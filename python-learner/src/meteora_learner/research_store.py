@@ -126,7 +126,7 @@ class ResearchStore:
         try:
             rows = conn.execute(
                 """
-                SELECT observed_at, pool_address, bin_array_index, bin_id,
+                SELECT observed_at, pool_address, bin_array_index, bin_id, price,
                        amount_x, amount_y, liquidity_supply,
                        fee_amount_x_per_token_stored,
                        fee_amount_y_per_token_stored
