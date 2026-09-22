@@ -30,6 +30,8 @@ def position_snapshot():
                 "bin_x_amount": "1000",
                 "bin_y_amount": "2000",
                 "bin_liquidity": "3000",
+                "bin_fee_x_per_token_stored": "31",
+                "bin_fee_y_per_token_stored": "41",
                 "position_liquidity": "300",
                 "position_x_amount": "100",
                 "position_y_amount": "200",
@@ -59,7 +61,8 @@ def test_position_snapshot_is_persisted(tmp_path):
         ).fetchone()
         bin_row = conn.execute(
             """
-            SELECT bin_id, bin_liquidity, position_liquidity,
+            SELECT bin_id, bin_liquidity, bin_fee_x_per_token_stored,
+                   bin_fee_y_per_token_stored, position_liquidity,
                    position_fee_x_amount, position_fee_y_amount
             FROM position_bin_snapshots
             """
@@ -68,7 +71,7 @@ def test_position_snapshot_is_persisted(tmp_path):
         conn.close()
 
     assert position == ("position", "pool", "3", "4")
-    assert bin_row == (100, "3000", "300", "3", "4")
+    assert bin_row == (100, "3000", "31", "41", "300", "3", "4")
     assert storage.data_status()["position_bin_snapshots"] == 1
 
 
