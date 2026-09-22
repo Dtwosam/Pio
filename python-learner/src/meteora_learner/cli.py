@@ -10,6 +10,7 @@ from .chain_scan import scan_chain_candidates
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
+from .reconciliation import reconcile_position
 from .research import inventory_backtest_from_store
 from .settings import Settings
 from .storage import Storage
@@ -102,6 +103,12 @@ def main() -> None:
         action="store_true",
         help="Put the active bin on the X/ask side",
     )
+
+    reconcile = subparsers.add_parser(
+        "reconcile-position",
+        help="Compare Python amount/fee math with stored exact DynamicPosition snapshots",
+    )
+    reconcile.add_argument("--position", required=True, help="Meteora position address")
 
     scan = subparsers.add_parser(
         "scan-chain",
@@ -223,6 +230,15 @@ def main() -> None:
             observation_limit=args.observations,
             max_share_bps=args.max_share_bps,
             favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "reconcile-position":
+        settings = Settings.from_env()
+        result = reconcile_position(
+            str(settings.database_path),
+            position_address=args.position,
         )
         print(json.dumps(result.to_record(), indent=2))
         return
