@@ -14,6 +14,7 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct BinSnapshot {
     pub bin_id: i32,
+    pub price: String,
     pub amount_x: String,
     pub amount_y: String,
     pub liquidity_supply: String,
@@ -139,6 +140,7 @@ pub async fn inspect_pool(
                 }
                 Some(BinSnapshot {
                     bin_id: lower_bin_id + offset as i32,
+                    price: bin.price.to_string(),
                     amount_x: bin.amount_x.to_string(),
                     amount_y: bin.amount_y.to_string(),
                     liquidity_supply: bin.liquidity_supply.to_string(),
