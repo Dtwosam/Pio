@@ -1,62 +1,90 @@
 # Simulator Design
 
-Status: Phase 2 started.
+Status: Phase 2 in progress.
 
-## Rule
+## Non-negotiable rule
 
-The simulator must not claim DLMM-accurate PnL until its outputs are reconciled against real Meteora position outcomes.
+Simulator outputs are not treated as DLMM-accurate training labels until they are reconciled against real Meteora position outcomes.
 
-## Verified bin-price primitive
+## Current fidelity
+
+Current version:
+
+DISCRETE_COMPLETED_BIN_V1
+
+What it models:
+- Meteora bin price ladder
+- Spot / Curve / Bid-Ask strategy weights
+- X inventory above the active bin
+- Y inventory below the active bin
+- completed-bin conversion as price crosses bins
+- idle capital when the selected range cannot accept one side
+- mark-to-market inventory value
+- hold benchmark
+- IL versus hold
+- explicit transaction/rebalance/exit costs
+- time in range
+- externally supplied position-attributable fees
+
+What it intentionally does not infer:
+- partial fill inside the current active bin
+- exact swap path within a candle
+- per-bin pool liquidity share
+- exact dynamic fee attribution to our position
+- rewards unless supplied separately
+- transaction slippage unless supplied as a cost
+
+Therefore ZERO-fee backtests are inventory/IL studies, not profitability claims.
+
+## Verified primitives
 
 Meteora's current SDK computes raw bin price as:
 
 price(bin_id) = (1 + bin_step / 10000) ^ bin_id
 
-UI token price then applies the token decimal difference.
+For real UI prices Pio can anchor to a known current price + active bin, then map price ratios to relative bin movement. This avoids decimal-offset errors when token decimals are not yet stored.
 
-Pio implements this primitive in python-learner/src/meteora_learner/dlmm_math.py.
+The current Meteora SDK strategy shapes are also mirrored:
+- Spot: uniform bin weights
+- Curve: weight toward the active area
+- Bid-Ask: weight toward range edges
 
-## Simulator inputs
+## Candidate grid
 
-Per pool:
-- bin_step
-- token decimals
-- historical price path
-- selected min/max bin
-- strategy/distribution weights
-- capital allocated
-- fee history or estimated per-bin fee share
-- rebalance/transaction/slippage cost assumptions
+Pio generates combinations of:
+- range half-width
+- center offset / skew
+- Spot
+- Curve
+- Bid-Ask
 
-For higher-fidelity simulation we will also need:
+This lets future models learn which range/shape is appropriate for the market state rather than learning only which pool to select.
+
+## Validation source
+
+Meteora Data API provides:
+- GET /positions/{pool_address}/pnl?user=...
+- GET /positions/{position_address}/historical
+
+The PnL response includes position bin range, deposits, withdrawals, fees, USD PnL and PnL percentage. Pio normalizes these fields for simulator reconciliation.
+
+## Validation metrics
+
+For matched real positions Pio measures:
+- PnL MAE in USD
+- PnL RMSE in USD
+- PnL bias
+- mean absolute error relative to actual PnL
+- return error in percentage points
+
+A simulator version must pass configured error tolerances across a meaningful sample before its outputs may become authoritative ML labels.
+
+## Next fidelity step
+
+DISCRETE_BIN_LIQUIDITY_V2 will require:
 - active-bin history
 - bin liquidity/distribution
 - position share of each bin
-- fee growth or swap-flow allocation by bin
+- swap/fee flow by bin or reliable fee-growth accounting
 
-## Simulation outputs
-
-Each simulated position must produce:
-- starting capital
-- ending marked value
-- fees
-- rewards
-- inventory change
-- IL versus hold
-- transaction/rebalance costs
-- time in range
-- max adverse excursion
-- max favorable excursion
-- realized net PnL
-
-## Validation gate
-
-Before model training uses simulator labels:
-1. choose real Meteora positions with observable PnL/history;
-2. reconstruct their ranges and holding periods;
-3. run the simulator over the same interval;
-4. compare value, fee and PnL error;
-5. document error distribution;
-6. reject simulator versions whose error exceeds the configured tolerance.
-
-No reinforcement learning is allowed before this gate passes.
+That version can estimate position fees rather than receiving them exogenously.
