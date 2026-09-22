@@ -5,6 +5,8 @@ from typing import Any
 from uuid import uuid4
 
 from .meteora_api import MeteoraDataAPI
+from .normalization import normalize_ohlcv, normalize_volume_history
+from .quality import assess_candles
 from .settings import Settings
 from .storage import Storage, utc_now_iso
 
@@ -14,6 +16,10 @@ class CollectorResult:
     run_id: str
     pools_seen: int
     history_pools_seen: int
+    candles_saved: int
+    volume_buckets_saved: int
+    quality_failures: int
+    collection_errors: int
 
 
 def extract_pool_rows(payload: Any) -> list[dict[str, Any]]:
@@ -46,6 +52,10 @@ def collect_once(settings: Settings | None = None) -> CollectorResult:
 
     pools_seen = 0
     history_pools_seen = 0
+    candles_saved = 0
+    volume_buckets_saved = 0
+    quality_failures = 0
+    collection_errors = 0
     pool_rows: list[dict[str, Any]] = []
 
     try:
@@ -75,33 +85,94 @@ def collect_once(settings: Settings | None = None) -> CollectorResult:
                     break
 
             for address in addresses:
-                detail = api.pool(address)
-                storage.save_raw(f"/pools/{address}", detail, observed_at=started_at, entity_key=address)
+                history_success = False
 
-                ohlcv = api.ohlcv(address)
-                storage.save_raw(
-                    f"/pools/{address}/ohlcv",
-                    ohlcv,
-                    observed_at=started_at,
-                    entity_key=address,
-                )
+                try:
+                    detail = api.pool(address)
+                    storage.save_raw(
+                        f"/pools/{address}",
+                        detail,
+                        observed_at=started_at,
+                        entity_key=address,
+                    )
+                    if isinstance(detail, dict):
+                        storage.save_pool_snapshot(detail, observed_at=started_at)
+                except Exception as exc:
+                    storage.save_collection_error(run_id, f"/pools/{address}", exc, entity_key=address)
+                    collection_errors += 1
 
-                volume = api.volume_history(address)
-                storage.save_raw(
-                    f"/pools/{address}/volume/history",
-                    volume,
-                    observed_at=started_at,
-                    entity_key=address,
-                )
-                history_pools_seen += 1
+                try:
+                    ohlcv = api.ohlcv(address, resolution=settings.ohlcv_resolution)
+                    storage.save_raw(
+                        f"/pools/{address}/ohlcv",
+                        ohlcv,
+                        observed_at=started_at,
+                        entity_key=address,
+                    )
+                    candles = normalize_ohlcv(
+                        address,
+                        ohlcv,
+                        observed_at=started_at,
+                        resolution=settings.ohlcv_resolution,
+                    )
+                    candles_saved += storage.save_ohlcv_candles(candles)
+                    checks = assess_candles(
+                        candles,
+                        checked_at=started_at,
+                        max_age_seconds=settings.market_data_stale_seconds,
+                        gap_multiplier=settings.history_gap_multiplier,
+                    )
+                    storage.save_quality_checks("ohlcv", address, checks, checked_at=started_at)
+                    quality_failures += sum(1 for item in checks if item["status"] == "FAIL")
+                    history_success = True
+                except Exception as exc:
+                    storage.save_collection_error(
+                        run_id,
+                        f"/pools/{address}/ohlcv",
+                        exc,
+                        entity_key=address,
+                    )
+                    collection_errors += 1
 
+                try:
+                    volume = api.volume_history(address)
+                    storage.save_raw(
+                        f"/pools/{address}/volume/history",
+                        volume,
+                        observed_at=started_at,
+                        entity_key=address,
+                    )
+                    buckets = normalize_volume_history(address, volume, observed_at=started_at)
+                    volume_buckets_saved += storage.save_volume_buckets(buckets)
+                    history_success = True
+                except Exception as exc:
+                    storage.save_collection_error(
+                        run_id,
+                        f"/pools/{address}/volume/history",
+                        exc,
+                        entity_key=address,
+                    )
+                    collection_errors += 1
+
+                if history_success:
+                    history_pools_seen += 1
+
+        status = "PARTIAL" if collection_errors else "SUCCESS"
         storage.finish_run(
             run_id,
-            status="SUCCESS",
+            status=status,
             pools_seen=pools_seen,
             history_pools_seen=history_pools_seen,
         )
-        return CollectorResult(run_id, pools_seen, history_pools_seen)
+        return CollectorResult(
+            run_id=run_id,
+            pools_seen=pools_seen,
+            history_pools_seen=history_pools_seen,
+            candles_saved=candles_saved,
+            volume_buckets_saved=volume_buckets_saved,
+            quality_failures=quality_failures,
+            collection_errors=collection_errors,
+        )
     except Exception as exc:
         storage.finish_run(
             run_id,
