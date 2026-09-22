@@ -5,12 +5,14 @@ import json
 import sys
 
 from .chain_ingest import ingest_chain_snapshot
+from .chain_replay import replay_latest_small_lp_interval
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
 from .research import inventory_backtest_from_store
 from .settings import Settings
 from .storage import Storage
+from .strategy import StrategyType
 
 
 def _parse_int_csv(value: str) -> tuple[int, ...]:
@@ -49,6 +51,32 @@ def main() -> None:
         "--file",
         default="-",
         help="JSON file path, or - for stdin",
+    )
+
+    replay = subparsers.add_parser(
+        "replay-chain",
+        help="Replay a small hypothetical standard-SPL LP over the latest two chain snapshots",
+    )
+    replay.add_argument("--pool", required=True, help="Meteora pool address")
+    replay.add_argument("--amount-x", required=True, type=int, help="Atomic token X amount")
+    replay.add_argument("--amount-y", required=True, type=int, help="Atomic token Y amount")
+    replay.add_argument("--min-bin", required=True, type=int)
+    replay.add_argument("--max-bin", required=True, type=int)
+    replay.add_argument(
+        "--strategy",
+        choices=[item.value for item in StrategyType],
+        default=StrategyType.SPOT.value,
+    )
+    replay.add_argument(
+        "--max-share-bps",
+        type=int,
+        default=500,
+        help="Reject if projected share exceeds this fraction of any starting bin supply",
+    )
+    replay.add_argument(
+        "--favor-x-active",
+        action="store_true",
+        help="Put the active bin on the X/ask side",
     )
 
     backtest = subparsers.add_parser(
@@ -109,6 +137,22 @@ def main() -> None:
                 payload = json.load(handle)
         result = ingest_position_snapshot(Storage(settings.database_path), payload)
         print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "replay-chain":
+        settings = Settings.from_env()
+        result = replay_latest_small_lp_interval(
+            str(settings.database_path),
+            pool_address=args.pool,
+            amount_x=args.amount_x,
+            amount_y=args.amount_y,
+            min_bin_id=args.min_bin,
+            max_bin_id=args.max_bin,
+            strategy=StrategyType(args.strategy),
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "backtest-inventory":
