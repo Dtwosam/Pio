@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .composition_fee import simulate_active_bin_composition_fee
 from .deposit_plan import (
     AtomicDepositPlan,
     ProjectedDepositShares,
@@ -23,6 +24,12 @@ class ReplayBinResult:
     liquidity_share: int
     start_supply: int
     share_bps_of_start_supply: int
+    entry_composition_fee_x: int
+    entry_composition_fee_y: int
+    entry_composition_protocol_fee_x: int
+    entry_composition_protocol_fee_y: int
+    entry_composition_lp_fee_x: int
+    entry_composition_lp_fee_y: int
     end_x_amount: int
     end_y_amount: int
     fee_x: int
@@ -44,6 +51,14 @@ class SmallLPReplayResult:
     ending_y: int
     fee_x: int
     fee_y: int
+    entry_composition_fee_x: int
+    entry_composition_fee_y: int
+    entry_composition_protocol_fee_x: int
+    entry_composition_protocol_fee_y: int
+    entry_composition_lp_fee_x: int
+    entry_composition_lp_fee_y: int
+    deposit_total_fee_rate: int
+    protocol_share_bps: int
     max_share_bps: int
     projected_share_fidelity: str
     replay_fidelity: str
@@ -129,6 +144,16 @@ def replay_latest_small_lp_interval(
         favor_x_in_active_bin=favor_x_in_active_bin,
     )
     projected: ProjectedDepositShares = project_deposit_shares(plan, start_bins)
+    plan_by_id = {item.bin_id: item for item in plan.bins}
+
+    deposit_fee_rate_raw = start_pool.get("deposit_total_fee_rate")
+    protocol_share_raw = start_pool.get("protocol_share_bps")
+    if deposit_fee_rate_raw is None or protocol_share_raw is None:
+        raise ValueError(
+            "deposit-time fee metadata missing; collect fresh chain snapshots before replay"
+        )
+    deposit_total_fee_rate = int(str(deposit_fee_rate_raw))
+    protocol_share_bps = int(protocol_share_raw)
 
     results: list[ReplayBinResult] = []
     for projected_bin in projected.bins:
@@ -150,6 +175,32 @@ def replay_latest_small_lp_interval(
                 f"projected share is too large in bin {projected_bin.bin_id}: "
                 f"{actual_bps} bps > {max_share_bps} bps limit"
             )
+
+        entry_composition_fee_x = 0
+        entry_composition_fee_y = 0
+        entry_composition_protocol_fee_x = 0
+        entry_composition_protocol_fee_y = 0
+        entry_composition_lp_fee_x = 0
+        entry_composition_lp_fee_y = 0
+
+        if projected_bin.bin_id == int(start_pool["active_bin_id"]):
+            planned = plan_by_id[projected_bin.bin_id]
+            composition = simulate_active_bin_composition_fee(
+                amount_x=planned.amount_x,
+                amount_y=planned.amount_y,
+                price_q64=int(str(start_row["price"])),
+                bin_amount_x=int(str(start_row["amount_x"])),
+                bin_amount_y=int(str(start_row["amount_y"])),
+                liquidity_supply=start_supply,
+                total_fee_rate=deposit_total_fee_rate,
+                protocol_share_bps=protocol_share_bps,
+            )
+            entry_composition_fee_x = composition.composition_fee_x
+            entry_composition_fee_y = composition.composition_fee_y
+            entry_composition_protocol_fee_x = composition.protocol_fee_x
+            entry_composition_protocol_fee_y = composition.protocol_fee_y
+            entry_composition_lp_fee_x = composition.lp_fee_x
+            entry_composition_lp_fee_y = composition.lp_fee_y
 
         end_supply = int(str(end_row["liquidity_supply"]))
         if end_supply <= 0:
@@ -186,6 +237,12 @@ def replay_latest_small_lp_interval(
                 liquidity_share=share,
                 start_supply=start_supply,
                 share_bps_of_start_supply=share * 10_000 // start_supply,
+                entry_composition_fee_x=entry_composition_fee_x,
+                entry_composition_fee_y=entry_composition_fee_y,
+                entry_composition_protocol_fee_x=entry_composition_protocol_fee_x,
+                entry_composition_protocol_fee_y=entry_composition_protocol_fee_y,
+                entry_composition_lp_fee_x=entry_composition_lp_fee_x,
+                entry_composition_lp_fee_y=entry_composition_lp_fee_y,
                 end_x_amount=end_x,
                 end_y_amount=end_y,
                 fee_x=fee_from_checkpoint_delta(
@@ -213,6 +270,18 @@ def replay_latest_small_lp_interval(
         ending_y=sum(item.end_y_amount for item in results),
         fee_x=sum(item.fee_x for item in results),
         fee_y=sum(item.fee_y for item in results),
+        entry_composition_fee_x=sum(item.entry_composition_fee_x for item in results),
+        entry_composition_fee_y=sum(item.entry_composition_fee_y for item in results),
+        entry_composition_protocol_fee_x=sum(
+            item.entry_composition_protocol_fee_x for item in results
+        ),
+        entry_composition_protocol_fee_y=sum(
+            item.entry_composition_protocol_fee_y for item in results
+        ),
+        entry_composition_lp_fee_x=sum(item.entry_composition_lp_fee_x for item in results),
+        entry_composition_lp_fee_y=sum(item.entry_composition_lp_fee_y for item in results),
+        deposit_total_fee_rate=deposit_total_fee_rate,
+        protocol_share_bps=protocol_share_bps,
         max_share_bps=max_share_bps,
         projected_share_fidelity=projected.fidelity,
         replay_fidelity="SMALL_LP_CHAIN_COUNTERFACTUAL_V1",
