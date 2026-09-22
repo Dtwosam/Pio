@@ -6,6 +6,7 @@ import sys
 
 from .chain_ingest import ingest_chain_snapshot
 from .chain_replay import replay_small_lp_history
+from .chain_scan import scan_chain_candidates
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
@@ -22,6 +23,23 @@ def _parse_int_csv(value: str) -> tuple[int, ...]:
         raise argparse.ArgumentTypeError("expected comma-separated integers") from exc
     if not parsed:
         raise argparse.ArgumentTypeError("at least one integer is required")
+    return parsed
+
+
+def _parse_strategy_csv(value: str) -> tuple[StrategyType, ...]:
+    try:
+        parsed = tuple(
+            StrategyType(item.strip())
+            for item in value.split(",")
+            if item.strip()
+        )
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in StrategyType)
+        raise argparse.ArgumentTypeError(
+            f"expected comma-separated strategies from: {allowed}"
+        ) from exc
+    if not parsed:
+        raise argparse.ArgumentTypeError("at least one strategy is required")
     return parsed
 
 
@@ -80,6 +98,53 @@ def main() -> None:
         help="Reject if projected share exceeds this fraction of any starting bin supply",
     )
     replay.add_argument(
+        "--favor-x-active",
+        action="store_true",
+        help="Put the active bin on the X/ask side",
+    )
+
+    scan = subparsers.add_parser(
+        "scan-chain",
+        help="Compare a grid of small-LP candidates over recent chain snapshots",
+    )
+    scan.add_argument("--pool", required=True, help="Meteora pool address")
+    scan.add_argument("--amount-x", required=True, type=int, help="Atomic token X amount")
+    scan.add_argument("--amount-y", required=True, type=int, help="Atomic token Y amount")
+    scan.add_argument(
+        "--observations",
+        type=int,
+        default=12,
+        help="Number of latest chain snapshots to scan",
+    )
+    scan.add_argument(
+        "--half-widths",
+        type=_parse_int_csv,
+        default=(0, 1, 2, 5, 10),
+        help="Comma-separated range half-widths in bins",
+    )
+    scan.add_argument(
+        "--center-offsets",
+        type=_parse_int_csv,
+        default=(0,),
+        help="Comma-separated range center offsets in bins",
+    )
+    scan.add_argument(
+        "--strategies",
+        type=_parse_strategy_csv,
+        default=(
+            StrategyType.SPOT,
+            StrategyType.CURVE,
+            StrategyType.BID_ASK,
+        ),
+        help="Comma-separated strategies: SPOT,CURVE,BID_ASK",
+    )
+    scan.add_argument(
+        "--max-share-bps",
+        type=int,
+        default=500,
+        help="Reject a candidate if its share exceeds this fraction of any observed bin supply",
+    )
+    scan.add_argument(
         "--favor-x-active",
         action="store_true",
         help="Put the active bin on the X/ask side",
@@ -156,6 +221,23 @@ def main() -> None:
             max_bin_id=args.max_bin,
             strategy=StrategyType(args.strategy),
             observation_limit=args.observations,
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "scan-chain":
+        settings = Settings.from_env()
+        result = scan_chain_candidates(
+            str(settings.database_path),
+            pool_address=args.pool,
+            amount_x=args.amount_x,
+            amount_y=args.amount_y,
+            observation_limit=args.observations,
+            half_widths=args.half_widths,
+            center_offsets=args.center_offsets,
+            strategies=args.strategies,
             max_share_bps=args.max_share_bps,
             favor_x_in_active_bin=args.favor_x_active,
         )
