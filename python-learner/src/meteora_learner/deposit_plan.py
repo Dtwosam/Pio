@@ -200,11 +200,7 @@ def project_deposit_shares(
             )
         )
 
-    fidelity = (
-        "SDK_EXISTING_BIN_SHARE_V1"
-        if empty == 0
-        else "SDK_EXISTING_PLUS_INVARIANT_EMPTY_BIN_V1"
-    )
+    fidelity = "METEORA_LIQUIDITY_SHARE_FORMULA_V1"
     return ProjectedDepositShares(
         bins=tuple(projected),
         total_liquidity_share_minted=sum(
