@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS bin_liquidity_snapshots (
     pool_address TEXT NOT NULL,
     bin_array_index INTEGER NOT NULL,
     bin_id INTEGER NOT NULL,
+    price TEXT NOT NULL DEFAULT '0',
     amount_x TEXT NOT NULL,
     amount_y TEXT NOT NULL,
     liquidity_supply TEXT NOT NULL,
@@ -188,6 +189,10 @@ CREATE TABLE IF NOT EXISTS collector_runs (
 
 VOLUME_BUCKET_EXTRA_COLUMNS = {
     "protocol_fees": "REAL",
+}
+
+BIN_LIQUIDITY_EXTRA_COLUMNS = {
+    "price": "TEXT NOT NULL DEFAULT '0'",
 }
 
 POOL_SNAPSHOT_EXTRA_COLUMNS = {
@@ -283,6 +288,7 @@ class Storage:
             conn.executescript(SCHEMA)
             _ensure_columns(conn, "pool_snapshots", POOL_SNAPSHOT_EXTRA_COLUMNS)
             _ensure_columns(conn, "volume_buckets", VOLUME_BUCKET_EXTRA_COLUMNS)
+            _ensure_columns(conn, "bin_liquidity_snapshots", BIN_LIQUIDITY_EXTRA_COLUMNS)
 
     def save_raw(
         self,
@@ -508,6 +514,7 @@ class Storage:
                         pool_address,
                         index,
                         int(bin_row["bin_id"]),
+                        str(bin_row["price"]),
                         str(bin_row["amount_x"]),
                         str(bin_row["amount_y"]),
                         str(bin_row["liquidity_supply"]),
@@ -538,10 +545,10 @@ class Storage:
                 conn.executemany(
                     """
                     INSERT INTO bin_liquidity_snapshots(
-                        observed_at, pool_address, bin_array_index, bin_id,
+                        observed_at, pool_address, bin_array_index, bin_id, price,
                         amount_x, amount_y, liquidity_supply,
                         fee_amount_x_per_token_stored, fee_amount_y_per_token_stored
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     bin_rows,
                 )
