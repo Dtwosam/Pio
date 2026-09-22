@@ -1,8 +1,10 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v0.1
+Status: v0.2
 
 ## Phase 0 — Foundation
+
+Status: complete.
 
 Deliverables:
 - source of truth
@@ -13,26 +15,28 @@ Deliverables:
 - Python learner skeleton
 - paper/live mode separation
 
-Exit condition:
-- both services have clear interfaces and no private key is required for research mode.
-
 ## Phase 1 — Market Data Engine
 
-Build:
+Status: implementation complete; live validation pending.
+
+Built:
 - Meteora pool discovery
 - pool snapshots
 - OHLCV downloader
 - volume-history downloader
-- local persistence
-- freshness checks
+- raw-response persistence
+- normalized candle/volume tables
+- freshness, duplicate, gap and OHLC consistency checks
 - retry/rate-limit handling
-
-Store raw observations before feature transformation.
+- endpoint-level error isolation
+- local data-status command
 
 Exit condition:
-- continuous historical/live dataset can be reproduced from saved raw data.
+- continuous historical/live dataset can be reproduced from saved raw data and remains healthy during an extended live collection run.
 
 ## Phase 2 — Position Simulator / Backtester
+
+Status: next.
 
 Build a DLMM-aware simulator for:
 - selected bin ranges
@@ -44,7 +48,7 @@ Build a DLMM-aware simulator for:
 - exits and re-entries
 
 Validation:
-- compare simulated position results against real Meteora historical position/PnL data where available.
+- compare simulated position results against real Meteora position/PnL data where available.
 
 Exit condition:
 - simulation error is measured and acceptable enough for model training.
@@ -72,9 +76,9 @@ Build supervised models for:
 
 Use walk-forward validation only. No random train/test split across time.
 
-Decision score example:
+Decision score:
 
-`score = expected_net_return - lambda * expected_downside - expected_cost`
+score = expected_net_return - lambda * expected_downside - expected_cost
 
 Exit condition:
 - challenger beats deterministic baseline out of sample without materially worse drawdown.
@@ -83,16 +87,7 @@ Exit condition:
 
 Run the full decision loop against live Meteora data without signing transactions.
 
-Record:
-- every considered candidate
-- every rejected candidate and reason
-- every hypothetical entry
-- every rebalance
-- every exit
-- expected versus realized result
-
-Exit condition:
-- stable continuous operation and acceptable prediction calibration.
+Record every considered candidate, rejection, hypothetical entry, rebalance, exit, and expected-versus-realized result.
 
 ## Phase 6 — Rust Transaction Executor
 
@@ -107,7 +102,7 @@ Implement:
 - idempotency
 - emergency close
 
-Initially use devnet or transaction simulation where practical, then tiny mainnet capital.
+Initially use transaction simulation/devnet where practical, then tiny mainnet capital.
 
 ## Phase 7 — Controlled Live Trading
 
@@ -120,7 +115,7 @@ Promotion gates:
 - no unresolved reconciliation errors
 - transaction simulation success
 
-Capital increases only through explicit config changes, never autonomously.
+Capital increases only through explicit config changes.
 
 ## Phase 8 — Continuous Learning
 
@@ -149,11 +144,10 @@ Potential additions:
 
 ## Immediate build order
 
-1. Scaffold services and config.
-2. Implement Meteora Data API client.
-3. Persist pool snapshots and candles.
-4. Build candidate/action data model.
-5. Build first deterministic scorer.
-6. Build simulator.
-7. Start collecting live paper-trading data.
-8. Train ML v1 only after enough clean observations exist.
+1. Validate Phase 1 against live API.
+2. Build dataset export and feature generation.
+3. Build DLMM bin/range simulator.
+4. Validate simulator against observed position economics.
+5. Build deterministic baseline.
+6. Start live paper trading.
+7. Train ML v1 only after enough clean observations exist.
