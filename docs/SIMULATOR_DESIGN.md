@@ -4,87 +4,76 @@ Status: Phase 2 in progress.
 
 ## Non-negotiable rule
 
-Simulator outputs are not treated as DLMM-accurate training labels until they are reconciled against real Meteora position outcomes.
+Simulator outputs are not treated as DLMM-accurate training labels until reconciled against real Meteora position outcomes.
 
 ## Current fidelity
 
-Current version:
+`DISCRETE_COMPLETED_BIN_V1`
 
-DISCRETE_COMPLETED_BIN_V1
-
-What it models:
-- Meteora bin price ladder
-- Spot / Curve / Bid-Ask strategy weights
-- X inventory above the active bin
-- Y inventory below the active bin
-- completed-bin conversion as price crosses bins
-- idle capital when the selected range cannot accept one side
+It models:
+- Meteora bin-price ladder
+- Spot / Curve / Bid-Ask weight shapes
+- X inventory above active
+- Y inventory below active
+- completed-bin conversion
 - mark-to-market inventory value
 - hold benchmark
-- IL versus hold
-- explicit transaction/rebalance/exit costs
-- time in range
+- IL
+- explicit costs
+- range survival
 - externally supplied position-attributable fees
 
-What it intentionally does not infer:
+It intentionally does not infer:
 - partial fill inside the current active bin
-- exact swap path within a candle
-- per-bin pool liquidity share
-- exact dynamic fee attribution to our position
-- rewards unless supplied separately
-- transaction slippage unless supplied as a cost
+- exact intra-candle swap path
+- hypothetical liquidity shares minted by a new deposit
+- exact future fee attribution
+- transaction slippage unless supplied
 
-Therefore ZERO-fee backtests are inventory/IL studies, not profitability claims.
+ZERO-fee backtests remain inventory/IL studies, not profitability claims.
 
-## Verified primitives
+## On-chain fidelity path
 
-Meteora's current SDK computes raw bin price as:
+Rust can now read:
+- exact active bin and nearby bin arrays
+- bin amount_x / amount_y
+- bin liquidity supply
+- bin fee-per-token checkpoints
+- exact existing DynamicPosition liquidity shares
+- exact existing position amounts, pending fees and rewards
 
-price(bin_id) = (1 + bin_step / 10000) ^ bin_id
+Python persists these snapshots for research and validation.
 
-For real UI prices Pio can anchor to a known current price + active bin, then map price ratios to relative bin movement. This avoids decimal-offset errors when token decimals are not yet stored.
+This removes **data access** as the main V2 blocker.
 
-The current Meteora SDK strategy shapes are also mirrored:
-- Spot: uniform bin weights
-- Curve: weight toward the active area
-- Bid-Ask: weight toward range edges
+## Remaining V2 blocker
 
-## Candidate grid
+For a hypothetical new position, Pio still needs a validated way to determine the exact liquidity shares that Meteora would mint in each bin.
 
-Pio generates combinations of:
-- range half-width
-- center offset / skew
-- Spot
-- Curve
-- Bid-Ask
+Until that is reproduced or obtained through safe transaction simulation:
+- Pio may use real positions to validate fee math;
+- Pio may use chain liquidity as market features;
+- Pio must not present hypothetical fee estimates as exact.
 
-This lets future models learn which range/shape is appropriate for the market state rather than learning only which pool to select.
+## Validation sources
 
-## Validation source
+Meteora Data API:
+- `GET /positions/{pool_address}/pnl?user=...`
+- `GET /positions/{position_address}/historical`
 
-Meteora Data API provides:
-- GET /positions/{pool_address}/pnl?user=...
-- GET /positions/{position_address}/historical
+On-chain Rust reader:
+- `inspect-position`
 
-The PnL response includes position bin range, deposits, withdrawals, fees, USD PnL and PnL percentage. Pio normalizes these fields for simulator reconciliation.
-
-## Validation metrics
-
-For matched real positions Pio measures:
-- PnL MAE in USD
-- PnL RMSE in USD
+Validation metrics:
+- PnL MAE
+- PnL RMSE
 - PnL bias
-- mean absolute error relative to actual PnL
-- return error in percentage points
-
-A simulator version must pass configured error tolerances across a meaningful sample before its outputs may become authoritative ML labels.
+- percentage error
+- return error
+- per-bin token-amount error
+- per-bin position-liquidity error
+- fee X/Y error
 
 ## Next fidelity step
 
-DISCRETE_BIN_LIQUIDITY_V2 will require:
-- active-bin history
-- bin liquidity/distribution
-- position share of each bin
-- swap/fee flow by bin or reliable fee-growth accounting
-
-That version can estimate position fees rather than receiving them exogenously.
+Build a safe deposit simulation/quote path that returns the post-deposit position liquidity shares without sending a transaction. Then replay fee checkpoint growth against those shares.
