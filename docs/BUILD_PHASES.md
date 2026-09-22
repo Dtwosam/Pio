@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v0.3
+Status: v0.4
 
 ## Phase 0 — Foundation
 Status: complete.
@@ -9,69 +9,97 @@ Status: complete.
 Status: implementation complete; extended live validation pending.
 
 Built:
-- Meteora pool discovery and pool snapshots
+- current Meteora Data API timeseries contract
 - raw API persistence
-- OHLCV and volume normalization
-- freshness, duplicate, gap and OHLC consistency checks
-- retry/rate-limit handling
-- endpoint-level error isolation
-- local data-status command
+- normalized pool/OHLCV/volume data
+- protocol-fee separation
+- data-quality checks
+- retries/rate limiting
+- endpoint failure isolation
 
 Exit condition:
-- continuous historical/live dataset remains healthy through an extended collection run.
+- extended live collection remains healthy and reproducible.
 
 ## Phase 2 — Position Simulator / Backtester
 Status: in progress.
 
 Built:
-- verified bin-price math
-- high-precision price/bin conversion
-- current-price + active-bin anchoring
-- exact strategy weight shapes for Spot/Curve/Bid-Ask
-- candidate range grid including skewed ranges
-- per-bin X/Y inventory state
-- completed-bin conversion engine
-- hold benchmark and IL
-- explicit fees/cost accounting
-- inventory-only stored-data backtest CLI
-- Meteora position PnL/history API support
-- PnL response normalization
-- simulator validation metrics
+- high-precision DLMM bin math
+- Spot/Curve/Bid-Ask strategy weights
+- candidate range grid
+- discrete per-bin inventory simulator
+- IL/hold/cost accounting
+- inventory-only stored-data backtests
+- PnL/history API normalization
+- validation metrics
+- pinned official Meteora Rust commons dependency
+- read-only LbPair/BinArray inspection
+- exact DynamicPosition inspection
+- persistent chain pool/bin/position snapshots
+- liquidity-concentration and fee-checkpoint activity features
 
-Still required:
-- real-position reconciliation corpus
+Remaining:
+- validate Rust build in a Rust-enabled environment
+- extended chain snapshot collection
+- exact hypothetical deposit liquidity-share creation
 - active-bin partial-fill model
-- bin-liquidity snapshots
-- position-attributable fee model
+- fee attribution for hypothetical positions
 - rebalance lifecycle simulation
+- real-position reconciliation corpus
 
 Exit condition:
-- measured error against real positions is acceptable enough for model training.
+- simulator error against real positions is measured and within an accepted tolerance.
 
 ## Phase 3 — Baseline Strategy
-Status: scaffold exists; upgrade after simulator validation.
+Status: scaffold exists; upgrade after Phase 2 validation.
 
 Build:
-- bad-pool filters
-- fee opportunity versus volatility
-- range/strategy selection
-- conservative position sizing
-- exit-on-loss-of-edge logic
+- pool safety filters
+- fee opportunity vs volatility/liquidity
+- range and strategy choice
+- position sizing
+- exit/rebalance logic
 
 ## Phase 4 — ML v1
-Build supervised models for future net return, downside, fee yield, range survival and holding-period quality using walk-forward validation only.
+
+Walk-forward supervised models for:
+- future net return
+- downside
+- fee yield
+- range survival
+- holding-period quality
 
 ## Phase 5 — Live Paper Trader
-Run full decisions against live data with no signing and record every candidate, rejection, entry, rebalance, exit and expected-versus-realized result.
+
+Run the full decision loop on live data without signing.
 
 ## Phase 6 — Rust Transaction Executor
-Implement wallet isolation, Meteora account decoding, liquidity instructions, claims, transaction simulation, fee handling, confirmation/retry, idempotency and emergency close.
+
+Implement:
+- wallet isolation
+- create/add/remove liquidity
+- claims
+- transaction simulation
+- priority fee handling
+- confirmation/retry
+- idempotency
+- emergency close
 
 ## Phase 7 — Controlled Live Trading
-Start with strict capital caps. Capital increases only through explicit configuration.
+
+Start with explicit, small capital caps.
 
 ## Phase 8 — Continuous Learning
-Ingest outcomes, train challenger, walk-forward test, paper-test, compare against champion, promote only on passing gates and preserve rollback.
+
+Champion/challenger retraining, walk-forward validation, paper validation, promotion gates and rollback.
 
 ## Phase 9 — Advanced Edge
-Potential additions include token safety, wallet flow, regime classifiers, adaptive ranges, cross-pool capital allocation, perp hedging and contextual bandits.
+
+Potential additions:
+- token risk
+- wallet flow
+- regime models
+- adaptive ranges
+- portfolio allocator
+- perp hedging
+- contextual bandits
