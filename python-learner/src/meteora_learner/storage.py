@@ -7,6 +7,8 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
 
+from .dlmm_math import price_to_bin_id
+
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -116,6 +118,15 @@ POOL_SNAPSHOT_EXTRA_COLUMNS = {
     "apy": "REAL",
     "token_x_symbol": "TEXT",
     "token_y_symbol": "TEXT",
+    "token_x_decimals": "INTEGER",
+    "token_y_decimals": "INTEGER",
+    "dynamic_fee_pct": "REAL",
+    "base_fee_pct": "REAL",
+    "max_fee_pct": "REAL",
+    "protocol_fee_pct": "REAL",
+    "collect_fee_mode": "INTEGER",
+    "is_blacklisted": "INTEGER",
+    "pool_created_at": "INTEGER",
 }
 
 
@@ -148,11 +159,20 @@ def _first(mapping: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _token_symbol(pool: dict[str, Any], *keys: str) -> str | None:
-    token = _first(pool, *keys)
-    if isinstance(token, dict):
-        symbol = _first(token, "symbol", "token_symbol", "ticker")
-        return str(symbol) if symbol is not None else None
+def _nested_mapping(pool: dict[str, Any], *keys: str) -> dict[str, Any]:
+    value = _first(pool, *keys)
+    return value if isinstance(value, dict) else {}
+
+
+def _token_field(pool: dict[str, Any], token_keys: tuple[str, ...], field: str) -> Any:
+    token = _nested_mapping(pool, *token_keys)
+    return token.get(field)
+
+
+def _time_window_metric(pool: dict[str, Any], key: str, window: str = "24h") -> Any:
+    value = pool.get(key)
+    if isinstance(value, dict):
+        return value.get(window)
     return None
 
 
@@ -207,17 +227,59 @@ class Storage:
             return False
 
         observed_at = observed_at or utc_now_iso()
+        config = _nested_mapping(pool, "pool_config", "poolConfig")
+
         name = _first(pool, "name", "pool_name", "pair_name")
         tvl = _number(_first(pool, "tvl", "liquidity", "total_liquidity"))
+
         volume_24h = _number(_first(pool, "volume_24h", "trade_volume_24h", "volume24h"))
+        if volume_24h is None:
+            volume_24h = _number(_time_window_metric(pool, "volume"))
+
         fees_24h = _number(_first(pool, "fees_24h", "fee_24h", "fees24h"))
+        if fees_24h is None:
+            fees_24h = _number(_time_window_metric(pool, "fees"))
+
         current_price = _number(_first(pool, "current_price", "currentPrice", "price"))
+
         bin_step = _integer(_first(pool, "bin_step", "binStep"))
+        if bin_step is None:
+            bin_step = _integer(_first(config, "bin_step", "binStep"))
+
+        token_x_symbol = _token_field(pool, ("token_x", "tokenX"), "symbol")
+        token_y_symbol = _token_field(pool, ("token_y", "tokenY"), "symbol")
+        token_x_decimals = _integer(_token_field(pool, ("token_x", "tokenX"), "decimals"))
+        token_y_decimals = _integer(_token_field(pool, ("token_y", "tokenY"), "decimals"))
+
         active_bin_id = _integer(_first(pool, "active_bin_id", "active_id", "activeId"))
+        if (
+            active_bin_id is None
+            and current_price is not None
+            and bin_step is not None
+            and token_x_decimals is not None
+            and token_y_decimals is not None
+        ):
+            try:
+                active_bin_id = price_to_bin_id(
+                    current_price,
+                    bin_step,
+                    round_down=True,
+                    token_x_decimals=token_x_decimals,
+                    token_y_decimals=token_y_decimals,
+                )
+            except ValueError:
+                active_bin_id = None
+
         apr = _number(_first(pool, "apr", "apr_24h"))
         apy = _number(_first(pool, "apy", "apy_24h"))
-        token_x_symbol = _token_symbol(pool, "token_x", "tokenX")
-        token_y_symbol = _token_symbol(pool, "token_y", "tokenY")
+        dynamic_fee_pct = _number(_first(pool, "dynamic_fee_pct", "dynamicFeePct"))
+        base_fee_pct = _number(_first(config, "base_fee_pct", "baseFeePct"))
+        max_fee_pct = _number(_first(config, "max_fee_pct", "maxFeePct"))
+        protocol_fee_pct = _number(_first(config, "protocol_fee_pct", "protocolFeePct"))
+        collect_fee_mode = _integer(_first(config, "collect_fee_mode", "collectFeeMode"))
+        is_blacklisted_raw = _first(pool, "is_blacklisted", "isBlacklisted")
+        is_blacklisted = int(bool(is_blacklisted_raw)) if is_blacklisted_raw is not None else None
+        pool_created_at = _integer(_first(pool, "created_at", "createdAt"))
 
         with self.connect() as conn:
             conn.execute(
@@ -225,8 +287,10 @@ class Storage:
                 INSERT INTO pool_snapshots(
                     observed_at, address, name, tvl, volume_24h, fees_24h,
                     current_price, bin_step, active_bin_id, apr, apy,
-                    token_x_symbol, token_y_symbol, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    token_x_symbol, token_y_symbol, token_x_decimals, token_y_decimals,
+                    dynamic_fee_pct, base_fee_pct, max_fee_pct, protocol_fee_pct,
+                    collect_fee_mode, is_blacklisted, pool_created_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observed_at,
@@ -240,8 +304,17 @@ class Storage:
                     active_bin_id,
                     apr,
                     apy,
-                    token_x_symbol,
-                    token_y_symbol,
+                    str(token_x_symbol) if token_x_symbol is not None else None,
+                    str(token_y_symbol) if token_y_symbol is not None else None,
+                    token_x_decimals,
+                    token_y_decimals,
+                    dynamic_fee_pct,
+                    base_fee_pct,
+                    max_fee_pct,
+                    protocol_fee_pct,
+                    collect_fee_mode,
+                    is_blacklisted,
+                    pool_created_at,
                     json.dumps(pool, separators=(",", ":")),
                 ),
             )
