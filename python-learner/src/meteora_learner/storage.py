@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS volume_buckets (
     bucket_time TEXT NOT NULL,
     volume REAL,
     fees REAL,
+    protocol_fees REAL,
     observed_at TEXT NOT NULL,
     raw_json TEXT NOT NULL,
     UNIQUE(pool_address, source, bucket_time)
@@ -109,6 +110,10 @@ CREATE TABLE IF NOT EXISTS collector_runs (
     error TEXT
 );
 """
+
+VOLUME_BUCKET_EXTRA_COLUMNS = {
+    "protocol_fees": "REAL",
+}
 
 POOL_SNAPSHOT_EXTRA_COLUMNS = {
     "current_price": "REAL",
@@ -202,6 +207,7 @@ class Storage:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
             _ensure_columns(conn, "pool_snapshots", POOL_SNAPSHOT_EXTRA_COLUMNS)
+            _ensure_columns(conn, "volume_buckets", VOLUME_BUCKET_EXTRA_COLUMNS)
 
     def save_raw(
         self,
@@ -369,6 +375,7 @@ class Storage:
                 item["bucket_time"],
                 item.get("volume"),
                 item.get("fees"),
+                item.get("protocol_fees"),
                 item["observed_at"],
                 json.dumps(item.get("raw", {}), separators=(",", ":")),
             )
@@ -378,11 +385,12 @@ class Storage:
             conn.executemany(
                 """
                 INSERT INTO volume_buckets(
-                    pool_address, source, bucket_time, volume, fees, observed_at, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    pool_address, source, bucket_time, volume, fees, protocol_fees, observed_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(pool_address, source, bucket_time) DO UPDATE SET
                     volume=excluded.volume,
                     fees=excluded.fees,
+                    protocol_fees=excluded.protocol_fees,
                     observed_at=excluded.observed_at,
                     raw_json=excluded.raw_json
                 """,
