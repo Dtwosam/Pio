@@ -225,3 +225,51 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def position_observation_times(
+        self,
+        position_address: str,
+        *,
+        limit: int = 2,
+    ) -> list[str]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT observed_at
+                FROM chain_position_snapshots
+                WHERE position_address = ?
+                ORDER BY observed_at DESC
+                LIMIT ?
+                """,
+                (position_address, limit),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [str(row["observed_at"]) for row in rows]
+
+    def position_snapshot_at(
+        self,
+        position_address: str,
+        observed_at: str,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT observed_at, position_address, pool_address, owner, fee_owner,
+                       lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
+                       fee_x, fee_y, reward_one, reward_two, last_updated_at,
+                       total_claimed_fee_x_amount, total_claimed_fee_y_amount
+                FROM chain_position_snapshots
+                WHERE position_address = ? AND observed_at = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (position_address, observed_at),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
