@@ -14,6 +14,9 @@ from .research_store import ResearchStore
 from .strategy import StrategyType
 
 
+STANDARD_SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+
 @dataclass(frozen=True)
 class ReplayBinResult:
     bin_id: int
@@ -93,6 +96,20 @@ def replay_latest_small_lp_interval(
         raise ValueError("missing chain pool snapshot")
     if int(start_pool["bin_step"]) != int(end_pool["bin_step"]):
         raise ValueError("bin_step changed across replay interval")
+
+    for side in ("x", "y"):
+        start_program = start_pool.get(f"token_{side}_program")
+        end_program = end_pool.get(f"token_{side}_program")
+        if start_program is None or end_program is None:
+            raise ValueError(
+                "token program metadata missing; collect fresh chain snapshots before replay"
+            )
+        if start_program != end_program:
+            raise ValueError(f"token {side.upper()} program changed across replay interval")
+        if str(start_program) != STANDARD_SPL_TOKEN_PROGRAM:
+            raise ValueError(
+                f"token {side.upper()} uses unsupported Token-2022/non-standard program"
+            )
 
     start_bins = store.load_bin_liquidity(pool_address, observed_at=start_time)
     end_bins = store.load_bin_liquidity(pool_address, observed_at=end_time)
