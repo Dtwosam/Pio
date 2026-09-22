@@ -10,6 +10,7 @@ from .chain_scan import scan_chain_candidates
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
+from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .reconciliation import reconcile_position
 from .reconciliation_corpus import build_reconciliation_corpus
 from .research import inventory_backtest_from_store
@@ -125,6 +126,32 @@ def main() -> None:
         "--require-pass",
         action="store_true",
         help="Exit non-zero unless the strict deterministic math gate passes",
+    )
+
+    phase2_gate = subparsers.add_parser(
+        "phase2-gate",
+        help="Evaluate exact-math and sample-size promotion criteria for Phase 2",
+    )
+    phase2_gate.add_argument("--min-positions", required=True, type=int)
+    phase2_gate.add_argument("--min-amount-bins", required=True, type=int)
+    phase2_gate.add_argument("--min-fee-intervals", required=True, type=int)
+    phase2_gate.add_argument("--min-fee-bins", required=True, type=int)
+    phase2_gate.add_argument(
+        "--min-amount-coverage-rate",
+        type=float,
+        default=1.0,
+        help="Required fraction of stored positions eligible for amount reconciliation",
+    )
+    phase2_gate.add_argument(
+        "--position-limit",
+        type=int,
+        default=None,
+        help="Evaluate only the most recently observed N positions",
+    )
+    phase2_gate.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Exit non-zero unless all math and sample criteria pass",
     )
 
     scan = subparsers.add_parser(
@@ -268,6 +295,24 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_pass and not result.strict_math_gate_passed:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase2-gate":
+        settings = Settings.from_env()
+        result = evaluate_phase2_promotion_gate(
+            str(settings.database_path),
+            criteria=Phase2PromotionCriteria(
+                min_positions=args.min_positions,
+                min_amount_bins=args.min_amount_bins,
+                min_fee_intervals=args.min_fee_intervals,
+                min_fee_bins=args.min_fee_bins,
+                min_amount_coverage_rate=args.min_amount_coverage_rate,
+            ),
+            position_limit=args.position_limit,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
         return
 
