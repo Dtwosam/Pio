@@ -4,38 +4,39 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 
 ## Read first
 
-- `docs/SOURCE_OF_TRUTH.md`
-- `docs/BUILD_PHASES.md`
-- `docs/ARCHITECTURE.md`
-- `docs/DATA_PIPELINE.md`
+- docs/SOURCE_OF_TRUTH.md
+- docs/BUILD_PHASES.md
+- docs/ARCHITECTURE.md
+- docs/DATA_PIPELINE.md
+- docs/DATA_SCHEMA.md
 
 ## Current status
 
-- Phase 0: foundation scaffold complete
-- Phase 1: market-data engine started
-- Default mode: `PAPER`
-- Live signing: not implemented yet
+- Phase 0: complete
+- Phase 1: implemented; live API validation pending
+- Phase 2: next
+- Default mode: PAPER
+- Live signing: not implemented
 
 ## Components
 
-### `rust-executor/`
-Hard risk boundary and, later, Solana/Meteora transaction execution. Python never owns the signing key.
+### rust-executor/
+Hard risk boundary and later Solana/Meteora transaction execution. Python never owns the signing key.
 
-### `python-learner/`
-Meteora data collection, storage, backtesting, feature engineering and model training.
+### python-learner/
+Meteora data collection, storage, data quality, backtesting, feature engineering and model training.
 
 ## Run the collector
 
-```bash
-cd python-learner
-python -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-pio collect-once
-```
+    cd python-learner
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -e '.[dev]'
+    pio collect-once
+    pio data-status
 
-The default SQLite database is written to `data/pio.db` relative to the working directory.
+The default SQLite database is data/pio.db relative to the working directory.
 
 ## Safety
 
-20% daily return is tracked only as an aspirational benchmark. The system is not allowed to increase risk simply to chase it. A no-trade day is valid.
+20% daily return is an aspirational benchmark only. The bot cannot increase risk just to chase it. A no-trade day is valid.
