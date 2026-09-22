@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Sequence
 
 from .dlmm_math import bin_price, price_ratio_to_bin_delta, price_to_bin_id, relative_bin_price
-from .strategy import StrategyType, strategy_weights
+from .strategy import StrategyType, deposit_weights
 
 SIMULATOR_FIDELITY = "DISCRETE_COMPLETED_BIN_V1"
 
@@ -141,7 +141,13 @@ def create_position(
         entry_cost_quote=float(entry_cost_quote),
     )
 
-    weights = strategy_weights(min_bin_id, max_bin_id, active_id, strategy)
+    weights = deposit_weights(
+        min_bin_id,
+        max_bin_id,
+        active_id,
+        strategy,
+        favor_x_in_active_bin=favor_x_in_active_bin,
+    )
     y_bins = [
         bin_id
         for bin_id in range(min_bin_id, max_bin_id + 1)
