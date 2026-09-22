@@ -77,6 +77,36 @@ CREATE TABLE IF NOT EXISTS volume_buckets (
 CREATE INDEX IF NOT EXISTS idx_volume_pool_time
 ON volume_buckets(pool_address, bucket_time);
 
+CREATE TABLE IF NOT EXISTS chain_pool_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    active_bin_id INTEGER NOT NULL,
+    bin_step INTEGER NOT NULL,
+    token_x_mint TEXT NOT NULL,
+    token_y_mint TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chain_pool_time
+ON chain_pool_snapshots(pool_address, observed_at);
+
+CREATE TABLE IF NOT EXISTS bin_liquidity_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    bin_array_index INTEGER NOT NULL,
+    bin_id INTEGER NOT NULL,
+    amount_x TEXT NOT NULL,
+    amount_y TEXT NOT NULL,
+    liquidity_supply TEXT NOT NULL,
+    fee_amount_x_per_token_stored TEXT NOT NULL,
+    fee_amount_y_per_token_stored TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bin_liquidity_pool_time
+ON bin_liquidity_snapshots(pool_address, observed_at, bin_id);
+
 CREATE TABLE IF NOT EXISTS data_quality_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checked_at TEXT NOT NULL,
@@ -398,6 +428,81 @@ class Storage:
             )
         return len(rows)
 
+    def save_chain_pool_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        observed_at: str | None = None,
+    ) -> tuple[int, int]:
+        observed_at = observed_at or utc_now_iso()
+        pool_address = str(snapshot["pool_address"])
+        active_bin_id = int(snapshot["active_bin_id"])
+        bin_step = int(snapshot["bin_step"])
+        token_x_mint = str(snapshot["token_x_mint"])
+        token_y_mint = str(snapshot["token_y_mint"])
+        bin_arrays = snapshot.get("bin_arrays")
+        if not isinstance(bin_arrays, list):
+            raise ValueError("bin_arrays must be a list")
+
+        bin_rows: list[tuple[Any, ...]] = []
+        arrays_seen = 0
+        for array in bin_arrays:
+            if not isinstance(array, dict):
+                raise ValueError("each bin array must be an object")
+            index = int(array["index"])
+            bins = array.get("bins")
+            if not isinstance(bins, list):
+                raise ValueError("bin array bins must be a list")
+            arrays_seen += 1
+            for bin_row in bins:
+                if not isinstance(bin_row, dict):
+                    raise ValueError("each bin must be an object")
+                bin_rows.append(
+                    (
+                        observed_at,
+                        pool_address,
+                        index,
+                        int(bin_row["bin_id"]),
+                        str(bin_row["amount_x"]),
+                        str(bin_row["amount_y"]),
+                        str(bin_row["liquidity_supply"]),
+                        str(bin_row["fee_amount_x_per_token_stored"]),
+                        str(bin_row["fee_amount_y_per_token_stored"]),
+                    )
+                )
+
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO chain_pool_snapshots(
+                    observed_at, pool_address, active_bin_id, bin_step,
+                    token_x_mint, token_y_mint, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    observed_at,
+                    pool_address,
+                    active_bin_id,
+                    bin_step,
+                    token_x_mint,
+                    token_y_mint,
+                    json.dumps(snapshot, separators=(",", ":")),
+                ),
+            )
+            if bin_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO bin_liquidity_snapshots(
+                        observed_at, pool_address, bin_array_index, bin_id,
+                        amount_x, amount_y, liquidity_supply,
+                        fee_amount_x_per_token_stored, fee_amount_y_per_token_stored
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    bin_rows,
+                )
+
+        return arrays_seen, len(bin_rows)
+
     def save_quality_checks(
         self,
         entity_type: str,
@@ -489,6 +594,12 @@ class Storage:
             pools = conn.execute(
                 "SELECT COUNT(*), MAX(observed_at), COUNT(DISTINCT address) FROM pool_snapshots"
             ).fetchone()
+            chain = conn.execute(
+                "SELECT COUNT(*), MAX(observed_at), COUNT(DISTINCT pool_address) FROM chain_pool_snapshots"
+            ).fetchone()
+            bins = conn.execute(
+                "SELECT COUNT(*) FROM bin_liquidity_snapshots"
+            ).fetchone()[0]
             failures = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_checks WHERE status = 'FAIL'"
             ).fetchone()[0]
@@ -504,6 +615,10 @@ class Storage:
             "volume_buckets": volume[0],
             "volume_pool_count": volume[2],
             "latest_volume_bucket": volume[1],
+            "chain_pool_snapshots": chain[0],
+            "chain_pool_count": chain[2],
+            "latest_chain_snapshot": chain[1],
+            "bin_liquidity_snapshots": bins,
             "quality_failures": failures,
             "collection_errors": errors,
         }
