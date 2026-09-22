@@ -58,3 +58,81 @@ def normalize_position_pnl(payload: Any) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def normalize_position_history(
+    payload: Any,
+    *,
+    observed_at: str,
+) -> list[dict[str, Any]]:
+    """
+    Normalize Meteora GetPositionHistoricalEventsResponse.
+
+    API token amount fields remain strings because the public schema does not
+    guarantee atomic-vs-UI units. Transaction signature + instruction index are
+    preserved for later on-chain event reconciliation.
+    """
+    if not isinstance(payload, dict):
+        return []
+    events = payload.get("events")
+    if not isinstance(events, list):
+        return []
+
+    required = (
+        "signature",
+        "ixIndex",
+        "eventType",
+        "positionAddress",
+        "blockTime",
+        "slot",
+        "poolAddress",
+        "userAddress",
+        "tokenX",
+        "tokenY",
+        "amountX",
+        "amountY",
+        "amountXUsd",
+        "amountYUsd",
+        "totalUsd",
+        "createdAt",
+    )
+
+    out: list[dict[str, Any]] = []
+    for row in events:
+        if not isinstance(row, dict):
+            continue
+        if any(row.get(key) is None for key in required):
+            continue
+
+        try:
+            ix_index = int(row["ixIndex"])
+            block_time = int(row["blockTime"])
+            slot = int(row["slot"])
+        except (TypeError, ValueError):
+            continue
+
+        out.append(
+            {
+                "observed_at": observed_at,
+                "position_address": str(row["positionAddress"]),
+                "signature": str(row["signature"]),
+                "ix_index": ix_index,
+                "event_type": str(row["eventType"]),
+                "block_time": block_time,
+                "slot": slot,
+                "pool_address": str(row["poolAddress"]),
+                "user_address": str(row["userAddress"]),
+                "token_x": str(row["tokenX"]),
+                "token_y": str(row["tokenY"]),
+                "amount_x": str(row["amountX"]),
+                "amount_y": str(row["amountY"]),
+                "amount_x_usd": str(row["amountXUsd"]),
+                "amount_y_usd": str(row["amountYUsd"]),
+                "total_usd": str(row["totalUsd"]),
+                "created_at": str(row["createdAt"]),
+                "raw": row,
+            }
+        )
+
+    return out
+
