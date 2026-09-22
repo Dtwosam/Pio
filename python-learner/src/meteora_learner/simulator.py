@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Sequence
 
-from .dlmm_math import bin_price, price_to_bin_id
+from .dlmm_math import bin_price, price_ratio_to_bin_delta, price_to_bin_id, relative_bin_price
 from .strategy import StrategyType, strategy_weights
 
 
@@ -26,6 +26,7 @@ class PositionState:
     strategy: StrategyType
     entry_active_id: int
     current_active_id: int
+    entry_price_anchor: float | None
     initial_x_amount: float
     initial_y_amount: float
     idle_x_amount: float
@@ -58,6 +59,15 @@ class SimulationResult:
 
 
 def _price(bin_id: int, state: PositionState) -> float:
+    if state.entry_price_anchor is not None:
+        return float(
+            relative_bin_price(
+                state.entry_price_anchor,
+                bin_id - state.entry_active_id,
+                state.bin_step,
+            )
+        )
+
     value: Decimal = bin_price(
         bin_id,
         state.bin_step,
@@ -65,6 +75,25 @@ def _price(bin_id: int, state: PositionState) -> float:
         token_y_decimals=state.token_y_decimals,
     )
     return float(value)
+
+
+def _active_id_for_price(state: PositionState, price: float) -> int:
+    if state.entry_price_anchor is not None:
+        delta = price_ratio_to_bin_delta(
+            price,
+            state.entry_price_anchor,
+            state.bin_step,
+            round_down=True,
+        )
+        return state.entry_active_id + delta
+
+    return price_to_bin_id(
+        price,
+        state.bin_step,
+        round_down=True,
+        token_x_decimals=state.token_x_decimals,
+        token_y_decimals=state.token_y_decimals,
+    )
 
 
 def create_position(
@@ -78,6 +107,7 @@ def create_position(
     strategy: StrategyType | str = StrategyType.SPOT,
     token_x_decimals: int = 0,
     token_y_decimals: int = 0,
+    entry_price: float | None = None,
     favor_x_in_active_bin: bool = False,
     entry_cost_quote: float = 0.0,
 ) -> PositionState:
@@ -85,6 +115,8 @@ def create_position(
         raise ValueError("min_bin_id cannot exceed max_bin_id")
     if amount_x < 0 or amount_y < 0:
         raise ValueError("token amounts cannot be negative")
+    if entry_price is not None and entry_price <= 0:
+        raise ValueError("entry_price must be positive")
     if entry_cost_quote < 0:
         raise ValueError("entry_cost_quote cannot be negative")
 
@@ -98,6 +130,7 @@ def create_position(
         strategy=strategy,
         entry_active_id=active_id,
         current_active_id=active_id,
+        entry_price_anchor=float(entry_price) if entry_price is not None else None,
         initial_x_amount=float(amount_x),
         initial_y_amount=float(amount_y),
         idle_x_amount=0.0,
@@ -129,7 +162,6 @@ def create_position(
         state.idle_y_amount = float(amount_y)
 
     if x_bins and amount_x > 0:
-        # Meteora's ask-side strategy weights X by inverse bin price.
         weighted = {bin_id: weights[bin_id] / state.bins[bin_id].price for bin_id in x_bins}
         denominator = sum(weighted.values())
         for bin_id in x_bins:
@@ -148,7 +180,6 @@ def _synchronize_completed_bins(state: PositionState, new_active_id: int) -> int
     - the active bin is left untouched because partial fill cannot be inferred from OHLC alone.
     """
     conversions = 0
-
     for bin_id, inventory in state.bins.items():
         if bin_id < new_active_id and inventory.x_amount > 0:
             inventory.y_amount += inventory.x_amount * inventory.price
@@ -198,7 +229,6 @@ def simulate_price_path(
         raise ValueError("all prices must be positive")
     if rebalance_cost_quote < 0 or exit_cost_quote < 0:
         raise ValueError("costs cannot be negative")
-
     if attributable_fee_quote_by_step is not None and len(attributable_fee_quote_by_step) != len(prices):
         raise ValueError("fee sequence length must match prices")
 
@@ -208,13 +238,7 @@ def simulate_price_path(
     in_range = 0
 
     for index, price in enumerate(prices):
-        active_id = price_to_bin_id(
-            price,
-            state.bin_step,
-            round_down=True,
-            token_x_decimals=state.token_x_decimals,
-            token_y_decimals=state.token_y_decimals,
-        )
+        active_id = _active_id_for_price(state, float(price))
         crossed_conversions += _synchronize_completed_bins(state, active_id)
 
         if state.min_bin_id <= active_id <= state.max_bin_id:
