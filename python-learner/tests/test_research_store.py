@@ -77,6 +77,7 @@ def test_research_store_reads_chain_and_position_snapshots(tmp_path):
                     "bins": [
                         {
                             "bin_id": 100,
+                            "price": "18446744073709551616",
                             "amount_x": "1",
                             "amount_y": "2",
                             "liquidity_supply": "3",
