@@ -107,6 +107,51 @@ CREATE TABLE IF NOT EXISTS bin_liquidity_snapshots (
 CREATE INDEX IF NOT EXISTS idx_bin_liquidity_pool_time
 ON bin_liquidity_snapshots(pool_address, observed_at, bin_id);
 
+CREATE TABLE IF NOT EXISTS chain_position_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    position_address TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    fee_owner TEXT NOT NULL,
+    lower_bin_id INTEGER NOT NULL,
+    upper_bin_id INTEGER NOT NULL,
+    total_x_amount TEXT NOT NULL,
+    total_y_amount TEXT NOT NULL,
+    fee_x TEXT NOT NULL,
+    fee_y TEXT NOT NULL,
+    reward_one TEXT NOT NULL,
+    reward_two TEXT NOT NULL,
+    last_updated_at INTEGER NOT NULL,
+    total_claimed_fee_x_amount TEXT NOT NULL,
+    total_claimed_fee_y_amount TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chain_position_time
+ON chain_position_snapshots(position_address, observed_at);
+
+CREATE TABLE IF NOT EXISTS position_bin_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    position_address TEXT NOT NULL,
+    bin_id INTEGER NOT NULL,
+    price TEXT NOT NULL,
+    bin_x_amount TEXT NOT NULL,
+    bin_y_amount TEXT NOT NULL,
+    bin_liquidity TEXT NOT NULL,
+    position_liquidity TEXT NOT NULL,
+    position_x_amount TEXT NOT NULL,
+    position_y_amount TEXT NOT NULL,
+    position_fee_x_amount TEXT NOT NULL,
+    position_fee_y_amount TEXT NOT NULL,
+    reward_one TEXT NOT NULL,
+    reward_two TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_position_bin_time
+ON position_bin_snapshots(position_address, observed_at, bin_id);
+
 CREATE TABLE IF NOT EXISTS data_quality_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checked_at TEXT NOT NULL,
@@ -503,6 +548,89 @@ class Storage:
 
         return arrays_seen, len(bin_rows)
 
+    def save_chain_position_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        observed_at: str | None = None,
+    ) -> int:
+        observed_at = observed_at or utc_now_iso()
+        position_address = str(snapshot["position_address"])
+        bins = snapshot.get("bins")
+        if not isinstance(bins, list):
+            raise ValueError("position bins must be a list")
+
+        bin_rows: list[tuple[Any, ...]] = []
+        for row in bins:
+            if not isinstance(row, dict):
+                raise ValueError("each position bin must be an object")
+            rewards = row.get("position_reward_amounts")
+            if not isinstance(rewards, list) or len(rewards) != 2:
+                raise ValueError("position_reward_amounts must contain two values")
+            bin_rows.append(
+                (
+                    observed_at,
+                    position_address,
+                    int(row["bin_id"]),
+                    str(row["price"]),
+                    str(row["bin_x_amount"]),
+                    str(row["bin_y_amount"]),
+                    str(row["bin_liquidity"]),
+                    str(row["position_liquidity"]),
+                    str(row["position_x_amount"]),
+                    str(row["position_y_amount"]),
+                    str(row["position_fee_x_amount"]),
+                    str(row["position_fee_y_amount"]),
+                    str(rewards[0]),
+                    str(rewards[1]),
+                )
+            )
+
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO chain_position_snapshots(
+                    observed_at, position_address, pool_address, owner, fee_owner,
+                    lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
+                    fee_x, fee_y, reward_one, reward_two, last_updated_at,
+                    total_claimed_fee_x_amount, total_claimed_fee_y_amount, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    observed_at,
+                    position_address,
+                    str(snapshot["pool_address"]),
+                    str(snapshot["owner"]),
+                    str(snapshot["fee_owner"]),
+                    int(snapshot["lower_bin_id"]),
+                    int(snapshot["upper_bin_id"]),
+                    str(snapshot["total_x_amount"]),
+                    str(snapshot["total_y_amount"]),
+                    str(snapshot["fee_x"]),
+                    str(snapshot["fee_y"]),
+                    str(snapshot["reward_one"]),
+                    str(snapshot["reward_two"]),
+                    int(snapshot["last_updated_at"]),
+                    str(snapshot["total_claimed_fee_x_amount"]),
+                    str(snapshot["total_claimed_fee_y_amount"]),
+                    json.dumps(snapshot, separators=(",", ":")),
+                ),
+            )
+            if bin_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO position_bin_snapshots(
+                        observed_at, position_address, bin_id, price,
+                        bin_x_amount, bin_y_amount, bin_liquidity,
+                        position_liquidity, position_x_amount, position_y_amount,
+                        position_fee_x_amount, position_fee_y_amount,
+                        reward_one, reward_two
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    bin_rows,
+                )
+        return len(bin_rows)
+
     def save_quality_checks(
         self,
         entity_type: str,
@@ -600,6 +728,12 @@ class Storage:
             bins = conn.execute(
                 "SELECT COUNT(*) FROM bin_liquidity_snapshots"
             ).fetchone()[0]
+            positions = conn.execute(
+                "SELECT COUNT(*), MAX(observed_at), COUNT(DISTINCT position_address) FROM chain_position_snapshots"
+            ).fetchone()
+            position_bins = conn.execute(
+                "SELECT COUNT(*) FROM position_bin_snapshots"
+            ).fetchone()[0]
             failures = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_checks WHERE status = 'FAIL'"
             ).fetchone()[0]
@@ -619,6 +753,10 @@ class Storage:
             "chain_pool_count": chain[2],
             "latest_chain_snapshot": chain[1],
             "bin_liquidity_snapshots": bins,
+            "chain_position_snapshots": positions[0],
+            "chain_position_count": positions[2],
+            "latest_chain_position_snapshot": positions[1],
+            "position_bin_snapshots": position_bins,
             "quality_failures": failures,
             "collection_errors": errors,
         }
