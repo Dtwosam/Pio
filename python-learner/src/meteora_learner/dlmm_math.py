@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from decimal import Decimal, getcontext
-import math
+from decimal import (
+    Decimal,
+    ROUND_CEILING,
+    ROUND_FLOOR,
+    ROUND_HALF_EVEN,
+    getcontext,
+)
 
-getcontext().prec = 50
+getcontext().prec = 60
 
 BASIS_POINT_MAX = Decimal(10_000)
+INTEGER_SNAP_TOLERANCE = Decimal("1e-12")
 
 
 def _base(bin_step: int) -> Decimal:
@@ -47,8 +53,17 @@ def price_to_bin_id(
             raise ValueError("both token decimal values are required")
         value /= Decimal(10) ** (token_x_decimals - token_y_decimals)
 
-    raw = math.log(float(value)) / math.log(float(_base(bin_step)))
-    return math.floor(raw + 1e-12) if round_down else math.ceil(raw - 1e-12)
+    raw = value.ln() / _base(bin_step).ln()
+    nearest_integer = raw.to_integral_value(rounding=ROUND_HALF_EVEN)
+
+    # Decimal ln can land infinitesimally to one side of an exact bin boundary.
+    # Snap only when it is extremely close to an integer so exact bin prices
+    # round-trip without changing the intended floor/ceiling behavior elsewhere.
+    if abs(raw - nearest_integer) <= INTEGER_SNAP_TOLERANCE:
+        return int(nearest_integer)
+
+    rounding = ROUND_FLOOR if round_down else ROUND_CEILING
+    return int(raw.to_integral_value(rounding=rounding))
 
 
 def range_prices(
