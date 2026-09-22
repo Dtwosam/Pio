@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from meteora_learner.range_analysis import evaluate_range_path
 
@@ -20,7 +21,7 @@ def test_range_path_stats():
     stats = evaluate_range_path(frame, lower_price=95.0, upper_price=105.0)
 
     assert stats.candles == 3
-    assert stats.close_in_range_ratio == 2 / 3
+    assert stats.close_in_range_ratio == pytest.approx(2 / 3)
     assert stats.survived_all_closes is False
     assert stats.first_close_outside_at == "2026-09-22T00:10:00+00:00"
-    assert stats.ending_return_pct == 10.000000000000009
+    assert stats.ending_return_pct == pytest.approx(10.0)
