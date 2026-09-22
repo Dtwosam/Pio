@@ -9,14 +9,17 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - docs/ARCHITECTURE.md
 - docs/DATA_PIPELINE.md
 - docs/DATA_SCHEMA.md
+- docs/SIMULATOR_DESIGN.md
 
 ## Current status
 
 - Phase 0: complete
 - Phase 1: implemented; live API validation pending
-- Phase 2: next
+- Phase 2: started
 - Default mode: PAPER
 - Live signing: not implemented
+
+Phase 2 currently includes verified DLMM bin-price math, market feature generation and range-path labels. Full DLMM PnL simulation is not considered valid until reconciled against real Meteora position outcomes.
 
 ## Components
 
