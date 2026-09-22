@@ -13,9 +13,13 @@ class Settings:
     pool_pages_per_run: int = 1
     top_pool_history_count: int = 25
     requests_per_second: float = 20.0
+    ohlcv_resolution: str | None = None
+    market_data_stale_seconds: int = 7200
+    history_gap_multiplier: float = 3.0
 
     @classmethod
     def from_env(cls) -> "Settings":
+        resolution = os.getenv("PIO_OHLCV_RESOLUTION", "").strip() or None
         return cls(
             meteora_data_api=os.getenv("METEORA_DATA_API", cls.meteora_data_api),
             database_path=Path(os.getenv("PIO_DATABASE_PATH", str(cls.database_path))),
@@ -26,5 +30,12 @@ class Settings:
             ),
             requests_per_second=float(
                 os.getenv("PIO_REQUESTS_PER_SECOND", str(cls.requests_per_second))
+            ),
+            ohlcv_resolution=resolution,
+            market_data_stale_seconds=int(
+                os.getenv("PIO_MARKET_DATA_STALE_SECONDS", str(cls.market_data_stale_seconds))
+            ),
+            history_gap_multiplier=float(
+                os.getenv("PIO_HISTORY_GAP_MULTIPLIER", str(cls.history_gap_multiplier))
             ),
         )
