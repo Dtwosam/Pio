@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS chain_pool_snapshots (
     base_fee_rate TEXT,
     variable_fee_rate TEXT,
     total_fee_rate TEXT,
+    deposit_total_fee_rate TEXT,
     protocol_share_bps INTEGER,
     collect_fee_mode INTEGER,
     raw_json TEXT NOT NULL
@@ -208,6 +209,7 @@ CHAIN_POOL_EXTRA_COLUMNS = {
     "base_fee_rate": "TEXT",
     "variable_fee_rate": "TEXT",
     "total_fee_rate": "TEXT",
+    "deposit_total_fee_rate": "TEXT",
     "protocol_share_bps": "INTEGER",
     "collect_fee_mode": "INTEGER",
 }
@@ -514,6 +516,7 @@ class Storage:
         base_fee_rate = snapshot.get("base_fee_rate")
         variable_fee_rate = snapshot.get("variable_fee_rate")
         total_fee_rate = snapshot.get("total_fee_rate")
+        deposit_total_fee_rate = snapshot.get("deposit_total_fee_rate")
         protocol_share_bps = snapshot.get("protocol_share_bps")
         collect_fee_mode = snapshot.get("collect_fee_mode")
         bin_arrays = snapshot.get("bin_arrays")
@@ -555,8 +558,8 @@ class Storage:
                     observed_at, pool_address, active_bin_id, bin_step,
                     token_x_mint, token_y_mint, token_x_program, token_y_program,
                     base_fee_rate, variable_fee_rate, total_fee_rate,
-                    protocol_share_bps, collect_fee_mode, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    deposit_total_fee_rate, protocol_share_bps, collect_fee_mode, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observed_at,
@@ -570,6 +573,7 @@ class Storage:
                     str(base_fee_rate) if base_fee_rate is not None else None,
                     str(variable_fee_rate) if variable_fee_rate is not None else None,
                     str(total_fee_rate) if total_fee_rate is not None else None,
+                    str(deposit_total_fee_rate) if deposit_total_fee_rate is not None else None,
                     int(protocol_share_bps) if protocol_share_bps is not None else None,
                     int(collect_fee_mode) if collect_fee_mode is not None else None,
                     json.dumps(snapshot, separators=(",", ":")),
