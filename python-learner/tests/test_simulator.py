@@ -1,7 +1,12 @@
 import pytest
 
-from meteora_learner.dlmm_math import bin_price
-from meteora_learner.simulator import create_position, simulate_price_path, token_totals
+from meteora_learner.dlmm_math import bin_price, relative_bin_price
+from meteora_learner.simulator import (
+    SIMULATOR_FIDELITY,
+    create_position,
+    simulate_price_path,
+    token_totals,
+)
 
 
 def test_spot_position_allocates_y_below_and_x_above_active():
@@ -43,6 +48,7 @@ def test_upward_move_converts_completed_ask_bin_x_to_y():
     assert state.bins[1].x_amount == 0
     assert state.bins[1].y_amount == pytest.approx(bin1_x_before * state.bins[1].price)
     assert result.crossed_bin_conversions >= 1
+    assert result.simulator_fidelity == SIMULATOR_FIDELITY
 
 
 def test_downward_move_converts_completed_bid_bin_y_to_x():
@@ -63,6 +69,24 @@ def test_downward_move_converts_completed_bid_bin_y_to_x():
 
     assert state.bins[-1].y_amount == 0
     assert state.bins[-1].x_amount == pytest.approx(bin_minus1_y_before / state.bins[-1].price)
+
+
+def test_real_price_anchor_moves_relative_to_known_active_bin():
+    state = create_position(
+        min_bin_id=98,
+        max_bin_id=103,
+        active_id=100,
+        bin_step=100,
+        amount_x=5.0,
+        amount_y=50.0,
+        entry_price=10.0,
+    )
+
+    price_two_bins_up = float(relative_bin_price(10.0, 2, 100))
+    result = simulate_price_path(state, [10.0, price_two_bins_up])
+
+    assert result.ending_active_id == 102
+    assert state.bins[101].x_amount == 0
 
 
 def test_fees_only_accrue_in_range_and_costs_reduce_pnl():
