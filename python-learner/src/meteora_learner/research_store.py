@@ -140,3 +140,54 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def latest_position_snapshot(self, position_address: str) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT observed_at, position_address, pool_address, owner, fee_owner,
+                       lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
+                       fee_x, fee_y, reward_one, reward_two, last_updated_at,
+                       total_claimed_fee_x_amount, total_claimed_fee_y_amount
+                FROM chain_position_snapshots
+                WHERE position_address = ?
+                ORDER BY observed_at DESC, id DESC
+                LIMIT 1
+                """,
+                (position_address,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
+    def load_position_bins(
+        self,
+        position_address: str,
+        *,
+        observed_at: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if observed_at is None:
+            snapshot = self.latest_position_snapshot(position_address)
+            if snapshot is None:
+                return []
+            observed_at = str(snapshot["observed_at"])
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT observed_at, position_address, bin_id, price,
+                       bin_x_amount, bin_y_amount, bin_liquidity,
+                       position_liquidity, position_x_amount, position_y_amount,
+                       position_fee_x_amount, position_fee_y_amount,
+                       reward_one, reward_two
+                FROM position_bin_snapshots
+                WHERE position_address = ? AND observed_at = ?
+                ORDER BY bin_id ASC
+                """,
+                (position_address, observed_at),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
