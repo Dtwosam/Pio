@@ -191,3 +191,25 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def chain_pool_snapshot_at(
+        self,
+        address: str,
+        observed_at: str,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT observed_at, pool_address, active_bin_id, bin_step,
+                       token_x_mint, token_y_mint
+                FROM chain_pool_snapshots
+                WHERE pool_address = ? AND observed_at = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (address, observed_at),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
