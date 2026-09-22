@@ -79,7 +79,9 @@ class ResearchStore:
             row = conn.execute(
                 """
                 SELECT observed_at, pool_address, active_bin_id, bin_step,
-                       token_x_mint, token_y_mint
+                       token_x_mint, token_y_mint, token_x_program, token_y_program,
+                       base_fee_rate, variable_fee_rate, total_fee_rate,
+                       protocol_share_bps, collect_fee_mode
                 FROM chain_pool_snapshots
                 WHERE pool_address = ?
                 ORDER BY observed_at DESC, id DESC
@@ -201,7 +203,9 @@ class ResearchStore:
             row = conn.execute(
                 """
                 SELECT observed_at, pool_address, active_bin_id, bin_step,
-                       token_x_mint, token_y_mint
+                       token_x_mint, token_y_mint, token_x_program, token_y_program,
+                       base_fee_rate, variable_fee_rate, total_fee_rate,
+                       protocol_share_bps, collect_fee_mode
                 FROM chain_pool_snapshots
                 WHERE pool_address = ? AND observed_at = ?
                 ORDER BY id DESC
