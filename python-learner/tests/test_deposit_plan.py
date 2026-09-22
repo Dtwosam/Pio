@@ -90,10 +90,10 @@ def test_share_projection_uses_chain_bin_supply():
     )
     assert projection.bins[0].liquidity_share_minted == 30 * Q64
     assert projection.empty_bin_initializations == 0
-    assert projection.fidelity == "SDK_EXISTING_BIN_SHARE_V1"
+    assert projection.fidelity == "METEORA_LIQUIDITY_SHARE_FORMULA_V1"
 
 
-def test_empty_bin_projection_is_explicitly_lower_fidelity():
+def test_empty_bin_projection_uses_verified_first_deposit_formula():
     plan = distribute_standard_spl_deposit(
         active_id=0,
         min_bin_id=1,
@@ -117,4 +117,4 @@ def test_empty_bin_projection_is_explicitly_lower_fidelity():
     )
     assert projection.bins[0].liquidity_share_minted == 10 * Q64
     assert projection.empty_bin_initializations == 1
-    assert projection.fidelity == "SDK_EXISTING_PLUS_INVARIANT_EMPTY_BIN_V1"
+    assert projection.fidelity == "METEORA_LIQUIDITY_SHARE_FORMULA_V1"
