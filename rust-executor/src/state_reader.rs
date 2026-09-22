@@ -7,7 +7,8 @@ use anchor_client::solana_sdk::sysvar::clock::{Clock, ID as CLOCK_ID};
 use anyhow::{Context, Result};
 use commons::dlmm::accounts::{BinArray, LbPair, PositionV2};
 use commons::{
-    derive_bin_array_pda, pod_read_unaligned_skip_disc, BinArrayExtension, DynamicPosition,
+    derive_bin_array_pda, get_price_from_id, pod_read_unaligned_skip_disc, BinArrayExtension,
+    DynamicPosition,
 };
 use serde::Serialize;
 
@@ -135,12 +136,15 @@ pub async fn inspect_pool(
             .iter()
             .enumerate()
             .filter_map(|(offset, bin)| {
-                if bin.amount_x == 0 && bin.amount_y == 0 && bin.liquidity_supply == 0 {
-                    return None;
-                }
+                let bin_id = lower_bin_id + offset as i32;
+                let price = if bin.price == 0 {
+                    get_price_from_id(bin_id, lb_pair.bin_step).ok()?
+                } else {
+                    bin.price
+                };
                 Some(BinSnapshot {
-                    bin_id: lower_bin_id + offset as i32,
-                    price: bin.price.to_string(),
+                    bin_id,
+                    price: price.to_string(),
                     amount_x: bin.amount_x.to_string(),
                     amount_y: bin.amount_y.to_string(),
                     liquidity_supply: bin.liquidity_supply.to_string(),
