@@ -10,6 +10,7 @@ from .chain_scan import scan_chain_candidates
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
+from .position_history import collect_position_history
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .reconciliation import reconcile_position
 from .reconciliation_corpus import build_reconciliation_corpus
@@ -62,6 +63,16 @@ def main() -> None:
         "--file",
         default="-",
         help="JSON file path, or - for stdin",
+    )
+
+    collect_history = subparsers.add_parser(
+        "collect-position-history",
+        help="Fetch and persist Meteora Data API lifecycle events for one position",
+    )
+    collect_history.add_argument(
+        "--position",
+        required=True,
+        help="Meteora position address",
     )
 
     ingest_position = subparsers.add_parser(
@@ -247,6 +258,17 @@ def main() -> None:
             with open(args.file, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
         result = ingest_chain_snapshot(Storage(settings.database_path), payload)
+        print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "collect-position-history":
+        settings = Settings.from_env()
+        with MeteoraDataAPI(base_url=settings.meteora_data_api) as api:
+            result = collect_position_history(
+                Storage(settings.database_path),
+                api,
+                args.position,
+            )
         print(json.dumps(result.__dict__, indent=2))
         return
 
