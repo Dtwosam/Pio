@@ -72,3 +72,71 @@ class ResearchStore:
             conn.close()
 
         return [dict(row) for row in rows]
+
+    def latest_chain_pool_snapshot(self, address: str) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT observed_at, pool_address, active_bin_id, bin_step,
+                       token_x_mint, token_y_mint
+                FROM chain_pool_snapshots
+                WHERE pool_address = ?
+                ORDER BY observed_at DESC, id DESC
+                LIMIT 1
+                """,
+                (address,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
+    def chain_observation_times(self, address: str, *, limit: int = 2) -> list[str]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT observed_at
+                FROM chain_pool_snapshots
+                WHERE pool_address = ?
+                ORDER BY observed_at DESC
+                LIMIT ?
+                """,
+                (address, limit),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [str(row["observed_at"]) for row in rows]
+
+    def load_bin_liquidity(
+        self,
+        address: str,
+        *,
+        observed_at: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if observed_at is None:
+            times = self.chain_observation_times(address, limit=1)
+            if not times:
+                return []
+            observed_at = times[0]
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT observed_at, pool_address, bin_array_index, bin_id,
+                       amount_x, amount_y, liquidity_supply,
+                       fee_amount_x_per_token_stored,
+                       fee_amount_y_per_token_stored
+                FROM bin_liquidity_snapshots
+                WHERE pool_address = ? AND observed_at = ?
+                ORDER BY bin_id ASC
+                """,
+                (address, observed_at),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
