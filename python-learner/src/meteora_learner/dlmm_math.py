@@ -20,6 +20,14 @@ def _base(bin_step: int) -> Decimal:
     return Decimal(1) + (Decimal(bin_step) / BASIS_POINT_MAX)
 
 
+def _round_log_bin(raw: Decimal, *, round_down: bool) -> int:
+    nearest_integer = raw.to_integral_value(rounding=ROUND_HALF_EVEN)
+    if abs(raw - nearest_integer) <= INTEGER_SNAP_TOLERANCE:
+        return int(nearest_integer)
+    rounding = ROUND_FLOOR if round_down else ROUND_CEILING
+    return int(raw.to_integral_value(rounding=rounding))
+
+
 def bin_price(
     bin_id: int,
     bin_step: int,
@@ -48,6 +56,21 @@ def relative_bin_price(
     return value * (_base(bin_step) ** int(delta_bins))
 
 
+def price_ratio_to_bin_delta(
+    price: float | Decimal,
+    reference_price: float | Decimal,
+    bin_step: int,
+    *,
+    round_down: bool,
+) -> int:
+    value = Decimal(str(price))
+    reference = Decimal(str(reference_price))
+    if value <= 0 or reference <= 0:
+        raise ValueError("prices must be positive")
+    raw = (value / reference).ln() / _base(bin_step).ln()
+    return _round_log_bin(raw, round_down=round_down)
+
+
 def price_to_bin_id(
     price: float | Decimal,
     bin_step: int,
@@ -66,13 +89,7 @@ def price_to_bin_id(
         value /= Decimal(10) ** (token_x_decimals - token_y_decimals)
 
     raw = value.ln() / _base(bin_step).ln()
-    nearest_integer = raw.to_integral_value(rounding=ROUND_HALF_EVEN)
-
-    if abs(raw - nearest_integer) <= INTEGER_SNAP_TOLERANCE:
-        return int(nearest_integer)
-
-    rounding = ROUND_FLOOR if round_down else ROUND_CEILING
-    return int(raw.to_integral_value(rounding=rounding))
+    return _round_log_bin(raw, round_down=round_down)
 
 
 def range_prices(
