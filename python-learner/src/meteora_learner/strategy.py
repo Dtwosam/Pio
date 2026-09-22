@@ -75,3 +75,63 @@ def strategy_weights(
         active_id,
         invert=strategy is StrategyType.BID_ASK,
     )
+
+
+def deposit_weights(
+    min_bin_id: int,
+    max_bin_id: int,
+    active_id: int,
+    strategy: StrategyType | str,
+    *,
+    favor_x_in_active_bin: bool = False,
+) -> dict[int, int]:
+    """
+    Match Meteora toAmountsBothSideByStrategy side-local weights.
+
+    This is intentionally separate from strategy_weights, which mirrors the
+    centered weight helpers used by autofill/strategy parameter calculations.
+    """
+    if min_bin_id > max_bin_id:
+        raise ValueError("min_bin_id cannot exceed max_bin_id")
+
+    strategy = StrategyType(strategy)
+
+    if strategy is StrategyType.SPOT:
+        return {bin_id: 1 for bin_id in range(min_bin_id, max_bin_id + 1)}
+
+    if active_id < min_bin_id:
+        return (
+            _descending(min_bin_id, max_bin_id)
+            if strategy is StrategyType.CURVE
+            else _ascending(min_bin_id, max_bin_id)
+        )
+
+    if active_id > max_bin_id:
+        return (
+            _ascending(min_bin_id, max_bin_id)
+            if strategy is StrategyType.CURVE
+            else _descending(min_bin_id, max_bin_id)
+        )
+
+    out: dict[int, int] = {}
+
+    bid_max = active_id - 1 if favor_x_in_active_bin else active_id
+    ask_min = active_id if favor_x_in_active_bin else active_id + 1
+
+    if min_bin_id <= bid_max:
+        bid = (
+            _ascending(min_bin_id, bid_max)
+            if strategy is StrategyType.CURVE
+            else _descending(min_bin_id, bid_max)
+        )
+        out.update(bid)
+
+    if ask_min <= max_bin_id:
+        ask = (
+            _descending(ask_min, max_bin_id)
+            if strategy is StrategyType.CURVE
+            else _ascending(ask_min, max_bin_id)
+        )
+        out.update(ask)
+
+    return out
