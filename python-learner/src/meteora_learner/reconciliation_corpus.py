@@ -6,7 +6,7 @@ from typing import Any
 from .reconciliation import (
     PositionAmountReconciliation,
     PositionFeeReconciliation,
-    reconcile_latest_position_fee_interval,
+    reconcile_position_fee_interval,
     reconcile_position_amounts,
 )
 from .research_store import ResearchStore
@@ -31,6 +31,7 @@ class ReconciliationCorpusReport:
     amount_total_abs_error_x: int
     amount_total_abs_error_y: int
     fee_positions_with_two_snapshots: int
+    fee_intervals_seen: int
     fee_intervals_eligible: int
     fee_intervals_exact: int
     fee_bins_checked: int
@@ -77,6 +78,7 @@ def build_reconciliation_corpus(
     amount_total_abs_error_y = 0
 
     fee_positions_with_two_snapshots = 0
+    fee_intervals_seen = 0
     fee_intervals_eligible = 0
     fee_intervals_exact = 0
     fee_bins_checked = 0
@@ -102,22 +104,34 @@ def build_reconciliation_corpus(
             amount_total_abs_error_x += amount_state.total_abs_error_x
             amount_total_abs_error_y += amount_state.total_abs_error_y
 
-        fee_interval = None
-        fee_error = None
+        latest_fee_interval = None
+        fee_errors: list[str] = []
         observation_times = store.position_observation_times(
             position_address,
-            limit=2,
+            limit=None,
+            ascending=True,
         )
         if len(observation_times) >= 2:
             fee_positions_with_two_snapshots += 1
-            try:
-                fee_interval = reconcile_latest_position_fee_interval(
-                    database_path,
-                    position_address=position_address,
-                )
-            except ValueError as exc:
-                fee_error = str(exc)
-            else:
+            for start_time, end_time in zip(
+                observation_times,
+                observation_times[1:],
+            ):
+                fee_intervals_seen += 1
+                try:
+                    fee_interval = reconcile_position_fee_interval(
+                        database_path,
+                        position_address=position_address,
+                        start_observed_at=start_time,
+                        end_observed_at=end_time,
+                    )
+                except ValueError as exc:
+                    fee_errors.append(
+                        f"{start_time} -> {end_time}: {exc}"
+                    )
+                    continue
+
+                latest_fee_interval = fee_interval
                 fee_intervals_eligible += 1
                 fee_intervals_exact += int(fee_interval.exact_match)
                 fee_bins_checked += fee_interval.bins_checked
@@ -125,15 +139,17 @@ def build_reconciliation_corpus(
                 fee_total_abs_error_x += fee_interval.total_abs_error_x
                 fee_total_abs_error_y += fee_interval.total_abs_error_y
         else:
-            fee_error = "need at least two position observations for fee reconciliation"
+            fee_errors.append(
+                "need at least two position observations for fee reconciliation"
+            )
 
         entries.append(
             PositionCorpusEntry(
                 position_address=position_address,
                 amount_state=amount_state,
                 amount_error=amount_error,
-                fee_interval=fee_interval,
-                fee_interval_error=fee_error,
+                fee_interval=latest_fee_interval,
+                fee_interval_error="; ".join(fee_errors) if fee_errors else None,
             )
         )
 
@@ -165,6 +181,7 @@ def build_reconciliation_corpus(
         amount_total_abs_error_x=amount_total_abs_error_x,
         amount_total_abs_error_y=amount_total_abs_error_y,
         fee_positions_with_two_snapshots=fee_positions_with_two_snapshots,
+        fee_intervals_seen=fee_intervals_seen,
         fee_intervals_eligible=fee_intervals_eligible,
         fee_intervals_exact=fee_intervals_exact,
         fee_bins_checked=fee_bins_checked,
