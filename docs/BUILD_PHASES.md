@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v0.4
+Status: v0.5
 
 ## Phase 0 — Foundation
 Status: complete.
@@ -21,44 +21,56 @@ Exit condition:
 - extended live collection remains healthy and reproducible.
 
 ## Phase 2 — Position Simulator / Backtester
-Status: in progress.
+Status: advanced implementation; reconciliation still pending.
 
 Built:
 - high-precision DLMM bin math
-- Spot/Curve/Bid-Ask strategy weights
-- candidate range grid
-- discrete per-bin inventory simulator
+- SDK-equivalent Spot/Curve/Bid-Ask deposit allocation
+- source-backed empty/existing-bin liquidity-share formulas
+- withdrawal/pro-rata amount math
+- discrete OHLC inventory simulator
 - IL/hold/cost accounting
-- inventory-only stored-data backtests
 - PnL/history API normalization
-- validation metrics
+- simulator validation metrics
 - pinned official Meteora Rust commons dependency
-- read-only LbPair/BinArray inspection
+- CI-validated read-only LbPair/BinArray inspection
 - exact DynamicPosition inspection
 - persistent chain pool/bin/position snapshots
-- liquidity-concentration and fee-checkpoint activity features
+- raw Q64 bin prices including empty bins
+- token program and on-chain fee-state capture
+- deposit-time dynamic fee calculation from Solana clock
+- composition-fee accounting
+- multi-snapshot small-LP counterfactual replay
+- interval-by-interval fee dilution
+- fail-closed Token-2022 gate
+- fail-closed counterfactual-size/zero-supply guards
+- chain-backed candidate scanner
 
 Remaining:
-- validate Rust build in a Rust-enabled environment
 - extended chain snapshot collection
-- exact hypothetical deposit liquidity-share creation
-- active-bin partial-fill model
-- fee attribution for hypothetical positions
-- rebalance lifecycle simulation
 - real-position reconciliation corpus
+- active-bin composition reconciliation against real adds
+- Token-2022 transfer-fee mint-extension support
+- hypothetical reward accounting
+- rebalance lifecycle simulation
+- transaction/slippage cost calibration
 
 Exit condition:
-- simulator error against real positions is measured and within an accepted tolerance.
+- simulator error against real positions is measured and within accepted tolerance.
 
-## Phase 3 — Baseline Strategy
-Status: scaffold exists; upgrade after Phase 2 validation.
+## Phase 3 — Deterministic Baseline Strategy
+Status: chain-backed candidate comparison exists; decision policy not yet promoted.
 
 Build:
 - pool safety filters
+- comparable value/PnL normalization
 - fee opportunity vs volatility/liquidity
-- range and strategy choice
-- position sizing
-- exit/rebalance logic
+- deterministic range/strategy policy
+- conservative position sizing
+- exit/rebalance policy
+- walk-forward baseline evaluation
+
+The baseline must consume validated Phase 2 outputs. It must not rank candidates using fake APY or pool-level fees as if they belonged to the position.
 
 ## Phase 4 — ML v1
 
