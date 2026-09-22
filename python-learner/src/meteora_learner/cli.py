@@ -7,6 +7,7 @@ import sys
 from .chain_ingest import ingest_chain_snapshot
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
+from .position_ingest import ingest_position_snapshot
 from .research import inventory_backtest_from_store
 from .settings import Settings
 from .storage import Storage
@@ -35,6 +36,16 @@ def main() -> None:
         help="Ingest JSON emitted by the Rust read-only inspect-pool command",
     )
     ingest.add_argument(
+        "--file",
+        default="-",
+        help="JSON file path, or - for stdin",
+    )
+
+    ingest_position = subparsers.add_parser(
+        "ingest-position-snapshot",
+        help="Ingest JSON emitted by Rust inspect-position",
+    )
+    ingest_position.add_argument(
         "--file",
         default="-",
         help="JSON file path, or - for stdin",
@@ -86,6 +97,17 @@ def main() -> None:
             with open(args.file, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
         result = ingest_chain_snapshot(Storage(settings.database_path), payload)
+        print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "ingest-position-snapshot":
+        settings = Settings.from_env()
+        if args.file == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with open(args.file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        result = ingest_position_snapshot(Storage(settings.database_path), payload)
         print(json.dumps(result.__dict__, indent=2))
         return
 
