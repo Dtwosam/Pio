@@ -163,6 +163,35 @@ CREATE TABLE IF NOT EXISTS position_bin_snapshots (
 CREATE INDEX IF NOT EXISTS idx_position_bin_time
 ON position_bin_snapshots(position_address, observed_at, bin_id);
 
+CREATE TABLE IF NOT EXISTS position_event_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    position_address TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    ix_index INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    block_time INTEGER NOT NULL,
+    slot INTEGER NOT NULL,
+    pool_address TEXT NOT NULL,
+    user_address TEXT NOT NULL,
+    token_x TEXT NOT NULL,
+    token_y TEXT NOT NULL,
+    amount_x TEXT NOT NULL,
+    amount_y TEXT NOT NULL,
+    amount_x_usd TEXT NOT NULL,
+    amount_y_usd TEXT NOT NULL,
+    total_usd TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    UNIQUE(position_address, signature, ix_index, event_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_position_event_history_position_time
+ON position_event_history(position_address, block_time, ix_index);
+
+CREATE INDEX IF NOT EXISTS idx_position_event_history_signature
+ON position_event_history(signature, ix_index);
+
 CREATE TABLE IF NOT EXISTS data_quality_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checked_at TEXT NOT NULL,
@@ -687,6 +716,61 @@ class Storage:
                 )
         return len(bin_rows)
 
+    def save_position_events(self, events: list[dict[str, Any]]) -> int:
+        if not events:
+            return 0
+        rows = [
+            (
+                item["observed_at"],
+                item["position_address"],
+                item["signature"],
+                int(item["ix_index"]),
+                item["event_type"],
+                int(item["block_time"]),
+                int(item["slot"]),
+                item["pool_address"],
+                item["user_address"],
+                item["token_x"],
+                item["token_y"],
+                str(item["amount_x"]),
+                str(item["amount_y"]),
+                str(item["amount_x_usd"]),
+                str(item["amount_y_usd"]),
+                str(item["total_usd"]),
+                item["created_at"],
+                json.dumps(item.get("raw", {}), separators=(",", ":")),
+            )
+            for item in events
+        ]
+        with self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO position_event_history(
+                    observed_at, position_address, signature, ix_index, event_type,
+                    block_time, slot, pool_address, user_address, token_x, token_y,
+                    amount_x, amount_y, amount_x_usd, amount_y_usd, total_usd,
+                    created_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(position_address, signature, ix_index, event_type) DO UPDATE SET
+                    observed_at=excluded.observed_at,
+                    block_time=excluded.block_time,
+                    slot=excluded.slot,
+                    pool_address=excluded.pool_address,
+                    user_address=excluded.user_address,
+                    token_x=excluded.token_x,
+                    token_y=excluded.token_y,
+                    amount_x=excluded.amount_x,
+                    amount_y=excluded.amount_y,
+                    amount_x_usd=excluded.amount_x_usd,
+                    amount_y_usd=excluded.amount_y_usd,
+                    total_usd=excluded.total_usd,
+                    created_at=excluded.created_at,
+                    raw_json=excluded.raw_json
+                """,
+                rows,
+            )
+        return len(rows)
+
     def save_quality_checks(
         self,
         entity_type: str,
@@ -790,6 +874,9 @@ class Storage:
             position_bins = conn.execute(
                 "SELECT COUNT(*) FROM position_bin_snapshots"
             ).fetchone()[0]
+            position_events = conn.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT position_address) FROM position_event_history"
+            ).fetchone()
             failures = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_checks WHERE status = 'FAIL'"
             ).fetchone()[0]
@@ -813,6 +900,8 @@ class Storage:
             "chain_position_count": positions[2],
             "latest_chain_position_snapshot": positions[1],
             "position_bin_snapshots": position_bins,
+            "position_event_history": position_events[0],
+            "position_event_position_count": position_events[1],
             "quality_failures": failures,
             "collection_errors": errors,
         }
