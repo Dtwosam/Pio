@@ -5,7 +5,7 @@ import json
 import sys
 
 from .chain_ingest import ingest_chain_snapshot
-from .chain_replay import replay_latest_small_lp_interval
+from .chain_replay import replay_small_lp_history
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
@@ -55,7 +55,7 @@ def main() -> None:
 
     replay = subparsers.add_parser(
         "replay-chain",
-        help="Replay a small hypothetical standard-SPL LP over the latest two chain snapshots",
+        help="Replay a small hypothetical standard-SPL LP over recent chain snapshots",
     )
     replay.add_argument("--pool", required=True, help="Meteora pool address")
     replay.add_argument("--amount-x", required=True, type=int, help="Atomic token X amount")
@@ -66,6 +66,12 @@ def main() -> None:
         "--strategy",
         choices=[item.value for item in StrategyType],
         default=StrategyType.SPOT.value,
+    )
+    replay.add_argument(
+        "--observations",
+        type=int,
+        default=2,
+        help="Number of latest chain snapshots to replay",
     )
     replay.add_argument(
         "--max-share-bps",
@@ -141,7 +147,7 @@ def main() -> None:
 
     if args.command == "replay-chain":
         settings = Settings.from_env()
-        result = replay_latest_small_lp_interval(
+        result = replay_small_lp_history(
             str(settings.database_path),
             pool_address=args.pool,
             amount_x=args.amount_x,
@@ -149,6 +155,7 @@ def main() -> None:
             min_bin_id=args.min_bin,
             max_bin_id=args.max_bin,
             strategy=StrategyType(args.strategy),
+            observation_limit=args.observations,
             max_share_bps=args.max_share_bps,
             favor_x_in_active_bin=args.favor_x_active,
         )
