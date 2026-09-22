@@ -40,6 +40,63 @@ CREATE TABLE IF NOT EXISTS pool_snapshots (
 CREATE INDEX IF NOT EXISTS idx_pool_snapshots_address_time
 ON pool_snapshots(address, observed_at);
 
+CREATE TABLE IF NOT EXISTS ohlcv_candles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pool_address TEXT NOT NULL,
+    source TEXT NOT NULL,
+    candle_time TEXT NOT NULL,
+    resolution TEXT NOT NULL DEFAULT '',
+    open REAL,
+    high REAL,
+    low REAL,
+    close REAL,
+    volume REAL,
+    observed_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    UNIQUE(pool_address, source, candle_time, resolution)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ohlcv_pool_time
+ON ohlcv_candles(pool_address, candle_time);
+
+CREATE TABLE IF NOT EXISTS volume_buckets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pool_address TEXT NOT NULL,
+    source TEXT NOT NULL,
+    bucket_time TEXT NOT NULL,
+    volume REAL,
+    fees REAL,
+    observed_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    UNIQUE(pool_address, source, bucket_time)
+);
+
+CREATE INDEX IF NOT EXISTS idx_volume_pool_time
+ON volume_buckets(pool_address, bucket_time);
+
+CREATE TABLE IF NOT EXISTS data_quality_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    checked_at TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_key TEXT NOT NULL,
+    check_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    value REAL,
+    detail TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_quality_entity_time
+ON data_quality_checks(entity_type, entity_key, checked_at);
+
+CREATE TABLE IF NOT EXISTS collection_errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    entity_key TEXT,
+    error TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS collector_runs (
     run_id TEXT PRIMARY KEY,
     started_at TEXT NOT NULL,
@@ -139,6 +196,127 @@ class Storage:
             )
         return True
 
+    def save_ohlcv_candles(self, candles: list[dict[str, Any]]) -> int:
+        if not candles:
+            return 0
+        rows = [
+            (
+                item["pool_address"],
+                item["source"],
+                item["candle_time"],
+                item.get("resolution") or "",
+                item.get("open"),
+                item.get("high"),
+                item.get("low"),
+                item.get("close"),
+                item.get("volume"),
+                item["observed_at"],
+                json.dumps(item.get("raw", {}), separators=(",", ":")),
+            )
+            for item in candles
+        ]
+        with self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO ohlcv_candles(
+                    pool_address, source, candle_time, resolution,
+                    open, high, low, close, volume, observed_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(pool_address, source, candle_time, resolution) DO UPDATE SET
+                    open=excluded.open,
+                    high=excluded.high,
+                    low=excluded.low,
+                    close=excluded.close,
+                    volume=excluded.volume,
+                    observed_at=excluded.observed_at,
+                    raw_json=excluded.raw_json
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def save_volume_buckets(self, buckets: list[dict[str, Any]]) -> int:
+        if not buckets:
+            return 0
+        rows = [
+            (
+                item["pool_address"],
+                item["source"],
+                item["bucket_time"],
+                item.get("volume"),
+                item.get("fees"),
+                item["observed_at"],
+                json.dumps(item.get("raw", {}), separators=(",", ":")),
+            )
+            for item in buckets
+        ]
+        with self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO volume_buckets(
+                    pool_address, source, bucket_time, volume, fees, observed_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(pool_address, source, bucket_time) DO UPDATE SET
+                    volume=excluded.volume,
+                    fees=excluded.fees,
+                    observed_at=excluded.observed_at,
+                    raw_json=excluded.raw_json
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def save_quality_checks(
+        self,
+        entity_type: str,
+        entity_key: str,
+        checks: list[dict[str, Any]],
+        *,
+        checked_at: str | None = None,
+    ) -> int:
+        if not checks:
+            return 0
+        checked_at = checked_at or utc_now_iso()
+        rows = [
+            (
+                checked_at,
+                entity_type,
+                entity_key,
+                item["check_name"],
+                item["status"],
+                item.get("value"),
+                item.get("detail"),
+            )
+            for item in checks
+        ]
+        with self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO data_quality_checks(
+                    checked_at, entity_type, entity_key, check_name, status, value, detail
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def save_collection_error(
+        self,
+        run_id: str,
+        endpoint: str,
+        error: Exception | str,
+        *,
+        entity_key: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO collection_errors(run_id, occurred_at, endpoint, entity_key, error)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (run_id, utc_now_iso(), endpoint, entity_key, str(error)[:2000]),
+            )
+
     def start_run(self, run_id: str, started_at: str) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -167,3 +345,33 @@ class Storage:
                 """,
                 (utc_now_iso(), status, pools_seen, history_pools_seen, error, run_id),
             )
+
+    def data_status(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            candles = conn.execute(
+                "SELECT COUNT(*), MAX(candle_time), COUNT(DISTINCT pool_address) FROM ohlcv_candles"
+            ).fetchone()
+            volume = conn.execute(
+                "SELECT COUNT(*), MAX(bucket_time), COUNT(DISTINCT pool_address) FROM volume_buckets"
+            ).fetchone()
+            pools = conn.execute(
+                "SELECT COUNT(*), MAX(observed_at), COUNT(DISTINCT address) FROM pool_snapshots"
+            ).fetchone()
+            failures = conn.execute(
+                "SELECT COUNT(*) FROM data_quality_checks WHERE status = 'FAIL'"
+            ).fetchone()[0]
+            errors = conn.execute("SELECT COUNT(*) FROM collection_errors").fetchone()[0]
+
+        return {
+            "pool_snapshots": pools[0],
+            "pool_count": pools[2],
+            "latest_pool_snapshot": pools[1],
+            "ohlcv_candles": candles[0],
+            "ohlcv_pool_count": candles[2],
+            "latest_candle": candles[1],
+            "volume_buckets": volume[0],
+            "volume_pool_count": volume[2],
+            "latest_volume_bucket": volume[1],
+            "quality_failures": failures,
+            "collection_errors": errors,
+        }
