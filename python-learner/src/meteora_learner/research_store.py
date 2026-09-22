@@ -229,22 +229,35 @@ class ResearchStore:
         self,
         position_address: str,
         *,
-        limit: int = 2,
+        limit: int | None = 2,
+        ascending: bool = False,
     ) -> list[str]:
-        if limit <= 0:
-            raise ValueError("limit must be positive")
+        if limit is not None and limit <= 0:
+            raise ValueError("limit must be positive when supplied")
+        order = "ASC" if ascending else "DESC"
         conn = self._connect()
         try:
-            rows = conn.execute(
-                """
-                SELECT DISTINCT observed_at
-                FROM chain_position_snapshots
-                WHERE position_address = ?
-                ORDER BY observed_at DESC
-                LIMIT ?
-                """,
-                (position_address, limit),
-            ).fetchall()
+            if limit is None:
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT observed_at
+                    FROM chain_position_snapshots
+                    WHERE position_address = ?
+                    ORDER BY observed_at {order}
+                    """,
+                    (position_address,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT observed_at
+                    FROM chain_position_snapshots
+                    WHERE position_address = ?
+                    ORDER BY observed_at {order}
+                    LIMIT ?
+                    """,
+                    (position_address, limit),
+                ).fetchall()
         finally:
             conn.close()
         return [str(row["observed_at"]) for row in rows]
