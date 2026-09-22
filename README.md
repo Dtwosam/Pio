@@ -15,13 +15,16 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 
 - Phase 0: complete
 - Phase 1: implemented; extended live validation pending
-- Phase 2: in progress
+- Phase 2: in progress with chain-backed replay
 - Default mode: PAPER
 - Live signing: not implemented
 
-Current simulator fidelity is `DISCRETE_COMPLETED_BIN_V1`.
+Pio now has two research fidelity paths:
 
-It models completed-bin inventory conversion and IL. It does **not** claim exact hypothetical active-bin fills or fee attribution yet.
+- `DISCRETE_COMPLETED_BIN_V1`: OHLC-based inventory/IL studies.
+- `SMALL_LP_CHAIN_PATH_V2`: standard-SPL counterfactual replay over repeated on-chain Meteora snapshots.
+
+The chain path uses source-backed Meteora liquidity-share formulas, real bin inventory/supply, real fee checkpoints, deposit-time dynamic fee state, and explicit active-bin composition fees. It still fails closed where the historical path would be materially changed by the hypothetical LP.
 
 ## Python commands
 
@@ -36,11 +39,37 @@ pio data-status
 pio backtest-inventory --pool <POOL_ADDRESS> --capital 100
 ```
 
-The inventory backtest uses zero simulated fees unless position-attributable fees are explicitly supplied.
+Replay one explicit candidate over recent chain snapshots:
+
+```bash
+pio replay-chain \
+  --pool <POOL_ADDRESS> \
+  --amount-x <ATOMIC_X> \
+  --amount-y <ATOMIC_Y> \
+  --min-bin <MIN_BIN> \
+  --max-bin <MAX_BIN> \
+  --strategy SPOT \
+  --observations 12
+```
+
+Compare a range/strategy grid without inventing a single profitability score:
+
+```bash
+pio scan-chain \
+  --pool <POOL_ADDRESS> \
+  --amount-x <ATOMIC_X> \
+  --amount-y <ATOMIC_Y> \
+  --observations 12 \
+  --half-widths 0,1,2,5,10 \
+  --center-offsets 0 \
+  --strategies SPOT,CURVE,BID_ASK
+```
+
+Rejected candidates are returned with their fail-closed reason.
 
 ## Rust read-only chain inspection
 
-The Rust layer now pins Meteora's official `commons` integration library.
+The Rust layer pins Meteora's official `commons` integration library and is exercised by CI.
 
 ```bash
 cd rust-executor
@@ -73,7 +102,7 @@ Hard risk boundary, read-only Solana/Meteora state inspection, and later transac
 
 ### python-learner/
 
-Meteora Data API ingestion, on-chain snapshot storage, data quality, candidate generation, simulation, validation, feature engineering and model training.
+Meteora Data API ingestion, on-chain snapshot storage, data quality, candidate generation, chain replay, validation, feature engineering and model training.
 
 ## Safety
 
