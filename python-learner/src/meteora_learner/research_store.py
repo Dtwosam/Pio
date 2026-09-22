@@ -187,6 +187,7 @@ class ResearchStore:
                 """
                 SELECT observed_at, position_address, bin_id, price,
                        bin_x_amount, bin_y_amount, bin_liquidity,
+                       bin_fee_x_per_token_stored, bin_fee_y_per_token_stored,
                        position_liquidity, position_x_amount, position_y_amount,
                        position_fee_x_amount, position_fee_y_amount,
                        reward_one, reward_two
