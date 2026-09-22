@@ -17,6 +17,7 @@ def save_snapshot(storage, observed_at, *, y_amount, fee_y_per_token, active=0):
             "base_fee_rate": "1000",
             "variable_fee_rate": "0",
             "total_fee_rate": "1000",
+            "deposit_total_fee_rate": "1000",
             "protocol_share_bps": 0,
             "collect_fee_mode": 0,
             "bin_arrays": [
@@ -112,6 +113,7 @@ def test_replay_rejects_token_2022_until_transfer_fee_model_exists(tmp_path):
             "base_fee_rate": "1000",
             "variable_fee_rate": "0",
             "total_fee_rate": "1000",
+            "deposit_total_fee_rate": "1000",
             "protocol_share_bps": 0,
             "collect_fee_mode": 0,
             "bin_arrays": [
@@ -153,3 +155,65 @@ def test_replay_rejects_token_2022_until_transfer_fee_model_exists(tmp_path):
         assert "Token-2022" in str(exc)
     else:
         raise AssertionError("expected Token-2022 replay to fail closed")
+
+
+
+def test_replay_reports_active_bin_composition_fee_separately(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+
+    for minute in (0, 5):
+        storage.save_chain_pool_snapshot(
+            {
+                "pool_address": "pool",
+                "active_bin_id": 0,
+                "bin_step": 25,
+                "token_x_mint": "x",
+                "token_y_mint": "y",
+                "token_x_program": STANDARD_SPL_TOKEN_PROGRAM,
+                "token_y_program": STANDARD_SPL_TOKEN_PROGRAM,
+                "base_fee_rate": "10000000",
+                "variable_fee_rate": "0",
+                "total_fee_rate": "10000000",
+                "deposit_total_fee_rate": "10000000",
+                "protocol_share_bps": 1000,
+                "collect_fee_mode": 0,
+                "bin_arrays": [
+                    {
+                        "address": "array",
+                        "index": 0,
+                        "lower_bin_id": 0,
+                        "upper_bin_id": 0,
+                        "bins": [
+                            {
+                                "bin_id": 0,
+                                "price": str(Q64),
+                                "amount_x": "100000",
+                                "amount_y": "100000",
+                                "liquidity_supply": str(200000 * Q64),
+                                "fee_amount_x_per_token_stored": "0",
+                                "fee_amount_y_per_token_stored": "0",
+                            }
+                        ],
+                    }
+                ],
+            },
+            observed_at=f"2026-09-22T00:{minute:02d}:00+00:00",
+        )
+
+    result = replay_latest_small_lp_interval(
+        str(db),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=1000,
+        min_bin_id=0,
+        max_bin_id=0,
+        strategy=StrategyType.SPOT,
+        max_share_bps=100,
+    )
+
+    assert result.entry_composition_fee_x == 0
+    assert result.entry_composition_fee_y > 0
+    assert result.entry_composition_protocol_fee_y == result.entry_composition_fee_y // 10
+    assert result.fee_x == 0
+    assert result.fee_y == 0
