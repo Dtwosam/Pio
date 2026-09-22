@@ -93,17 +93,24 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
-    def chain_observation_times(self, address: str, *, limit: int = 2) -> list[str]:
+    def chain_observation_times(
+        self,
+        address: str,
+        *,
+        limit: int = 2,
+        ascending: bool = False,
+    ) -> list[str]:
         if limit <= 0:
             raise ValueError("limit must be positive")
+        order = "ASC" if ascending else "DESC"
         conn = self._connect()
         try:
             rows = conn.execute(
-                """
+                f"""
                 SELECT DISTINCT observed_at
                 FROM chain_pool_snapshots
                 WHERE pool_address = ?
-                ORDER BY observed_at DESC
+                ORDER BY observed_at {order}
                 LIMIT ?
                 """,
                 (address, limit),
