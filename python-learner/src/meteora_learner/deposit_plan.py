@@ -71,9 +71,11 @@ def _allocate_x_by_weight_over_price(
 
     components: dict[int, Fraction] = {}
     for bin_id, weight in weights.items():
+        if bin_id not in prices_q64:
+            raise ValueError(f"missing Q64 price for bin {bin_id}")
         price = int(prices_q64[bin_id])
         if price <= 0:
-            raise ValueError(f"missing/invalid Q64 price for bin {bin_id}")
+            raise ValueError(f"invalid Q64 price for bin {bin_id}")
         components[bin_id] = Fraction(int(weight), price)
 
     denominator = sum(components.values(), Fraction(0, 1))
