@@ -22,6 +22,7 @@ def snapshot():
                 "bins": [
                     {
                         "bin_id": 100,
+                        "price": "18446744073709551616",
                         "amount_x": "10",
                         "amount_y": "20",
                         "liquidity_supply": "30",
@@ -53,13 +54,13 @@ def test_ingest_chain_snapshot_persists_pool_and_bins(tmp_path):
             "SELECT pool_address, active_bin_id, bin_step FROM chain_pool_snapshots"
         ).fetchone()
         bin_row = conn.execute(
-            "SELECT bin_id, amount_x, amount_y, liquidity_supply FROM bin_liquidity_snapshots"
+            "SELECT bin_id, price, amount_x, amount_y, liquidity_supply FROM bin_liquidity_snapshots"
         ).fetchone()
     finally:
         conn.close()
 
     assert pool == ("pool", 100, 25)
-    assert bin_row == (100, "10", "20", "30")
+    assert bin_row == (100, "18446744073709551616", "10", "20", "30")
     assert storage.data_status()["bin_liquidity_snapshots"] == 1
 
 
