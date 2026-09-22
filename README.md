@@ -14,12 +14,25 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 ## Current status
 
 - Phase 0: complete
-- Phase 1: implemented; live API validation pending
-- Phase 2: started
+- Phase 1: implemented; extended live validation pending
+- Phase 2: in progress
 - Default mode: PAPER
 - Live signing: not implemented
 
-Phase 2 currently includes verified DLMM bin-price math, market feature generation and range-path labels. Full DLMM PnL simulation is not considered valid until reconciled against real Meteora position outcomes.
+Current simulator fidelity is DISCRETE_COMPLETED_BIN_V1. It models completed-bin inventory conversion and IL, but does not claim exact active-bin fills or position fee attribution yet.
+
+## Useful commands
+
+    cd python-learner
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -e '.[dev]'
+
+    pio collect-once
+    pio data-status
+    pio backtest-inventory --pool <POOL_ADDRESS> --capital 100
+
+The inventory backtest intentionally uses zero simulated fees unless position-attributable fees are supplied by code. It must not be read as full profit performance.
 
 ## Components
 
@@ -27,18 +40,7 @@ Phase 2 currently includes verified DLMM bin-price math, market feature generati
 Hard risk boundary and later Solana/Meteora transaction execution. Python never owns the signing key.
 
 ### python-learner/
-Meteora data collection, storage, data quality, backtesting, feature engineering and model training.
-
-## Run the collector
-
-    cd python-learner
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -e '.[dev]'
-    pio collect-once
-    pio data-status
-
-The default SQLite database is data/pio.db relative to the working directory.
+Meteora data collection, storage, data quality, candidate generation, simulation, validation, feature engineering and model training.
 
 ## Safety
 
