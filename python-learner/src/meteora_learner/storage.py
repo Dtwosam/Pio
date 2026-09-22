@@ -108,6 +108,16 @@ CREATE TABLE IF NOT EXISTS collector_runs (
 );
 """
 
+POOL_SNAPSHOT_EXTRA_COLUMNS = {
+    "current_price": "REAL",
+    "bin_step": "INTEGER",
+    "active_bin_id": "INTEGER",
+    "apr": "REAL",
+    "apy": "REAL",
+    "token_x_symbol": "TEXT",
+    "token_y_symbol": "TEXT",
+}
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -122,11 +132,35 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _integer(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _first(mapping: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in mapping and mapping[key] is not None:
             return mapping[key]
     return None
+
+
+def _token_symbol(pool: dict[str, Any], *keys: str) -> str | None:
+    token = _first(pool, *keys)
+    if isinstance(token, dict):
+        symbol = _first(token, "symbol", "token_symbol", "ticker")
+        return str(symbol) if symbol is not None else None
+    return None
+
+
+def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name, column_type in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
 
 
 class Storage:
@@ -147,6 +181,7 @@ class Storage:
     def _initialize(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            _ensure_columns(conn, "pool_snapshots", POOL_SNAPSHOT_EXTRA_COLUMNS)
 
     def save_raw(
         self,
@@ -176,13 +211,22 @@ class Storage:
         tvl = _number(_first(pool, "tvl", "liquidity", "total_liquidity"))
         volume_24h = _number(_first(pool, "volume_24h", "trade_volume_24h", "volume24h"))
         fees_24h = _number(_first(pool, "fees_24h", "fee_24h", "fees24h"))
+        current_price = _number(_first(pool, "current_price", "currentPrice", "price"))
+        bin_step = _integer(_first(pool, "bin_step", "binStep"))
+        active_bin_id = _integer(_first(pool, "active_bin_id", "active_id", "activeId"))
+        apr = _number(_first(pool, "apr", "apr_24h"))
+        apy = _number(_first(pool, "apy", "apy_24h"))
+        token_x_symbol = _token_symbol(pool, "token_x", "tokenX")
+        token_y_symbol = _token_symbol(pool, "token_y", "tokenY")
 
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO pool_snapshots(
-                    observed_at, address, name, tvl, volume_24h, fees_24h, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    observed_at, address, name, tvl, volume_24h, fees_24h,
+                    current_price, bin_step, active_bin_id, apr, apy,
+                    token_x_symbol, token_y_symbol, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observed_at,
@@ -191,6 +235,13 @@ class Storage:
                     tvl,
                     volume_24h,
                     fees_24h,
+                    current_price,
+                    bin_step,
+                    active_bin_id,
+                    apr,
+                    apy,
+                    token_x_symbol,
+                    token_y_symbol,
                     json.dumps(pool, separators=(",", ":")),
                 ),
             )
