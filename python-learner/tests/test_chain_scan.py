@@ -96,7 +96,7 @@ def test_chain_scan_preserves_rejection_reason_for_uncovered_range(tmp_path):
     candidate = result.candidates[0]
     assert candidate.status == "REJECTED"
     assert candidate.replay is None
-    assert "does not cover bin" in str(candidate.rejection_reason)
+    assert "bin 2" in str(candidate.rejection_reason)
 
 
 def test_chain_scan_deduplicates_same_range_strategy(tmp_path):
