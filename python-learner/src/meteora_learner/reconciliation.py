@@ -144,19 +144,19 @@ def reconcile_position_amounts(
     )
 
 
-def reconcile_latest_position_fee_interval(
+def reconcile_position_fee_interval(
     database_path: str,
     *,
     position_address: str,
+    start_observed_at: str,
+    end_observed_at: str,
 ) -> PositionFeeReconciliation:
-    store = ResearchStore(database_path)
-    times = store.position_observation_times(position_address, limit=2)
-    if len(times) < 2:
-        raise ValueError("need at least two position observations for fee reconciliation")
+    if start_observed_at >= end_observed_at:
+        raise ValueError("fee reconciliation interval must move forward in time")
 
-    end_time, start_time = times[0], times[1]
-    start = store.position_snapshot_at(position_address, start_time)
-    end = store.position_snapshot_at(position_address, end_time)
+    store = ResearchStore(database_path)
+    start = store.position_snapshot_at(position_address, start_observed_at)
+    end = store.position_snapshot_at(position_address, end_observed_at)
     if start is None or end is None:
         raise ValueError("missing position snapshot")
 
@@ -175,11 +175,17 @@ def reconcile_latest_position_fee_interval(
 
     previous = {
         int(row["bin_id"]): row
-        for row in store.load_position_bins(position_address, observed_at=start_time)
+        for row in store.load_position_bins(
+            position_address,
+            observed_at=start_observed_at,
+        )
     }
     current = {
         int(row["bin_id"]): row
-        for row in store.load_position_bins(position_address, observed_at=end_time)
+        for row in store.load_position_bins(
+            position_address,
+            observed_at=end_observed_at,
+        )
     }
     if set(previous) != set(current):
         raise ValueError("position bin coverage changed across reconciliation interval")
@@ -236,8 +242,8 @@ def reconcile_latest_position_fee_interval(
     mismatched = sum(item.error_x != 0 or item.error_y != 0 for item in checks)
     return PositionFeeReconciliation(
         position_address=position_address,
-        start_observed_at=start_time,
-        end_observed_at=end_time,
+        start_observed_at=start_observed_at,
+        end_observed_at=end_observed_at,
         bins_checked=len(checks),
         mismatched_bins=mismatched,
         predicted_fee_x_delta=sum(item.predicted_fee_x_delta for item in checks),
@@ -250,6 +256,24 @@ def reconcile_latest_position_fee_interval(
         bins=tuple(checks),
     )
 
+
+def reconcile_latest_position_fee_interval(
+    database_path: str,
+    *,
+    position_address: str,
+) -> PositionFeeReconciliation:
+    store = ResearchStore(database_path)
+    times = store.position_observation_times(position_address, limit=2)
+    if len(times) < 2:
+        raise ValueError("need at least two position observations for fee reconciliation")
+
+    end_time, start_time = times[0], times[1]
+    return reconcile_position_fee_interval(
+        database_path,
+        position_address=position_address,
+        start_observed_at=start_time,
+        end_observed_at=end_time,
+    )
 
 def reconcile_position(
     database_path: str,
