@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
+from .chain_ingest import ingest_chain_snapshot
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .research import inventory_backtest_from_store
@@ -27,6 +29,16 @@ def main() -> None:
     subparsers.add_parser("collect-once", help="Collect one Meteora market-data snapshot")
     subparsers.add_parser("protocol-metrics", help="Print current Meteora protocol metrics")
     subparsers.add_parser("data-status", help="Print local market-data coverage and quality status")
+
+    ingest = subparsers.add_parser(
+        "ingest-chain-snapshot",
+        help="Ingest JSON emitted by the Rust read-only inspect-pool command",
+    )
+    ingest.add_argument(
+        "--file",
+        default="-",
+        help="JSON file path, or - for stdin",
+    )
 
     backtest = subparsers.add_parser(
         "backtest-inventory",
@@ -64,6 +76,17 @@ def main() -> None:
     if args.command == "data-status":
         settings = Settings.from_env()
         print(json.dumps(Storage(settings.database_path).data_status(), indent=2))
+        return
+
+    if args.command == "ingest-chain-snapshot":
+        settings = Settings.from_env()
+        if args.file == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with open(args.file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        result = ingest_chain_snapshot(Storage(settings.database_path), payload)
+        print(json.dumps(result.__dict__, indent=2))
         return
 
     if args.command == "backtest-inventory":
