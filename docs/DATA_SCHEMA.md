@@ -2,51 +2,83 @@
 
 ## raw_api_observations
 
-Append-only source observations from Meteora.
-
-Key fields:
-- observed_at
-- endpoint
-- entity_key
-- payload_json
+Append-only raw Meteora Data API observations.
 
 ## pool_snapshots
 
-Normalized pool-level observations used for scanning.
+Normalized pool observations.
 
-Key fields:
-- observed_at
-- address
-- name
-- tvl
-- volume_24h
-- fees_24h
-- raw_json
+Important fields include:
+- current_price
+- bin_step
+- derived active_bin_id when possible
+- token symbols and decimals
+- TVL
+- 24h volume
+- 24h fees
+- APR/APY
+- dynamic/base/max/protocol fee configuration
+- blacklist state
+- pool creation time
 
 ## ohlcv_candles
 
-Deduplicated normalized candles.
-
-Natural key:
+Deduplicated OHLCV data keyed by:
 - pool_address
 - source
 - candle_time
-- resolution
-
-Fields include open, high, low, close, volume and observed_at.
+- resolution/timeframe
 
 ## volume_buckets
 
-Deduplicated historical volume/fee buckets.
+Historical volume and fee buckets.
 
-Natural key:
-- pool_address
-- source
-- bucket_time
+Pool fees and `protocol_fees` are stored separately.
+
+## chain_pool_snapshots
+
+Read-only Solana LbPair snapshots emitted by Rust.
+
+Fields:
+- active_bin_id
+- bin_step
+- token mint addresses
+- raw snapshot
+
+## bin_liquidity_snapshots
+
+Per-bin on-chain state:
+- amount_x
+- amount_y
+- liquidity_supply
+- fee_amount_x_per_token_stored
+- fee_amount_y_per_token_stored
+
+Large integer values are stored as text to avoid precision loss.
+
+## chain_position_snapshots
+
+Exact DynamicPosition aggregate state:
+- pool and owner
+- bin range
+- token amounts
+- pending fees
+- rewards
+- claimed fees
+- last update timestamp
+
+## position_bin_snapshots
+
+Exact per-bin position state:
+- position_liquidity
+- pool bin liquidity
+- position token amounts
+- pending fee amounts
+- rewards
+
+This table is the main validation source for future fee attribution.
 
 ## data_quality_checks
-
-Stores quality outcomes rather than silently dropping suspect data.
 
 Current checks:
 - non_empty
@@ -55,17 +87,11 @@ Current checks:
 - time_gaps
 - ohlc_consistency
 
-Status values:
-- PASS
-- FAIL
-
 ## collection_errors
 
-Endpoint-level failures tied to a collector run. One pool failing history collection does not invalidate every other pool in the run.
+Endpoint-level failures tied to a collection run.
 
 ## collector_runs
-
-One row per collector execution.
 
 Status:
 - RUNNING
