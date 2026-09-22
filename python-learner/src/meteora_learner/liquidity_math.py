@@ -46,12 +46,10 @@ def mint_liquidity_share(
     For an initialized bin, this mirrors Meteora's official rebalance simulator:
         share = deposit_liquidity * bin_supply / bin_liquidity
 
-    For an empty bin, the natural invariant-preserving initialization is:
+    For an empty bin, Meteora's current source-backed formula is:
         share = deposit_liquidity
-    which makes supply == bin liquidity after first deposit.
 
-    Empty-bin behavior remains validation-gated until reconciled against a real
-    first-deposit observation.
+    Both branches use integer round-down semantics.
     """
     if min(bin_amount_x, bin_amount_y, liquidity_supply) < 0:
         raise ValueError("bin state cannot be negative")
