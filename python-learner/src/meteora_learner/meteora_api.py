@@ -6,6 +6,9 @@ from typing import Any
 import httpx
 
 
+VALID_TIMEFRAMES = {"5m", "30m", "1h", "2h", "4h", "12h", "24h"}
+
+
 class MeteoraAPIError(RuntimeError):
     def __init__(
         self,
@@ -47,7 +50,7 @@ class MeteoraDataAPI:
         self.rate_limiter = RateLimiter(requests_per_second)
         self.client = httpx.Client(
             timeout=timeout,
-            headers={"User-Agent": "pio-meteora-lp/0.2", "Accept": "application/json"},
+            headers={"User-Agent": "pio-meteora-lp/0.3", "Accept": "application/json"},
         )
 
     def __enter__(self) -> "MeteoraDataAPI":
@@ -75,7 +78,6 @@ class MeteoraDataAPI:
         for attempt in range(self.max_retries + 1):
             self.rate_limiter.wait()
             retry_after: float | None = None
-
             try:
                 response = self.client.get(f"{self.base_url}{path}", params=params)
             except httpx.TransportError as exc:
@@ -105,6 +107,30 @@ class MeteoraDataAPI:
 
         status_code = getattr(last_error, "status_code", None)
         raise MeteoraAPIError(f"Meteora request failed for {path}: {last_error}", status_code)
+
+    @staticmethod
+    def _timeseries_params(
+        *,
+        timeframe: str | None,
+        start_time: int | None,
+        end_time: int | None,
+    ) -> dict[str, Any] | None:
+        params: dict[str, Any] = {}
+        if timeframe is not None:
+            if timeframe not in VALID_TIMEFRAMES:
+                raise ValueError(f"unsupported timeframe: {timeframe}")
+            params["timeframe"] = timeframe
+        if start_time is not None:
+            if start_time < 0:
+                raise ValueError("start_time cannot be negative")
+            params["start_time"] = start_time
+        if end_time is not None:
+            if end_time < 0:
+                raise ValueError("end_time cannot be negative")
+            params["end_time"] = end_time
+        if start_time is not None and end_time is not None and start_time > end_time:
+            raise ValueError("start_time cannot exceed end_time")
+        return params or None
 
     def pools(
         self,
@@ -137,21 +163,35 @@ class MeteoraDataAPI:
         self,
         address: str,
         *,
-        from_: int | None = None,
-        to: int | None = None,
-        resolution: str | None = None,
+        timeframe: str | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
     ) -> Any:
-        params: dict[str, Any] = {}
-        if from_ is not None:
-            params["from"] = from_
-        if to is not None:
-            params["to"] = to
-        if resolution is not None:
-            params["resolution"] = resolution
-        return self._get(f"/pools/{address}/ohlcv", params=params or None)
+        return self._get(
+            f"/pools/{address}/ohlcv",
+            params=self._timeseries_params(
+                timeframe=timeframe,
+                start_time=start_time,
+                end_time=end_time,
+            ),
+        )
 
-    def volume_history(self, address: str) -> Any:
-        return self._get(f"/pools/{address}/volume/history")
+    def volume_history(
+        self,
+        address: str,
+        *,
+        timeframe: str | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> Any:
+        return self._get(
+            f"/pools/{address}/volume/history",
+            params=self._timeseries_params(
+                timeframe=timeframe,
+                start_time=start_time,
+                end_time=end_time,
+            ),
+        )
 
     def position_history(
         self,
@@ -187,11 +227,7 @@ class MeteoraDataAPI:
         if not 1 <= page_size <= 100:
             raise ValueError("page_size must be between 1 and 100")
 
-        params: dict[str, Any] = {
-            "user": user,
-            "page": page,
-            "page_size": page_size,
-        }
+        params: dict[str, Any] = {"user": user, "page": page, "page_size": page_size}
         if status is not None:
             params["status"] = status
         return self._get(f"/positions/{pool_address}/pnl", params=params)
