@@ -85,6 +85,13 @@ CREATE TABLE IF NOT EXISTS chain_pool_snapshots (
     bin_step INTEGER NOT NULL,
     token_x_mint TEXT NOT NULL,
     token_y_mint TEXT NOT NULL,
+    token_x_program TEXT,
+    token_y_program TEXT,
+    base_fee_rate TEXT,
+    variable_fee_rate TEXT,
+    total_fee_rate TEXT,
+    protocol_share_bps INTEGER,
+    collect_fee_mode INTEGER,
     raw_json TEXT NOT NULL
 );
 
@@ -195,6 +202,16 @@ BIN_LIQUIDITY_EXTRA_COLUMNS = {
     "price": "TEXT NOT NULL DEFAULT '0'",
 }
 
+CHAIN_POOL_EXTRA_COLUMNS = {
+    "token_x_program": "TEXT",
+    "token_y_program": "TEXT",
+    "base_fee_rate": "TEXT",
+    "variable_fee_rate": "TEXT",
+    "total_fee_rate": "TEXT",
+    "protocol_share_bps": "INTEGER",
+    "collect_fee_mode": "INTEGER",
+}
+
 POOL_SNAPSHOT_EXTRA_COLUMNS = {
     "current_price": "REAL",
     "bin_step": "INTEGER",
@@ -289,6 +306,7 @@ class Storage:
             _ensure_columns(conn, "pool_snapshots", POOL_SNAPSHOT_EXTRA_COLUMNS)
             _ensure_columns(conn, "volume_buckets", VOLUME_BUCKET_EXTRA_COLUMNS)
             _ensure_columns(conn, "bin_liquidity_snapshots", BIN_LIQUIDITY_EXTRA_COLUMNS)
+            _ensure_columns(conn, "chain_pool_snapshots", CHAIN_POOL_EXTRA_COLUMNS)
 
     def save_raw(
         self,
@@ -491,6 +509,13 @@ class Storage:
         bin_step = int(snapshot["bin_step"])
         token_x_mint = str(snapshot["token_x_mint"])
         token_y_mint = str(snapshot["token_y_mint"])
+        token_x_program = snapshot.get("token_x_program")
+        token_y_program = snapshot.get("token_y_program")
+        base_fee_rate = snapshot.get("base_fee_rate")
+        variable_fee_rate = snapshot.get("variable_fee_rate")
+        total_fee_rate = snapshot.get("total_fee_rate")
+        protocol_share_bps = snapshot.get("protocol_share_bps")
+        collect_fee_mode = snapshot.get("collect_fee_mode")
         bin_arrays = snapshot.get("bin_arrays")
         if not isinstance(bin_arrays, list):
             raise ValueError("bin_arrays must be a list")
@@ -528,8 +553,10 @@ class Storage:
                 """
                 INSERT INTO chain_pool_snapshots(
                     observed_at, pool_address, active_bin_id, bin_step,
-                    token_x_mint, token_y_mint, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    token_x_mint, token_y_mint, token_x_program, token_y_program,
+                    base_fee_rate, variable_fee_rate, total_fee_rate,
+                    protocol_share_bps, collect_fee_mode, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observed_at,
@@ -538,6 +565,13 @@ class Storage:
                     bin_step,
                     token_x_mint,
                     token_y_mint,
+                    str(token_x_program) if token_x_program is not None else None,
+                    str(token_y_program) if token_y_program is not None else None,
+                    str(base_fee_rate) if base_fee_rate is not None else None,
+                    str(variable_fee_rate) if variable_fee_rate is not None else None,
+                    str(total_fee_rate) if total_fee_rate is not None else None,
+                    int(protocol_share_bps) if protocol_share_bps is not None else None,
+                    int(collect_fee_mode) if collect_fee_mode is not None else None,
                     json.dumps(snapshot, separators=(",", ":")),
                 ),
             )
