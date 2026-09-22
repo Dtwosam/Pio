@@ -273,3 +273,32 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def position_addresses(self, *, limit: int | None = None) -> list[str]:
+        if limit is not None and limit <= 0:
+            raise ValueError("limit must be positive when supplied")
+        conn = self._connect()
+        try:
+            if limit is None:
+                rows = conn.execute(
+                    """
+                    SELECT position_address, MAX(observed_at) AS latest_observed_at
+                    FROM chain_position_snapshots
+                    GROUP BY position_address
+                    ORDER BY latest_observed_at DESC, position_address ASC
+                    """
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT position_address, MAX(observed_at) AS latest_observed_at
+                    FROM chain_position_snapshots
+                    GROUP BY position_address
+                    ORDER BY latest_observed_at DESC, position_address ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        finally:
+            conn.close()
+        return [str(row["position_address"]) for row in rows]
+
