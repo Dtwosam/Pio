@@ -3,10 +3,12 @@ meteora_data_api = "https://dlmm.datapi.meteora.ag"
 solana_rpc_url = ""
 
 [risk]
+# Percentage units: 2.0 means 2%.
 max_capital_per_position_pct = 2.0
 max_total_deployed_pct = 20.0
 max_daily_drawdown_pct = 3.0
 min_expected_edge_pct = 0.25
+max_expected_downside_pct = 2.0
 max_data_age_seconds = 30
 
 [learning]
