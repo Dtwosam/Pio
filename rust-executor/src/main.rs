@@ -6,7 +6,9 @@ use anyhow::{Context, Result};
 
 fn usage() {
     eprintln!(
-        "Usage:\n  meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]"
+        "Usage:
+  meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
+  meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>"
     );
 }
 
@@ -14,7 +16,7 @@ fn usage() {
 async fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let Some(command) = args.next() else {
-        println!("meteora-executor v0.2");
+        println!("meteora-executor v0.3");
         println!("default safety state: PAPER / signing disabled");
         usage();
         return Ok(());
@@ -33,6 +35,13 @@ async fn main() -> Result<()> {
 
             let snapshot =
                 state_reader::inspect_pool(&rpc_url, &pool_address, array_radius).await?;
+            println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "inspect-position" => {
+            let rpc_url = args.next().context("RPC_URL is required")?;
+            let position_address = args.next().context("POSITION_ADDRESS is required")?;
+            let snapshot =
+                state_reader::inspect_position(&rpc_url, &position_address).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
         }
         _ => {
