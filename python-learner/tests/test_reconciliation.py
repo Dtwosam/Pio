@@ -3,6 +3,7 @@ import pytest
 from meteora_learner.liquidity_math import Q64
 from meteora_learner.reconciliation import (
     reconcile_latest_position_fee_interval,
+    reconcile_position_fee_interval,
     reconcile_position,
     reconcile_position_amounts,
 )
@@ -166,3 +167,44 @@ def test_reconcile_position_includes_fee_interval_when_available(tmp_path):
     assert report.amount_state.exact_match is True
     assert report.fee_interval is not None
     assert report.fee_interval.exact_match is True
+
+
+
+def test_specific_fee_interval_can_reconcile_non_latest_pair(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_position(
+        storage,
+        "2026-09-22T00:00:00+00:00",
+        checkpoint_x=0,
+        checkpoint_y=0,
+        fee_x=0,
+        fee_y=0,
+    )
+    save_position(
+        storage,
+        "2026-09-22T00:05:00+00:00",
+        checkpoint_x=Q64,
+        checkpoint_y=2 * Q64,
+        fee_x=10,
+        fee_y=20,
+    )
+    save_position(
+        storage,
+        "2026-09-22T00:10:00+00:00",
+        checkpoint_x=3 * Q64,
+        checkpoint_y=5 * Q64,
+        fee_x=30,
+        fee_y=50,
+    )
+
+    result = reconcile_position_fee_interval(
+        str(db),
+        position_address="position",
+        start_observed_at="2026-09-22T00:00:00+00:00",
+        end_observed_at="2026-09-22T00:05:00+00:00",
+    )
+
+    assert result.predicted_fee_x_delta == 10
+    assert result.predicted_fee_y_delta == 20
+    assert result.exact_match is True
