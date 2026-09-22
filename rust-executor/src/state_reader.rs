@@ -44,6 +44,7 @@ pub struct PoolChainSnapshot {
     pub base_fee_rate: String,
     pub variable_fee_rate: String,
     pub total_fee_rate: String,
+    pub deposit_total_fee_rate: String,
     pub protocol_share_bps: u16,
     pub collect_fee_mode: u8,
     pub bin_arrays: Vec<BinArraySnapshot>,
@@ -110,7 +111,7 @@ pub async fn inspect_pool(
     if account.owner != commons::dlmm::ID {
         anyhow::bail!("pool account is not owned by Meteora DLMM");
     }
-    let lb_pair = decode_lb_pair(&account.data).context("failed to decode LbPair")?;
+    let mut lb_pair = decode_lb_pair(&account.data).context("failed to decode LbPair")?;
     let token_programs = lb_pair
         .get_token_programs()
         .context("failed to resolve token programs")?;
@@ -121,6 +122,22 @@ pub async fn inspect_pool(
     let total_fee_rate = lb_pair
         .get_total_fee()
         .context("failed to compute total fee")?;
+
+    let clock_account = rpc
+        .get_account(&CLOCK_ID)
+        .await
+        .context("failed to fetch Solana clock")?;
+    let clock: Clock =
+        bincode::deserialize(&clock_account.data).context("failed to decode Solana clock")?;
+    lb_pair
+        .update_references(clock.unix_timestamp)
+        .context("failed to update fee references")?;
+    lb_pair
+        .update_volatility_accumulator()
+        .context("failed to update volatility accumulator")?;
+    let deposit_total_fee_rate = lb_pair
+        .get_total_fee()
+        .context("failed to compute deposit-time total fee")?;
 
     let active_array_index =
         BinArray::bin_id_to_bin_array_index(lb_pair.active_id).context("active bin index")?;
@@ -195,6 +212,7 @@ pub async fn inspect_pool(
         base_fee_rate: base_fee_rate.to_string(),
         variable_fee_rate: variable_fee_rate.to_string(),
         total_fee_rate: total_fee_rate.to_string(),
+        deposit_total_fee_rate: deposit_total_fee_rate.to_string(),
         protocol_share_bps: lb_pair.parameters.protocol_share,
         collect_fee_mode: lb_pair.parameters.collect_fee_mode,
         bin_arrays,
