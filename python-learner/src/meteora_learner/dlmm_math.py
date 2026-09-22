@@ -36,6 +36,18 @@ def bin_price(
     return price
 
 
+def relative_bin_price(
+    reference_price: float | Decimal,
+    delta_bins: int,
+    bin_step: int,
+) -> Decimal:
+    """Move a known UI price by a DLMM bin delta without needing token decimals."""
+    value = Decimal(str(reference_price))
+    if value <= 0:
+        raise ValueError("reference_price must be positive")
+    return value * (_base(bin_step) ** int(delta_bins))
+
+
 def price_to_bin_id(
     price: float | Decimal,
     bin_step: int,
@@ -56,9 +68,6 @@ def price_to_bin_id(
     raw = value.ln() / _base(bin_step).ln()
     nearest_integer = raw.to_integral_value(rounding=ROUND_HALF_EVEN)
 
-    # Decimal ln can land infinitesimally to one side of an exact bin boundary.
-    # Snap only when it is extremely close to an integer so exact bin prices
-    # round-trip without changing the intended floor/ceiling behavior elsewhere.
     if abs(raw - nearest_integer) <= INTEGER_SNAP_TOLERANCE:
         return int(nearest_integer)
 
