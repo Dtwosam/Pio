@@ -149,6 +149,8 @@ CREATE TABLE IF NOT EXISTS position_bin_snapshots (
     bin_x_amount TEXT NOT NULL,
     bin_y_amount TEXT NOT NULL,
     bin_liquidity TEXT NOT NULL,
+    bin_fee_x_per_token_stored TEXT NOT NULL DEFAULT '0',
+    bin_fee_y_per_token_stored TEXT NOT NULL DEFAULT '0',
     position_liquidity TEXT NOT NULL,
     position_x_amount TEXT NOT NULL,
     position_y_amount TEXT NOT NULL,
@@ -201,6 +203,11 @@ VOLUME_BUCKET_EXTRA_COLUMNS = {
 
 BIN_LIQUIDITY_EXTRA_COLUMNS = {
     "price": "TEXT NOT NULL DEFAULT '0'",
+}
+
+POSITION_BIN_EXTRA_COLUMNS = {
+    "bin_fee_x_per_token_stored": "TEXT NOT NULL DEFAULT '0'",
+    "bin_fee_y_per_token_stored": "TEXT NOT NULL DEFAULT '0'",
 }
 
 CHAIN_POOL_EXTRA_COLUMNS = {
@@ -309,6 +316,7 @@ class Storage:
             _ensure_columns(conn, "volume_buckets", VOLUME_BUCKET_EXTRA_COLUMNS)
             _ensure_columns(conn, "bin_liquidity_snapshots", BIN_LIQUIDITY_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_pool_snapshots", CHAIN_POOL_EXTRA_COLUMNS)
+            _ensure_columns(conn, "position_bin_snapshots", POSITION_BIN_EXTRA_COLUMNS)
 
     def save_raw(
         self,
@@ -621,6 +629,8 @@ class Storage:
                     str(row["bin_x_amount"]),
                     str(row["bin_y_amount"]),
                     str(row["bin_liquidity"]),
+                    str(row.get("bin_fee_x_per_token_stored", "0")),
+                    str(row.get("bin_fee_y_per_token_stored", "0")),
                     str(row["position_liquidity"]),
                     str(row["position_x_amount"]),
                     str(row["position_y_amount"]),
@@ -667,10 +677,11 @@ class Storage:
                     INSERT INTO position_bin_snapshots(
                         observed_at, position_address, bin_id, price,
                         bin_x_amount, bin_y_amount, bin_liquidity,
+                        bin_fee_x_per_token_stored, bin_fee_y_per_token_stored,
                         position_liquidity, position_x_amount, position_y_amount,
                         position_fee_x_amount, position_fee_y_amount,
                         reward_one, reward_two
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     bin_rows,
                 )
