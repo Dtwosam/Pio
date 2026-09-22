@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use commons::dlmm::accounts::{BinArray, LbPair, PositionV2};
 use commons::{
     derive_bin_array_pda, get_price_from_id, pod_read_unaligned_skip_disc, BinArrayExtension,
-    DynamicPosition,
+    DynamicPosition, LbPairExtension,
 };
 use serde::Serialize;
 
@@ -39,6 +39,13 @@ pub struct PoolChainSnapshot {
     pub bin_step: u16,
     pub token_x_mint: String,
     pub token_y_mint: String,
+    pub token_x_program: String,
+    pub token_y_program: String,
+    pub base_fee_rate: String,
+    pub variable_fee_rate: String,
+    pub total_fee_rate: String,
+    pub protocol_share_bps: u16,
+    pub collect_fee_mode: u8,
     pub bin_arrays: Vec<BinArraySnapshot>,
 }
 
@@ -104,6 +111,16 @@ pub async fn inspect_pool(
         anyhow::bail!("pool account is not owned by Meteora DLMM");
     }
     let lb_pair = decode_lb_pair(&account.data).context("failed to decode LbPair")?;
+    let token_programs = lb_pair
+        .get_token_programs()
+        .context("failed to resolve token programs")?;
+    let base_fee_rate = lb_pair.get_base_fee().context("failed to compute base fee")?;
+    let variable_fee_rate = lb_pair
+        .get_variable_fee()
+        .context("failed to compute variable fee")?;
+    let total_fee_rate = lb_pair
+        .get_total_fee()
+        .context("failed to compute total fee")?;
 
     let active_array_index =
         BinArray::bin_id_to_bin_array_index(lb_pair.active_id).context("active bin index")?;
@@ -173,6 +190,13 @@ pub async fn inspect_pool(
         bin_step: lb_pair.bin_step,
         token_x_mint: lb_pair.token_x_mint.to_string(),
         token_y_mint: lb_pair.token_y_mint.to_string(),
+        token_x_program: token_programs[0].to_string(),
+        token_y_program: token_programs[1].to_string(),
+        base_fee_rate: base_fee_rate.to_string(),
+        variable_fee_rate: variable_fee_rate.to_string(),
+        total_fee_rate: total_fee_rate.to_string(),
+        protocol_share_bps: lb_pair.parameters.protocol_share,
+        collect_fee_mode: lb_pair.parameters.collect_fee_mode,
         bin_arrays,
     })
 }
