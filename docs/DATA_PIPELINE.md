@@ -4,7 +4,7 @@ Status: Phase 1 implementation complete; extended live collection validation pen
 
 ## Goal
 
-Create a reproducible time-series dataset before training any model.
+Create reproducible API and on-chain time series before training any model.
 
 ## Data API collection
 
@@ -28,19 +28,40 @@ Repeated runs build our own continuous history.
 
 ## On-chain collection
 
-The Rust executor has read-only commands for:
+The Rust executor has CI-validated read-only commands for:
 - LbPair state
 - active bin
 - nearby BinArray state
+- every bin in fetched arrays, including empty bins
+- raw Q64 bin price
 - bin X/Y inventory
 - liquidity supply
 - per-token fee checkpoints
+- token mint/program IDs
+- base/variable/total fee state
+- deposit-time total fee after volatility decay/reference update
+- protocol share and collect-fee mode
 - exact DynamicPosition state
 - per-bin position liquidity
 - position token amounts
 - pending fees and rewards
 
 Rust emits JSON. Python stores these snapshots with its own observation timestamp.
+
+## Chain replay
+
+Repeated snapshots can be replayed as a small hypothetical standard-SPL LP.
+
+The path:
+1. selects the earliest observation in the requested recent window as entry;
+2. distributes atomic X/Y using Meteora strategy rules;
+3. mints source-backed hypothetical per-bin liquidity shares;
+4. accounts for entry active-bin composition fees;
+5. rechecks counterfactual share size at every observation;
+6. attributes fee-checkpoint growth interval by interval;
+7. marks ending inventory from final real per-share bin state.
+
+Paths fail closed on missing coverage, zero historical supply, oversized counterfactual share, or unsupported token programs.
 
 ## Main tables
 
@@ -71,12 +92,15 @@ Suspect data is stored and marked; it is not silently promoted into model-traini
 - `pio data-status`
 - `pio ingest-chain-snapshot`
 - `pio ingest-position-snapshot`
+- `pio replay-chain`
+- `pio scan-chain`
 - `pio backtest-inventory`
 
 ## Remaining validation
 
 - run extended live Data API collection
-- run repeated Solana chain snapshots for selected pools
+- run repeated high-frequency Solana snapshots for selected pools
 - verify chain/API active-bin reconciliation
-- measure historical coverage and gaps
+- build real-position replay/reconciliation samples
+- measure snapshot gaps and counterfactual rejection rates
 - export clean training frames
