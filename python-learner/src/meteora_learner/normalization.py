@@ -132,6 +132,7 @@ def normalize_volume_history(
                 "bucket_time": bucket_time,
                 "volume": number(first(row, "volume", "volume_usd", "trade_volume", "amount")),
                 "fees": number(first(row, "fees", "fee", "fees_usd", "fee_usd")),
+                "protocol_fees": number(first(row, "protocol_fees", "protocol_fee", "protocol_fees_usd")),
                 "observed_at": observed_at,
                 "raw": row,
             }
