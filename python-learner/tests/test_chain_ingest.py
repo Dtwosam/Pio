@@ -18,6 +18,7 @@ def snapshot():
         "base_fee_rate": "1000",
         "variable_fee_rate": "50",
         "total_fee_rate": "1050",
+        "deposit_total_fee_rate": "1025",
         "protocol_share_bps": 100,
         "collect_fee_mode": 0,
         "bin_arrays": [
@@ -61,7 +62,7 @@ def test_ingest_chain_snapshot_persists_pool_and_bins(tmp_path):
             """
             SELECT pool_address, active_bin_id, bin_step, token_x_program,
                    token_y_program, base_fee_rate, variable_fee_rate,
-                   total_fee_rate, protocol_share_bps, collect_fee_mode
+                   total_fee_rate, deposit_total_fee_rate, protocol_share_bps, collect_fee_mode
             FROM chain_pool_snapshots
             """
         ).fetchone()
@@ -75,7 +76,7 @@ def test_ingest_chain_snapshot_persists_pool_and_bins(tmp_path):
         "pool", 100, 25,
         "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
         "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-        "1000", "50", "1050", 100, 0,
+        "1000", "50", "1050", "1025", 100, 0,
     )
     assert bin_row == (100, "18446744073709551616", "10", "20", "30")
     assert storage.data_status()["bin_liquidity_snapshots"] == 1
