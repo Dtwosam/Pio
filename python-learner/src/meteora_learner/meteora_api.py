@@ -153,5 +153,48 @@ class MeteoraDataAPI:
     def volume_history(self, address: str) -> Any:
         return self._get(f"/pools/{address}/volume/history")
 
+    def position_history(
+        self,
+        position_address: str,
+        *,
+        event_type: str | None = None,
+        order_direction: str | None = None,
+    ) -> Any:
+        params: dict[str, Any] = {}
+        if event_type is not None:
+            params["event_type"] = event_type
+        if order_direction is not None:
+            if order_direction not in {"asc", "desc"}:
+                raise ValueError("order_direction must be 'asc' or 'desc'")
+            params["order_direction"] = order_direction
+        return self._get(f"/positions/{position_address}/historical", params=params or None)
+
+    def position_pnl(
+        self,
+        pool_address: str,
+        *,
+        user: str,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Any:
+        if not user:
+            raise ValueError("user wallet address is required")
+        if status is not None and status not in {"open", "closed", "all"}:
+            raise ValueError("status must be open, closed or all")
+        if page < 1:
+            raise ValueError("page must be >= 1")
+        if not 1 <= page_size <= 100:
+            raise ValueError("page_size must be between 1 and 100")
+
+        params: dict[str, Any] = {
+            "user": user,
+            "page": page,
+            "page_size": page_size,
+        }
+        if status is not None:
+            params["status"] = status
+        return self._get(f"/positions/{pool_address}/pnl", params=params)
+
     def protocol_metrics(self) -> Any:
         return self._get("/stats/protocol_metrics")
