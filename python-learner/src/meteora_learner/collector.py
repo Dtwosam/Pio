@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -49,6 +50,9 @@ def collect_once(settings: Settings | None = None) -> CollectorResult:
     run_id = str(uuid4())
     started_at = utc_now_iso()
     storage.start_run(run_id, started_at)
+
+    now_epoch = int(datetime.now(timezone.utc).timestamp())
+    history_start = max(0, now_epoch - settings.history_lookback_seconds)
 
     pools_seen = 0
     history_pools_seen = 0
@@ -102,7 +106,12 @@ def collect_once(settings: Settings | None = None) -> CollectorResult:
                     collection_errors += 1
 
                 try:
-                    ohlcv = api.ohlcv(address, resolution=settings.ohlcv_resolution)
+                    ohlcv = api.ohlcv(
+                        address,
+                        timeframe=settings.ohlcv_timeframe,
+                        start_time=history_start,
+                        end_time=now_epoch,
+                    )
                     storage.save_raw(
                         f"/pools/{address}/ohlcv",
                         ohlcv,
@@ -113,7 +122,7 @@ def collect_once(settings: Settings | None = None) -> CollectorResult:
                         address,
                         ohlcv,
                         observed_at=started_at,
-                        resolution=settings.ohlcv_resolution,
+                        resolution=settings.ohlcv_timeframe,
                     )
                     candles_saved += storage.save_ohlcv_candles(candles)
                     checks = assess_candles(
@@ -135,7 +144,12 @@ def collect_once(settings: Settings | None = None) -> CollectorResult:
                     collection_errors += 1
 
                 try:
-                    volume = api.volume_history(address)
+                    volume = api.volume_history(
+                        address,
+                        timeframe=settings.ohlcv_timeframe,
+                        start_time=history_start,
+                        end_time=now_epoch,
+                    )
                     storage.save_raw(
                         f"/pools/{address}/volume/history",
                         volume,
