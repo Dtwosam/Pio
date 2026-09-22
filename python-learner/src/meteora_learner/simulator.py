@@ -7,6 +7,8 @@ from typing import Sequence
 from .dlmm_math import bin_price, price_ratio_to_bin_delta, price_to_bin_id, relative_bin_price
 from .strategy import StrategyType, strategy_weights
 
+SIMULATOR_FIDELITY = "DISCRETE_COMPLETED_BIN_V1"
+
 
 @dataclass
 class BinInventory:
@@ -40,6 +42,7 @@ class PositionState:
 
 @dataclass(frozen=True)
 class SimulationResult:
+    simulator_fidelity: str
     initial_value_quote: float
     final_inventory_value_quote: float
     hold_value_quote: float
@@ -139,7 +142,6 @@ def create_position(
     )
 
     weights = strategy_weights(min_bin_id, max_bin_id, active_id, strategy)
-
     y_bins = [
         bin_id
         for bin_id in range(min_bin_id, max_bin_id + 1)
@@ -174,10 +176,9 @@ def create_position(
 
 def _synchronize_completed_bins(state: PositionState, new_active_id: int) -> int:
     """
-    Discrete-bin approximation:
-    - bins fully below the new active bin hold Y;
-    - bins fully above the new active bin hold X;
-    - the active bin is left untouched because partial fill cannot be inferred from OHLC alone.
+    V1 approximation:
+    bins that are no longer active are treated as fully converted at their bin price.
+    The current active bin remains untouched because OHLC alone cannot reveal partial fill.
     """
     conversions = 0
     for bin_id, inventory in state.bins.items():
@@ -215,14 +216,6 @@ def simulate_price_path(
     rebalance_cost_quote: float = 0.0,
     exit_cost_quote: float = 0.0,
 ) -> SimulationResult:
-    """
-    Simulate completed-bin inventory conversion across a price path.
-
-    Fees are deliberately exogenous. If supplied, each value must already be the
-    position-attributable fee estimate for that step. This prevents pool-level
-    fees from being falsely treated as position fees before bin-liquidity share
-    data is available.
-    """
     if not prices:
         raise ValueError("prices cannot be empty")
     if any(price <= 0 for price in prices):
@@ -263,6 +256,7 @@ def simulate_price_path(
     x, y = token_totals(state)
 
     return SimulationResult(
+        simulator_fidelity=SIMULATOR_FIDELITY,
         initial_value_quote=initial_value,
         final_inventory_value_quote=inventory_value,
         hold_value_quote=hold_value,
