@@ -11,6 +11,7 @@ from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
 from .reconciliation import reconcile_position
+from .reconciliation_corpus import build_reconciliation_corpus
 from .research import inventory_backtest_from_store
 from .settings import Settings
 from .storage import Storage
@@ -109,6 +110,22 @@ def main() -> None:
         help="Compare Python amount/fee math with stored exact DynamicPosition snapshots",
     )
     reconcile.add_argument("--position", required=True, help="Meteora position address")
+
+    reconcile_corpus = subparsers.add_parser(
+        "reconcile-corpus",
+        help="Aggregate exact DynamicPosition reconciliation across stored positions",
+    )
+    reconcile_corpus.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Validate only the most recently observed N positions",
+    )
+    reconcile_corpus.add_argument(
+        "--require-pass",
+        action="store_true",
+        help="Exit non-zero unless the strict deterministic math gate passes",
+    )
 
     scan = subparsers.add_parser(
         "scan-chain",
@@ -241,6 +258,17 @@ def main() -> None:
             position_address=args.position,
         )
         print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "reconcile-corpus":
+        settings = Settings.from_env()
+        result = build_reconciliation_corpus(
+            str(settings.database_path),
+            position_limit=args.limit,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_pass and not result.strict_math_gate_passed:
+            raise SystemExit(2)
         return
 
     if args.command == "scan-chain":
