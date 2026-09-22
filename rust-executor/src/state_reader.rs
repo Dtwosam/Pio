@@ -57,6 +57,8 @@ pub struct PositionBinSnapshot {
     pub bin_x_amount: String,
     pub bin_y_amount: String,
     pub bin_liquidity: String,
+    pub bin_fee_x_per_token_stored: String,
+    pub bin_fee_y_per_token_stored: String,
     pub position_liquidity: String,
     pub position_x_amount: String,
     pub position_y_amount: String,
@@ -289,12 +291,28 @@ pub async fn inspect_position(
     let bins = parsed
         .bins
         .into_iter()
-        .map(|bin| PositionBinSnapshot {
+        .map(|bin| {
+            let (bin_fee_x_per_token_stored, bin_fee_y_per_token_stored) =
+                BinArray::bin_id_to_bin_array_index(bin.bin_id)
+                    .ok()
+                    .and_then(|index| bin_array_map.get(&index))
+                    .and_then(|array| array.get_bin(bin.bin_id).ok())
+                    .map(|raw_bin| {
+                        (
+                            raw_bin.fee_amount_x_per_token_stored,
+                            raw_bin.fee_amount_y_per_token_stored,
+                        )
+                    })
+                    .unwrap_or((0, 0));
+
+            PositionBinSnapshot {
             bin_id: bin.bin_id,
             price: bin.price.to_string(),
             bin_x_amount: bin.bin_x_amount.to_string(),
             bin_y_amount: bin.bin_y_amount.to_string(),
             bin_liquidity: bin.bin_liquidity.to_string(),
+            bin_fee_x_per_token_stored: bin_fee_x_per_token_stored.to_string(),
+            bin_fee_y_per_token_stored: bin_fee_y_per_token_stored.to_string(),
             position_liquidity: bin.position_liquidity.to_string(),
             position_x_amount: bin.position_x_amount.to_string(),
             position_y_amount: bin.position_y_amount.to_string(),
@@ -304,6 +322,7 @@ pub async fn inspect_position(
                 bin.position_reward_amounts[0].to_string(),
                 bin.position_reward_amounts[1].to_string(),
             ],
+        }
         })
         .collect();
 
