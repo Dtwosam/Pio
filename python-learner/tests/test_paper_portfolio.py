@@ -277,3 +277,43 @@ def test_portfolio_cycle_blocks_stale_chain_snapshot(tmp_path):
     assert report.scheduled_positions == 0
     assert report.cycle is None
     assert "chain collection required" in report.schedule[0].reason
+
+
+def test_portfolio_cycle_blocks_missing_external_reward_quote(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    entry = "2026-09-23T09:00:00+00:00"
+    latest = "2026-09-23T09:05:00+00:00"
+    save_pool_api(storage, "a", latest)
+    save_chain(storage, "a", entry)
+    save_chain(storage, "a", latest, Q64)
+    bind(storage, "pos-a", "a", entry)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE paper_counterfactual_positions
+            SET reward_mint_0 = 'reward'
+            WHERE position_id = 'pos-a'
+            """
+        )
+    save_token_quote(
+        storage,
+        token_mint="a-y",
+        quote_per_atomic=1.0,
+        source="TEST",
+        observed_at=latest,
+    )
+
+    report = run_portfolio_live_paper_cycle(
+        storage,
+        account_id="paper",
+        cycle_id="reward-missing",
+        token_y_quotes=None,
+        quote_max_age_seconds=300,
+        quote_as_of=latest,
+        safety_config=safety_config(),
+    )
+
+    assert report.scheduled_positions == 0
+    assert report.cycle is None
+    assert "reward quote unavailable" in report.schedule[0].reason
