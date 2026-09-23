@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 
+from .add_execution import build_add_execution_calibration
 from .chain_ingest import ingest_chain_snapshot
 from .chain_replay import replay_small_lp_history
 from .chain_scan import scan_chain_candidates
@@ -77,6 +78,16 @@ def main() -> None:
         "--file",
         default="-",
         help="JSON file path, or - for stdin",
+    )
+
+    add_execution = subparsers.add_parser(
+        "add-execution",
+        help="Compare requested versus actual Meteora add-liquidity execution",
+    )
+    add_execution.add_argument(
+        "--position",
+        required=True,
+        help="Meteora position address",
     )
 
     transaction_costs = subparsers.add_parser(
@@ -327,6 +338,15 @@ def main() -> None:
             payload,
         )
         print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "add-execution":
+        settings = Settings.from_env()
+        result = build_add_execution_calibration(
+            str(settings.database_path),
+            position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "transaction-costs":
