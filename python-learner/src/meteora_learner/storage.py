@@ -865,6 +865,18 @@ CREATE TABLE IF NOT EXISTS model_promotion_evidence (
     evidence_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS model_live_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    evidence_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_live_evidence_model_time
+ON model_live_evidence(model_id, created_at, id);
+
 CREATE TABLE IF NOT EXISTS data_quality_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checked_at TEXT NOT NULL,
@@ -2443,6 +2455,85 @@ class Storage:
                     json.dumps(evidence, separators=(",", ":")),
                 ),
             )
+
+    def save_model_live_evidence(
+        self,
+        *,
+        model_id: str,
+        evidence_type: str,
+        status: str,
+        evidence: dict[str, Any],
+    ) -> int:
+        if not model_id.strip():
+            raise ValueError("model_id is required")
+        if not evidence_type.strip():
+            raise ValueError("evidence_type is required")
+        if not status.strip():
+            raise ValueError("status is required")
+        with self.connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM model_registry WHERE model_id = ?",
+                (model_id,),
+            ).fetchone() is None:
+                raise ValueError(f"unknown model_id: {model_id}")
+            cursor = conn.execute(
+                """
+                INSERT INTO model_live_evidence(
+                    model_id, created_at, evidence_type,
+                    status, evidence_json
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    model_id,
+                    utc_now_iso(),
+                    evidence_type,
+                    status,
+                    json.dumps(evidence, separators=(",", ":")),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def latest_model_live_evidence(
+        self,
+        model_id: str,
+        *,
+        evidence_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            if evidence_type is None:
+                row = conn.execute(
+                    """
+                    SELECT id, model_id, created_at, evidence_type,
+                           status, evidence_json
+                    FROM model_live_evidence
+                    WHERE model_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (model_id,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT id, model_id, created_at, evidence_type,
+                           status, evidence_json
+                    FROM model_live_evidence
+                    WHERE model_id = ? AND evidence_type = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (model_id, evidence_type),
+                ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": int(row[0]),
+            "model_id": str(row[1]),
+            "created_at": str(row[2]),
+            "evidence_type": str(row[3]),
+            "status": str(row[4]),
+            "evidence": json.loads(str(row[5])),
+        }
 
     def promote_model_to_champion(
         self,
