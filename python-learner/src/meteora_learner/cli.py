@@ -109,6 +109,7 @@ from .strategy import StrategyType
 from .transaction_event_ingest import ingest_transaction_events
 from .execution_receipt_ingest import ingest_execution_receipt
 from .execution_receipt_audit import audit_execution_receipts
+from .live_execution_effects import apply_live_execution_effect
 from .transaction_costs import build_transaction_cost_report
 
 
@@ -1004,6 +1005,12 @@ def main() -> None:
         help="JSON file path, or - for stdin",
     )
 
+    live_effect_cmd = subparsers.add_parser(
+        "apply-live-execution-effect",
+        help="Persist atomic live wallet effects from a reconciled execution receipt",
+    )
+    live_effect_cmd.add_argument("--decision", required=True)
+
     execution_receipt_audit_cmd = subparsers.add_parser(
         "execution-receipt-audit",
         help="Audit stored live execution receipts against Solana snapshots",
@@ -1367,6 +1374,15 @@ def main() -> None:
                 payload = json.load(handle)
         result = ingest_chain_snapshot(Storage(settings.database_path), payload)
         print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "apply-live-execution-effect":
+        settings = Settings.from_env()
+        result = apply_live_execution_effect(
+            Storage(settings.database_path),
+            args.decision,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "execution-receipt-audit":
