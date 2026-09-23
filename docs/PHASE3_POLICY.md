@@ -1,6 +1,6 @@
 # Phase 3 Deterministic Policy
 
-Status: research implementation
+Status: implementation complete; promotion evidence pending
 
 ## Purpose
 
@@ -56,7 +56,7 @@ Safety exits override PnL. Pio must never keep an unsafe position open only beca
 
 Candidate selection uses a trailing lookback window. The chosen shape is recentered at the decision observation and evaluated only on future observations. Forward evaluation windows cannot overlap.
 
-This path remains research-only when no promoted Phase 2 gate is supplied.
+Walk-forward validation is aggregated across pools with explicit sample, completion, positive-excess, average-edge and downside criteria. Phase 3 promotion is persisted only after Phase 2 is already persistently promoted and the configured Phase 3 criteria pass.
 
 ## Commands
 
@@ -68,10 +68,13 @@ pio manage-position ...
 pio phase3-plan ...
 ```
 
-## Not complete yet
+## Promotion state
 
-- standardized cross-pool notional/value normalization
-- multi-pool policy comparison
-- paper account state and order lifecycle
-- Phase 3 promotion thresholds
-- live transaction execution
+Cross-pool comparison uses equal requested notional and entry-value normalized basis-point economics. Promotion state is persisted and is the source of truth for downstream ML and paper gates.
+
+Still required for promotion:
+- real Phase 2 promotion evidence
+- a sufficiently large multi-pool, regime-diverse walk-forward corpus
+- passing configured Phase 3 validation thresholds
+
+Live transaction construction/signing remains outside Phase 3.
