@@ -303,6 +303,6 @@ def walk_forward_baseline(
         total_excess_vs_hold_y_atomic=sum(excess) if excess else None,
         mean_excess_vs_hold_bps=float(mean(bps)) if bps else None,
         phase2_ready=phase2_ready,
-        research_only=not phase2_gate.promotion_ready,
+        research_only=not phase2_ready,
         steps_detail=tuple(steps),
     )
