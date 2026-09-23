@@ -3,6 +3,10 @@ use crate::execution_store::{
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use solana_client::rpc_client::RpcClient;
+use solana_sdk::commitment_config::CommitmentConfig;
+use solana_sdk::signature::Signature;
+use std::str::FromStr;
 
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -21,6 +25,32 @@ pub struct ConfirmationReconcileReport {
     pub observation: ObservedConfirmation,
     pub intent_status: ExecutionIntentStatus,
     pub changed: bool,
+}
+
+
+pub fn observe_confirmation_rpc(
+    rpc_url: &str,
+    signature: &str,
+) -> Result<ObservedConfirmation> {
+    if rpc_url.trim().is_empty() {
+        anyhow::bail!("RPC URL is required");
+    }
+    let signature = Signature::from_str(signature.trim())
+        .context("execution signature is not valid base58")?;
+    let client = RpcClient::new(rpc_url.to_string());
+    let status = client
+        .get_signature_status_with_commitment_and_history(
+            &signature,
+            CommitmentConfig::confirmed(),
+            true,
+        )
+        .context("Solana signature status RPC failed")?;
+
+    Ok(match status {
+        None => ObservedConfirmation::Pending,
+        Some(Ok(())) => ObservedConfirmation::Confirmed,
+        Some(Err(error)) => ObservedConfirmation::Failed(error.to_string()),
+    })
 }
 
 
