@@ -118,6 +118,8 @@ It uses the read-only Rust inspection paths and official public-data
 collection, writes only local research state under `/opt/pio/data`, and has
 no wallet key, signing, submission, LIVE-policy or `live-submit` capability.
 
+Wallet-flow capture also uses bounded read-only pool-signature discovery by default. Each pool scans at most 25 recent signatures plus one 25-signature historical backfill page per source pass after the first page has established a cursor. Set `PIO_PHASE9_SOURCE_CAPTURE_EXTRA_ARGS=--skip-wallet-historical-pool-activity` to disable it, or change the bound with `--wallet-historical-signature-limit <N>`.
+
 Optional bounded source-capture arguments can be supplied with
 `PIO_PHASE9_SOURCE_CAPTURE_EXTRA_ARGS` in `/etc/pio/pio.env`. Do not use
 that variable to reduce the history interval below the research cadence chosen
