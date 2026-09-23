@@ -232,28 +232,20 @@ def test_cycle_bound_bandit_rejects_symlinked_dataset_evidence(tmp_path):
     link = tmp_path / "retrain-link.csv"
     link.symlink_to(output)
 
-    with storage.connect() as conn:
-        row = conn.execute(
-            """
-            SELECT id, evidence_json
-            FROM model_live_evidence
-            WHERE model_id = 'champion'
-              AND evidence_type = 'CONTINUOUS_RETRAIN_DATASET_V1'
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ).fetchone()
-        assert row is not None
-        payload = json.loads(str(row[1]))
-        payload["output_file"] = str(link.absolute())
-        conn.execute(
-            """
-            UPDATE model_live_evidence
-            SET evidence_json = ?
-            WHERE id = ?
-            """,
-            (json.dumps(payload, separators=(",", ":")), int(row[0])),
-        )
+    latest = storage.latest_model_live_evidence(
+        "champion",
+        evidence_type="CONTINUOUS_RETRAIN_DATASET_V1",
+    )
+    assert latest is not None
+    payload = dict(latest["evidence"])
+    payload["output_file"] = str(link.absolute())
+    forged_id = storage.save_model_live_evidence(
+        model_id="champion",
+        evidence_type="CONTINUOUS_RETRAIN_DATASET_V1",
+        status="BUILT",
+        evidence=payload,
+    )
+    assert forged_id > int(latest["id"])
 
     try:
         evaluate_cycle_contextual_bandit(
