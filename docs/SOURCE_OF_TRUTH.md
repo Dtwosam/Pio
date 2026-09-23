@@ -194,7 +194,11 @@ Execution intents are durable and keyed by immutable decision ID. Reusing an ID 
 
 The first instruction-construction primitive is a standard-SPL emergency exposure exit using Meteora `RemoveAllLiquidity`. Its public path resolves the pool, reserves, mints, bin arrays, bitmap extension and position owner from Solana state; callers supply only the position, executor-owned token destinations and executor wallet. Token-2022 execution remains blocked. This primitive removes liquidity but intentionally does not claim fees/rewards or close the position account.
 
-Confirmation reconciliation for an already-sent signature is read-only and restart-safe: pending remains `SENT`, success becomes `CONFIRMED`, and chain failure becomes terminal `FAILED`. No current public executor command signs or sends a transaction. Live signing/sending remains disabled until the remaining Phase 6 construction, blockhash, signer, retry and receipt-reconciliation work is implemented and validated.
+Before signing state, the executor now refreshes the still-unsigned transaction to a fresh confirmed blockhash, re-applies the transaction/account/instruction guard and wallet authorization to that exact message, simulates that exact blockhash without replacement, and persists both the prepared transaction and final simulation. This prevents a successful earlier simulation from authorizing a materially different final message.
+
+Confirmation reconciliation for an already-sent signature is read-only and restart-safe: pending remains `SENT`, success becomes `CONFIRMED`, and chain failure becomes terminal `FAILED`. Terminal intents can export a decision-bound execution receipt containing signature, pool/action, slot, fee/compute outcome and decoded event counts. Python can ingest that receipt idempotently and reconcile it to an already-stored Solana transaction snapshot without receiving wallet access. Receipt-driven live account/PnL mutation remains unfinished.
+
+No current public executor command sends a transaction. Live sending remains disabled until the remaining Phase 6 instruction-construction, signer exposure, retry/ambiguous-outcome recovery and live-account reconciliation work is implemented and validated.
 
 ## 7. Decision flow
 
