@@ -191,6 +191,24 @@ def seed_explicit_inputs(storage):
     )
 
 
+def seed_bandit_explicit_inputs(storage):
+    base = seed_explicit_inputs(storage)
+    payload = base.inputs.to_record()
+    payload["pool_inputs"].append(
+        {
+            "pool_address": "pool-c",
+            "amount_x": 100,
+            "amount_y": 100,
+            "requested_quote": 100.0,
+            "network_cost_y_atomic": 1000,
+        }
+    )
+    return persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(payload),
+    )
+
+
 def seed_portfolio_candidate_lineage(storage):
     comparison = CrossPoolResearchReport(
         plans_seen=2,
@@ -1190,6 +1208,29 @@ def test_work_queue_refuses_historical_mint_backfill(tmp_path):
     assert task.shell_command is None
     assert "cannot backfill" in task.reason
     assert "exceeds 3600s" in task.reason
+
+
+def test_work_queue_derives_bandit_dataset_from_explicit_inputs(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    artifact = seed_bandit_explicit_inputs(storage)
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "CONTEXTUAL_BANDIT"
+    )
+    assert task.scope == str(artifact.evidence_id)
+    assert task.shell_command is not None
+    assert "phase9-bandit-research-run" in task.shell_command
+    assert (
+        f"--input-evidence-id {artifact.evidence_id}"
+        in task.shell_command
+    )
+    assert "--persist --require-qualified" in task.shell_command
+    assert "derive" in task.reason
 
 
 def test_work_queue_prefers_cycle_bound_bandit_when_lineage_exists(tmp_path):
