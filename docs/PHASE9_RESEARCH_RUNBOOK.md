@@ -740,6 +740,33 @@ inputs, the queue emits the concrete CLI command. When a genuinely new external
 artifact is required—such as a fresh retraining cycle, rollout envelope or
 updated rollback metrics—it says so instead of fabricating one.
 
+
+### Read-only chain capture planning
+
+If fewer than three chain-observed pools exist, the work queue now checks
+already-persisted Meteora API pool discovery. When uncaptured candidates exist,
+it emits `CHAIN_POOL_CAPTURE_PLAN`; otherwise it emits
+`API_POOL_DISCOVERY` with `pio collect-once`.
+
+Build the concrete capture plan with:
+
+```bash
+pio phase9-chain-capture-plan --rpc-url <RPC_URL> --require-ready
+```
+
+The planner never performs an RPC call itself. It ranks the latest API snapshot
+per pool deterministically by available TVL, then volume and address, excludes
+pools that already have chain snapshots, and emits commands shaped as:
+
+```bash
+meteora-executor inspect-pool <RPC_URL> <POOL> <BIN_ARRAY_RADIUS> \
+  | pio ingest-chain-snapshot --file -
+```
+
+This path is read-only with respect to Solana. It requires no wallet key,
+cannot sign or submit transactions, and only persists the returned inspection
+snapshot locally for research evidence.
+
 Persisting the queue snapshot with `--persist-snapshot` records the new
 policy-evidence readiness fields as sanitized append-only state. No emitted
 shell commands, RPC URLs or secrets are stored. `pio phase9-progress` now
