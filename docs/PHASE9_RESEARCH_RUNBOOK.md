@@ -658,3 +658,26 @@ pio phase9-policy-rollback-audit --require-current
 
 The simulator never closes a position, changes a policy, edits the rollout
 envelope or calls the Rust executor.
+
+
+## Final pre-wiring audit
+
+For one fail-able check across the entire future-policy simulation boundary:
+
+```bash
+pio phase9-policy-prewire-audit --require-ready
+```
+
+The audit reports ready only when all of these are true at the same time:
+
+- Phase 9 authorization evidence is current;
+- the fresh controlled holdout is current;
+- the disabled bounded-rollout simulation is current;
+- the rollback simulation is current;
+- the rollback simulation has resolved to `NO_ROLLBACK_TRIGGER` rather than
+  `OBSERVATION_PENDING` or `ROLLBACK_REQUIRED`.
+
+The output remains `research_only=true`, `simulation_only=true`,
+`policy_actionable=false` and `execution_wired=false`. A ready pre-wiring
+audit is the end of the simulation evidence chain, not permission to connect
+Phase 9 to the LIVE executor.
