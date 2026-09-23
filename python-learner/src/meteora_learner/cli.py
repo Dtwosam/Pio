@@ -128,6 +128,12 @@ from .continuous_learning import (
     build_continuous_learning_plan,
     persist_continuous_learning_plan,
 )
+from .retraining_cycle import (
+    active_retraining_cycle,
+    attach_retraining_challenger,
+    retraining_cycle,
+    start_retraining_cycle,
+)
 from .live_champion_monitor import (
     LiveChampionCriteria,
     evaluate_live_champion,
@@ -1034,6 +1040,47 @@ def main() -> None:
     ml_retrain_plan.add_argument("--as-of")
     ml_retrain_plan.add_argument("--persist", action="store_true")
     ml_retrain_plan.add_argument("--require-due", action="store_true")
+
+    ml_retrain_start = subparsers.add_parser(
+        "ml-retrain-start",
+        help="Start one immutable evidence-bound continuous retraining cycle",
+    )
+    ml_retrain_start.add_argument("--dataset-version", required=True)
+    ml_retrain_start.add_argument("--cycle-id")
+    ml_retrain_start.add_argument("--as-of")
+    ml_retrain_start.add_argument(
+        "--min-new-chain-observations",
+        type=int,
+        default=500,
+    )
+    ml_retrain_start.add_argument(
+        "--min-new-chain-pools",
+        type=int,
+        default=3,
+    )
+    ml_retrain_start.add_argument(
+        "--min-new-live-labels",
+        type=int,
+        default=5,
+    )
+    ml_retrain_start.add_argument(
+        "--max-champion-age-days",
+        type=float,
+        default=14.0,
+    )
+
+    ml_retrain_status = subparsers.add_parser(
+        "ml-retrain-status",
+        help="Inspect an active or named continuous retraining cycle",
+    )
+    ml_retrain_status.add_argument("--cycle-id")
+
+    ml_retrain_attach = subparsers.add_parser(
+        "ml-retrain-attach",
+        help="Attach a registered offline candidate to a retraining cycle",
+    )
+    ml_retrain_attach.add_argument("--cycle-id", required=True)
+    ml_retrain_attach.add_argument("--model-id", required=True)
 
     ml_live_monitor = subparsers.add_parser(
         "ml-live-monitor",
@@ -2174,6 +2221,54 @@ def main() -> None:
         print(json.dumps(output, indent=2))
         if args.require_due and not result.retrain_due:
             raise SystemExit(2)
+        return
+
+    if args.command == "ml-retrain-start":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = start_retraining_cycle(
+            storage,
+            target_dataset_version=args.dataset_version,
+            cycle_id=args.cycle_id,
+            as_of=args.as_of,
+            criteria=ContinuousLearningCriteria(
+                min_new_chain_observations=(
+                    args.min_new_chain_observations
+                ),
+                min_new_chain_pools=args.min_new_chain_pools,
+                min_new_live_labels=args.min_new_live_labels,
+                max_champion_age_days=args.max_champion_age_days,
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "ml-retrain-status":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        if args.cycle_id:
+            result = retraining_cycle(
+                storage,
+                cycle_id=args.cycle_id,
+            )
+        else:
+            result = active_retraining_cycle(storage)
+        print(
+            json.dumps(
+                result.to_record() if result is not None else None,
+                indent=2,
+            )
+        )
+        return
+
+    if args.command == "ml-retrain-attach":
+        settings = Settings.from_env()
+        result = attach_retraining_challenger(
+            Storage(settings.database_path),
+            cycle_id=args.cycle_id,
+            model_id=args.model_id,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "ml-live-monitor":
