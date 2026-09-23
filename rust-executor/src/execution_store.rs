@@ -762,6 +762,66 @@ impl ExecutionIntentStore {
         )
     }
 
+    pub fn submitted_live_entry_capital_today(
+        &self,
+        exclude_decision_id: Option<&str>,
+    ) -> Result<f64> {
+        let now = now_unix()?;
+        let day_start = now - now.rem_euclid(86_400);
+        let conn = self.connection()?;
+        let mut statement = conn.prepare(
+            r#"
+            SELECT decision_id, request_json
+            FROM execution_intents
+            WHERE mode = 'LIVE'
+              AND action = 'ENTER'
+              AND status IN ('SIGNING', 'SENT', 'CONFIRMED')
+              AND updated_at_unix >= ?1
+            ORDER BY updated_at_unix ASC, decision_id ASC
+            "#,
+        )?;
+        let rows = statement.query_map(params![day_start], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+            ))
+        })?;
+
+        let mut total = 0.0_f64;
+        for row in rows {
+            let (decision_id, raw) = row?;
+            if exclude_decision_id == Some(decision_id.as_str()) {
+                continue;
+            }
+            let value: serde_json::Value =
+                serde_json::from_str(&raw).context(
+                    "persisted execution request_json is invalid JSON",
+                )?;
+            let request: DryRunExecutionRequest = serde_json::from_value(
+                value
+                    .get("request")
+                    .cloned()
+                    .context(
+                        "persisted execution request_json is missing request payload",
+                    )?,
+            )
+            .context("persisted execution request payload is invalid")?;
+            let capital = request.proposal.capital_quote;
+            if !capital.is_finite() || capital < 0.0 {
+                anyhow::bail!(
+                    "persisted LIVE ENTER capital_quote is invalid"
+                );
+            }
+            total += capital;
+            if !total.is_finite() {
+                anyhow::bail!(
+                    "submitted LIVE ENTER daily capital total overflowed"
+                );
+            }
+        }
+        Ok(total)
+    }
+
     pub fn unresolved_live_entry_decision_ids(
         &self,
         exclude_decision_id: Option<&str>,
@@ -1468,6 +1528,73 @@ mod tests {
         assert_eq!(
             store.unresolved_live_entry_decision_ids(None).unwrap(),
             vec![id.clone()]
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn submitted_live_entry_capital_tracks_signing_and_confirmed() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let mut request = request();
+        request.proposal.capital_quote = 12.5;
+        let id = request.proposal.decision_id.to_string();
+
+        store.register(&request, &config()).unwrap();
+        store
+            .record_risk(
+                &id,
+                &risk(true, request.proposal.decision_id),
+            )
+            .unwrap();
+        store.record_transaction_guard(&id, &guard(true)).unwrap();
+        store.record_simulation(&id, &simulation(true)).unwrap();
+        let authorization = WalletAuthorizationReport {
+            accepted: true,
+            reason: "approved".into(),
+            wallet_pubkey: "payer".into(),
+            transaction_fee_payer: "payer".into(),
+        };
+        store
+            .record_wallet_authorization(&id, &authorization)
+            .unwrap();
+        store
+            .record_final_presign(
+                &id,
+                &PreparedUnsignedTransaction {
+                    transaction_base64: "prepared".into(),
+                    recent_blockhash: "blockhash".into(),
+                    last_valid_block_height: 123,
+                    rpc_context_slot: 99,
+                    signatures_all_default: true,
+                },
+                &guard(true),
+                &authorization,
+                &simulation(true),
+            )
+            .unwrap();
+
+        assert_eq!(
+            store.submitted_live_entry_capital_today(None).unwrap(),
+            0.0
+        );
+        store.begin_signing(&id).unwrap();
+        assert_eq!(
+            store.submitted_live_entry_capital_today(None).unwrap(),
+            12.5
+        );
+        assert_eq!(
+            store
+                .submitted_live_entry_capital_today(Some(&id))
+                .unwrap(),
+            0.0
+        );
+        store.record_sent(&id, "signature").unwrap();
+        store.record_confirmed(&id, "signature").unwrap();
+        assert_eq!(
+            store.submitted_live_entry_capital_today(None).unwrap(),
+            12.5
         );
 
         let _ = std::fs::remove_file(path);
