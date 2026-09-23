@@ -206,6 +206,142 @@ def test_wallet_flow_capture_prioritizes_new_owner_before_existing_source(
     assert report.positions_attempted == 1
 
 
+def test_wallet_flow_capture_expands_current_owners_to_closed_positions(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+
+    def collect(position):
+        calls.append(position)
+        owner = {
+            "position-a": "owner-a",
+            "closed-a": "owner-a",
+            "position-b": "owner-b",
+            "closed-b": "owner-b",
+        }[position]
+        return seed_events(
+            storage,
+            pool="pool-a",
+            position=position,
+            owner=owner,
+            count=2,
+            offset=len(calls) * 10,
+        )
+
+    report = run_phase9_wallet_flow_capture(
+        storage,
+        pool_address="pool-a",
+        criteria=WalletFlowCriteria(
+            min_events=8,
+            min_unique_users=2,
+        ),
+        discover_positions=lambda pool, limit: discovery(
+            pool,
+            (
+                ("position-a", "owner-a"),
+                ("position-b", "owner-b"),
+            ),
+        ),
+        expand_owner_positions=lambda pool, owner: (
+            ("position-a", "closed-a")
+            if owner == "owner-a"
+            else ("position-b", "closed-b")
+        ),
+        collect_history=collect,
+    )
+
+    assert report.source_after.ready is True
+    assert report.source_scope == "CURRENT_OWNER_ALL_POSITION_COHORT"
+    assert report.owners_expanded == 2
+    assert report.owner_expansion_failures == 0
+    assert report.expanded_positions_added == 2
+    assert set(calls) == {
+        "position-a",
+        "position-b",
+        "closed-a",
+        "closed-b",
+    }
+    assert any(
+        item.source == "API_OWNER_ALL"
+        for item in report.items
+    )
+
+
+def test_wallet_flow_capture_round_robins_owners_before_extra_positions(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+
+    def collect(position):
+        calls.append(position)
+        return 0
+
+    report = run_phase9_wallet_flow_capture(
+        storage,
+        pool_address="pool-a",
+        criteria=WalletFlowCriteria(
+            min_events=100,
+            min_unique_users=5,
+        ),
+        discover_positions=lambda pool, limit: discovery(
+            pool,
+            (
+                ("position-a", "owner-a"),
+                ("position-b", "owner-b"),
+            ),
+        ),
+        expand_owner_positions=lambda pool, owner: (
+            ("position-a", "closed-a-1", "closed-a-2")
+            if owner == "owner-a"
+            else ("position-b", "closed-b-1", "closed-b-2")
+        ),
+        collect_history=collect,
+        max_positions_per_run=4,
+    )
+
+    assert report.positions_attempted == 4
+    assert calls[:2] == ["position-a", "position-b"]
+    assert set(calls[2:]) == {"closed-a-1", "closed-b-1"}
+
+
+def test_wallet_flow_capture_isolates_owner_expansion_failure(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    def expand(pool, owner):
+        if owner == "owner-a":
+            raise RuntimeError("pnl unavailable")
+        return ("position-b", "closed-b")
+
+    report = run_phase9_wallet_flow_capture(
+        storage,
+        pool_address="pool-a",
+        criteria=WalletFlowCriteria(
+            min_events=100,
+            min_unique_users=5,
+        ),
+        discover_positions=lambda pool, limit: discovery(
+            pool,
+            (
+                ("position-a", "owner-a"),
+                ("position-b", "owner-b"),
+            ),
+        ),
+        expand_owner_positions=expand,
+        collect_history=lambda position: 0,
+    )
+
+    assert report.owners_expanded == 1
+    assert report.owner_expansion_failures == 1
+    assert report.expanded_positions_added == 1
+    assert any(
+        "owner position expansion(s) failed" in reason
+        and "pnl unavailable" in reason
+        for reason in report.reasons
+    )
+
+
 def test_wallet_flow_capture_isolates_position_history_failure(tmp_path):
     storage = Storage(tmp_path / "pio.db")
 
@@ -246,8 +382,7 @@ def test_wallet_flow_capture_isolates_position_history_failure(tmp_path):
     )
     assert "data api unavailable" in failed.error
     assert any(
-        "current-position cohort is not a complete historical pool census"
-        in reason
+        "not a complete historical pool census" in reason
         for reason in report.reasons
     )
 
