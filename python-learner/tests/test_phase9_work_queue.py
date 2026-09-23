@@ -2118,7 +2118,7 @@ def test_work_queue_surfaces_replay_valid_source_refresh(
     monkeypatch.setattr(
         work_queue_module,
         "evaluate_phase9_source_freshness",
-        lambda storage: SimpleNamespace(
+        lambda *args, **kwargs: SimpleNamespace(
             families=tuple(
                 SimpleNamespace(
                     family=family,
