@@ -25,6 +25,8 @@ pub fn authorize_wallet(
         Some("transaction_guard_not_accepted")
     } else if transaction.required_signatures == 0 {
         Some("transaction_has_no_required_signer")
+    } else if !transaction.signatures_all_default {
+        Some("transaction_not_unsigned")
     } else if transaction_payer != *wallet_pubkey {
         Some("executor_wallet_is_not_transaction_fee_payer")
     } else {
@@ -60,6 +62,7 @@ mod tests {
             signatures_all_default: true,
             address_lookup_table_count: 0,
             program_ids: vec![Pubkey::new_unique().to_string()],
+            instruction_fingerprints: vec![],
         }
     }
 
