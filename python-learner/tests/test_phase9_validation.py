@@ -44,6 +44,9 @@ from meteora_learner.static_hedge import (
 from meteora_learner.storage import Storage
 from meteora_learner.wallet_flow import (
     WALLET_FLOW_EVIDENCE_TYPE,
+    WalletFlowCriteria,
+    persist_wallet_flow_research,
+    research_wallet_flow,
     wallet_flow_source_sha256,
 )
 
@@ -187,7 +190,7 @@ def seed_wallet_flow_lineage(storage, pool):
     position = f"position-{pool}"
     user = f"user-{pool}"
     with storage.connect() as conn:
-        cursor = conn.execute(
+        conn.execute(
             """
             INSERT INTO position_event_history(
                 observed_at, position_address, signature, ix_index,
@@ -210,31 +213,20 @@ def seed_wallet_flow_lineage(storage, pool):
                 created_at,
             ),
         )
-        event_id = int(cursor.lastrowid)
 
-    source_records = [
-        {
-            "id": event_id,
-            "created_at": created_at,
-            "user_address": user,
-            "event_type": "ADD_LIQUIDITY",
-            "total_usd": "100",
-            "signature": signature,
-            "ix_index": 0,
-            "position_address": position,
-        }
-    ]
-    evidence(
+    report = research_wallet_flow(
         storage,
-        WALLET_FLOW_EVIDENCE_TYPE,
-        pool,
-        extra={
-            "source_event_ids": [event_id],
-            "source_event_sha256": wallet_flow_source_sha256(
-                source_records
-            ),
-        },
+        pool_address=pool,
+        criteria=WalletFlowCriteria(
+            lookback_events=10,
+            min_events=1,
+            min_unique_users=1,
+            max_top_user_share_bps=10_000,
+        ),
+        as_of=created_at,
     )
+    assert report.research_qualified is True
+    persist_wallet_flow_research(storage, report=report)
 
 
 def seed_mint_risk_lineage(storage, pool):
