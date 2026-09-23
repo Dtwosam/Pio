@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
 from decimal import Decimal
 from statistics import fmean
 from typing import Any
 
 from .liquidity_math import Q64
 from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
-from .research_store import ResearchStore
 from .storage import Storage
 
 
@@ -98,6 +99,16 @@ class StaticHedgeWindow:
 
 
 @dataclass(frozen=True)
+class StaticHedgeSourceObservation:
+    pool_snapshot_id: int
+    bin_liquidity_snapshot_id: int
+    pool_address: str
+    observed_at: str
+    active_bin_id: int
+    price_q64: int
+
+
+@dataclass(frozen=True)
 class StaticHedgeResearchReport:
     pool_address: str
     as_of: str | None
@@ -121,6 +132,8 @@ class StaticHedgeResearchReport:
     max_hedge_notional_to_lp_value_bps: int | None
     liquidity_constrained_windows: int
     leverage_constrained_windows: int
+    source_observations: tuple[StaticHedgeSourceObservation, ...]
+    source_path_sha256: str
     instrument: HedgeInstrumentAssumptions
     criteria: StaticHedgeCriteria
     research_qualified: bool
@@ -145,64 +158,115 @@ def _value_y_atomic(
     )
 
 
+def static_hedge_source_sha256(
+    observations: tuple[StaticHedgeSourceObservation, ...]
+    | list[StaticHedgeSourceObservation],
+) -> str:
+    canonical = json.dumps(
+        [asdict(item) for item in observations],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def _active_price_path(
-    database_path: str,
+    storage: Storage,
     *,
     pool_address: str,
     observation_limit: int,
     as_of: str | None,
-) -> list[tuple[str, int]]:
-    store = ResearchStore(database_path)
-    times = store.chain_observation_times(
-        pool_address,
-        limit=None,
-        ascending=True,
-    )
-    if as_of is not None:
-        # ISO timestamps collected by Pio are timezone-aware and canonical.
-        # Parse-free filtering here mirrors the exact stored observation keys;
-        # future leakage is independently covered by walk-forward tests.
-        from datetime import datetime
+) -> tuple[
+    list[tuple[str, int]],
+    tuple[StaticHedgeSourceObservation, ...],
+]:
+    with storage.connect() as conn:
+        if as_of is None:
+            pool_rows = conn.execute(
+                """
+                SELECT p.id, p.observed_at, p.pool_address,
+                       p.active_bin_id
+                FROM chain_pool_snapshots p
+                WHERE p.pool_address = ?
+                  AND p.id = (
+                      SELECT MAX(p2.id)
+                      FROM chain_pool_snapshots p2
+                      WHERE p2.pool_address = p.pool_address
+                        AND p2.observed_at = p.observed_at
+                  )
+                ORDER BY julianday(p.observed_at) DESC, p.id DESC
+                LIMIT ?
+                """,
+                (pool_address, observation_limit),
+            ).fetchall()
+        else:
+            pool_rows = conn.execute(
+                """
+                SELECT p.id, p.observed_at, p.pool_address,
+                       p.active_bin_id
+                FROM chain_pool_snapshots p
+                WHERE p.pool_address = ?
+                  AND julianday(p.observed_at) <= julianday(?)
+                  AND p.id = (
+                      SELECT MAX(p2.id)
+                      FROM chain_pool_snapshots p2
+                      WHERE p2.pool_address = p.pool_address
+                        AND p2.observed_at = p.observed_at
+                  )
+                ORDER BY julianday(p.observed_at) DESC, p.id DESC
+                LIMIT ?
+                """,
+                (pool_address, as_of, observation_limit),
+            ).fetchall()
 
-        cutoff = datetime.fromisoformat(
-            as_of.replace("Z", "+00:00")
-        )
-        times = [
-            value
-            for value in times
-            if datetime.fromisoformat(
-                value.replace("Z", "+00:00")
+        ordered = list(reversed(pool_rows))
+        path: list[tuple[str, int]] = []
+        source: list[StaticHedgeSourceObservation] = []
+        for pool_row in ordered:
+            pool_snapshot_id = int(pool_row[0])
+            observed_at = str(pool_row[1])
+            stored_pool = str(pool_row[2])
+            active_bin_id = int(pool_row[3])
+            bin_row = conn.execute(
+                """
+                SELECT id, price
+                FROM bin_liquidity_snapshots
+                WHERE pool_address = ?
+                  AND observed_at = ?
+                  AND bin_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (
+                    stored_pool,
+                    observed_at,
+                    active_bin_id,
+                ),
+            ).fetchone()
+            if bin_row is None:
+                raise ValueError(
+                    f"active-bin price missing at {observed_at}"
+                )
+            bin_snapshot_id = int(bin_row[0])
+            price = int(str(bin_row[1]))
+            if price <= 0:
+                raise ValueError(
+                    f"active-bin price is non-positive at {observed_at}"
+                )
+            path.append((observed_at, price))
+            source.append(
+                StaticHedgeSourceObservation(
+                    pool_snapshot_id=pool_snapshot_id,
+                    bin_liquidity_snapshot_id=bin_snapshot_id,
+                    pool_address=stored_pool,
+                    observed_at=observed_at,
+                    active_bin_id=active_bin_id,
+                    price_q64=price,
+                )
             )
-            <= cutoff
-        ]
-    if observation_limit:
-        times = times[-observation_limit:]
 
-    output: list[tuple[str, int]] = []
-    for observed_at in times:
-        pool = store.chain_pool_snapshot_at(
-            pool_address,
-            observed_at,
-        )
-        if pool is None:
-            continue
-        active_bin_id = int(pool["active_bin_id"])
-        row = store.bin_liquidity_at(
-            pool_address,
-            observed_at=observed_at,
-            bin_id=active_bin_id,
-        )
-        if row is None:
-            raise ValueError(
-                f"active-bin price missing at {observed_at}"
-            )
-        price = int(str(row["price"]))
-        if price <= 0:
-            raise ValueError(
-                f"active-bin price is non-positive at {observed_at}"
-            )
-        output.append((observed_at, price))
-    return output
+    return path, tuple(source)
 
 
 def research_static_inventory_hedge(
@@ -226,11 +290,14 @@ def research_static_inventory_hedge(
         PHASE8,
         evidence_type=PHASE8_EVIDENCE_TYPE,
     )
-    path = _active_price_path(
-        str(storage.path),
+    path, source_observations = _active_price_path(
+        storage,
         pool_address=pool_address,
         observation_limit=criteria.observation_limit,
         as_of=as_of,
+    )
+    source_path_sha256 = static_hedge_source_sha256(
+        source_observations
     )
 
     window_results: list[StaticHedgeWindow] = []
@@ -439,6 +506,8 @@ def research_static_inventory_hedge(
         max_hedge_notional_to_lp_value_bps=max_notional_to_lp_bps,
         liquidity_constrained_windows=liquidity_constrained_windows,
         leverage_constrained_windows=leverage_constrained_windows,
+        source_observations=source_observations,
+        source_path_sha256=source_path_sha256,
         instrument=instrument,
         criteria=criteria,
         research_qualified=qualified,
