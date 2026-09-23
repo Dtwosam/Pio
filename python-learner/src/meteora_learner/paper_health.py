@@ -9,7 +9,11 @@ from .paper_chain_collection import (
     build_paper_chain_collection_queue,
 )
 from .paper_scheduler import PaperSchedulerState, paper_scheduler_state
-from .quote_registry import TokenQuoteStatus, load_fresh_quote_map
+from .quote_registry import (
+    TokenQuoteStatus,
+    load_fresh_quote_map,
+    required_paper_quote_mints,
+)
 from .storage import Storage
 
 
@@ -39,27 +43,6 @@ def _parse_time(value: str) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError("health timestamps must include a timezone")
     return parsed.astimezone(timezone.utc)
-
-
-def _required_token_y_mints(
-    storage: Storage,
-    *,
-    account_id: str,
-) -> tuple[str, ...]:
-    with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT DISTINCT c.token_y_mint
-            FROM paper_positions p
-            JOIN paper_counterfactual_positions c
-              ON c.position_id = p.position_id
-            WHERE p.account_id = ?
-              AND p.status = 'OPEN'
-            ORDER BY c.token_y_mint ASC
-            """,
-            (account_id,),
-        ).fetchall()
-    return tuple(str(row[0]) for row in rows)
 
 
 def build_paper_health(
@@ -137,7 +120,7 @@ def build_paper_health(
     )
     _, quote_statuses = load_fresh_quote_map(
         storage,
-        token_mints=_required_token_y_mints(
+        token_mints=required_paper_quote_mints(
             storage,
             account_id=account_id,
         ),
