@@ -361,6 +361,11 @@ def run_scheduled_paper_tick(
         raise ValueError("interval_seconds must be positive")
     if lease_seconds <= 0:
         raise ValueError("lease_seconds must be positive")
+    if lease_seconds <= interval_seconds:
+        raise ValueError(
+            "lease_seconds must exceed interval_seconds to prevent "
+            "same-account worker overlap"
+        )
 
     now = _parse_time(as_of) if as_of is not None else datetime.now(timezone.utc)
     bucket = _bucket_start(now, interval_seconds)
