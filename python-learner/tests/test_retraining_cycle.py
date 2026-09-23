@@ -4,6 +4,8 @@ from meteora_learner.retraining_cycle import (
     active_retraining_cycle,
     attach_retraining_challenger,
     start_retraining_cycle,
+    sync_retraining_cycle,
+    cancel_retraining_cycle,
 )
 from meteora_learner.storage import Storage
 
@@ -216,3 +218,77 @@ def test_candidate_cannot_use_data_after_cycle_cutoff(tmp_path):
         assert "cycle cutoff" in str(exc)
     else:
         raise AssertionError("expected no-lookahead cutoff refusal")
+
+
+
+def test_rejected_challenger_releases_active_cycle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    start_retraining_cycle(
+        storage,
+        cycle_id="cycle",
+        target_dataset_version="dataset-v2",
+        criteria=criteria(),
+        as_of=NOW,
+    )
+    register_candidate(storage)
+    attach_retraining_challenger(
+        storage,
+        cycle_id="cycle",
+        model_id="challenger",
+    )
+    storage.update_model_status(
+        "challenger",
+        expected_status="OFFLINE_CANDIDATE",
+        new_status="REJECTED",
+    )
+
+    cycle = sync_retraining_cycle(
+        storage,
+        cycle_id="cycle",
+    )
+
+    assert cycle.status == "FAILED"
+    assert active_retraining_cycle(storage) is None
+
+
+def test_cancel_refuses_to_orphan_active_candidate(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    start_retraining_cycle(
+        storage,
+        cycle_id="cycle",
+        target_dataset_version="dataset-v2",
+        criteria=criteria(),
+        as_of=NOW,
+    )
+    register_candidate(storage)
+    attach_retraining_challenger(
+        storage,
+        cycle_id="cycle",
+        model_id="challenger",
+    )
+
+    try:
+        cancel_retraining_cycle(
+            storage,
+            cycle_id="cycle",
+        )
+    except ValueError as exc:
+        assert "must be rejected" in str(exc)
+    else:
+        raise AssertionError("expected active challenger cancellation refusal")
+
+    storage.update_model_status(
+        "challenger",
+        expected_status="OFFLINE_CANDIDATE",
+        new_status="REJECTED",
+    )
+    cycle = cancel_retraining_cycle(
+        storage,
+        cycle_id="cycle",
+        notes="test cancellation",
+    )
+
+    assert cycle.status == "CANCELLED"
+    assert active_retraining_cycle(storage) is None
