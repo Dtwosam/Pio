@@ -5,6 +5,7 @@ from typing import Any
 
 from .ml_registry import CHAMPION, PAPER_CHALLENGER, ModelRegistryRecord, _to_record
 from .paper_performance import PaperPerformanceReport, build_paper_performance
+from .phase_promotion import PHASE3, PHASE3_EVIDENCE_TYPE
 from .storage import Storage
 
 
@@ -48,13 +49,16 @@ def evaluate_paper_challenger(
     *,
     account_id: str,
     model_id: str,
-    phase3_ready: bool,
     criteria: PaperChallengerCriteria = PaperChallengerCriteria(),
 ) -> PaperChallengerValidation:
     raw = storage.model_registry_entry(model_id)
     if raw is None:
         raise ValueError(f"unknown model_id: {model_id}")
     status = str(raw["status"])
+    phase3_ready = storage.phase_is_promoted(
+        PHASE3,
+        evidence_type=PHASE3_EVIDENCE_TYPE,
+    )
 
     challenger = build_paper_performance(
         storage,
