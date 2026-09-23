@@ -1,3 +1,5 @@
+import hashlib
+from pathlib import Path
 from meteora_learner.chain_snapshot_lineage import (
     chain_snapshot_source_record,
     chain_snapshot_source_sha256,
@@ -99,11 +101,20 @@ def seed_retraining_dataset_evidence(
     storage,
     *,
     cycle_id="cycle-lineage",
-    dataset_version="ML_ACTION_DATASET_V1:deadbeefdeadbeef",
-    dataset_sha256="deadbeefdeadbeefdeadbeef",
     cutoff="2026-09-23T12:00:00+00:00",
-    output_file="retrain.csv",
 ):
+    dataset_path = (
+        Path(storage.path).parent
+        / f"{cycle_id}-retrain.csv"
+    )
+    dataset_path.write_text(
+        "decision_observed_at,forward_end_observed_at\n"
+        "2026-09-23T10:00:00+00:00,2026-09-23T11:00:00+00:00\n",
+        encoding="utf-8",
+    )
+    digest = hashlib.sha256(dataset_path.read_bytes()).hexdigest()
+    dataset_version = f"ML_ACTION_DATASET_V1:{digest[:16]}"
+
     with storage.connect() as conn:
         conn.execute(
             """
@@ -145,10 +156,10 @@ def seed_retraining_dataset_evidence(
             "cutoff": cutoff,
             "target_dataset_version": dataset_version,
             "dataset": {
-                "dataset_sha256": dataset_sha256,
+                "dataset_sha256": digest,
                 "dataset_version": dataset_version,
             },
-            "output_file": output_file,
+            "output_file": str(dataset_path),
         },
     )
     return {
@@ -156,9 +167,9 @@ def seed_retraining_dataset_evidence(
         "champion_model_id": "champion",
         "dataset_evidence_id": evidence_id,
         "dataset_version": dataset_version,
-        "dataset_sha256": dataset_sha256,
+        "dataset_sha256": digest,
         "cutoff": cutoff,
-        "output_file": output_file,
+        "output_file": str(dataset_path),
     }
 
 
@@ -423,8 +434,6 @@ def seed_ready(storage):
     bandit_lineage = seed_retraining_dataset_evidence(
         storage,
         cycle_id="cycle",
-        dataset_version="ML_ACTION_DATASET_V1:test",
-        dataset_sha256="deadbeef",
     )
     for pool in ("pool-a", "pool-b"):
         seed_mint_risk_lineage(storage, pool)
