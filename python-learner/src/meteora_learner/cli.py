@@ -26,6 +26,21 @@ from .position_history import collect_position_history
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .pool_safety import PoolSafetyConfig, screen_pool_universe
 from .position_policy import PositionManagementConfig, decide_position_action
+from .paper_account import (
+    close_paper_position,
+    create_paper_account,
+    mark_paper_position,
+    open_paper_position,
+    paper_account_snapshot,
+    rebalance_paper_position,
+)
+from .paper_policy import evaluate_paper_position_policy
+from .paper_performance import build_paper_performance
+from .paper_challenger import (
+    PaperChallengerCriteria,
+    evaluate_paper_challenger,
+    promote_paper_challenger,
+)
 from .phase3_plan import build_phase3_research_plan
 from .multi_pool_research import PoolResearchInput, build_multi_pool_research
 from .reconciliation import reconcile_position
@@ -127,6 +142,118 @@ def main() -> None:
         type=int,
         default=0,
     )
+
+    paper_create = subparsers.add_parser(
+        "paper-create-account",
+        help="Create a persistent paper-trading account",
+    )
+    paper_create.add_argument("--account", required=True)
+    paper_create.add_argument("--cash", required=True, type=float)
+
+    paper_status = subparsers.add_parser(
+        "paper-status",
+        help="Print paper account cash, equity, drawdown and PnL",
+    )
+    paper_status.add_argument("--account", required=True)
+
+    paper_open = subparsers.add_parser(
+        "paper-open",
+        help="Open a paper position without signing a transaction",
+    )
+    paper_open.add_argument("--event-key", required=True)
+    paper_open.add_argument("--account", required=True)
+    paper_open.add_argument("--position", required=True)
+    paper_open.add_argument("--pool", required=True)
+    paper_open.add_argument(
+        "--policy-source",
+        choices=["DETERMINISTIC", "ML_CHALLENGER", "ML_CHAMPION"],
+        required=True,
+    )
+    paper_open.add_argument("--model-id")
+    paper_open.add_argument("--strategy", required=True)
+    paper_open.add_argument("--min-bin", required=True, type=int)
+    paper_open.add_argument("--max-bin", required=True, type=int)
+    paper_open.add_argument("--capital", required=True, type=float)
+    paper_open.add_argument("--entry-cost", type=float, default=0.0)
+
+    paper_mark = subparsers.add_parser(
+        "paper-mark",
+        help="Update a paper position mark and incremental income",
+    )
+    paper_mark.add_argument("--event-key", required=True)
+    paper_mark.add_argument("--position", required=True)
+    paper_mark.add_argument("--mark", required=True, type=float)
+    paper_mark.add_argument("--fee-delta", type=float, default=0.0)
+    paper_mark.add_argument("--reward-delta", type=float, default=0.0)
+
+    paper_rebalance = subparsers.add_parser(
+        "paper-rebalance",
+        help="Apply a paper rebalance and its cost",
+    )
+    paper_rebalance.add_argument("--event-key", required=True)
+    paper_rebalance.add_argument("--position", required=True)
+    paper_rebalance.add_argument("--min-bin", required=True, type=int)
+    paper_rebalance.add_argument("--max-bin", required=True, type=int)
+    paper_rebalance.add_argument("--mark", required=True, type=float)
+    paper_rebalance.add_argument("--cost", required=True, type=float)
+
+    paper_close = subparsers.add_parser(
+        "paper-close",
+        help="Close a paper position and realize net PnL",
+    )
+    paper_close.add_argument("--event-key", required=True)
+    paper_close.add_argument("--position", required=True)
+    paper_close.add_argument("--mark", required=True, type=float)
+    paper_close.add_argument("--exit-cost", type=float, default=0.0)
+    paper_close.add_argument("--fee-delta", type=float, default=0.0)
+    paper_close.add_argument("--reward-delta", type=float, default=0.0)
+
+    paper_manage = subparsers.add_parser(
+        "paper-manage",
+        help="Evaluate net-cost HOLD/REBALANCE/EXIT for a paper position",
+    )
+    paper_manage.add_argument("--position", required=True)
+    paper_manage.add_argument("--active-bin", required=True, type=int)
+    paper_manage.add_argument("--holding-observations", required=True, type=int)
+    paper_manage.add_argument("--estimated-exit-cost", type=float, default=0.0)
+    paper_manage.add_argument("--pool-unsafe", action="store_true")
+    paper_manage.add_argument("--emergency-exit", action="store_true")
+    paper_manage.add_argument("--stop-loss-bps", type=int, default=500)
+    paper_manage.add_argument("--take-profit-bps", type=int)
+    paper_manage.add_argument("--max-rebalances", type=int, default=3)
+    paper_manage.add_argument("--max-holding-observations", type=int)
+    paper_manage.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
+
+    paper_perf = subparsers.add_parser(
+        "paper-performance",
+        help="Summarize completed paper-trade performance for one policy cohort",
+    )
+    paper_perf.add_argument("--account", required=True)
+    paper_perf.add_argument(
+        "--policy-source",
+        choices=["DETERMINISTIC", "ML_CHALLENGER", "ML_CHAMPION"],
+        required=True,
+    )
+    paper_perf.add_argument("--model-id")
+
+    paper_challenger = subparsers.add_parser(
+        "paper-challenger",
+        help="Validate an ML paper challenger against deterministic paper results",
+    )
+    paper_challenger.add_argument("--account", required=True)
+    paper_challenger.add_argument("--model-id", required=True)
+    paper_challenger.add_argument("--phase3-ready", action="store_true")
+    paper_challenger.add_argument("--min-closed-trades", type=int, default=20)
+    paper_challenger.add_argument("--min-return-bps", type=int, default=0)
+    paper_challenger.add_argument("--min-win-rate", type=float, default=0.5)
+    paper_challenger.add_argument("--max-drawdown-bps", type=int, default=1500)
+    paper_challenger.add_argument("--min-uplift-bps", type=int, default=0)
+    paper_challenger.add_argument("--require-qualified", action="store_true")
+    paper_challenger.add_argument("--promote", action="store_true")
 
     phase3_plan = subparsers.add_parser(
         "phase3-plan",
@@ -746,6 +873,155 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "paper-create-account":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = create_paper_account(
+            storage,
+            account_id=args.account,
+            starting_cash_quote=args.cash,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-status":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = paper_account_snapshot(storage, account_id=args.account)
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-open":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = open_paper_position(
+            storage,
+            event_key=args.event_key,
+            account_id=args.account,
+            position_id=args.position,
+            pool_address=args.pool,
+            policy_source=args.policy_source,
+            model_id=args.model_id,
+            strategy=args.strategy,
+            min_bin_id=args.min_bin,
+            max_bin_id=args.max_bin,
+            capital_quote=args.capital,
+            entry_cost_quote=args.entry_cost,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-mark":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = mark_paper_position(
+            storage,
+            event_key=args.event_key,
+            position_id=args.position,
+            mark_quote=args.mark,
+            fee_delta_quote=args.fee_delta,
+            reward_delta_quote=args.reward_delta,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-rebalance":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = rebalance_paper_position(
+            storage,
+            event_key=args.event_key,
+            position_id=args.position,
+            new_min_bin_id=args.min_bin,
+            new_max_bin_id=args.max_bin,
+            new_mark_quote=args.mark,
+            rebalance_cost_quote=args.cost,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-close":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = close_paper_position(
+            storage,
+            event_key=args.event_key,
+            position_id=args.position,
+            final_mark_quote=args.mark,
+            exit_cost_quote=args.exit_cost,
+            fee_delta_quote=args.fee_delta,
+            reward_delta_quote=args.reward_delta,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-manage":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_paper_position_policy(
+            storage,
+            position_id=args.position,
+            active_bin_id=args.active_bin,
+            holding_observations=args.holding_observations,
+            pool_safe=not args.pool_unsafe,
+            estimated_exit_cost_quote=args.estimated_exit_cost,
+            emergency_exit=args.emergency_exit,
+            config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-performance":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_paper_performance(
+            storage,
+            account_id=args.account,
+            policy_source=args.policy_source,
+            model_id=args.model_id,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-challenger":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_paper_challenger(
+            storage,
+            account_id=args.account,
+            model_id=args.model_id,
+            phase3_ready=args.phase3_ready,
+            criteria=PaperChallengerCriteria(
+                min_closed_trades=args.min_closed_trades,
+                min_realized_return_bps=args.min_return_bps,
+                min_win_rate=args.min_win_rate,
+                max_realized_drawdown_bps=args.max_drawdown_bps,
+                min_return_uplift_vs_baseline_bps=args.min_uplift_bps,
+            ),
+        )
+        output = result.to_record()
+        if args.promote:
+            promoted = promote_paper_challenger(
+                storage,
+                validation=result,
+            )
+            output["promoted_model"] = {
+                "model_id": promoted.model_id,
+                "status": promoted.status,
+            }
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not result.paper_qualified:
             raise SystemExit(2)
         return
 
