@@ -435,6 +435,7 @@ mod tests {
                 require_instruction_policy: true,
                 instruction_policies: vec![ProgramInstructionPolicy {
                     program_id: dlmm::ID.to_string(),
+                    allowed_actions: vec![Action::Exit],
                     allowed_data_prefixes_hex: vec![
                         "0a333d2370691855".into(),
                     ],
