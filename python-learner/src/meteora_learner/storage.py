@@ -519,6 +519,30 @@ CREATE TABLE IF NOT EXISTS live_position_outcomes (
 CREATE INDEX IF NOT EXISTS idx_live_position_outcomes_pool
 ON live_position_outcomes(pool_address, created_at);
 
+CREATE TABLE IF NOT EXISTS live_position_valuations (
+    position_address TEXT PRIMARY KEY,
+    pool_address TEXT NOT NULL,
+    opened_decision_id TEXT NOT NULL,
+    closed_decision_id TEXT NOT NULL,
+    quote_unit TEXT NOT NULL,
+    valued_execution_count INTEGER NOT NULL,
+    principal_cashflow_quote TEXT NOT NULL,
+    composition_cost_quote TEXT NOT NULL,
+    fee_income_quote TEXT NOT NULL,
+    reward_income_quote TEXT NOT NULL,
+    network_cost_quote TEXT NOT NULL,
+    realized_pnl_quote TEXT NOT NULL,
+    entry_outflow_quote TEXT NOT NULL,
+    realized_return_bps INTEGER NOT NULL,
+    max_age_seconds INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    quote_evidence_json TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_position_valuations_pool
+ON live_position_valuations(pool_address, created_at);
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
