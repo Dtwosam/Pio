@@ -7,6 +7,9 @@ const ADD_LIQUIDITY_DISCRIMINATOR: [u8; 8] = [31, 94, 125, 90, 227, 52, 61, 186]
 const COMPOSITION_FEE_DISCRIMINATOR: [u8; 8] = [128, 151, 123, 106, 17, 102, 113, 142];
 const REMOVE_LIQUIDITY_DISCRIMINATOR: [u8; 8] = [116, 244, 97, 232, 103, 31, 152, 58];
 const REBALANCING_DISCRIMINATOR: [u8; 8] = [0, 109, 117, 179, 61, 91, 199, 200];
+const CLAIM_FEE2_DISCRIMINATOR: [u8; 8] = [232, 171, 242, 97, 58, 77, 35, 45];
+const CLAIM_REWARD2_DISCRIMINATOR: [u8; 8] = [27, 143, 244, 33, 80, 43, 110, 146];
+const POSITION_CLOSE_DISCRIMINATOR: [u8; 8] = [255, 196, 16, 107, 28, 202, 53, 128];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AddLiquidityEvent {
@@ -39,6 +42,32 @@ pub struct RemoveLiquidityEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClaimFee2Event {
+    pub lb_pair: String,
+    pub position: String,
+    pub owner: String,
+    pub fee_x: String,
+    pub fee_y: String,
+    pub active_bin_id: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClaimReward2Event {
+    pub lb_pair: String,
+    pub position: String,
+    pub owner: String,
+    pub reward_index: u64,
+    pub total_reward: String,
+    pub active_bin_id: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PositionCloseEvent {
+    pub position: String,
+    pub owner: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RebalancingEvent {
     pub lb_pair: String,
     pub position: String,
@@ -65,6 +94,9 @@ pub enum DecodedDlmmEvent {
     CompositionFee(CompositionFeeEvent),
     RemoveLiquidity(RemoveLiquidityEvent),
     Rebalancing(RebalancingEvent),
+    ClaimFee2(ClaimFee2Event),
+    ClaimReward2(ClaimReward2Event),
+    PositionClose(PositionCloseEvent),
 }
 
 fn take<const N: usize>(data: &[u8], offset: &mut usize) -> Result<[u8; N]> {
@@ -155,6 +187,53 @@ fn decode_rebalancing(payload: &[u8]) -> Result<DecodedDlmmEvent> {
     Ok(DecodedDlmmEvent::Rebalancing(event))
 }
 
+fn decode_claim_fee2(payload: &[u8]) -> Result<DecodedDlmmEvent> {
+    let mut offset = 0;
+    let event = ClaimFee2Event {
+        lb_pair: read_pubkey(payload, &mut offset)?.to_string(),
+        position: read_pubkey(payload, &mut offset)?.to_string(),
+        owner: read_pubkey(payload, &mut offset)?.to_string(),
+        fee_x: read_u64(payload, &mut offset)?.to_string(),
+        fee_y: read_u64(payload, &mut offset)?.to_string(),
+        active_bin_id: read_i32(payload, &mut offset)?,
+    };
+    if offset != payload.len() {
+        bail!("unexpected trailing bytes in ClaimFee2 event");
+    }
+    Ok(DecodedDlmmEvent::ClaimFee2(event))
+}
+
+fn decode_claim_reward2(payload: &[u8]) -> Result<DecodedDlmmEvent> {
+    let mut offset = 0;
+    let event = ClaimReward2Event {
+        lb_pair: read_pubkey(payload, &mut offset)?.to_string(),
+        position: read_pubkey(payload, &mut offset)?.to_string(),
+        owner: read_pubkey(payload, &mut offset)?.to_string(),
+        reward_index: read_u64(payload, &mut offset)?,
+        total_reward: read_u64(payload, &mut offset)?.to_string(),
+        active_bin_id: read_i32(payload, &mut offset)?,
+    };
+    if event.reward_index > 1 {
+        bail!("ClaimReward2 reward_index must be 0 or 1");
+    }
+    if offset != payload.len() {
+        bail!("unexpected trailing bytes in ClaimReward2 event");
+    }
+    Ok(DecodedDlmmEvent::ClaimReward2(event))
+}
+
+fn decode_position_close(payload: &[u8]) -> Result<DecodedDlmmEvent> {
+    let mut offset = 0;
+    let event = PositionCloseEvent {
+        position: read_pubkey(payload, &mut offset)?.to_string(),
+        owner: read_pubkey(payload, &mut offset)?.to_string(),
+    };
+    if offset != payload.len() {
+        bail!("unexpected trailing bytes in PositionClose event");
+    }
+    Ok(DecodedDlmmEvent::PositionClose(event))
+}
+
 fn decode_composition_fee(payload: &[u8]) -> Result<DecodedDlmmEvent> {
     let mut offset = 0;
     let event = CompositionFeeEvent {
@@ -195,6 +274,15 @@ pub fn decode_event_cpi_data(data: &[u8]) -> Result<Option<DecodedDlmmEvent>> {
     }
     if discriminator == REBALANCING_DISCRIMINATOR {
         return decode_rebalancing(payload).map(Some);
+    }
+    if discriminator == CLAIM_FEE2_DISCRIMINATOR {
+        return decode_claim_fee2(payload).map(Some);
+    }
+    if discriminator == CLAIM_REWARD2_DISCRIMINATOR {
+        return decode_claim_reward2(payload).map(Some);
+    }
+    if discriminator == POSITION_CLOSE_DISCRIMINATOR {
+        return decode_position_close(payload).map(Some);
     }
 
     Ok(None)
@@ -351,4 +439,89 @@ mod tests {
         let data = envelope(ADD_LIQUIDITY_DISCRIMINATOR, vec![0; 10]);
         assert!(decode_event_cpi_data(&data).is_err());
     }
+    #[test]
+    fn decodes_settlement_events() {
+        let mut fee_payload = Vec::new();
+        fee_payload.extend_from_slice(pk(11).as_ref());
+        fee_payload.extend_from_slice(pk(12).as_ref());
+        fee_payload.extend_from_slice(pk(13).as_ref());
+        fee_payload.extend_from_slice(&101u64.to_le_bytes());
+        fee_payload.extend_from_slice(&202u64.to_le_bytes());
+        fee_payload.extend_from_slice(&7i32.to_le_bytes());
+        assert_eq!(
+            decode_event_cpi_data(&envelope(
+                CLAIM_FEE2_DISCRIMINATOR,
+                fee_payload,
+            ))
+            .unwrap()
+            .unwrap(),
+            DecodedDlmmEvent::ClaimFee2(ClaimFee2Event {
+                lb_pair: pk(11).to_string(),
+                position: pk(12).to_string(),
+                owner: pk(13).to_string(),
+                fee_x: "101".into(),
+                fee_y: "202".into(),
+                active_bin_id: 7,
+            })
+        );
+
+        let mut reward_payload = Vec::new();
+        reward_payload.extend_from_slice(pk(11).as_ref());
+        reward_payload.extend_from_slice(pk(12).as_ref());
+        reward_payload.extend_from_slice(pk(13).as_ref());
+        reward_payload.extend_from_slice(&1u64.to_le_bytes());
+        reward_payload.extend_from_slice(&303u64.to_le_bytes());
+        reward_payload.extend_from_slice(&8i32.to_le_bytes());
+        assert_eq!(
+            decode_event_cpi_data(&envelope(
+                CLAIM_REWARD2_DISCRIMINATOR,
+                reward_payload,
+            ))
+            .unwrap()
+            .unwrap(),
+            DecodedDlmmEvent::ClaimReward2(ClaimReward2Event {
+                lb_pair: pk(11).to_string(),
+                position: pk(12).to_string(),
+                owner: pk(13).to_string(),
+                reward_index: 1,
+                total_reward: "303".into(),
+                active_bin_id: 8,
+            })
+        );
+
+        let mut close_payload = Vec::new();
+        close_payload.extend_from_slice(pk(12).as_ref());
+        close_payload.extend_from_slice(pk(13).as_ref());
+        assert_eq!(
+            decode_event_cpi_data(&envelope(
+                POSITION_CLOSE_DISCRIMINATOR,
+                close_payload,
+            ))
+            .unwrap()
+            .unwrap(),
+            DecodedDlmmEvent::PositionClose(PositionCloseEvent {
+                position: pk(12).to_string(),
+                owner: pk(13).to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_reward_index() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(pk(11).as_ref());
+        payload.extend_from_slice(pk(12).as_ref());
+        payload.extend_from_slice(pk(13).as_ref());
+        payload.extend_from_slice(&2u64.to_le_bytes());
+        payload.extend_from_slice(&1u64.to_le_bytes());
+        payload.extend_from_slice(&0i32.to_le_bytes());
+        assert!(
+            decode_event_cpi_data(&envelope(
+                CLAIM_REWARD2_DISCRIMINATOR,
+                payload,
+            ))
+            .is_err()
+        );
+    }
+
 }
