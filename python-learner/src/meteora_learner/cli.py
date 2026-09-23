@@ -69,6 +69,7 @@ from .paper_latest import (
 from .paper_portfolio import run_portfolio_live_paper_cycle
 from .paper_entry_workflow import build_and_open_bound_phase3_paper_entry
 from .paper_chain_collection import build_paper_chain_collection_queue
+from .quote_registry import save_token_quote, token_quote_status
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -194,6 +195,22 @@ def main() -> None:
         type=int,
         default=0,
     )
+
+    paper_quote_ingest = subparsers.add_parser(
+        "paper-quote-ingest",
+        help="Persist one timestamped token quote for paper valuation",
+    )
+    paper_quote_ingest.add_argument("--mint", required=True)
+    paper_quote_ingest.add_argument("--quote-per-atomic", required=True, type=float)
+    paper_quote_ingest.add_argument("--source", required=True)
+    paper_quote_ingest.add_argument("--observed-at")
+
+    paper_quote_status = subparsers.add_parser(
+        "paper-quote-status",
+        help="Show latest persisted paper quote and freshness",
+    )
+    paper_quote_status.add_argument("--mint", required=True)
+    paper_quote_status.add_argument("--max-age-seconds", type=int, default=300)
 
     paper_chain_queue = subparsers.add_parser(
         "paper-chain-work-queue",
@@ -478,9 +495,9 @@ def main() -> None:
     paper_portfolio.add_argument("--cycle-id", required=True)
     paper_portfolio.add_argument(
         "--quotes-file",
-        required=True,
-        help="JSON object mapping token-Y mint to quote-per-atomic value",
+        help="Optional JSON object mapping token-Y mint to quote-per-atomic value; omit to use persisted quotes",
     )
+    paper_portfolio.add_argument("--max-quote-age-seconds", type=int, default=300)
     paper_portfolio.add_argument("--max-positions", type=int)
     paper_portfolio.add_argument("--retry-failed", action="store_true")
     paper_portfolio.add_argument("--stop-loss-bps", type=int, default=500)
@@ -1476,6 +1493,28 @@ def main() -> None:
         print(json.dumps(record.__dict__, indent=2))
         return
 
+    if args.command == "paper-quote-ingest":
+        settings = Settings.from_env()
+        result = save_token_quote(
+            Storage(settings.database_path),
+            token_mint=args.mint,
+            quote_per_atomic=args.quote_per_atomic,
+            source=args.source,
+            observed_at=args.observed_at,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-quote-status":
+        settings = Settings.from_env()
+        result = token_quote_status(
+            Storage(settings.database_path),
+            token_mint=args.mint,
+            max_age_seconds=args.max_age_seconds,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
     if args.command == "paper-chain-work-queue":
         settings = Settings.from_env()
         result = build_paper_chain_collection_queue(
@@ -1786,19 +1825,24 @@ def main() -> None:
     if args.command == "paper-portfolio-run":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
-        with open(args.quotes_file, "r", encoding="utf-8") as handle:
-            raw_quotes = json.load(handle)
-        if not isinstance(raw_quotes, dict):
-            raise ValueError("paper-portfolio-run quotes file must contain a JSON object")
-        quotes = {
-            str(mint): float(value)
-            for mint, value in raw_quotes.items()
-        }
+        quotes = None
+        if args.quotes_file:
+            with open(args.quotes_file, "r", encoding="utf-8") as handle:
+                raw_quotes = json.load(handle)
+            if not isinstance(raw_quotes, dict):
+                raise ValueError(
+                    "paper-portfolio-run quotes file must contain a JSON object"
+                )
+            quotes = {
+                str(mint): float(value)
+                for mint, value in raw_quotes.items()
+            }
         result = run_portfolio_live_paper_cycle(
             storage,
             account_id=args.account,
             cycle_id=args.cycle_id,
             token_y_quotes=quotes,
+            quote_max_age_seconds=args.max_quote_age_seconds,
             max_positions=args.max_positions,
             safety_config=_pool_safety_config_from_args(args),
             management_config=PositionManagementConfig(
