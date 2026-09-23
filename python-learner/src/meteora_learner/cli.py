@@ -144,6 +144,9 @@ from .phase9_wallet_flow_capture import (
 )
 from .phase9_source_capture import run_phase9_source_capture
 from .phase9_research_refresh import run_phase9_research_refresh
+from .phase9_source_freshness import (
+    evaluate_phase9_source_freshness,
+)
 from .phase9_operation_lease import (
     acquire_phase9_operation_lease,
     phase9_operation_lease_status,
@@ -2445,6 +2448,16 @@ def main() -> None:
         type=int,
         default=1800,
         help="SQLite lease duration preventing overlapping source-capture runs",
+    )
+
+    phase9_source_freshness = subparsers.add_parser(
+        "phase9-source-freshness",
+        help="Show whether persisted Phase 9 research has incorporated the latest source observations",
+    )
+    phase9_source_freshness.add_argument(
+        "--require-current",
+        action="store_true",
+        help="Exit non-zero unless every Phase 9 research family is source-current",
     )
 
     phase9_maintenance_status = subparsers.add_parser(
@@ -5418,6 +5431,15 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.source_after.ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-source-freshness":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_source_freshness(storage)
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_current and not result.current:
             raise SystemExit(2)
         return
 
