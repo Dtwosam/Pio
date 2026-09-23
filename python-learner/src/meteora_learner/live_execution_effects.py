@@ -314,6 +314,20 @@ def derive_live_execution_effect(
             wallet_x += _int(amount_x)
             wallet_y += _int(amount_y)
             action_events += 1
+        elif action == "EXIT" and event_type == "ClaimFee2":
+            claimed_x = _int(x_fee)
+            claimed_y = _int(y_fee)
+            wallet_x += claimed_x
+            wallet_y += claimed_y
+            earned_fee_x += claimed_x
+            earned_fee_y += claimed_y
+            action_events += 1
+        elif action == "EXIT" and event_type == "ClaimReward2":
+            reward_one += _int(reward_1)
+            reward_two += _int(reward_2)
+            action_events += 1
+        elif action == "EXIT" and event_type == "PositionClose":
+            action_events += 1
         else:
             raise ValueError(
                 f"unexpected decoded event {event_type} for LIVE action {action}"
