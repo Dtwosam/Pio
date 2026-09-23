@@ -1,0 +1,33 @@
+{
+  "current": {
+    "enabled": true,
+    "allowed_pool_addresses": [
+      "POOL_A",
+      "POOL_B"
+    ],
+    "max_open_positions": 2,
+    "max_rebalances_per_position": 2,
+    "max_capital_quote_per_entry": 100.0,
+    "max_daily_entry_capital_quote": 300.0,
+    "max_daily_entry_submissions": 3,
+    "max_daily_realized_loss_quote": 50.0,
+    "max_daily_drawdown_pct": 5.0,
+    "allow_rebalance": true,
+    "allow_exit": true
+  },
+  "proposed": {
+    "enabled": false,
+    "allowed_pool_addresses": [
+      "POOL_A"
+    ],
+    "max_open_positions": 1,
+    "max_rebalances_per_position": 1,
+    "max_capital_quote_per_entry": 50.0,
+    "max_daily_entry_capital_quote": 100.0,
+    "max_daily_entry_submissions": 1,
+    "max_daily_realized_loss_quote": 25.0,
+    "max_daily_drawdown_pct": 2.5,
+    "allow_rebalance": false,
+    "allow_exit": true
+  }
+}
