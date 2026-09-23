@@ -38,6 +38,66 @@ def promote_phase8(storage):
     )
 
 
+def seed_bandit_dataset_lineage(storage):
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO model_registry(
+                model_id, created_at, updated_at, model_family,
+                feature_version, dataset_version, status,
+                metrics_json
+            ) VALUES (
+                'champion', '2026-09-23T00:00:00+00:00',
+                '2026-09-23T00:00:00+00:00',
+                'TEST', 'TEST', 'dataset-v1', 'CHAMPION', '{}'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO continuous_learning_cycles(
+                cycle_id, created_at, updated_at, status, active_key,
+                champion_model_id, champion_dataset_version,
+                champion_evidence_watermark, plan_evidence_id,
+                plan_as_of, target_dataset_version,
+                challenger_model_id, plan_json, notes
+            ) VALUES (
+                'cycle', '2026-09-23T00:00:00+00:00',
+                '2026-09-23T00:00:00+00:00',
+                'PLANNED', NULL, 'champion', 'dataset-v1',
+                '2026-09-23T00:00:00+00:00', 1,
+                '2026-09-23T12:00:00+00:00',
+                'ML_ACTION_DATASET_V1:test',
+                NULL, '{}', NULL
+            )
+            """
+        )
+    evidence_id = storage.save_model_live_evidence(
+        model_id="champion",
+        evidence_type="CONTINUOUS_RETRAIN_DATASET_V1",
+        status="BUILT",
+        evidence={
+            "cycle_id": "cycle",
+            "cutoff": "2026-09-23T12:00:00+00:00",
+            "target_dataset_version": "ML_ACTION_DATASET_V1:test",
+            "dataset": {
+                "dataset_sha256": "deadbeef",
+                "dataset_version": "ML_ACTION_DATASET_V1:test",
+            },
+            "output_file": "retrain.csv",
+        },
+    )
+    return {
+        "cycle_id": "cycle",
+        "champion_model_id": "champion",
+        "dataset_evidence_id": evidence_id,
+        "dataset_version": "ML_ACTION_DATASET_V1:test",
+        "dataset_sha256": "deadbeef",
+        "cutoff": "2026-09-23T12:00:00+00:00",
+        "output_file": "retrain.csv",
+    }
+
+
 def evidence(
     storage,
     edge_type,
@@ -69,6 +129,7 @@ def evidence(
 
 def seed_ready(storage):
     promote_phase8(storage)
+    bandit_lineage = seed_bandit_dataset_lineage(storage)
     evidence(
         storage,
         PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
@@ -87,17 +148,7 @@ def seed_ready(storage):
         storage,
         CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
         "__CONTEXTUAL_BANDIT__",
-        extra={
-            "dataset_lineage": {
-                "cycle_id": "cycle",
-                "champion_model_id": "champion",
-                "dataset_evidence_id": 1,
-                "dataset_version": "ML_ACTION_DATASET_V1:test",
-                "dataset_sha256": "deadbeef",
-                "cutoff": "2026-09-23T12:00:00+00:00",
-                "output_file": "retrain.csv",
-            }
-        },
+        extra={"dataset_lineage": bandit_lineage},
     )
 
 
