@@ -270,6 +270,8 @@ class Phase9PromotionReport:
     research_only: bool
     policy_actionable: bool
     research_bundle: Phase9ResearchBundleReport
+    research_bundle_evidence_id: int | None
+    persisted_bundle_matches_current: bool
     promotion_ready: bool
     reasons: tuple[str, ...]
 
@@ -288,6 +290,38 @@ def evaluate_phase9_promotion(
         storage,
         criteria=criteria,
     )
+    latest_bundle = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
+        pool_address="__PHASE9_RESEARCH__",
+    )
+    bundle_evidence_id = (
+        int(latest_bundle["id"])
+        if latest_bundle is not None
+        else None
+    )
+    persisted_matches_current = False
+    if latest_bundle is not None:
+        persisted = latest_bundle["evidence"]
+        current = bundle.to_record()
+        persisted_matches_current = all(
+            persisted.get(key) == current.get(key)
+            for key in (
+                "phase8_promoted",
+                "research_only",
+                "policy_actionable",
+                "status",
+                "criteria",
+                "adaptive_multi_pool",
+                "mint_risk",
+                "wallet_flow",
+                "portfolio_allocation",
+                "static_hedge",
+                "contextual_bandit",
+                "research_ready",
+                "reasons",
+            )
+        )
+
     reasons: list[str] = []
 
     if not bundle.phase8_promoted:
@@ -307,12 +341,26 @@ def evaluate_phase9_promotion(
         reasons.append(
             "Phase 9 promotion cannot grant live-policy authority"
         )
+    if latest_bundle is None:
+        reasons.append(
+            "persisted Phase 9 research-bundle evidence is required"
+        )
+    elif not bool(latest_bundle["qualified"]):
+        reasons.append(
+            "persisted Phase 9 research bundle is not qualified"
+        )
+    elif not persisted_matches_current:
+        reasons.append(
+            "persisted Phase 9 research bundle is stale versus current evidence"
+        )
 
     return Phase9PromotionReport(
         phase8_promoted=bundle.phase8_promoted,
         research_only=True,
         policy_actionable=False,
         research_bundle=bundle,
+        research_bundle_evidence_id=bundle_evidence_id,
+        persisted_bundle_matches_current=persisted_matches_current,
         promotion_ready=not reasons,
         reasons=tuple(reasons),
     )
