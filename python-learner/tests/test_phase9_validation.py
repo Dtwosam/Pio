@@ -1459,3 +1459,28 @@ def test_forged_bandit_metric_blocks_bundle(tmp_path):
         "checksum-verified retraining dataset lineage" in reason
         for reason in report.reasons
     )
+
+
+
+def test_phase9_bundle_requires_verified_storage_integrity(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+
+    baseline = evaluate_phase9_research_bundle(storage)
+    assert baseline.research_ready is True
+    assert baseline.storage_integrity_verified is True
+
+    with storage.connect() as conn:
+        conn.execute(
+            "DROP TRIGGER advanced_edge_evidence_no_delete"
+        )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert report.storage_integrity_verified is False
+    assert any(
+        "storage integrity:" in reason
+        and "advanced_edge_evidence_no_delete" in reason
+        for reason in report.reasons
+    )
