@@ -49,11 +49,11 @@ class PoolSafetyAssessment:
     volume_24h_usd: float | None
     fees_24h_usd: float | None
     dynamic_fee_pct: float | None
-    snapshot_age_seconds: int | None
     pool_age_hours: float | None
     chain_observations: int
     standard_spl: bool | None
     is_blacklisted: bool | None
+    snapshot_age_seconds: int | None = None
 
 
 @dataclass(frozen=True)
