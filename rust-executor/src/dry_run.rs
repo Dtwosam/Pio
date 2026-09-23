@@ -2,6 +2,7 @@ use crate::execution_guard::{check_proposal, RiskCheckReport};
 use crate::models::TradeProposal;
 use crate::risk::RiskConfig;
 use crate::simulation::SimulationReport;
+use crate::transaction_guard::TransactionGuardReport;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +18,7 @@ pub struct DryRunExecutionReport {
     pub stage: String,
     pub reason: String,
     pub risk: RiskCheckReport,
+    pub transaction: Option<TransactionGuardReport>,
     pub simulation: Option<SimulationReport>,
 }
 
@@ -35,6 +37,7 @@ where
             stage: "RISK".into(),
             reason: risk.reason.clone(),
             risk,
+            transaction: None,
             simulation: None,
         });
     }
@@ -46,6 +49,7 @@ where
             stage: "SIMULATION".into(),
             reason: "transaction_simulation_failed".into(),
             risk,
+            transaction: None,
             simulation: Some(simulation),
         });
     }
