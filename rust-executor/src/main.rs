@@ -1,6 +1,8 @@
 mod dry_run;
 mod events;
 mod execution_guard;
+mod execution_store;
+mod journaled_dry_run;
 mod models;
 mod prestate_verifier;
 mod risk;
@@ -18,7 +20,8 @@ fn usage() {
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
   meteora-executor risk-check <PROPOSAL_JSON_OR_-> <RISK_CONFIG_JSON>
-  meteora-executor dry-run-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON>
+  meteora-executor dry-run-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <EXECUTION_DB>
+  meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
   meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>
   meteora-executor verify-prestate <RPC_URL> <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]"
@@ -117,8 +120,11 @@ RPC_URL is accepted as a compatibility fallback",
             let config_path = args
                 .next()
                 .context("RISK_CONFIG_JSON is required")?;
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
             if args.next().is_some() {
-                anyhow::bail!("dry-run-execution accepts exactly two arguments");
+                anyhow::bail!("dry-run-execution accepts exactly three arguments");
             }
 
             let request_json = if request_source == "-" {
@@ -146,16 +152,36 @@ RPC_URL is accepted as a compatibility fallback",
                     "SOLANA_RPC_URL environment variable is required; \
 RPC_URL is accepted as a compatibility fallback",
                 )?;
+            let store = execution_store::ExecutionIntentStore::open(
+                &execution_db,
+            )?;
 
-            let report = dry_run::evaluate_dry_run_with(
+            let report = journaled_dry_run::run_journaled_dry_run_with(
+                &store,
                 &request,
                 &config,
                 |encoded| simulation::simulate_base64_transaction(&rpc_url, encoded),
             )?;
             println!("{}", serde_json::to_string_pretty(&report)?);
-            if !report.accepted {
+            if !report.report.accepted {
                 std::process::exit(2);
             }
+        }
+        "execution-intent-status" => {
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
+            let decision_id = args
+                .next()
+                .context("DECISION_ID is required")?;
+            if args.next().is_some() {
+                anyhow::bail!("execution-intent-status accepts exactly two arguments");
+            }
+            let store = execution_store::ExecutionIntentStore::open(
+                &execution_db,
+            )?;
+            let record = store.load(&decision_id)?;
+            println!("{}", serde_json::to_string_pretty(&record)?);
         }
         "simulate-transaction" => {
             let transaction_source = args
