@@ -207,6 +207,19 @@ pub async fn inspect_pool(
         anyhow::bail!("pool account is not owned by Meteora DLMM");
     }
     let mut lb_pair = decode_lb_pair(&account.data).context("failed to decode LbPair")?;
+    let raw_fee_state = FeeStateSnapshot {
+        base_factor: lb_pair.parameters.base_factor,
+        filter_period: lb_pair.parameters.filter_period,
+        decay_period: lb_pair.parameters.decay_period,
+        reduction_factor: lb_pair.parameters.reduction_factor,
+        variable_fee_control: lb_pair.parameters.variable_fee_control,
+        max_volatility_accumulator: lb_pair.parameters.max_volatility_accumulator,
+        base_fee_power_factor: lb_pair.parameters.base_fee_power_factor,
+        volatility_accumulator: lb_pair.v_parameters.volatility_accumulator,
+        volatility_reference: lb_pair.v_parameters.volatility_reference,
+        index_reference: lb_pair.v_parameters.index_reference,
+        last_update_timestamp: lb_pair.v_parameters.last_update_timestamp,
+    };
     let token_programs = lb_pair
         .get_token_programs()
         .context("failed to resolve token programs")?;
@@ -349,19 +362,7 @@ pub async fn inspect_pool(
             lb_pair.reward_infos[0].last_update_time,
             lb_pair.reward_infos[1].last_update_time,
         ],
-        fee_state: FeeStateSnapshot {
-            base_factor: lb_pair.parameters.base_factor,
-            filter_period: lb_pair.parameters.filter_period,
-            decay_period: lb_pair.parameters.decay_period,
-            reduction_factor: lb_pair.parameters.reduction_factor,
-            variable_fee_control: lb_pair.parameters.variable_fee_control,
-            max_volatility_accumulator: lb_pair.parameters.max_volatility_accumulator,
-            base_fee_power_factor: lb_pair.parameters.base_fee_power_factor,
-            volatility_accumulator: lb_pair.v_parameters.volatility_accumulator,
-            volatility_reference: lb_pair.v_parameters.volatility_reference,
-            index_reference: lb_pair.v_parameters.index_reference,
-            last_update_timestamp: lb_pair.v_parameters.last_update_timestamp,
-        },
+        fee_state: raw_fee_state,
         bin_arrays,
     })
 }
