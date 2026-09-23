@@ -3,6 +3,7 @@ from meteora_learner.continuous_promotion import (
 )
 from meteora_learner.phase8_validation import (
     Phase8PromotionCriteria,
+    audit_persisted_phase8_promotion,
     evaluate_phase8_promotion,
 )
 from meteora_learner.phase_promotion import (
