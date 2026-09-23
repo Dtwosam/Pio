@@ -237,7 +237,7 @@ def seed_mint_risk_lineage(storage, pool):
     x = f"{pool}-x"
     y = f"{pool}-y"
     with storage.connect() as conn:
-        cursor = conn.execute(
+        conn.execute(
             """
             INSERT INTO chain_pool_snapshots(
                 observed_at, pool_address, active_bin_id, bin_step,
@@ -247,22 +247,8 @@ def seed_mint_risk_lineage(storage, pool):
             """,
             (observed_at, pool, x, y, token_program, token_program),
         )
-        pool_snapshot_id = int(cursor.lastrowid)
-        pool_source = conn.execute(
-            f"""
-            SELECT {", ".join(POOL_SOURCE_COLUMNS)}
-            FROM chain_pool_snapshots
-            WHERE id = ?
-            """,
-            (pool_snapshot_id,),
-        ).fetchone()
-        assert pool_source is not None
-        pool_snapshot_sha256 = mint_risk_source_sha256(
-            mint_risk_pool_source_record(pool_source)
-        )
 
-    assessment_rows = []
-    for mint, role in ((x, "TOKEN_X"), (y, "TOKEN_Y")):
+    for mint in (x, y):
         storage.save_token_mint_snapshot(
             {
                 "mint_address": mint,
@@ -280,42 +266,19 @@ def seed_mint_risk_lineage(storage, pool):
             },
             observed_at=observed_at,
         )
-        with storage.connect() as conn:
-            mint_source = conn.execute(
-                f"""
-                SELECT {", ".join(MINT_SOURCE_COLUMNS)}
-                FROM token_mint_snapshots
-                WHERE mint_address = ? AND observed_at = ?
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (mint, observed_at),
-            ).fetchone()
-            assert mint_source is not None
-        mint_record = mint_risk_mint_source_record(mint_source)
-        assessment_rows.append(
-            {
-                "mint_address": mint,
-                "roles": [role],
-                "mint_snapshot_id": int(mint_record["id"]),
-                "mint_snapshot_sha256": mint_risk_source_sha256(
-                    mint_record
-                ),
-                "observed_at": observed_at,
-                "accepted": True,
-            }
-        )
 
-    evidence(
+    report = research_pool_mint_risk(
         storage,
-        MINT_RISK_EVIDENCE_TYPE,
-        pool,
-        extra={
-            "pool_snapshot_id": pool_snapshot_id,
-            "pool_snapshot_sha256": pool_snapshot_sha256,
-            "assessments": assessment_rows,
-        },
+        pool_address=pool,
+        as_of=observed_at,
     )
+    assert report.research_qualified is True
+    assert report.pool_snapshot_sha256
+    assert all(
+        item.mint_snapshot_sha256
+        for item in report.assessments
+    )
+    persist_pool_mint_risk(storage, report=report)
 
 
 def seed_adaptive_multi_pool_lineage(storage, pools):
