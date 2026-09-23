@@ -5,13 +5,13 @@ import json
 import shlex
 from typing import Any
 
+from .phase8_validation import audit_persisted_phase8_promotion
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
     audit_persisted_phase9_promotion,
     evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
 )
-from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .storage import Storage
 
 
@@ -154,10 +154,8 @@ def build_phase9_work_queue(
     ),
     rpc_url: str | None = None,
 ) -> Phase9WorkQueue:
-    phase8_promoted = storage.phase_is_promoted(
-        PHASE8,
-        evidence_type=PHASE8_EVIDENCE_TYPE,
-    )
+    phase8_audit = audit_persisted_phase8_promotion(storage)
+    phase8_promoted = phase8_audit.current
     bundle = evaluate_phase9_research_bundle(
         storage,
         criteria=criteria,
@@ -191,17 +189,35 @@ def build_phase9_work_queue(
         )
 
     if not phase8_promoted:
-        items.append(
-            Phase9WorkItem(
-                task_type="PHASE8_PROMOTION_REQUIRED",
-                scope="PHASE8",
-                reason=(
-                    "Phase 8 must be persistently promoted before "
-                    "Phase 9 research can qualify"
-                ),
-                shell_command="pio phase8-validate --require-ready --persist-ready",
+        if phase8_audit.exists:
+            items.append(
+                Phase9WorkItem(
+                    task_type="PHASE8_CURRENTNESS_REQUIRED",
+                    scope="PHASE8",
+                    reason=(
+                        "persisted Phase 8 promotion is stale or invalid: "
+                        + "; ".join(phase8_audit.reasons)
+                    ),
+                    shell_command=(
+                        "pio phase8-promotion-audit --require-current"
+                    ),
+                )
             )
-        )
+        else:
+            items.append(
+                Phase9WorkItem(
+                    task_type="PHASE8_PROMOTION_REQUIRED",
+                    scope="PHASE8",
+                    reason=(
+                        "Phase 8 must be promoted before "
+                        "Phase 9 research can qualify"
+                    ),
+                    shell_command=(
+                        "pio phase8-validate "
+                        "--require-ready --persist-ready"
+                    ),
+                )
+            )
 
     if bundle.adaptive_multi_pool.qualified_records < 1:
         command = None
