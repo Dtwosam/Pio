@@ -471,3 +471,75 @@ def test_portfolio_freshness_prefers_explicit_chain_watermarks(tmp_path):
     item = freshness(storage, "portfolio_allocation")
     assert item.current is False
     assert "chain history advanced from" in item.reason
+
+
+def test_adaptive_freshness_detects_ranked_research_cohort_change(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    with storage.connect() as conn:
+        for rank, pool in enumerate(
+            ("pool-a", "pool-b", "pool-c", "pool-d"),
+        ):
+            conn.execute(
+                """
+                INSERT INTO pool_snapshots(
+                    observed_at, address, name, tvl,
+                    volume_24h, fees_24h, raw_json
+                ) VALUES (
+                    '2026-09-23T12:00:00+00:00',
+                    ?, ?, ?, 100, 1, '{}'
+                )
+                """,
+                (pool, pool, 1_000 - rank * 100),
+            )
+
+    latest_ids = {}
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        for minute in range(43):
+            latest_ids[pool] = save_pool(
+                storage,
+                pool,
+                f"2026-09-23T10:{minute:02d}:00+00:00",
+            )
+    for minute in range(42):
+        save_pool(
+            storage,
+            "pool-d",
+            f"2026-09-23T10:{minute:02d}:30+00:00",
+        )
+
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "pools": [
+                {
+                    "pool_address": pool,
+                    "adaptive": {
+                        "source_snapshot_ids": [latest_ids[pool]],
+                    },
+                }
+                for pool in ("pool-a", "pool-b", "pool-c")
+            ],
+        },
+    )
+
+    assert freshness(storage, "adaptive_regime").current is True
+
+    save_pool(
+        storage,
+        "pool-d",
+        "2026-09-23T10:42:30+00:00",
+    )
+
+    item = freshness(storage, "adaptive_regime")
+    assert item.current is False
+    assert "ranked research cohort changed" in item.reason
+    assert "pool-d" in item.reason
