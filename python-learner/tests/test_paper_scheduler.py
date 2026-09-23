@@ -51,7 +51,7 @@ def test_scheduler_uses_deterministic_bucket_tick_and_releases_lease(tmp_path):
         storage,
         account_id="paper",
         interval_seconds=300,
-        lease_seconds=240,
+        lease_seconds=600,
         owner_id="worker-a",
         as_of=NOW,
         tick_runner=run,
@@ -98,7 +98,7 @@ def test_scheduler_refuses_overlap_while_lease_is_live(tmp_path):
         storage,
         account_id="paper",
         interval_seconds=300,
-        lease_seconds=240,
+        lease_seconds=600,
         owner_id="worker-a",
         as_of=NOW,
         tick_runner=lambda *args, **kwargs: called.append(True),
@@ -142,7 +142,7 @@ def test_scheduler_recovers_expired_lease_and_updates_health(tmp_path):
         storage,
         account_id="paper",
         interval_seconds=300,
-        lease_seconds=240,
+        lease_seconds=600,
         owner_id="worker-b",
         as_of=NOW,
         tick_runner=recovered_tick,
@@ -166,7 +166,7 @@ def test_scheduler_resets_failure_streak_after_success(tmp_path):
         storage,
         account_id="paper",
         interval_seconds=300,
-        lease_seconds=240,
+        lease_seconds=600,
         as_of=NOW,
         tick_runner=fake_tick("FAILED"),
     )
@@ -176,7 +176,7 @@ def test_scheduler_resets_failure_streak_after_success(tmp_path):
         storage,
         account_id="paper",
         interval_seconds=300,
-        lease_seconds=240,
+        lease_seconds=600,
         as_of="2026-09-23T10:07:31+00:00",
         tick_runner=fake_tick("COMPLETE"),
     )
@@ -206,7 +206,7 @@ def test_scheduler_recovers_owner_with_missing_lease_deadline(tmp_path):
         storage,
         account_id="paper",
         interval_seconds=300,
-        lease_seconds=240,
+        lease_seconds=600,
         owner_id="worker-c",
         as_of=NOW,
         tick_runner=fake_tick("COMPLETE"),
@@ -218,3 +218,21 @@ def test_scheduler_recovers_owner_with_missing_lease_deadline(tmp_path):
         ("LEASE_RECOVERED", result.tick_id, "worker-c", "RUNNING"),
         ("TICK_FINISHED", result.tick_id, "worker-c", "COMPLETE"),
     ]
+
+
+def test_scheduler_rejects_lease_not_longer_than_interval(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    try:
+        run_scheduled_paper_tick(
+            storage,
+            account_id="paper",
+            interval_seconds=300,
+            lease_seconds=300,
+            as_of=NOW,
+            tick_runner=fake_tick("COMPLETE"),
+        )
+    except ValueError as exc:
+        assert "lease_seconds must exceed interval_seconds" in str(exc)
+    else:
+        raise AssertionError("expected unsafe lease configuration failure")
