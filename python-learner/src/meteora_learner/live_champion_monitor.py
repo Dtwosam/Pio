@@ -18,6 +18,7 @@ LIVE_ROLLBACK_EVIDENCE_TYPE = "LIVE_CHAMPION_ROLLBACK_V1"
 @dataclass(frozen=True)
 class LiveChampionCriteria:
     min_live_labels: int = 10
+    min_live_pools: int = 2
     max_realized_drawdown_bps: int = 2_000
     max_single_loss_bps: int = 1_500
     min_win_rate: float = 0.30
@@ -27,6 +28,8 @@ class LiveChampionCriteria:
     def __post_init__(self) -> None:
         if self.min_live_labels <= 0:
             raise ValueError("min_live_labels must be positive")
+        if self.min_live_pools <= 0:
+            raise ValueError("min_live_pools must be positive")
         if self.max_realized_drawdown_bps < 0:
             raise ValueError(
                 "max_realized_drawdown_bps cannot be negative"
@@ -172,6 +175,12 @@ def evaluate_live_champion(
         reasons.append(
             f"live labels {label_count} are below "
             f"{criteria.min_live_labels}"
+        )
+    elif distinct_pools < criteria.min_live_pools:
+        status = "INSUFFICIENT_EVIDENCE"
+        reasons.append(
+            f"distinct live pools {distinct_pools} are below "
+            f"{criteria.min_live_pools}"
         )
     else:
         checks = (
