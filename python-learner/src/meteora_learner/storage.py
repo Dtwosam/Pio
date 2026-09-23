@@ -1940,7 +1940,9 @@ class Storage:
                     raise ValueError(
                         "position event insert was ignored without an existing event"
                     )
-                same_fields = tuple(existing[:17]) == tuple(row[:17])
+                # observed_at is collector metadata and may differ on an
+                # exact replay. All immutable on-chain/event fields must match.
+                same_fields = tuple(existing[1:17]) == tuple(row[1:17])
                 try:
                     same_raw = (
                         json.loads(str(existing[17]))
