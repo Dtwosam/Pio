@@ -15,6 +15,36 @@ STATIC_HEDGE_EVIDENCE_TYPE = "PHASE9_STATIC_INVENTORY_HEDGE_V1"
 
 
 @dataclass(frozen=True)
+class HedgeInstrumentAssumptions:
+    instrument_id: str
+    venue: str
+    available_liquidity_y_atomic: float
+    max_liquidity_share_bps: int = 1_000
+    max_leverage: float = 1.0
+    funding_bps_per_holding_window: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not self.instrument_id.strip():
+            raise ValueError("instrument_id is required")
+        if not self.venue.strip():
+            raise ValueError("venue is required")
+        if self.available_liquidity_y_atomic <= 0:
+            raise ValueError(
+                "available_liquidity_y_atomic must be positive"
+            )
+        if not 1 <= self.max_liquidity_share_bps <= 10_000:
+            raise ValueError(
+                "max_liquidity_share_bps must be between 1 and 10000"
+            )
+        if self.max_leverage <= 0:
+            raise ValueError("max_leverage must be positive")
+        if self.funding_bps_per_holding_window < 0:
+            raise ValueError(
+                "funding_bps_per_holding_window cannot be negative"
+            )
+
+
+@dataclass(frozen=True)
 class StaticHedgeCriteria:
     observation_limit: int = 96
     holding_observations: int = 6
@@ -60,6 +90,9 @@ class StaticHedgeWindow:
     exit_price_q64: int
     unhedged_return_bps: float
     hedged_return_bps: float
+    hedge_notional_y_atomic: float
+    hedge_liquidity_share_bps: int
+    hedge_notional_to_lp_value_bps: int
     hedge_pnl_y_atomic: float
     hedge_cost_y_atomic: float
 
@@ -84,6 +117,11 @@ class StaticHedgeResearchReport:
     worst_unhedged_return_bps: float | None
     worst_hedged_return_bps: float | None
     worst_loss_improvement_bps: float | None
+    max_hedge_liquidity_share_bps: int | None
+    max_hedge_notional_to_lp_value_bps: int | None
+    liquidity_constrained_windows: int
+    leverage_constrained_windows: int
+    instrument: HedgeInstrumentAssumptions
     criteria: StaticHedgeCriteria
     research_qualified: bool
     reasons: tuple[str, ...]
@@ -173,6 +211,7 @@ def research_static_inventory_hedge(
     pool_address: str,
     amount_x: int,
     amount_y: int,
+    instrument: HedgeInstrumentAssumptions,
     criteria: StaticHedgeCriteria = StaticHedgeCriteria(),
     as_of: str | None = None,
 ) -> StaticHedgeResearchReport:
@@ -204,6 +243,19 @@ def research_static_inventory_hedge(
         Decimal(str(criteria.hedge_round_trip_cost_bps))
         / Decimal(10_000)
     )
+    funding_rate = (
+        Decimal(str(instrument.funding_bps_per_holding_window))
+        / Decimal(10_000)
+    )
+    available_liquidity = Decimal(
+        str(instrument.available_liquidity_y_atomic)
+    )
+    max_liquidity_share = Decimal(
+        instrument.max_liquidity_share_bps
+    ) / Decimal(10_000)
+    max_leverage = Decimal(str(instrument.max_leverage))
+    liquidity_constrained_windows = 0
+    leverage_constrained_windows = 0
 
     for start in range(0, len(path) - horizon):
         start_time, entry_price = path[start]
@@ -232,7 +284,17 @@ def research_static_inventory_hedge(
             * Decimal(entry_price - exit_price)
             / Decimal(Q64)
         )
-        hedge_cost = entry_x_notional * cost_rate
+        hedge_cost = entry_x_notional * (cost_rate + funding_rate)
+        liquidity_share = (
+            entry_x_notional / available_liquidity
+            if available_liquidity > 0
+            else Decimal("Infinity")
+        )
+        notional_to_lp = entry_x_notional / initial_value
+        if liquidity_share > max_liquidity_share:
+            liquidity_constrained_windows += 1
+        if notional_to_lp > max_leverage:
+            leverage_constrained_windows += 1
         hedged_pnl = unhedged_pnl + hedge_gross_pnl - hedge_cost
 
         unhedged_return = float(
@@ -253,6 +315,13 @@ def research_static_inventory_hedge(
                 exit_price_q64=exit_price,
                 unhedged_return_bps=unhedged_return,
                 hedged_return_bps=hedged_return,
+                hedge_notional_y_atomic=float(entry_x_notional),
+                hedge_liquidity_share_bps=int(
+                    liquidity_share * Decimal(10_000)
+                ),
+                hedge_notional_to_lp_value_bps=int(
+                    notional_to_lp * Decimal(10_000)
+                ),
                 hedge_pnl_y_atomic=float(hedge_gross_pnl),
                 hedge_cost_y_atomic=float(hedge_cost),
             )
@@ -276,6 +345,14 @@ def research_static_inventory_hedge(
         worst_unhedged = min(unhedged)
         worst_hedged = min(hedged)
         worst_improvement = worst_hedged - worst_unhedged
+        max_liquidity_share_bps = max(
+            item.hedge_liquidity_share_bps
+            for item in window_results
+        )
+        max_notional_to_lp_bps = max(
+            item.hedge_notional_to_lp_value_bps
+            for item in window_results
+        )
     else:
         mean_unhedged = None
         mean_hedged = None
@@ -286,6 +363,8 @@ def research_static_inventory_hedge(
         worst_unhedged = None
         worst_hedged = None
         worst_improvement = None
+        max_liquidity_share_bps = None
+        max_notional_to_lp_bps = None
 
     reasons: list[str] = []
     checks = (
@@ -310,6 +389,14 @@ def research_static_inventory_hedge(
             mean_drag is not None
             and mean_drag <= criteria.max_mean_return_drag_bps,
             "mean return drag exceeds configured maximum",
+        ),
+        (
+            liquidity_constrained_windows == 0,
+            "hedge notional exceeds configured liquidity-share cap",
+        ),
+        (
+            leverage_constrained_windows == 0,
+            "hedge notional exceeds configured leverage cap",
         ),
     )
     reasons.extend(message for passed, message in checks if not passed)
@@ -348,6 +435,11 @@ def research_static_inventory_hedge(
         worst_unhedged_return_bps=worst_unhedged,
         worst_hedged_return_bps=worst_hedged,
         worst_loss_improvement_bps=worst_improvement,
+        max_hedge_liquidity_share_bps=max_liquidity_share_bps,
+        max_hedge_notional_to_lp_value_bps=max_notional_to_lp_bps,
+        liquidity_constrained_windows=liquidity_constrained_windows,
+        leverage_constrained_windows=leverage_constrained_windows,
+        instrument=instrument,
         criteria=criteria,
         research_qualified=qualified,
         reasons=tuple(reasons),
