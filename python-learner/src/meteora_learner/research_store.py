@@ -380,7 +380,12 @@ class ResearchStore:
                            position_address, active_bin_id, bin_id, amount_x,
                            amount_y, token_x_fee_amount, token_y_fee_amount,
                            protocol_token_x_fee_amount,
-                           protocol_token_y_fee_amount
+                           protocol_token_y_fee_amount,
+                           owner_address, x_withdrawn_amount, x_added_amount,
+                           y_withdrawn_amount, y_added_amount,
+                           x_fee_amount, y_fee_amount,
+                           old_min_id, old_max_id, new_min_id, new_max_id,
+                           reward_one, reward_two
                     FROM chain_transaction_events
                     WHERE signature = ?
                     ORDER BY event_index ASC
@@ -395,7 +400,12 @@ class ResearchStore:
                            position_address, active_bin_id, bin_id, amount_x,
                            amount_y, token_x_fee_amount, token_y_fee_amount,
                            protocol_token_x_fee_amount,
-                           protocol_token_y_fee_amount
+                           protocol_token_y_fee_amount,
+                           owner_address, x_withdrawn_amount, x_added_amount,
+                           y_withdrawn_amount, y_added_amount,
+                           x_fee_amount, y_fee_amount,
+                           old_min_id, old_max_id, new_min_id, new_max_id,
+                           reward_one, reward_two
                     FROM chain_transaction_events
                     WHERE signature = ? AND parent_ix_index = ?
                     ORDER BY event_index ASC
