@@ -387,3 +387,137 @@ def attach_retraining_challenger(
         )
 
     return retraining_cycle(storage, cycle_id=cycle_id)
+
+def sync_retraining_cycle(
+    storage: Storage,
+    *,
+    cycle_id: str,
+) -> RetrainingCycle:
+    now = utc_now_iso()
+    with storage.connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT status, active_key, challenger_model_id
+            FROM continuous_learning_cycles
+            WHERE cycle_id = ?
+            """,
+            (cycle_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown retraining cycle: {cycle_id}")
+        status, active_key, challenger_model_id = row
+        if active_key is None:
+            return retraining_cycle(storage, cycle_id=cycle_id)
+        if challenger_model_id is None:
+            if str(status) != "PLANNED":
+                raise ValueError(
+                    "active retraining cycle without challenger is not PLANNED"
+                )
+            return retraining_cycle(storage, cycle_id=cycle_id)
+
+        model = conn.execute(
+            """
+            SELECT status
+            FROM model_registry
+            WHERE model_id = ?
+            """,
+            (str(challenger_model_id),),
+        ).fetchone()
+        if model is None:
+            next_status = "FAILED"
+            release = True
+        else:
+            model_status = str(model[0])
+            if model_status == "OFFLINE_CANDIDATE":
+                next_status = "CHALLENGER_REGISTERED"
+                release = False
+            elif model_status == "OFFLINE_QUALIFIED":
+                next_status = "OFFLINE_QUALIFIED"
+                release = False
+            elif model_status == "PAPER_CHALLENGER":
+                next_status = "PAPER_CHALLENGER"
+                release = False
+            elif model_status == "CHAMPION":
+                next_status = "COMPLETED"
+                release = True
+            elif model_status in {"REJECTED", "ROLLED_BACK"}:
+                next_status = "FAILED"
+                release = True
+            else:
+                raise ValueError(
+                    f"unsupported challenger model status: {model_status}"
+                )
+
+        conn.execute(
+            """
+            UPDATE continuous_learning_cycles
+            SET status = ?,
+                active_key = ?,
+                updated_at = ?
+            WHERE cycle_id = ?
+              AND active_key = 'ACTIVE'
+            """,
+            (
+                next_status,
+                None if release else ACTIVE_KEY,
+                now,
+                cycle_id,
+            ),
+        )
+
+    return retraining_cycle(storage, cycle_id=cycle_id)
+
+
+def cancel_retraining_cycle(
+    storage: Storage,
+    *,
+    cycle_id: str,
+    notes: str | None = None,
+) -> RetrainingCycle:
+    now = utc_now_iso()
+    with storage.connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT status, active_key, challenger_model_id
+            FROM continuous_learning_cycles
+            WHERE cycle_id = ?
+            """,
+            (cycle_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown retraining cycle: {cycle_id}")
+        if row[1] is None:
+            raise ValueError("retraining cycle is already terminal")
+        challenger_model_id = row[2]
+        if challenger_model_id is not None:
+            model = conn.execute(
+                """
+                SELECT status
+                FROM model_registry
+                WHERE model_id = ?
+                """,
+                (str(challenger_model_id),),
+            ).fetchone()
+            if model is not None and str(model[0]) not in {
+                "REJECTED",
+                "ROLLED_BACK",
+            }:
+                raise ValueError(
+                    "active challenger must be rejected before cycle cancellation"
+                )
+        conn.execute(
+            """
+            UPDATE continuous_learning_cycles
+            SET status = 'CANCELLED',
+                active_key = NULL,
+                updated_at = ?,
+                notes = COALESCE(?, notes)
+            WHERE cycle_id = ?
+              AND active_key = 'ACTIVE'
+            """,
+            (now, notes, cycle_id),
+        )
+    return retraining_cycle(storage, cycle_id=cycle_id)
+
