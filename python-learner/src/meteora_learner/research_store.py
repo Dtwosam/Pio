@@ -445,7 +445,7 @@ class ResearchStore:
                 SELECT observed_at, signature, instruction_index,
                        instruction_type, requested_amount_x, requested_amount_y,
                        observed_active_id, max_active_bin_slippage,
-                       min_bin_id, max_bin_id, strategy_variant,
+                       min_bin_id, max_bin_id, strategy_variant, strategy_favor_x,
                        explicit_distribution_json, weighted_distribution_json
                 FROM chain_add_liquidity_requests
                 WHERE signature = ? AND instruction_index = ?
