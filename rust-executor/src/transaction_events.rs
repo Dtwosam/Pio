@@ -1,7 +1,8 @@
 use std::str::FromStr;
 
 use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
-use anchor_client::solana_client::rpc_config::{RpcTransactionConfig, UiTransactionEncoding};
+use anchor_client::solana_client::rpc_config::RpcTransactionConfig;
+use solana_transaction_status_client_types::UiTransactionEncoding;
 use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::signature::Signature;
 use anyhow::{Context, Result};
