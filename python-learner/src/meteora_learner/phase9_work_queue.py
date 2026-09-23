@@ -165,10 +165,12 @@ def build_phase9_work_queue(
     promotion = evaluate_phase9_promotion(
         storage,
         criteria=criteria,
+        research_bundle=bundle,
     )
     promotion_audit = audit_persisted_phase9_promotion(
         storage,
         criteria=criteria,
+        current_report=promotion,
     )
     pools = _candidate_pools(storage)
     items: list[Phase9WorkItem] = []
