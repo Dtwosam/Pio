@@ -156,3 +156,28 @@ def test_phase8_rejects_champion_without_continuous_cycle_lineage(tmp_path):
         "continuous cycle" in reason
         for reason in report.reasons
     )
+
+
+def test_phase8_persistence_refuses_unready_report(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_phase7(storage)
+    seed_champion(storage, with_cycle=False)
+    add_live_label(storage)
+
+    report = evaluate_phase8_promotion(
+        storage,
+        criteria=criteria(),
+    )
+    assert report.promotion_ready is False
+
+    try:
+        persist_phase8_promotion(storage, report=report)
+    except ValueError as exc:
+        assert "not ready" in str(exc)
+    else:
+        raise AssertionError("expected Phase 8 promotion refusal")
+
+    assert phase_promotion_state(
+        storage,
+        phase_name=PHASE8,
+    ).promoted is False
