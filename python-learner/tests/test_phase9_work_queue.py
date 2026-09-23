@@ -1,5 +1,9 @@
 import hashlib
 from pathlib import Path
+from meteora_learner.adaptive_range import AdaptiveRangeCriteria
+from meteora_learner.adaptive_range_validation import (
+    AdaptiveRangeValidationCriteria,
+)
 from meteora_learner.chain_snapshot_lineage import (
     chain_snapshot_source_record,
     chain_snapshot_source_sha256,
@@ -7,6 +11,7 @@ from meteora_learner.chain_snapshot_lineage import (
 from meteora_learner.contextual_bandit import (
     CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
 )
+from meteora_learner.market_regime import DLMMRegimeCriteria
 from meteora_learner.mint_risk import (
     MINT_RISK_EVIDENCE_TYPE,
     persist_pool_mint_risk,
@@ -14,6 +19,9 @@ from meteora_learner.mint_risk import (
 )
 from meteora_learner.phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+    Phase9ResearchCriteria,
+    evaluate_phase9_research,
+    persist_phase9_research,
 )
 from meteora_learner.phase9_validation import (
     Phase9ResearchBundleCriteria,
@@ -296,46 +304,70 @@ def seed_mint_risk_lineage(storage, pool):
 
 
 def seed_adaptive_multi_pool_lineage(storage, pools):
-    pool_records = []
+    token_program = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
     with storage.connect() as conn:
         for pool in pools:
-            row = conn.execute(
-                """
-                SELECT id, pool_address, observed_at, active_bin_id
-                FROM chain_pool_snapshots
-                WHERE pool_address = ?
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (pool,),
-            ).fetchone()
-            assert row is not None
-            record = chain_snapshot_source_record(row)
-            source_ids = [int(record["id"])]
-            source_sha = chain_snapshot_source_sha256([record])
-            observed_at = str(record["observed_at"])
-            pool_records.append(
-                {
-                    "pool_address": pool,
-                    "adaptive": {
-                        "as_of": observed_at,
-                        "source_snapshot_ids": source_ids,
-                        "source_snapshot_sha256": source_sha,
-                    },
-                    "regime": {
-                        "as_of": observed_at,
-                        "source_snapshot_ids": source_ids,
-                        "source_snapshot_sha256": source_sha,
-                    },
-                }
-            )
+            for index in range(10):
+                observed_at = (
+                    f"2026-09-23T11:{50 + index:02d}:00+00:00"
+                )
+                conn.execute(
+                    """
+                    INSERT INTO chain_pool_snapshots(
+                        observed_at, pool_address, active_bin_id,
+                        bin_step, token_x_mint, token_y_mint,
+                        token_x_program, token_y_program, raw_json
+                    ) VALUES (?, ?, ?, 25, ?, ?, ?, ?, '{}')
+                    """,
+                    (
+                        observed_at,
+                        pool,
+                        index % 2,
+                        f"{pool}-x",
+                        f"{pool}-y",
+                        token_program,
+                        token_program,
+                    ),
+                )
 
-    evidence(
+    report = evaluate_phase9_research(
         storage,
-        PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
-        "__MULTI_POOL__",
-        extra={"pools": pool_records},
+        pool_addresses=pools,
+        criteria=Phase9ResearchCriteria(
+            min_pools=len(pools),
+            min_qualified_pools=len(pools),
+            min_qualified_pool_rate=1.0,
+            min_mean_survival_uplift_vs_fixed=-1.0,
+            max_mean_width_multiple_vs_fixed=10.0,
+        ),
+        adaptive_criteria=AdaptiveRangeCriteria(
+            lookback_observations=8,
+            holding_observations=1,
+            target_coverage=0.5,
+            min_half_width_bins=1,
+            max_half_width_bins=10,
+            min_historical_windows=2,
+        ),
+        adaptive_validation_criteria=AdaptiveRangeValidationCriteria(
+            fixed_half_width_bins=5,
+            min_decisions=2,
+            min_adaptive_survival_rate=0.0,
+            min_survival_uplift_vs_fixed=-1.0,
+            max_mean_width_multiple_vs_fixed=10.0,
+            max_cap_exceeded_rate=1.0,
+        ),
+        regime_criteria=DLMMRegimeCriteria(
+            lookback_observations=8,
+            recent_observations=2,
+            min_observations=3,
+            trend_efficiency_threshold=0.65,
+            activity_percentile=0.75,
+            quiet_percentile=0.25,
+        ),
+        as_of="2026-09-23T12:00:00+00:00",
     )
+    assert report.research_qualified is True
+    persist_phase9_research(storage, report=report)
 
 
 def seed_static_hedge_lineage(storage, pool):
