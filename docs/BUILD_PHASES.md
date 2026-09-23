@@ -295,4 +295,21 @@ Still needed:
 
 ## Phase 9 — Advanced Edge
 
-Optional token risk, wallet flow, regime models, adaptive ranges, portfolio allocation, hedging and contextual bandits.
+Status: research-only advanced edge in progress; no Phase 9 output has live-policy authority.
+
+Built:
+- no-lookahead adaptive range research from persisted DLMM active-bin movement
+- empirical holding-window displacement coverage with explicit history/coverage/cap evidence
+- Phase 8 promotion visibility in advanced-edge reports
+- hard `research_only=true` / `policy_actionable=false` boundary for adaptive-range output
+- fail-closed range-cap and insufficient-history states
+- CLI research workflow with optional readiness exit status
+
+Still needed:
+- regime classification and validation
+- token/mint risk enrichment from trustworthy sources
+- wallet-flow research with anti-manipulation filters
+- portfolio-level allocation research
+- optional hedge research where instrument/liquidity assumptions are explicit
+- contextual-bandit research only after offline counterfactual validation
+- a separate evidence/promotion gate before any Phase 9 signal can influence live policy
