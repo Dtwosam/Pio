@@ -49,6 +49,7 @@ class MLTrainingExample:
     decision_observed_at: str
     forward_end_observed_at: str
     strategy: str
+    baseline_selected: int
     strategy_spot: int
     strategy_curve: int
     strategy_bid_ask: int
@@ -211,6 +212,7 @@ def build_ml_dataset(
                     decision_observed_at=step.decision_observed_at,
                     forward_end_observed_at=step.forward_end_observed_at,
                     strategy=strategy,
+                    baseline_selected=1,
                     strategy_spot=int(strategy == "SPOT"),
                     strategy_curve=int(strategy == "CURVE"),
                     strategy_bid_ask=int(strategy == "BID_ASK"),
