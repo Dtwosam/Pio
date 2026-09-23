@@ -1,3 +1,4 @@
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -180,3 +181,78 @@ def test_phase9_promotion_accepts_current_non_actionable_bundle(tmp_path):
 
     assert state.phase_name == "PHASE9"
     assert state.promoted is True
+
+
+
+def test_phase_promotion_history_is_append_only(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_phase_promotion_evidence(
+        phase_name=PHASE8,
+        evidence_type=PHASE8_EVIDENCE_TYPE,
+        qualified=True,
+        evidence={"version": 1},
+    )
+    storage.save_phase_promotion_evidence(
+        phase_name=PHASE8,
+        evidence_type=PHASE8_EVIDENCE_TYPE,
+        qualified=True,
+        evidence={"version": 2},
+    )
+
+    history = storage.phase_promotion_history(PHASE8)
+
+    assert len(history) == 2
+    assert history[0]["evidence"] == {"version": 1}
+    assert history[1]["evidence"] == {"version": 2}
+    assert history[0]["id"] < history[1]["id"]
+    assert storage.phase_is_promoted(
+        PHASE8,
+        evidence_type=PHASE8_EVIDENCE_TYPE,
+    ) is True
+
+    with storage.connect() as conn:
+        current = conn.execute(
+            """
+            SELECT evidence_json
+            FROM phase_promotion_evidence
+            WHERE phase_name = ?
+            """,
+            (PHASE8,),
+        ).fetchone()
+    assert current is not None
+    assert '"version":2' in str(current[0])
+
+
+def test_phase_promotion_history_rejects_update_and_delete(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_phase_promotion_evidence(
+        phase_name=PHASE8,
+        evidence_type=PHASE8_EVIDENCE_TYPE,
+        qualified=True,
+        evidence={"version": 1},
+    )
+
+    with storage.connect() as conn:
+        with pytest.raises(sqlite3.DatabaseError, match="immutable"):
+            conn.execute(
+                """
+                UPDATE phase_promotion_evidence_history
+                SET qualified = 0
+                WHERE phase_name = ?
+                """,
+                (PHASE8,),
+            )
+
+    with storage.connect() as conn:
+        with pytest.raises(sqlite3.DatabaseError, match="immutable"):
+            conn.execute(
+                """
+                DELETE FROM phase_promotion_evidence_history
+                WHERE phase_name = ?
+                """,
+                (PHASE8,),
+            )
+
+    history = storage.phase_promotion_history(PHASE8)
+    assert len(history) == 1
+    assert history[0]["qualified"] is True
