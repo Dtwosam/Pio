@@ -179,6 +179,61 @@ def persist_phase9_promotion(
         raise ValueError(
             "Phase 9 promotion must remain research-only"
         )
+
+    bundle_evidence_id = getattr(
+        report,
+        "research_bundle_evidence_id",
+        None,
+    )
+    current_sha = str(
+        getattr(report, "research_bundle_sha256", "")
+    ).strip()
+    persisted_sha = str(
+        getattr(report, "persisted_bundle_sha256", "")
+    ).strip()
+    if bundle_evidence_id is None:
+        raise ValueError(
+            "Phase 9 promotion requires persisted research-bundle evidence"
+        )
+    if not current_sha or not persisted_sha:
+        raise ValueError(
+            "Phase 9 promotion requires research-bundle checksums"
+        )
+    if current_sha != persisted_sha:
+        raise ValueError(
+            "Phase 9 promotion research-bundle checksum is not current"
+        )
+    if not bool(
+        getattr(report, "persisted_bundle_hash_valid", False)
+    ):
+        raise ValueError(
+            "Phase 9 promotion requires a valid persisted bundle checksum"
+        )
+    if not bool(
+        getattr(report, "persisted_bundle_matches_current", False)
+    ):
+        raise ValueError(
+            "Phase 9 promotion requires current persisted bundle evidence"
+        )
+
+    bundle = getattr(report, "research_bundle", None)
+    if bundle is None:
+        raise ValueError(
+            "Phase 9 promotion requires the evaluated research bundle"
+        )
+    if not bool(getattr(bundle, "research_ready", False)):
+        raise ValueError(
+            "Phase 9 promotion requires a ready research bundle"
+        )
+    if bool(getattr(bundle, "policy_actionable", True)):
+        raise ValueError(
+            "Phase 9 research bundle must not grant live-policy authority"
+        )
+    if not bool(getattr(bundle, "research_only", False)):
+        raise ValueError(
+            "Phase 9 research bundle must remain research-only"
+        )
+
     storage.save_phase_promotion_evidence(
         phase_name=PHASE9,
         evidence_type=PHASE9_EVIDENCE_TYPE,
