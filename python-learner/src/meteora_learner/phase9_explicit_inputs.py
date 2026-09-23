@@ -691,7 +691,26 @@ def run_phase9_explicit_research(
     artifact: Phase9ExplicitInputsArtifact,
     persist: bool = False,
     deduplicate_persistence: bool = False,
+    persist_static_hedge: bool | None = None,
+    persist_portfolio: bool | None = None,
 ) -> Phase9ExplicitResearchRun:
+    should_persist_static = (
+        persist
+        and (
+            True
+            if persist_static_hedge is None
+            else persist_static_hedge
+        )
+    )
+    should_persist_portfolio = (
+        persist
+        and (
+            True
+            if persist_portfolio is None
+            else persist_portfolio
+        )
+    )
+
     static_reports = []
     static_ids: list[int] = []
     for spec in artifact.inputs.static_hedges:
@@ -705,7 +724,7 @@ def run_phase9_explicit_research(
             as_of=spec.as_of,
         )
         static_reports.append(report)
-        if persist:
+        if should_persist_static:
             static_evidence = report.to_record()
             existing_id = (
                 _latest_evidence_matches(
@@ -748,7 +767,7 @@ def run_phase9_explicit_research(
     candidate_id = None
     candidate_sha = None
     candidate_lineage = None
-    if persist:
+    if should_persist_portfolio:
         source_inputs = [asdict(item) for item in artifact.inputs.pool_inputs]
         assumptions = {
             "explicit_input_evidence_id": artifact.evidence_id,
@@ -810,7 +829,7 @@ def run_phase9_explicit_research(
         candidate_lineage=candidate_lineage,
     )
     allocation_id = None
-    if persist:
+    if should_persist_portfolio:
         allocation_evidence = allocation.to_record()
         allocation_id = (
             _latest_evidence_matches(
