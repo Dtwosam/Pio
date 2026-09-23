@@ -18,6 +18,7 @@ class Phase2CapabilityStatus:
     rebalance_lifecycle: bool = True
     reward_accounting: bool = True
     transaction_fee_calibration: bool = True
+    add_execution_calibration: bool = True
     slippage_calibration: bool = False
 
 
@@ -157,6 +158,7 @@ def evaluate_phase2_promotion_gate(
         "rebalance_lifecycle": capabilities.rebalance_lifecycle,
         "reward_accounting": capabilities.reward_accounting,
         "transaction_fee_calibration": capabilities.transaction_fee_calibration,
+        "add_execution_calibration": capabilities.add_execution_calibration,
         "slippage_calibration": capabilities.slippage_calibration,
     }
     capability_gate_passed = all(required_capabilities.values())
