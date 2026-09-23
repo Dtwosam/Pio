@@ -29,6 +29,33 @@ pio phase8-promotion-audit --require-current
 
 A rolled-back champion, changed champion lineage, invalid promotion history, or a current live-health breach makes Phase 8 stale and blocks new Phase 9 qualification even if the historical Phase 8 promotion row still exists.
 
+## Evidence debt and next action
+
+Use the quantitative status view when you want the full readiness picture:
+
+```bash
+pio phase9-evidence-status
+```
+
+Use the evidence-debt planner when you want the single next safe step:
+
+```bash
+pio phase9-evidence-plan
+```
+
+The planner is local and deterministic. It does not call Solana or Meteora,
+sign, submit, promote or change policy. It ranks blockers across Phase 8
+currentness, fresh API coverage, ranked-chain onboarding, exact chain-history
+depth, authoritative mint inputs, wallet-flow source coverage, explicit
+hedge/portfolio assumptions and research refresh.
+
+Non-actionable dependencies remain visible, but `next_action` selects the
+first executable research/read-only command when one exists. For chain-history
+debt, `history_capture_cycles_remaining` is the maximum remaining fresh
+observations across the ranked sampling cohort. It is a sample-count measure,
+not a profit or wall-clock prediction; the configured minimum observation
+interval still controls when the next sample may be added.
+
 ## Research families
 
 ### Adaptive range + regime
