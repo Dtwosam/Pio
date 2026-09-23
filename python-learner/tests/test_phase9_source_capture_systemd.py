@@ -11,7 +11,8 @@ def test_phase9_source_capture_service_is_read_only_and_bounded():
     ).read_text(encoding="utf-8")
 
     assert "phase9-source-capture-run" in service
-    assert "--history-min-observation-interval-seconds 3600" in service\n    assert "--lease-seconds 1800" in service
+    assert "--history-min-observation-interval-seconds 3600" in service
+    assert "--lease-seconds 1800" in service
     assert "SOLANA_RPC_URL" not in service
     assert "--require-automatic-ready" not in service
     assert "live-submit" not in service
@@ -38,7 +39,8 @@ def test_phase9_research_refresh_service_cannot_promote_or_execute():
         SYSTEMD / "pio-phase9-research-refresh.service"
     ).read_text(encoding="utf-8")
 
-    assert "phase9-research-refresh-run" in service\n    assert "--lease-seconds 1800" in service
+    assert "phase9-research-refresh-run" in service
+    assert "--lease-seconds 1800" in service
     assert "phase9-validate" not in service
     assert "persist-ready" not in service
     assert "phase9-source-capture-run" not in service
