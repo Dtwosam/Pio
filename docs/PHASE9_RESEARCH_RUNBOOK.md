@@ -113,15 +113,32 @@ liquidity-share or leverage assumptions.
 
 ### Contextual bandit replay
 
-Use a fixed multi-action ML dataset CSV containing the same
-`MLTrainingExample` schema used by Pio's counterfactual action datasets:
+The preferred Phase 9 qualification path is bound to a checksum-verified
+continuous-retraining action dataset:
+
+```bash
+pio contextual-bandit-cycle-research \
+  --cycle-id <RETRAINING_CYCLE_ID> \
+  --persist \
+  --require-qualified
+```
+
+The command resolves the cycle's persisted `CONTINUOUS_RETRAIN_DATASET_V1`
+evidence, verifies the dataset path, SHA-256, dataset version and cycle cutoff,
+then refuses any file whose decision or forward-label timestamp exceeds that
+cutoff. Persisted bandit evidence records this lineage.
+
+A free-form fixed CSV can still be replayed for exploratory research:
 
 ```bash
 pio contextual-bandit-research \
   --file <ML_ACTION_DATASET_CSV> \
-  --persist \
-  --require-qualified
+  --persist
 ```
+
+However, the Phase 9 research-bundle gate requires qualified contextual-bandit
+evidence with checksum-bound retraining-cycle lineage by default. Arbitrary CSV
+evidence cannot satisfy promotion readiness.
 
 Selection is strictly sequential: only rewards revealed by prior selected
 actions may update the pool/context-local UCB statistics. Current-decision
