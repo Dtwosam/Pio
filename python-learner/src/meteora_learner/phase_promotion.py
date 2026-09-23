@@ -12,12 +12,14 @@ PHASE5 = "PHASE5"
 PHASE6 = "PHASE6"
 PHASE7 = "PHASE7"
 PHASE8 = "PHASE8"
+PHASE9 = "PHASE9"
 PHASE2_EVIDENCE_TYPE = "PHASE2_PROMOTION_V1"
 PHASE3_EVIDENCE_TYPE = "PHASE3_PROMOTION_V1"
 PHASE5_EVIDENCE_TYPE = "PHASE5_PROMOTION_V1"
 PHASE6_EVIDENCE_TYPE = "PHASE6_PROMOTION_V1"
 PHASE7_EVIDENCE_TYPE = "PHASE7_PROMOTION_V1"
 PHASE8_EVIDENCE_TYPE = "PHASE8_PROMOTION_V1"
+PHASE9_EVIDENCE_TYPE = "PHASE9_PROMOTION_V1"
 
 
 @dataclass(frozen=True)
@@ -157,6 +159,35 @@ def persist_phase8_promotion(
     return phase_promotion_state(storage, phase_name=PHASE8)
 
 
+def persist_phase9_promotion(
+    storage: Storage,
+    *,
+    report: Any,
+) -> PhasePromotionState:
+    if not storage.phase_is_promoted(
+        PHASE8,
+        evidence_type=PHASE8_EVIDENCE_TYPE,
+    ):
+        raise ValueError("Phase 8 must be persistently promoted before Phase 9")
+    if not bool(getattr(report, "promotion_ready", False)):
+        raise ValueError("Phase 9 promotion report is not ready")
+    if bool(getattr(report, "policy_actionable", True)):
+        raise ValueError(
+            "Phase 9 promotion must not grant live-policy authority"
+        )
+    if not bool(getattr(report, "research_only", False)):
+        raise ValueError(
+            "Phase 9 promotion must remain research-only"
+        )
+    storage.save_phase_promotion_evidence(
+        phase_name=PHASE9,
+        evidence_type=PHASE9_EVIDENCE_TYPE,
+        qualified=True,
+        evidence=_record(report),
+    )
+    return phase_promotion_state(storage, phase_name=PHASE9)
+
+
 def phase_promotion_state(
     storage: Storage,
     *,
@@ -174,6 +205,8 @@ def phase_promotion_state(
         evidence_type = PHASE7_EVIDENCE_TYPE
     elif phase_name == PHASE8:
         evidence_type = PHASE8_EVIDENCE_TYPE
+    elif phase_name == PHASE9:
+        evidence_type = PHASE9_EVIDENCE_TYPE
     else:
         raise ValueError(f"unsupported phase_name: {phase_name}")
     return PhasePromotionState(
