@@ -1,3 +1,5 @@
+import hashlib
+from pathlib import Path
 from dataclasses import replace
 
 from meteora_learner.chain_snapshot_lineage import (
@@ -77,6 +79,16 @@ def seed_portfolio_candidate_lineage(storage):
 
 
 def seed_bandit_dataset_lineage(storage):
+    dataset_path = Path(storage.path).parent / "phase9-bandit.csv"
+    dataset_path.write_text(
+        "decision_observed_at,forward_end_observed_at\n"
+        "2026-09-23T10:00:00+00:00,2026-09-23T11:00:00+00:00\n",
+        encoding="utf-8",
+    )
+    digest = hashlib.sha256(dataset_path.read_bytes()).hexdigest()
+    dataset_version = f"ML_ACTION_DATASET_V1:{digest[:16]}"
+    cutoff = "2026-09-23T12:00:00+00:00"
+
     with storage.connect() as conn:
         conn.execute(
             """
@@ -104,11 +116,10 @@ def seed_bandit_dataset_lineage(storage):
                 '2026-09-23T00:00:00+00:00',
                 'PLANNED', NULL, 'champion', 'dataset-v1',
                 '2026-09-23T00:00:00+00:00', 1,
-                '2026-09-23T12:00:00+00:00',
-                'ML_ACTION_DATASET_V1:test',
-                NULL, '{}', NULL
+                ?, ?, NULL, '{}', NULL
             )
-            """
+            """,
+            (cutoff, dataset_version),
         )
     evidence_id = storage.save_model_live_evidence(
         model_id="champion",
@@ -116,23 +127,23 @@ def seed_bandit_dataset_lineage(storage):
         status="BUILT",
         evidence={
             "cycle_id": "cycle",
-            "cutoff": "2026-09-23T12:00:00+00:00",
-            "target_dataset_version": "ML_ACTION_DATASET_V1:test",
+            "cutoff": cutoff,
+            "target_dataset_version": dataset_version,
             "dataset": {
-                "dataset_sha256": "deadbeef",
-                "dataset_version": "ML_ACTION_DATASET_V1:test",
+                "dataset_sha256": digest,
+                "dataset_version": dataset_version,
             },
-            "output_file": "retrain.csv",
+            "output_file": str(dataset_path),
         },
     )
     return {
         "cycle_id": "cycle",
         "champion_model_id": "champion",
         "dataset_evidence_id": evidence_id,
-        "dataset_version": "ML_ACTION_DATASET_V1:test",
-        "dataset_sha256": "deadbeef",
-        "cutoff": "2026-09-23T12:00:00+00:00",
-        "output_file": "retrain.csv",
+        "dataset_version": dataset_version,
+        "dataset_sha256": digest,
+        "cutoff": cutoff,
+        "output_file": str(dataset_path),
     }
 
 
