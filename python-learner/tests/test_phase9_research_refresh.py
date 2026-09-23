@@ -7,6 +7,9 @@ from meteora_learner.phase9_research_refresh import (
     _persist_if_changed,
     run_phase9_research_refresh,
 )
+from meteora_learner.phase9_bandit_dataset import (
+    Phase9BanditDatasetLineage,
+)
 from meteora_learner.storage import Storage
 
 
@@ -703,7 +706,7 @@ def test_research_refresh_derives_bandit_dataset_from_explicit_inputs(
             calls.append("dataset") or dataset_artifact
         ),
     )
-    lineage = SimpleNamespace(
+    lineage = Phase9BanditDatasetLineage(
         source_type="PHASE9_BANDIT_DATASET_V1",
         dataset_evidence_id=88,
         dataset_artifact_sha256="b" * 64,
