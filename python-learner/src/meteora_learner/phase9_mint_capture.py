@@ -178,21 +178,50 @@ def inspect_mint_with_rust(
 def _selected_pools(
     storage: Storage,
     limit: int,
+    pool_addresses: tuple[str, ...] | None = None,
 ) -> tuple[str, ...]:
+    requested = (
+        tuple(
+            sorted(
+                {
+                    value.strip()
+                    for value in pool_addresses
+                    if value.strip()
+                }
+            )
+        )
+        if pool_addresses is not None
+        else None
+    )
     with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT pool_address, COUNT(*) AS observations
-            FROM chain_pool_snapshots
-            WHERE pool_address IS NOT NULL
-              AND TRIM(pool_address) != ''
-            GROUP BY pool_address
-            ORDER BY observations DESC, pool_address ASC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-    return tuple(str(row[0]) for row in rows)
+        if requested is None:
+            rows = conn.execute(
+                """
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                WHERE pool_address IS NOT NULL
+                  AND TRIM(pool_address) != ''
+                GROUP BY pool_address
+                ORDER BY observations DESC, pool_address ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        elif not requested:
+            rows = []
+        else:
+            placeholders = ",".join("?" for _ in requested)
+            rows = conn.execute(
+                f"""
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                WHERE pool_address IN ({placeholders})
+                GROUP BY pool_address
+                ORDER BY pool_address ASC
+                """,
+                requested,
+            ).fetchall()
+    return tuple(str(row[0]) for row in rows[:limit])
 
 
 def _pool_mints(
@@ -260,6 +289,7 @@ def build_phase9_mint_capture_plan(
     storage: Storage,
     *,
     criteria: Phase9MintCaptureCriteria = Phase9MintCaptureCriteria(),
+    pool_addresses: tuple[str, ...] | None = None,
     as_of: str | None = None,
 ) -> Phase9MintCapturePlan:
     criteria.validate()
@@ -269,7 +299,11 @@ def build_phase9_mint_capture_plan(
         else datetime.now(timezone.utc)
     )
     as_of_text = now.isoformat()
-    pools = _selected_pools(storage, criteria.target_pools)
+    pools = _selected_pools(
+        storage,
+        criteria.target_pools,
+        pool_addresses,
+    )
 
     required: dict[str, dict[str, set[str]]] = {}
     for pool in pools:
@@ -371,6 +405,7 @@ def run_phase9_mint_capture(
     storage: Storage,
     *,
     criteria: Phase9MintCaptureCriteria = Phase9MintCaptureCriteria(),
+    pool_addresses: tuple[str, ...] | None = None,
     inspector: InspectMint | None = None,
     rust_manifest_path: str | Path | None = None,
     rust_binary_path: str | Path | None = None,
@@ -386,6 +421,7 @@ def run_phase9_mint_capture(
     before = build_phase9_mint_capture_plan(
         storage,
         criteria=criteria,
+        pool_addresses=pool_addresses,
         as_of=timestamp_text,
     )
 
@@ -451,6 +487,7 @@ def run_phase9_mint_capture(
     after = build_phase9_mint_capture_plan(
         storage,
         criteria=criteria,
+        pool_addresses=pool_addresses,
         as_of=timestamp_text,
     )
     reasons: list[str] = []
