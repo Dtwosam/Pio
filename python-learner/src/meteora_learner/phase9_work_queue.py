@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 import shlex
 from typing import Any
 
@@ -106,6 +107,42 @@ def _mint_snapshot_exists(
             (mint_address,),
         ).fetchone()
     return row is not None
+
+
+def _latest_retraining_dataset_cycle(
+    storage: Storage,
+) -> str | None:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT evidence_json
+            FROM model_live_evidence
+            WHERE evidence_type = 'CONTINUOUS_RETRAIN_DATASET_V1'
+              AND status = 'BUILT'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    if row is None:
+        return None
+    payload = json.loads(str(row[0]))
+    cycle_id = str(payload.get("cycle_id", "")).strip()
+    target_version = str(
+        payload.get("target_dataset_version", "")
+    ).strip()
+    output_file = str(payload.get("output_file", "")).strip()
+    dataset = payload.get("dataset")
+    if (
+        not cycle_id
+        or not target_version
+        or not output_file
+        or not isinstance(dataset, dict)
+        or not str(dataset.get("dataset_sha256", "")).strip()
+        or str(dataset.get("dataset_version", "")).strip()
+        != target_version
+    ):
+        return None
+    return cycle_id
 
 
 def build_phase9_work_queue(
@@ -335,17 +372,37 @@ def build_phase9_work_queue(
         criteria.require_contextual_bandit
         and bundle.contextual_bandit.qualified_records < 1
     ):
-        items.append(
-            Phase9WorkItem(
-                task_type="CONTEXTUAL_BANDIT",
-                scope="LABELED_ACTION_CSV_REQUIRED",
-                reason=(
-                    "contextual-bandit research requires a fixed fully "
-                    "labeled counterfactual action CSV"
-                ),
-                shell_command=None,
+        cycle_id = _latest_retraining_dataset_cycle(storage)
+        if cycle_id is not None:
+            items.append(
+                Phase9WorkItem(
+                    task_type="CONTEXTUAL_BANDIT",
+                    scope=cycle_id,
+                    reason=(
+                        "qualified contextual-bandit evidence is missing; "
+                        "a checksum-bound retraining dataset is available"
+                    ),
+                    shell_command=(
+                        "pio contextual-bandit-cycle-research "
+                        "--cycle-id "
+                        + _q(cycle_id)
+                        + " --persist --require-qualified"
+                    ),
+                )
             )
-        )
+        else:
+            items.append(
+                Phase9WorkItem(
+                    task_type="CONTEXTUAL_BANDIT",
+                    scope="LABELED_ACTION_CSV_REQUIRED",
+                    reason=(
+                        "contextual-bandit research requires a fixed fully "
+                        "labeled counterfactual action CSV or persisted "
+                        "retraining-cycle dataset lineage"
+                    ),
+                    shell_command=None,
+                )
+            )
 
     if bundle.research_ready and not promotion.promotion_ready:
         if promotion.research_bundle_evidence_id is None:
