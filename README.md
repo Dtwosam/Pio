@@ -118,6 +118,7 @@ pio ml-model-status --model-id <MODEL>
 
 # Phase 9 research-only evidence
 pio phase9-work-queue --rpc-url <RPC_URL>
+pio phase9-storage-integrity --require-verified
 pio phase9-replay-audit --require-verified
 pio phase9-research-validate --pools <POOL_A,POOL_B,POOL_C> --persist
 pio mint-risk-research --pool <POOL> --persist --require-qualified
