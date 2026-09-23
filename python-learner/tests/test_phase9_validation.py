@@ -9,7 +9,11 @@ from meteora_learner.chain_snapshot_lineage import (
 from meteora_learner.contextual_bandit import (
     CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
 )
-from meteora_learner.mint_risk import MINT_RISK_EVIDENCE_TYPE
+from meteora_learner.mint_risk import (
+    MINT_RISK_EVIDENCE_TYPE,
+    persist_pool_mint_risk,
+    research_pool_mint_risk,
+)
 from meteora_learner.phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
 )
@@ -238,7 +242,7 @@ def seed_mint_risk_lineage(storage, pool):
     x = f"{pool}-x"
     y = f"{pool}-y"
     with storage.connect() as conn:
-        cursor = conn.execute(
+        conn.execute(
             """
             INSERT INTO chain_pool_snapshots(
                 observed_at, pool_address, active_bin_id, bin_step,
@@ -248,10 +252,8 @@ def seed_mint_risk_lineage(storage, pool):
             """,
             (observed_at, pool, x, y, token_program, token_program),
         )
-        pool_snapshot_id = int(cursor.lastrowid)
 
-    assessment_rows = []
-    for mint, role in ((x, "TOKEN_X"), (y, "TOKEN_Y")):
+    for mint in (x, y):
         storage.save_token_mint_snapshot(
             {
                 "mint_address": mint,
@@ -269,38 +271,14 @@ def seed_mint_risk_lineage(storage, pool):
             },
             observed_at=observed_at,
         )
-        with storage.connect() as conn:
-            snapshot_id = int(
-                conn.execute(
-                    """
-                    SELECT id
-                    FROM token_mint_snapshots
-                    WHERE mint_address = ? AND observed_at = ?
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (mint, observed_at),
-                ).fetchone()[0]
-            )
-        assessment_rows.append(
-            {
-                "mint_address": mint,
-                "roles": [role],
-                "mint_snapshot_id": snapshot_id,
-                "observed_at": observed_at,
-                "accepted": True,
-            }
-        )
 
-    evidence(
+    report = research_pool_mint_risk(
         storage,
-        MINT_RISK_EVIDENCE_TYPE,
-        pool,
-        extra={
-            "pool_snapshot_id": pool_snapshot_id,
-            "assessments": assessment_rows,
-        },
+        pool_address=pool,
+        as_of=observed_at,
     )
+    assert report.research_qualified is True
+    persist_pool_mint_risk(storage, report=report)
 
 
 def seed_adaptive_multi_pool_lineage(storage, pools):
