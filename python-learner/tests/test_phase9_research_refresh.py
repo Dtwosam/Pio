@@ -219,6 +219,8 @@ def test_research_refresh_skips_replay_verified_automatic_families(
             "adaptive_regime": True,
             "mint_risk": True,
             "wallet_flow": True,
+            "portfolio_allocation": True,
+            "static_hedge": True,
             "contextual_bandit": True,
         },
     )
@@ -264,6 +266,8 @@ def test_research_refresh_skips_replay_verified_automatic_families(
         "adaptive_regime",
         "mint_risk",
         "wallet_flow",
+        "portfolio_allocation",
+        "static_hedge",
         "contextual_bandit",
     }
     assert all(item.status == "UNCHANGED" for item in report.items)
@@ -289,6 +293,8 @@ def test_research_refresh_runs_ready_missing_families_and_bundle(
             "adaptive_regime": False,
             "mint_risk": False,
             "wallet_flow": False,
+            "portfolio_allocation": True,
+            "static_hedge": True,
             "contextual_bandit": False,
         },
     )
@@ -456,3 +462,179 @@ def test_research_refresh_runs_ready_missing_families_and_bundle(
     assert report.research_only is True
     assert report.policy_actionable is False
     assert report.execution_wired is False
+
+
+def test_research_refresh_skips_explicit_families_without_valid_artifact(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: SimpleNamespace(current=True),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "_replay_statuses",
+        lambda *args, **kwargs: {
+            "adaptive_regime": True,
+            "mint_risk": True,
+            "wallet_flow": True,
+            "portfolio_allocation": False,
+            "static_hedge": False,
+            "contextual_bandit": True,
+        },
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_phase9_explicit_inputs",
+        lambda storage: SimpleNamespace(
+            valid=False,
+            evidence_id=None,
+            reasons=("explicit inputs missing",),
+        ),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: bundle(
+            ready=False,
+            adaptive=1,
+            mint=2,
+            wallet=2,
+            bandit=1,
+        ),
+    )
+
+    report = run_phase9_research_refresh(storage)
+
+    explicit_items = {
+        item.family: item
+        for item in report.items
+        if item.family in {
+            "static_hedge",
+            "portfolio_allocation",
+        }
+    }
+    assert explicit_items["static_hedge"].status == (
+        "SKIPPED_SOURCE_NOT_READY"
+    )
+    assert explicit_items["portfolio_allocation"].status == (
+        "SKIPPED_SOURCE_NOT_READY"
+    )
+    assert "explicit inputs missing" in (
+        explicit_items["static_hedge"].reason
+    )
+    assert "explicit inputs missing" in (
+        explicit_items["portfolio_allocation"].reason
+    )
+
+
+def test_research_refresh_replays_only_missing_explicit_family(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: SimpleNamespace(current=True),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "_replay_statuses",
+        lambda *args, **kwargs: {
+            "adaptive_regime": True,
+            "mint_risk": True,
+            "wallet_flow": True,
+            "portfolio_allocation": True,
+            "static_hedge": False,
+            "contextual_bandit": True,
+        },
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_phase9_explicit_inputs",
+        lambda storage: SimpleNamespace(
+            valid=True,
+            evidence_id=99,
+            reasons=(),
+        ),
+    )
+    artifact = SimpleNamespace(
+        evidence_id=99,
+        inputs=SimpleNamespace(
+            static_hedges=(
+                SimpleNamespace(pool_address="pool-a"),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "load_phase9_explicit_inputs",
+        lambda *args, **kwargs: artifact,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "_latest_evidence_id",
+        lambda *args, **kwargs: None,
+    )
+
+    def fake_explicit_run(*args, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            static_hedge_reports=(
+                {
+                    "pool_address": "pool-a",
+                    "research_qualified": True,
+                },
+            ),
+            static_hedge_evidence_ids=(101,),
+            portfolio_allocation=None,
+            portfolio_allocation_evidence_id=None,
+        )
+
+    monkeypatch.setattr(
+        refresh_module,
+        "run_phase9_explicit_research",
+        fake_explicit_run,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: bundle(
+            ready=False,
+            adaptive=1,
+            mint=2,
+            wallet=2,
+            bandit=1,
+        ),
+    )
+
+    report = run_phase9_research_refresh(storage)
+
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["persist"] is True
+    assert call["deduplicate_persistence"] is True
+    assert call["include_static_hedge"] is True
+    assert call["include_portfolio"] is False
+    assert call["persist_static_hedge"] is True
+    assert call["persist_portfolio"] is False
+
+    static_item = next(
+        item for item in report.items
+        if item.family == "static_hedge"
+    )
+    allocation_item = next(
+        item for item in report.items
+        if item.family == "portfolio_allocation"
+    )
+    assert static_item.status == "PERSISTED"
+    assert static_item.persisted_evidence_id == 101
+    assert static_item.research_qualified is True
+    assert allocation_item.status == "UNCHANGED"
