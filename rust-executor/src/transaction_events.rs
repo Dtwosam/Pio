@@ -19,6 +19,17 @@ pub struct TransactionEventRecord {
 }
 
 #[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LiquidityAddRequest {
+    pub instruction_index: usize,
+    pub instruction_type: String,
+    pub requested_amount_x: String,
+    pub requested_amount_y: String,
+    pub observed_active_id: Option<i32>,
+    pub max_active_bin_slippage: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct TransactionEventSnapshot {
     pub signature: String,
     pub slot: u64,
@@ -26,7 +37,80 @@ pub struct TransactionEventSnapshot {
     pub network_fee_lamports: Option<u64>,
     pub compute_units_consumed: Option<u64>,
     pub succeeded: Option<bool>,
+    pub add_requests: Vec<LiquidityAddRequest>,
     pub events: Vec<TransactionEventRecord>,
+}
+
+const ADD_LIQUIDITY_IX: [u8; 8] = [181, 157, 89, 67, 143, 182, 52, 72];
+const ADD_LIQUIDITY2_IX: [u8; 8] = [228, 162, 78, 28, 70, 219, 116, 115];
+const ADD_BY_STRATEGY_IX: [u8; 8] = [7, 3, 150, 127, 148, 40, 61, 200];
+const ADD_BY_STRATEGY2_IX: [u8; 8] = [3, 221, 149, 218, 111, 141, 118, 213];
+const ADD_BY_WEIGHT_IX: [u8; 8] = [28, 140, 238, 99, 231, 162, 21, 149];
+const ADD_BY_WEIGHT2_IX: [u8; 8] = [209, 59, 63, 91, 111, 200, 153, 228];
+
+fn decode_add_request(data: &[u8], instruction_index: usize) -> Option<LiquidityAddRequest> {
+    if data.len() < 24 {
+        return None;
+    }
+    let discriminator: [u8; 8] = data[..8].try_into().ok()?;
+    let amount_x = u64::from_le_bytes(data[8..16].try_into().ok()?);
+    let amount_y = u64::from_le_bytes(data[16..24].try_into().ok()?);
+
+    let (instruction_type, has_active_guard) = match discriminator {
+        ADD_LIQUIDITY_IX => ("add_liquidity", false),
+        ADD_LIQUIDITY2_IX => ("add_liquidity2", false),
+        ADD_BY_STRATEGY_IX => ("add_liquidity_by_strategy", true),
+        ADD_BY_STRATEGY2_IX => ("add_liquidity_by_strategy2", true),
+        ADD_BY_WEIGHT_IX => ("add_liquidity_by_weight", true),
+        ADD_BY_WEIGHT2_IX => ("add_liquidity_by_weight2", true),
+        _ => return None,
+    };
+
+    let (observed_active_id, max_active_bin_slippage) = if has_active_guard {
+        if data.len() < 32 {
+            return None;
+        }
+        (
+            Some(i32::from_le_bytes(data[24..28].try_into().ok()?)),
+            Some(i32::from_le_bytes(data[28..32].try_into().ok()?)),
+        )
+    } else {
+        (None, None)
+    };
+
+    Some(LiquidityAddRequest {
+        instruction_index,
+        instruction_type: instruction_type.to_string(),
+        requested_amount_x: amount_x.to_string(),
+        requested_amount_y: amount_y.to_string(),
+        observed_active_id,
+        max_active_bin_slippage,
+    })
+}
+
+fn decode_add_requests(value: &Value) -> Vec<LiquidityAddRequest> {
+    let Some(instructions) = value
+        .pointer("/transaction/transaction/message/instructions")
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let meteora_program = commons::dlmm::ID.to_string();
+
+    instructions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, instruction)| {
+            if instruction.get("programId").and_then(Value::as_str)
+                != Some(meteora_program.as_str())
+            {
+                return None;
+            }
+            let encoded = instruction.get("data").and_then(Value::as_str)?;
+            let data = bs58::decode(encoded).into_vec().ok()?;
+            decode_add_request(&data, index)
+        })
+        .collect()
 }
 
 fn extract_transaction_costs(value: &Value) -> (Option<u64>, Option<u64>, Option<bool>) {
@@ -114,6 +198,7 @@ pub async fn inspect_transaction_events(
 
     let value = serde_json::to_value(&confirmed).context("failed to serialize transaction")?;
     let events = decode_inner_events(&value)?;
+    let add_requests = decode_add_requests(&value);
     let (network_fee_lamports, compute_units_consumed, succeeded) =
         extract_transaction_costs(&value);
 
@@ -124,6 +209,7 @@ pub async fn inspect_transaction_events(
         network_fee_lamports,
         compute_units_consumed,
         succeeded,
+        add_requests,
         events,
     })
 }
@@ -186,6 +272,54 @@ mod tests {
                 active_bin_id: 5,
             })
         );
+    }
+
+    #[test]
+    fn decodes_strategy_add_request_amounts_and_active_guard() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&ADD_BY_STRATEGY_IX);
+        bytes.extend_from_slice(&100u64.to_le_bytes());
+        bytes.extend_from_slice(&200u64.to_le_bytes());
+        bytes.extend_from_slice(&12i32.to_le_bytes());
+        bytes.extend_from_slice(&3i32.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 20]);
+
+        let request = decode_add_request(&bytes, 7).expect("request");
+        assert_eq!(request.instruction_index, 7);
+        assert_eq!(request.instruction_type, "add_liquidity_by_strategy");
+        assert_eq!(request.requested_amount_x, "100");
+        assert_eq!(request.requested_amount_y, "200");
+        assert_eq!(request.observed_active_id, Some(12));
+        assert_eq!(request.max_active_bin_slippage, Some(3));
+    }
+
+    #[test]
+    fn extracts_add_requests_from_outer_instructions() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&ADD_LIQUIDITY_IX);
+        bytes.extend_from_slice(&10u64.to_le_bytes());
+        bytes.extend_from_slice(&20u64.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        let value = serde_json::json!({
+            "transaction": {
+                "transaction": {
+                    "message": {
+                        "instructions": [
+                            {
+                                "programId": commons::dlmm::ID.to_string(),
+                                "data": bs58::encode(bytes).into_string()
+                            }
+                        ]
+                    }
+                }
+            }
+        });
+        let requests = decode_add_requests(&value);
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].requested_amount_x, "10");
+        assert_eq!(requests[0].requested_amount_y, "20");
+        assert_eq!(requests[0].observed_active_id, None);
     }
 
     #[test]
