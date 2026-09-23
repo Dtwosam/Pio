@@ -303,7 +303,7 @@ def start_retraining_cycle_with_dataset(
         max_observed_at=cutoff,
     )
 
-    output_path = Path(output_file)
+    output_path = Path(output_file).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     dataset.frame.to_csv(
         output_path,
