@@ -15,18 +15,28 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 
 - Phase 0: complete
 - Phase 1: implemented; extended live validation pending
-- Phase 2: in progress with chain-backed replay
+- Phase 2: advanced implementation; real calibration still pending
 - Default mode: PAPER
 - Live signing: not implemented
 
-Pio now has two research fidelity paths:
+Current research paths:
+- `DISCRETE_COMPLETED_BIN_V1`: OHLC inventory/IL studies.
+- `SMALL_LP_CHAIN_PATH_V2`: standard-SPL fixed-share counterfactual replay over real chain snapshots.
+- `OBSERVATION_BOUNDARY_REBALANCE_V1`: out-of-range withdraw/re-enter lifecycle replay.
 
-- `DISCRETE_COMPLETED_BIN_V1`: OHLC-based inventory/IL studies.
-- `SMALL_LP_CHAIN_PATH_V2`: standard-SPL counterfactual replay over repeated on-chain Meteora snapshots.
+Chain replay now models:
+- exact Q64 bin prices and liquidity shares
+- Meteora fee checkpoints
+- effective reward checkpoints
+- active-bin composition fees
+- real token program / dynamic fee state
+- counterfactual dilution guards
+- reward campaign guards
+- observation-boundary rebalances
 
-The chain path uses source-backed Meteora liquidity-share formulas, real bin inventory/supply, real fee checkpoints, deposit-time dynamic fee state, and explicit active-bin composition fees. It still fails closed where the historical path would be materially changed by the hypothetical LP.
+Phase 2 remains fail-closed until real composition-fee reconciliation and broader slippage calibration are complete.
 
-## Python commands
+## Main research commands
 
 ```bash
 cd python-learner
@@ -36,73 +46,42 @@ pip install -e '.[dev]'
 
 pio collect-once
 pio data-status
-pio backtest-inventory --pool <POOL_ADDRESS> --capital 100
+pio replay-chain --pool <POOL> --amount-x <ATOMIC_X> --amount-y <ATOMIC_Y> \
+  --min-bin <MIN> --max-bin <MAX> --strategy SPOT --observations 12
+
+pio replay-rebalance --pool <POOL> --amount-x <ATOMIC_X> --amount-y <ATOMIC_Y> \
+  --half-width 5 --strategy CURVE --observations 24
+
+pio scan-chain --pool <POOL> --amount-x <ATOMIC_X> --amount-y <ATOMIC_Y>
+pio reconcile-position --position <POSITION>
+pio reconcile-corpus
 ```
 
-Replay one explicit candidate over recent chain snapshots:
+Collect real position lifecycle/calibration data:
 
 ```bash
-pio replay-chain \
-  --pool <POOL_ADDRESS> \
-  --amount-x <ATOMIC_X> \
-  --amount-y <ATOMIC_Y> \
-  --min-bin <MIN_BIN> \
-  --max-bin <MAX_BIN> \
-  --strategy SPOT \
-  --observations 12
+pio collect-position-history --position <POSITION>
+pio composition-labels --position <POSITION>
+pio transaction-costs --position <POSITION>
+pio add-execution --position <POSITION>
 ```
 
-Compare a range/strategy grid without inventing a single profitability score:
-
-```bash
-pio scan-chain \
-  --pool <POOL_ADDRESS> \
-  --amount-x <ATOMIC_X> \
-  --amount-y <ATOMIC_Y> \
-  --observations 12 \
-  --half-widths 0,1,2,5,10 \
-  --center-offsets 0 \
-  --strategies SPOT,CURVE,BID_ASK
-```
-
-Rejected candidates are returned with their fail-closed reason.
-
-## Rust read-only chain inspection
-
-The Rust layer pins Meteora's official `commons` integration library and is exercised by CI.
+## Rust read-only inspection
 
 ```bash
 cd rust-executor
 
 cargo run -- inspect-pool <RPC_URL> <POOL_ADDRESS> 1
 cargo run -- inspect-position <RPC_URL> <POSITION_ADDRESS>
+cargo run -- inspect-transaction-events <RPC_URL> <SIGNATURE>
 ```
 
-Pool JSON can be piped into Python storage:
-
-```bash
-cargo run -- inspect-pool <RPC_URL> <POOL_ADDRESS> 1 \
-  | ../python-learner/.venv/bin/pio ingest-chain-snapshot
-```
-
-Position JSON can be piped the same way:
-
-```bash
-cargo run -- inspect-position <RPC_URL> <POSITION_ADDRESS> \
-  | ../python-learner/.venv/bin/pio ingest-position-snapshot
-```
+Rust JSON can be piped into:
+- `pio ingest-chain-snapshot`
+- `pio ingest-position-snapshot`
+- `pio ingest-transaction-events`
 
 These commands are read-only and require no wallet private key.
-
-## Components
-
-### rust-executor/
-
-Hard risk boundary, read-only Solana/Meteora state inspection, and later transaction execution. Python never owns the signing key.
-
-### python-learner/
-
-Meteora Data API ingestion, on-chain snapshot storage, data quality, candidate generation, chain replay, validation, feature engineering and model training.
 
 ## Safety
 
