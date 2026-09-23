@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Source of Truth
 
-Status: v0.5
+Status: v0.6
 Date: 2026-09-23
 
 ## 1. Mission
@@ -179,6 +179,8 @@ ML challengers move through evidence-backed stages. Offline qualification requir
 Paper mode maintains a persistent, idempotent ledger. For chain-bound counterfactual positions, inventory and fee/reward accrual are derived from real DLMM bin snapshots using the same validated liquidity-share and checkpoint formulas as the simulator. Unsupported reward valuation or token programs fail closed.
 
 Live paper cycles derive pool safety from the latest local normalized state rather than caller flags. Prepared valuations and paper events use deterministic keys so restarts cannot double-count fee/reward income or repeat an exit/rebalance. Account-level scheduling discovers open chain-bound positions, skips positions with no new chain observation or missing token-Y quote data, and can cap each cycle using oldest-last-observation priority. Newly authorized deterministic Phase 3 paper entries are preflighted and then commit the cash debit, paper position, ENTER event, and counterfactual chain binding atomically in one database transaction.
+
+Unattended PAPER operation is driven by idempotent ticks. A tick refreshes only the market metadata needed by open positions, refreshes stale/missing chain state through the Rust executor's read-only pool inspector, optionally refreshes token-Y USD quotes through Jupiter, and then runs the persisted portfolio supervisor. A per-account SQLite lease prevents overlapping scheduler workers. Tick IDs are deterministic by time bucket, expired leases may recover stale RUNNING ticks, and production refresh can use a prebuilt Rust binary without granting Python any signing capability.
 
 ## 7. Decision flow
 
