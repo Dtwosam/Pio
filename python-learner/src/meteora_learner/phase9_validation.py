@@ -24,6 +24,7 @@ PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE = "PHASE9_RESEARCH_BUNDLE_V1"
 class Phase9ResearchBundleCriteria:
     min_mint_risk_pools: int = 2
     min_wallet_flow_pools: int = 2
+    require_mint_snapshot_lineage: bool = True
     min_static_hedge_pools: int = 1
     require_adaptive_multi_pool: bool = True
     require_portfolio_allocation: bool = True
@@ -140,6 +141,63 @@ def _summary(
         latest_evidence_ids=tuple(int(row["id"]) for row in rows),
         boundary_valid=boundary_valid,
     )
+
+
+def _mint_lineage_valid(storage: Storage) -> bool:
+    rows = _latest_by_pool(
+        storage,
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+    )
+    qualified = [row for row in rows if row["qualified"]]
+    if not qualified:
+        return False
+
+    with storage.connect() as conn:
+        for row in qualified:
+            evidence = row["evidence"]
+            try:
+                pool_snapshot_id = int(evidence["pool_snapshot_id"])
+            except (KeyError, TypeError, ValueError):
+                return False
+            pool_row = conn.execute(
+                """
+                SELECT pool_address
+                FROM chain_pool_snapshots
+                WHERE id = ?
+                """,
+                (pool_snapshot_id,),
+            ).fetchone()
+            if (
+                pool_row is None
+                or str(pool_row[0]) != str(row["pool_address"])
+            ):
+                return False
+
+            assessments = evidence.get("assessments")
+            if not isinstance(assessments, list) or not assessments:
+                return False
+            for item in assessments:
+                if not isinstance(item, dict):
+                    return False
+                try:
+                    snapshot_id = int(item["mint_snapshot_id"])
+                except (KeyError, TypeError, ValueError):
+                    return False
+                mint_row = conn.execute(
+                    """
+                    SELECT mint_address, observed_at
+                    FROM token_mint_snapshots
+                    WHERE id = ?
+                    """,
+                    (snapshot_id,),
+                ).fetchone()
+                if mint_row is None:
+                    return False
+                if str(mint_row[0]) != str(item.get("mint_address", "")):
+                    return False
+                if str(mint_row[1]) != str(item.get("observed_at", "")):
+                    return False
+    return True
 
 
 def _allocation_lineage_valid(storage: Storage) -> bool:
@@ -339,6 +397,15 @@ def evaluate_phase9_research_bundle(
         reasons.append(
             f"qualified mint-risk pools {mint.qualified_records} are below "
             f"{criteria.min_mint_risk_pools}"
+        )
+    if (
+        criteria.require_mint_snapshot_lineage
+        and mint.qualified_records >= criteria.min_mint_risk_pools
+        and not _mint_lineage_valid(storage)
+    ):
+        reasons.append(
+            "qualified mint-risk evidence must resolve to authoritative "
+            "pool and mint snapshot IDs"
         )
     if wallet.qualified_records < criteria.min_wallet_flow_pools:
         reasons.append(
