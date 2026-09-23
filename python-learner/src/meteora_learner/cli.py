@@ -1624,6 +1624,10 @@ def main() -> None:
         type=int,
         default=1,
     )
+    phase9_work_queue.add_argument(
+        "--rpc-url",
+        help="Optional Solana RPC URL used in emitted read-only mint inspection commands",
+    )
 
     phase9_validate = subparsers.add_parser(
         "phase9-validate",
@@ -3529,6 +3533,7 @@ def main() -> None:
                 min_wallet_flow_pools=args.min_wallet_flow_pools,
                 min_static_hedge_pools=args.min_static_hedge_pools,
             ),
+            rpc_url=args.rpc_url,
         )
         print(json.dumps(result.to_record(), indent=2))
         return
