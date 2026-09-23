@@ -746,6 +746,19 @@ CREATE TABLE IF NOT EXISTS phase9_operation_leases (
 CREATE INDEX IF NOT EXISTS idx_phase9_operation_leases_until
 ON phase9_operation_leases(lease_until);
 
+CREATE TABLE IF NOT EXISTS phase9_pool_activity_scan_state (
+    pool_address TEXT PRIMARY KEY,
+    backfill_before_signature TEXT,
+    backfill_exhausted INTEGER NOT NULL DEFAULT 0 CHECK(
+        backfill_exhausted IN (0, 1)
+    ),
+    pages_scanned INTEGER NOT NULL DEFAULT 0,
+    signatures_scanned INTEGER NOT NULL DEFAULT 0,
+    matching_transactions INTEGER NOT NULL DEFAULT 0,
+    positions_discovered INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
 
 CREATE TABLE IF NOT EXISTS token_quote_observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
