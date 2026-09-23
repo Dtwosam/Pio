@@ -340,6 +340,8 @@ mod tests {
             pool_address: pool_address.into(),
             live_enabled: true,
             open_positions: 0,
+            unresolved_entry_intents: 0,
+            effective_open_positions: 0,
             matching_pool_positions: 1,
             max_open_positions: 1,
             pool_allowed: true,
