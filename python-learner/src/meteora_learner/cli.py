@@ -29,10 +29,13 @@ from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .phase_promotion import (
     PHASE2,
     PHASE3,
+    PHASE5,
     persist_phase2_promotion,
+    persist_phase5_promotion,
     phase_promotion_state,
 )
 from .phase3_validation import Phase3PromotionCriteria
+from .phase5_validation import Phase5PromotionCriteria, evaluate_phase5_promotion
 from .phase3_workflow import (
     Phase3ValidationInput,
     validate_phase3_from_chain,
@@ -767,7 +770,7 @@ def main() -> None:
 
     subparsers.add_parser(
         "phase-status",
-        help="Print persisted Phase 2 and Phase 3 promotion state",
+        help="Print persisted Phase 2, Phase 3 and Phase 5 promotion state",
     )
 
     phase3_validate = subparsers.add_parser(
@@ -821,6 +824,61 @@ def main() -> None:
     )
     phase3_validate.add_argument("--persist-ready", action="store_true")
     phase3_validate.add_argument("--require-ready", action="store_true")
+
+    phase5_validate = subparsers.add_parser(
+        "phase5-validate",
+        help="Evaluate real PAPER endurance/accounting evidence for Phase 5",
+    )
+    phase5_validate.add_argument("--account", required=True)
+    phase5_validate.add_argument("--min-runtime-hours", type=float, default=72.0)
+    phase5_validate.add_argument("--min-terminal-ticks", type=int, default=500)
+    phase5_validate.add_argument(
+        "--min-success-rate-pct",
+        type=float,
+        default=99.0,
+    )
+    phase5_validate.add_argument(
+        "--max-dependency-blocked-pct",
+        type=float,
+        default=5.0,
+    )
+    phase5_validate.add_argument(
+        "--max-consecutive-failures",
+        type=int,
+        default=1,
+    )
+    phase5_validate.add_argument(
+        "--max-stale-running-ticks",
+        type=int,
+        default=0,
+    )
+    phase5_validate.add_argument(
+        "--stale-running-after-seconds",
+        type=int,
+        default=900,
+    )
+    phase5_validate.add_argument(
+        "--min-applied-chain-valuations",
+        type=int,
+        default=100,
+    )
+    phase5_validate.add_argument(
+        "--min-distinct-positions-valued",
+        type=int,
+        default=3,
+    )
+    phase5_validate.add_argument(
+        "--min-closed-positions",
+        type=int,
+        default=3,
+    )
+    phase5_validate.add_argument(
+        "--min-distinct-pools",
+        type=int,
+        default=2,
+    )
+    phase5_validate.add_argument("--persist-ready", action="store_true")
+    phase5_validate.add_argument("--require-ready", action="store_true")
 
     ml_train = subparsers.add_parser(
         "ml-train-csv",
@@ -1513,6 +1571,10 @@ def main() -> None:
                 storage,
                 phase_name=PHASE3,
             ).__dict__,
+            "phase5": phase_promotion_state(
+                storage,
+                phase_name=PHASE5,
+            ).__dict__,
         }
         print(json.dumps(output, indent=2))
         return
@@ -1557,6 +1619,43 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2, default=str))
         if args.require_ready and not result.promotion.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase5-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase5_promotion(
+            storage,
+            account_id=args.account,
+            criteria=Phase5PromotionCriteria(
+                min_runtime_hours=args.min_runtime_hours,
+                min_terminal_ticks=args.min_terminal_ticks,
+                min_success_rate_pct=args.min_success_rate_pct,
+                max_dependency_blocked_pct=args.max_dependency_blocked_pct,
+                max_consecutive_failures=args.max_consecutive_failures,
+                max_stale_running_ticks=args.max_stale_running_ticks,
+                stale_running_after_seconds=args.stale_running_after_seconds,
+                min_applied_chain_valuations=(
+                    args.min_applied_chain_valuations
+                ),
+                min_distinct_positions_valued=(
+                    args.min_distinct_positions_valued
+                ),
+                min_closed_positions=args.min_closed_positions,
+                min_distinct_pools=args.min_distinct_pools,
+            ),
+        )
+        output = result.to_record()
+        if args.persist_ready and result.promotion_ready:
+            output["persisted"] = persist_phase5_promotion(
+                storage,
+                report=result,
+            ).__dict__
+        else:
+            output["persisted"] = None
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
         return
 
