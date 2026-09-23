@@ -179,6 +179,10 @@ from .contextual_bandit import (
     evaluate_contextual_bandit,
     persist_contextual_bandit_research,
 )
+from .contextual_bandit_cycle import (
+    evaluate_cycle_contextual_bandit,
+    persist_cycle_contextual_bandit,
+)
 from .continuous_learning import (
     ContinuousLearningCriteria,
     build_continuous_learning_plan,
@@ -1719,6 +1723,55 @@ def main() -> None:
     )
     phase9_validate.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    contextual_bandit_cycle = subparsers.add_parser(
+        "contextual-bandit-cycle-research",
+        help="Replay contextual-bandit research from a checksum-bound retraining cycle dataset",
+    )
+    contextual_bandit_cycle.add_argument("--cycle-id", required=True)
+    contextual_bandit_cycle.add_argument(
+        "--warmup-decisions-per-context",
+        type=int,
+        default=2,
+    )
+    contextual_bandit_cycle.add_argument(
+        "--exploration-bonus-bps",
+        type=float,
+        default=50.0,
+    )
+    contextual_bandit_cycle.add_argument(
+        "--min-decisions",
+        type=int,
+        default=30,
+    )
+    contextual_bandit_cycle.add_argument(
+        "--min-pools",
+        type=int,
+        default=3,
+    )
+    contextual_bandit_cycle.add_argument(
+        "--min-selected-arms",
+        type=int,
+        default=2,
+    )
+    contextual_bandit_cycle.add_argument(
+        "--min-mean-uplift-vs-baseline-bps",
+        type=float,
+        default=0.0,
+    )
+    contextual_bandit_cycle.add_argument(
+        "--max-mean-regret-vs-oracle-bps",
+        type=float,
+        default=500.0,
+    )
+    contextual_bandit_cycle.add_argument(
+        "--persist",
+        action="store_true",
+    )
+    contextual_bandit_cycle.add_argument(
+        "--require-qualified",
         action="store_true",
     )
 
@@ -3654,6 +3707,45 @@ def main() -> None:
             output["persisted"] = None
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "contextual-bandit-cycle-research":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_cycle_contextual_bandit(
+            storage,
+            cycle_id=args.cycle_id,
+            criteria=ContextualBanditCriteria(
+                warmup_decisions_per_context=(
+                    args.warmup_decisions_per_context
+                ),
+                exploration_bonus_bps=args.exploration_bonus_bps,
+                min_decisions=args.min_decisions,
+                min_pools=args.min_pools,
+                min_selected_arms=args.min_selected_arms,
+                min_mean_uplift_vs_baseline_bps=(
+                    args.min_mean_uplift_vs_baseline_bps
+                ),
+                max_mean_regret_vs_oracle_bps=(
+                    args.max_mean_regret_vs_oracle_bps
+                ),
+            ),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_cycle_contextual_bandit(
+                    storage,
+                    result=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if (
+            args.require_qualified
+            and not result.report.research_qualified
+        ):
             raise SystemExit(2)
         return
 
