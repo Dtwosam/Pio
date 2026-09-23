@@ -60,8 +60,9 @@ where
     let registered = store.register(request, config)?;
     let decision_id = request.proposal.decision_id.to_string();
     let current = registered.record;
+    let current_status = current.status.clone();
 
-    match current.status {
+    match current_status {
         ExecutionIntentStatus::Rejected
         | ExecutionIntentStatus::SimulationPassed
         | ExecutionIntentStatus::SimulationFailed => {
@@ -69,7 +70,7 @@ where
                 .risk
                 .context("completed dry-run intent is missing persisted risk result")?;
             let report = report_from_persisted(
-                &current.status,
+                &current_status,
                 risk,
                 current.simulation,
             )?;
@@ -90,7 +91,7 @@ where
         ExecutionIntentStatus::Received | ExecutionIntentStatus::RiskApproved => {}
     }
 
-    let risk = if current.status == ExecutionIntentStatus::RiskApproved {
+    let risk = if current_status == ExecutionIntentStatus::RiskApproved {
         current
             .risk
             .context("RISK_APPROVED intent is missing persisted risk result")?
