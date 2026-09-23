@@ -2,6 +2,7 @@ use crate::dry_run::DryRunExecutionRequest;
 use crate::execution_guard::RiskCheckReport;
 use crate::simulation::SimulationReport;
 use crate::transaction_guard::TransactionGuardReport;
+use crate::wallet_guard::WalletAuthorizationReport;
 use crate::risk::RiskConfig;
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
@@ -66,6 +67,7 @@ pub struct ExecutionIntentRecord {
     pub risk: Option<RiskCheckReport>,
     pub simulation: Option<SimulationReport>,
     pub transaction_guard: Option<TransactionGuardReport>,
+    pub wallet_authorization: Option<WalletAuthorizationReport>,
     pub signature: Option<String>,
     pub error: Option<String>,
 }
@@ -137,6 +139,7 @@ impl ExecutionIntentStore {
                 risk_json TEXT,
                 simulation_json TEXT,
                 transaction_guard_json TEXT,
+                wallet_authorization_json TEXT,
                 signature TEXT,
                 error TEXT
             );
@@ -154,6 +157,12 @@ impl ExecutionIntentStore {
         if !names.iter().any(|name| name == "transaction_guard_json") {
             conn.execute(
                 "ALTER TABLE execution_intents ADD COLUMN transaction_guard_json TEXT",
+                [],
+            )?;
+        }
+        if !names.iter().any(|name| name == "wallet_authorization_json") {
+            conn.execute(
+                "ALTER TABLE execution_intents ADD COLUMN wallet_authorization_json TEXT",
                 [],
             )?;
         }
@@ -429,6 +438,53 @@ impl ExecutionIntentStore {
         self.load(decision_id)
     }
 
+    pub fn record_wallet_authorization(
+        &self,
+        decision_id: &str,
+        authorization: &WalletAuthorizationReport,
+    ) -> Result<ExecutionIntentRecord> {
+        let current = self.load(decision_id)?;
+        if let Some(existing) = &current.wallet_authorization {
+            let existing_json = serde_json::to_string(existing)?;
+            let incoming_json = serde_json::to_string(authorization)?;
+            if existing_json == incoming_json {
+                return Ok(current);
+            }
+            anyhow::bail!(
+                "execution intent {decision_id} already has a different wallet authorization"
+            );
+        }
+        if current.status != ExecutionIntentStatus::SimulationPassed {
+            anyhow::bail!(
+                "wallet authorization requires SIMULATION_PASSED status; current status is {:?}",
+                current.status
+            );
+        }
+        if !authorization.accepted {
+            anyhow::bail!(
+                "rejected wallet authorization cannot be persisted as execution-ready"
+            );
+        }
+        let payload = serde_json::to_string(authorization)?;
+        let now = now_unix()?;
+        let conn = self.connection()?;
+        let changed = conn.execute(
+            r#"
+            UPDATE execution_intents
+            SET wallet_authorization_json = ?, updated_at_unix = ?
+            WHERE decision_id = ? AND status = 'SIMULATION_PASSED'
+              AND wallet_authorization_json IS NULL
+            "#,
+            params![payload, now, decision_id],
+        )?;
+        if changed != 1 {
+            anyhow::bail!(
+                "execution intent {decision_id} changed concurrently while authorizing wallet"
+            );
+        }
+        self.load(decision_id)
+    }
+
     fn transition(
         &self,
         decision_id: &str,
@@ -496,6 +552,14 @@ impl ExecutionIntentStore {
     }
 
     pub fn begin_signing(&self, decision_id: &str) -> Result<ExecutionIntentRecord> {
+        let current = self.load(decision_id)?;
+        let authorization = current
+            .wallet_authorization
+            .as_ref()
+            .context("signing requires persisted wallet authorization")?;
+        if !authorization.accepted {
+            anyhow::bail!("signing requires accepted wallet authorization");
+        }
         self.transition(
             decision_id,
             &[ExecutionIntentStatus::SimulationPassed],
@@ -570,7 +634,7 @@ impl ExecutionIntentStore {
             SELECT decision_id, mode, action, pool_address, status,
                    created_at_unix, updated_at_unix,
                    risk_json, simulation_json, transaction_guard_json,
-                   signature, error
+                   wallet_authorization_json, signature, error
             FROM execution_intents
             WHERE decision_id = ?
             "#,
@@ -590,6 +654,7 @@ impl ExecutionIntentStore {
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
                 ))
             })
             .with_context(|| format!("unknown execution decision_id: {decision_id}"))?;
@@ -614,8 +679,12 @@ impl ExecutionIntentStore {
                 .9
                 .map(|value| serde_json::from_str(&value))
                 .transpose()?,
-            signature: raw.10,
-            error: raw.11,
+            wallet_authorization: raw
+                .10
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            signature: raw.11,
+            error: raw.12,
         })
     }
 }
