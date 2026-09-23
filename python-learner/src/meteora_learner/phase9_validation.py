@@ -1129,8 +1129,10 @@ class Phase9PromotionReport:
 @dataclass(frozen=True)
 class Phase9PersistedPromotionAudit:
     exists: bool
+    history_exists: bool
     qualified: bool
     evidence_type_valid: bool
+    current_row_matches_latest_history: bool
     current_promotion_ready: bool
     persisted_matches_current: bool
     current: bool
@@ -1254,9 +1256,19 @@ def audit_persisted_phase9_promotion(
     with storage.connect() as conn:
         row = conn.execute(
             """
-            SELECT evidence_type, qualified, evidence_json
+            SELECT promoted_at, evidence_type, qualified, evidence_json
             FROM phase_promotion_evidence
             WHERE phase_name = ?
+            LIMIT 1
+            """,
+            (PHASE9,),
+        ).fetchone()
+        history_row = conn.execute(
+            """
+            SELECT promoted_at, evidence_type, qualified, evidence_json
+            FROM phase_promotion_evidence_history
+            WHERE phase_name = ?
+            ORDER BY id DESC
             LIMIT 1
             """,
             (PHASE9,),
@@ -1267,18 +1279,25 @@ def audit_persisted_phase9_promotion(
         reasons.append("persisted Phase 9 promotion evidence is missing")
         return Phase9PersistedPromotionAudit(
             exists=False,
+            history_exists=history_row is not None,
             qualified=False,
             evidence_type_valid=False,
+            current_row_matches_latest_history=False,
             current_promotion_ready=current_report.promotion_ready,
             persisted_matches_current=False,
             current=False,
             reasons=tuple(reasons),
         )
 
-    evidence_type_valid = str(row[0]) == PHASE9_EVIDENCE_TYPE
-    qualified = bool(row[1])
+    history_exists = history_row is not None
+    current_row_matches_latest_history = (
+        history_row is not None
+        and tuple(row) == tuple(history_row)
+    )
+    evidence_type_valid = str(row[1]) == PHASE9_EVIDENCE_TYPE
+    qualified = bool(row[2])
     try:
-        persisted = json.loads(str(row[2]))
+        persisted = json.loads(str(row[3]))
     except (TypeError, ValueError, json.JSONDecodeError):
         persisted = None
 
@@ -1290,6 +1309,14 @@ def audit_persisted_phase9_promotion(
         and persisted == current_record
     )
 
+    if not history_exists:
+        reasons.append(
+            "immutable Phase 9 promotion history is missing"
+        )
+    elif not current_row_matches_latest_history:
+        reasons.append(
+            "current Phase 9 promotion row differs from immutable history"
+        )
     if not evidence_type_valid:
         reasons.append("persisted Phase 9 promotion evidence type is invalid")
     if not qualified:
@@ -1305,8 +1332,12 @@ def audit_persisted_phase9_promotion(
 
     return Phase9PersistedPromotionAudit(
         exists=True,
+        history_exists=history_exists,
         qualified=qualified,
         evidence_type_valid=evidence_type_valid,
+        current_row_matches_latest_history=(
+            current_row_matches_latest_history
+        ),
         current_promotion_ready=current_report.promotion_ready,
         persisted_matches_current=persisted_matches_current,
         current=not reasons,
