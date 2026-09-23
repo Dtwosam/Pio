@@ -18,6 +18,39 @@ pub struct SubmissionReport {
 }
 
 
+fn ensure_submission_blockhash_is_live(
+    store: &ExecutionIntentStore,
+    decision_id: &str,
+    current_block_height: u64,
+) -> Result<()> {
+    let current = store.load(decision_id)?;
+    let prepared = current
+        .prepared_transaction
+        .as_ref()
+        .context("execution intent is missing prepared transaction")?;
+    if current_block_height > prepared.last_valid_block_height {
+        if current.status == ExecutionIntentStatus::Sent {
+            anyhow::bail!(
+                "persisted SENT transaction blockhash has expired; confirmation recovery is required before any further action"
+            );
+        }
+        if matches!(
+            current.status,
+            ExecutionIntentStatus::SimulationPassed
+                | ExecutionIntentStatus::Signing
+        ) {
+            let reason = "prepared_blockhash_expired_before_submission";
+            store.record_failure(decision_id, reason)?;
+            anyhow::bail!("{reason}");
+        }
+        anyhow::bail!(
+            "execution transaction blockhash expired in unexpected state {:?}",
+            current.status
+        );
+    }
+    Ok(())
+}
+
 fn signed_for_current(
     store: &ExecutionIntentStore,
     decision_id: &str,
@@ -60,11 +93,17 @@ pub fn submit_execution_intent_with<F>(
     store: &ExecutionIntentStore,
     decision_id: &str,
     keypair: &Keypair,
+    current_block_height: u64,
     send: F,
 ) -> Result<SubmissionReport>
 where
     F: FnOnce(&SignedExecutionTransaction) -> Result<String>,
 {
+    ensure_submission_blockhash_is_live(
+        store,
+        decision_id,
+        current_block_height,
+    )?;
     let (signed, reused_persisted_signature) =
         signed_for_current(store, decision_id, keypair)?;
 
@@ -251,6 +290,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            950,
             |signed| {
                 let current = store.load(&id).unwrap();
                 saw_sent.set(
@@ -279,6 +319,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            950,
             |_| anyhow::bail!("timeout after submit"),
         )
         .unwrap();
@@ -302,6 +343,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            950,
             |_| anyhow::bail!("ambiguous"),
         )
         .unwrap();
@@ -309,6 +351,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            950,
             |signed| Ok(signed.signature.clone()),
         )
         .unwrap();
@@ -329,6 +372,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            950,
             |_| Ok(Signature::new_unique().to_string()),
         );
 
@@ -340,4 +384,70 @@ mod tests {
 
         let _ = std::fs::remove_file(path);
     }
+    #[test]
+    fn expired_pre_submission_intent_fails_before_send() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        let called = Cell::new(false);
+
+        let result = submit_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            1_001,
+            |_| {
+                called.set(true);
+                anyhow::bail!("must not send expired transaction")
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!called.get());
+        let current = store.load(&id).unwrap();
+        assert_eq!(current.status, ExecutionIntentStatus::Failed);
+        assert_eq!(
+            current.error.as_deref(),
+            Some("prepared_blockhash_expired_before_submission")
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn expired_sent_intent_cannot_be_resubmitted_blindly() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+
+        let first = submit_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            950,
+            |_| anyhow::bail!("ambiguous"),
+        )
+        .unwrap();
+        assert_eq!(first.intent_status, ExecutionIntentStatus::Sent);
+
+        let called = Cell::new(false);
+        let retry = submit_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            1_001,
+            |_| {
+                called.set(true);
+                Ok("must-not-send".into())
+            },
+        );
+
+        assert!(retry.is_err());
+        assert!(!called.get());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::Sent
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
 }
