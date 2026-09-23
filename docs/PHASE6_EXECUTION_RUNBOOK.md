@@ -320,3 +320,64 @@ Phase 6 is not complete yet. Remaining work includes:
 
 Live signing/sending must not be enabled merely because the preflight layer
 passes.
+
+
+## Valued live outcomes and learning attribution
+
+After a confirmed live lifecycle has been fully reconciled, Python keeps the
+raw atomic evidence separate from valuation.
+
+Build the immutable closed-position atomic outcome:
+
+```bash
+pio build-live-position-outcome --position <POSITION_ADDRESS>
+```
+
+Value that outcome using only persisted quotes observed at or before each
+execution cashflow:
+
+```bash
+pio value-live-position-outcome   --position <POSITION_ADDRESS>   --max-age-seconds 300
+```
+
+The valuation fails closed if any counted execution effect is missing, pool
+mint metadata is stale/missing, a non-zero reward has no reward mint, or a
+required token/SOL quote is missing/stale. Principal cashflow, composition
+costs, earned fees, rewards and network fees are persisted separately.
+
+Export the original terminal Rust decision context from the execution journal:
+
+```bash
+meteora-executor execution-decision-context   <EXECUTION_DB> <OPENING_DECISION_ID> > decision-context.json
+```
+
+Ingest it into Python:
+
+```bash
+pio ingest-execution-decision-context --file decision-context.json
+```
+
+The context must be terminal (`CONFIRMED` or `FAILED`) and its action,
+pool, signature and terminal status must reconcile to the execution receipt.
+
+For a confirmed closed position, create the immutable learner label:
+
+```bash
+pio build-live-learning-label --position <POSITION_ADDRESS>
+```
+
+The label is accepted only when the originating context is a confirmed
+`LIVE ENTER`, its signature/pool match the position, and its proposed range
+matches the confirmed ENTER lifecycle event. It stores model version,
+strategy, entry range, proposed capital, expected return/downside, realized
+PnL/return and prediction error.
+
+Audit the complete live evidence graph:
+
+```bash
+pio live-execution-ledger-audit --require-clean
+```
+
+A `VALUED` outcome without valuation evidence or without its learning label
+makes the audit fail. Atomic-only outcomes are preserved until their required
+historical quote evidence exists.
