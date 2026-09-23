@@ -8,12 +8,16 @@ from meteora_learner.phase9_research import (
 from meteora_learner.phase9_validation import (
     PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
     Phase9ResearchBundleCriteria,
+    evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
     persist_phase9_research_bundle,
 )
 from meteora_learner.phase_promotion import (
     PHASE8,
     PHASE8_EVIDENCE_TYPE,
+    PHASE9,
+    persist_phase9_promotion,
+    phase_promotion_state,
 )
 from meteora_learner.portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
@@ -207,5 +211,49 @@ def test_bundle_criteria_can_require_more_pool_diversity(tmp_path):
     )
     assert any(
         "static-hedge pools 1 are below 2" in reason
+        for reason in report.reasons
+    )
+
+
+def test_phase9_promotion_persists_non_actionable_ready_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+
+    report = evaluate_phase9_promotion(storage)
+
+    assert report.promotion_ready is True
+    assert report.research_only is True
+    assert report.policy_actionable is False
+
+    state = persist_phase9_promotion(
+        storage,
+        report=report,
+    )
+    assert state.phase_name == PHASE9
+    assert state.promoted is True
+    assert phase_promotion_state(
+        storage,
+        phase_name=PHASE9,
+    ).promoted is True
+
+
+def test_phase9_promotion_requires_complete_research_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            DELETE FROM advanced_edge_evidence
+            WHERE edge_type = ?
+            """,
+            (STATIC_HEDGE_EVIDENCE_TYPE,),
+        )
+
+    report = evaluate_phase9_promotion(storage)
+
+    assert report.promotion_ready is False
+    assert report.policy_actionable is False
+    assert any(
+        "static-hedge" in reason
         for reason in report.reasons
     )
