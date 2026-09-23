@@ -420,7 +420,7 @@ def build_phase9_work_queue(
                 )
 
     wallet_lineage_invalid = any(
-        "immutable source event IDs and SHA-256" in reason
+        "position-event IDs with matching source hash" in reason
         for reason in bundle.reasons
     )
     if wallet_lineage_invalid:
