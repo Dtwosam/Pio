@@ -272,7 +272,6 @@ def main() -> None:
     )
     paper_challenger.add_argument("--account", required=True)
     paper_challenger.add_argument("--model-id", required=True)
-    paper_challenger.add_argument("--phase3-ready", action="store_true")
     paper_challenger.add_argument("--min-closed-trades", type=int, default=20)
     paper_challenger.add_argument("--min-return-bps", type=int, default=0)
     paper_challenger.add_argument("--min-win-rate", type=float, default=0.5)
@@ -1056,7 +1055,6 @@ def main() -> None:
             storage,
             account_id=args.account,
             model_id=args.model_id,
-            phase3_ready=args.phase3_ready,
             criteria=PaperChallengerCriteria(
                 min_closed_trades=args.min_closed_trades,
                 min_realized_return_bps=args.min_return_bps,
