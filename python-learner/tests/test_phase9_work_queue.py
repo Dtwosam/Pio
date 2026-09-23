@@ -12,6 +12,10 @@ from meteora_learner.contextual_bandit import (
     CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
     ContextualBanditCriteria,
 )
+from meteora_learner.cross_pool_research import (
+    CrossPoolResearchCandidate,
+    CrossPoolResearchReport,
+)
 from meteora_learner.contextual_bandit_cycle import (
     evaluate_cycle_contextual_bandit,
     persist_cycle_contextual_bandit,
@@ -40,7 +44,10 @@ from meteora_learner.phase_promotion import (
 )
 from meteora_learner.portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
-    portfolio_candidate_artifact_sha256,
+    PortfolioAllocationCriteria,
+    persist_portfolio_allocation_research,
+    persist_portfolio_candidate_research,
+    research_portfolio_allocation,
 )
 from meteora_learner.static_hedge import (
     STATIC_HEDGE_EVIDENCE_TYPE,
@@ -92,29 +99,83 @@ def save_mint_snapshot(storage, mint):
 
 
 def seed_portfolio_candidate_lineage(storage):
-    payload = {
-        "research_only": True,
-        "policy_actionable": False,
-        "source_inputs": [{"pool_address": "pool-a"}],
-        "assumptions": {"budget_context": "test"},
-        "comparison": {"candidates": [{"pool_address": "pool-a"}]},
-    }
-    artifact_sha = portfolio_candidate_artifact_sha256(payload)
-    evidence_id = storage.save_advanced_edge_evidence(
-        edge_type="PHASE9_PORTFOLIO_CANDIDATES_V1",
-        pool_address="__PORTFOLIO_CANDIDATES__",
-        as_of="2026-09-23T12:00:00+00:00",
-        status="BUILT",
-        qualified=True,
-        evidence={
-            "artifact_sha256": artifact_sha,
-            **payload,
-        },
+    comparison = CrossPoolResearchReport(
+        plans_seen=2,
+        comparable_plans=2,
+        excluded_plans=0,
+        leader_pool_address="pool-a",
+        ranking_rule="test-ranking",
+        candidates=(
+            CrossPoolResearchCandidate(
+                rank=1,
+                pool_address="pool-a",
+                strategy="SPOT",
+                min_bin_id=-1,
+                max_bin_id=1,
+                half_width=1,
+                center_offset=0,
+                net_return_bps=100,
+                hold_return_bps=50,
+                excess_vs_hold_initial_bps=50,
+                range_survival_ratio=1.0,
+                max_observed_share_bps=100,
+                sized_quote=60.0,
+                phase2_ready=True,
+                policy_authorized=True,
+            ),
+            CrossPoolResearchCandidate(
+                rank=2,
+                pool_address="pool-b",
+                strategy="CURVE",
+                min_bin_id=-2,
+                max_bin_id=2,
+                half_width=2,
+                center_offset=0,
+                net_return_bps=90,
+                hold_return_bps=50,
+                excess_vs_hold_initial_bps=40,
+                range_survival_ratio=1.0,
+                max_observed_share_bps=100,
+                sized_quote=60.0,
+                phase2_ready=True,
+                policy_authorized=True,
+            ),
+        ),
     )
-    return {
+    evidence_id, artifact_sha = persist_portfolio_candidate_research(
+        storage,
+        comparison=comparison,
+        source_inputs=[
+            {"pool_address": "pool-a"},
+            {"pool_address": "pool-b"},
+        ],
+        assumptions={"budget_context": "test"},
+    )
+    lineage = {
         "candidate_evidence_id": evidence_id,
         "candidate_evidence_sha256": artifact_sha,
     }
+    report = research_portfolio_allocation(
+        storage,
+        comparison=comparison,
+        budget_quote=100.0,
+        criteria=PortfolioAllocationCriteria(
+            max_positions=2,
+            min_positions=2,
+            max_pool_allocation_bps=6_000,
+            min_range_survival_ratio=0.5,
+            min_excess_vs_hold_bps=0,
+            min_position_quote=10.0,
+            min_budget_utilization_rate=0.9,
+        ),
+        candidate_lineage=lineage,
+    )
+    assert report.research_qualified is True
+    persist_portfolio_allocation_research(
+        storage,
+        report=report,
+    )
+    return lineage
 
 
 def seed_retraining_dataset_evidence(
@@ -481,12 +542,6 @@ def seed_ready(storage):
     seed_adaptive_multi_pool_lineage(
         storage,
         ("pool-a", "pool-b"),
-    )
-    evidence(
-        storage,
-        PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
-        "__PORTFOLIO__",
-        extra={"candidate_lineage": portfolio_lineage},
     )
     seed_static_hedge_lineage(storage, "pool-a")
 
