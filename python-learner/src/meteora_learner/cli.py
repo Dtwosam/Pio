@@ -4,6 +4,8 @@ import argparse
 import json
 import sys
 
+import pandas as pd
+
 from .add_execution import build_add_execution_calibration
 from .baseline_policy import BaselinePolicyConfig
 from .baseline_walk_forward import walk_forward_baseline
@@ -24,6 +26,17 @@ from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
 from .position_history import collect_position_history
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
+from .phase_promotion import (
+    PHASE2,
+    PHASE3,
+    persist_phase2_promotion,
+    phase_promotion_state,
+)
+from .phase3_validation import Phase3PromotionCriteria
+from .phase3_workflow import (
+    Phase3ValidationInput,
+    validate_phase3_from_chain,
+)
 from .pool_safety import PoolSafetyConfig, screen_pool_universe
 from .position_policy import PositionManagementConfig, decide_position_action
 from .paper_account import (
@@ -44,6 +57,14 @@ from .paper_challenger import (
 )
 from .phase3_plan import build_phase3_research_plan
 from .multi_pool_research import PoolResearchInput, build_multi_pool_research
+from .ml_challenger import MLChallengerCriteria
+from .ml_inference import MLInferenceConfig
+from .ml_registry import model_record, start_paper_challenger
+from .ml_workflow import (
+    evaluate_registered_offline_challenger,
+    qualify_registered_offline_challenger,
+    train_save_register_ml_v1,
+)
 from .reconciliation import reconcile_position
 from .reconciliation_corpus import build_reconciliation_corpus
 from .rebalance_execution import build_rebalance_execution_calibration
@@ -279,6 +300,105 @@ def main() -> None:
     paper_challenger.add_argument("--min-uplift-bps", type=int, default=0)
     paper_challenger.add_argument("--require-qualified", action="store_true")
     paper_challenger.add_argument("--promote", action="store_true")
+
+    subparsers.add_parser(
+        "phase-status",
+        help="Print persisted Phase 2 and Phase 3 promotion state",
+    )
+
+    phase3_validate = subparsers.add_parser(
+        "phase3-validate",
+        help="Run multi-pool no-lookahead Phase 3 validation from chain history",
+    )
+    phase3_validate.add_argument(
+        "--file",
+        required=True,
+        help="JSON array with pool_address, amount_x, amount_y, network_cost_y_atomic",
+    )
+    phase3_validate.add_argument("--lookback-observations", type=int, default=12)
+    phase3_validate.add_argument("--forward-observations", type=int, default=2)
+    phase3_validate.add_argument("--step-observations", type=int)
+    phase3_validate.add_argument(
+        "--half-widths",
+        type=_parse_int_csv,
+        default=(0, 1, 2, 5, 10),
+    )
+    phase3_validate.add_argument(
+        "--center-offsets",
+        type=_parse_int_csv,
+        default=(0,),
+    )
+    phase3_validate.add_argument(
+        "--strategies",
+        type=_parse_strategy_csv,
+        default=tuple(StrategyType),
+    )
+    phase3_validate.add_argument("--max-share-bps", type=int, default=500)
+    phase3_validate.add_argument("--favor-x-active", action="store_true")
+    phase3_validate.add_argument("--min-pools", type=int, default=3)
+    phase3_validate.add_argument("--min-total-steps", type=int, default=30)
+    phase3_validate.add_argument("--min-complete-steps", type=int, default=20)
+    phase3_validate.add_argument("--min-selection-rate", type=float, default=0.5)
+    phase3_validate.add_argument("--min-complete-rate", type=float, default=0.5)
+    phase3_validate.add_argument(
+        "--min-positive-excess-rate",
+        type=float,
+        default=0.55,
+    )
+    phase3_validate.add_argument(
+        "--min-mean-excess-bps",
+        type=float,
+        default=0.0,
+    )
+    phase3_validate.add_argument(
+        "--max-single-step-loss-bps",
+        type=int,
+        default=1000,
+    )
+    phase3_validate.add_argument("--persist-ready", action="store_true")
+    phase3_validate.add_argument("--require-ready", action="store_true")
+
+    ml_train = subparsers.add_parser(
+        "ml-train-csv",
+        help="Train, checksum, save and register an experimental ML v1 model",
+    )
+    ml_train.add_argument("--file", required=True)
+    ml_train.add_argument("--model-id", required=True)
+    ml_train.add_argument("--dataset-version", required=True)
+    ml_train.add_argument("--artifact-dir", required=True)
+    ml_train.add_argument("--split-fraction", type=float, default=0.8)
+    ml_train.add_argument("--min-rows", type=int, default=50)
+
+    ml_eval = subparsers.add_parser(
+        "ml-offline-evaluate-csv",
+        help="Evaluate a registered ML challenger on its held-out decision window",
+    )
+    ml_eval.add_argument("--file", required=True)
+    ml_eval.add_argument("--model-id", required=True)
+    ml_eval.add_argument("--risk-lambda", type=float, default=1.5)
+    ml_eval.add_argument("--min-positive-probability", type=float, default=0.55)
+    ml_eval.add_argument("--min-range-survival", type=float, default=0.50)
+    ml_eval.add_argument("--min-score-bps", type=float, default=0.0)
+    ml_eval.add_argument("--min-decisions", type=int, default=20)
+    ml_eval.add_argument("--min-choice-coverage", type=float, default=0.80)
+    ml_eval.add_argument("--min-uplift-bps", type=float, default=0.0)
+    ml_eval.add_argument("--min-win-rate", type=float, default=0.50)
+    ml_eval.add_argument("--min-positive-rate", type=float, default=0.50)
+    ml_eval.add_argument("--max-single-loss-bps", type=int, default=1000)
+    ml_eval.add_argument("--qualify", action="store_true")
+    ml_eval.add_argument("--require-qualified", action="store_true")
+
+    ml_start_paper = subparsers.add_parser(
+        "ml-start-paper",
+        help="Move an offline-qualified model into PAPER_CHALLENGER state",
+    )
+    ml_start_paper.add_argument("--model-id", required=True)
+
+    ml_status = subparsers.add_parser(
+        "ml-model-status",
+        help="Print one registered ML model state",
+    )
+    ml_status.add_argument("--model-id", required=True)
 
     phase3_plan = subparsers.add_parser(
         "phase3-plan",
@@ -551,6 +671,11 @@ def main() -> None:
         "--require-ready",
         action="store_true",
         help="Exit non-zero unless all math and sample criteria pass",
+    )
+    phase2_gate.add_argument(
+        "--persist-ready",
+        action="store_true",
+        help="Persist Phase 2 promotion evidence when the gate passes",
     )
 
     scan = subparsers.add_parser(
@@ -896,9 +1021,165 @@ def main() -> None:
             ),
             position_limit=args.position_limit,
         )
-        print(json.dumps(result.to_record(), indent=2))
+        output = result.to_record()
+        if args.persist_ready and result.promotion_ready:
+            state = persist_phase2_promotion(
+                Storage(settings.database_path),
+                report=result,
+            )
+            output["persisted_promotion"] = {
+                "phase_name": state.phase_name,
+                "promoted": state.promoted,
+                "evidence_type": state.evidence_type,
+            }
+        print(json.dumps(output, indent=2))
         if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
+        return
+
+    if args.command == "phase-status":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        output = {
+            "phase2": phase_promotion_state(
+                storage,
+                phase_name=PHASE2,
+            ).__dict__,
+            "phase3": phase_promotion_state(
+                storage,
+                phase_name=PHASE3,
+            ).__dict__,
+        }
+        print(json.dumps(output, indent=2))
+        return
+
+    if args.command == "phase3-validate":
+        settings = Settings.from_env()
+        with open(args.file, "r", encoding="utf-8") as handle:
+            raw_inputs = json.load(handle)
+        if not isinstance(raw_inputs, list):
+            raise ValueError("phase3-validate file must contain a JSON array")
+        inputs = tuple(
+            Phase3ValidationInput(
+                pool_address=str(item["pool_address"]),
+                amount_x=int(item["amount_x"]),
+                amount_y=int(item["amount_y"]),
+                network_cost_y_atomic=int(item["network_cost_y_atomic"]),
+            )
+            for item in raw_inputs
+        )
+        result = validate_phase3_from_chain(
+            str(settings.database_path),
+            inputs=inputs,
+            criteria=Phase3PromotionCriteria(
+                min_pools=args.min_pools,
+                min_total_steps=args.min_total_steps,
+                min_complete_steps=args.min_complete_steps,
+                min_selection_rate=args.min_selection_rate,
+                min_complete_rate=args.min_complete_rate,
+                min_positive_excess_rate=args.min_positive_excess_rate,
+                min_mean_excess_vs_hold_bps=args.min_mean_excess_bps,
+                max_single_step_loss_bps=args.max_single_step_loss_bps,
+            ),
+            persist_if_ready=args.persist_ready,
+            lookback_observations=args.lookback_observations,
+            forward_observations=args.forward_observations,
+            step_observations=args.step_observations,
+            half_widths=args.half_widths,
+            center_offsets=args.center_offsets,
+            strategies=args.strategies,
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2, default=str))
+        if args.require_ready and not result.promotion.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "ml-train-csv":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        frame = pd.read_csv(args.file)
+        result = train_save_register_ml_v1(
+            storage,
+            frame,
+            model_id=args.model_id,
+            dataset_version=args.dataset_version,
+            artifact_directory=args.artifact_dir,
+            split_fraction=args.split_fraction,
+            min_rows=args.min_rows,
+        )
+        print(
+            json.dumps(
+                {
+                    "model": result.registry.__dict__,
+                    "artifact_path": str(result.artifact.artifact_path),
+                    "metadata_path": str(result.artifact.metadata_path),
+                    "artifact_sha256": result.artifact.metadata.artifact_sha256,
+                },
+                indent=2,
+            )
+        )
+        return
+
+    if args.command == "ml-offline-evaluate-csv":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        frame = pd.read_csv(args.file)
+        inference_config = MLInferenceConfig(
+            risk_lambda=args.risk_lambda,
+            min_positive_excess_probability=args.min_positive_probability,
+            min_range_survival_probability=args.min_range_survival,
+            min_score_bps=args.min_score_bps,
+        )
+        criteria = MLChallengerCriteria(
+            min_comparable_decisions=args.min_decisions,
+            min_choice_coverage_rate=args.min_choice_coverage,
+            min_mean_uplift_bps=args.min_uplift_bps,
+            min_win_rate=args.min_win_rate,
+            min_positive_excess_rate=args.min_positive_rate,
+            max_single_decision_loss_bps=args.max_single_loss_bps,
+        )
+        if args.qualify:
+            validation, record = qualify_registered_offline_challenger(
+                storage,
+                frame,
+                model_id=args.model_id,
+                inference_config=inference_config,
+                criteria=criteria,
+            )
+            output = validation.to_record()
+            output["model_status"] = record.status
+        else:
+            validation = evaluate_registered_offline_challenger(
+                storage,
+                frame,
+                model_id=args.model_id,
+                inference_config=inference_config,
+                criteria=criteria,
+            )
+            output = validation.to_record()
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not validation.offline_qualified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "ml-start-paper":
+        settings = Settings.from_env()
+        record = start_paper_challenger(
+            Storage(settings.database_path),
+            model_id=args.model_id,
+        )
+        print(json.dumps(record.__dict__, indent=2))
+        return
+
+    if args.command == "ml-model-status":
+        settings = Settings.from_env()
+        record = model_record(
+            Storage(settings.database_path),
+            model_id=args.model_id,
+        )
+        print(json.dumps(record.__dict__, indent=2))
         return
 
     if args.command == "paper-create-account":
