@@ -822,6 +822,42 @@ impl ExecutionIntentStore {
         Ok(total)
     }
 
+    pub fn submitted_live_entry_count_today(
+        &self,
+        exclude_decision_id: Option<&str>,
+    ) -> Result<usize> {
+        let now = now_unix()?;
+        let day_start = now - now.rem_euclid(86_400);
+        let conn = self.connection()?;
+        let mut statement = conn.prepare(
+            r#"
+            SELECT decision_id
+            FROM execution_intents
+            WHERE mode = 'LIVE'
+              AND action = 'ENTER'
+              AND status IN ('SIGNING', 'SENT', 'CONFIRMED')
+              AND updated_at_unix >= ?1
+            ORDER BY updated_at_unix ASC, decision_id ASC
+            "#,
+        )?;
+        let rows = statement.query_map(
+            params![day_start],
+            |row| row.get::<_, String>(0),
+        )?;
+
+        let mut count = 0_usize;
+        for row in rows {
+            let decision_id = row?;
+            if exclude_decision_id == Some(decision_id.as_str()) {
+                continue;
+            }
+            count = count
+                .checked_add(1)
+                .context("submitted LIVE ENTER daily count overflow")?;
+        }
+        Ok(count)
+    }
+
     pub fn unresolved_live_entry_decision_ids(
         &self,
         exclude_decision_id: Option<&str>,
@@ -1579,10 +1615,18 @@ mod tests {
             store.submitted_live_entry_capital_today(None).unwrap(),
             0.0
         );
+        assert_eq!(
+            store.submitted_live_entry_count_today(None).unwrap(),
+            0
+        );
         store.begin_signing(&id).unwrap();
         assert_eq!(
             store.submitted_live_entry_capital_today(None).unwrap(),
             12.5
+        );
+        assert_eq!(
+            store.submitted_live_entry_count_today(None).unwrap(),
+            1
         );
         assert_eq!(
             store
@@ -1590,11 +1634,21 @@ mod tests {
                 .unwrap(),
             0.0
         );
+        assert_eq!(
+            store
+                .submitted_live_entry_count_today(Some(&id))
+                .unwrap(),
+            0
+        );
         store.record_sent(&id, "signature").unwrap();
         store.record_confirmed(&id, "signature").unwrap();
         assert_eq!(
             store.submitted_live_entry_capital_today(None).unwrap(),
             12.5
+        );
+        assert_eq!(
+            store.submitted_live_entry_count_today(None).unwrap(),
+            1
         );
 
         let _ = std::fs::remove_file(path);
