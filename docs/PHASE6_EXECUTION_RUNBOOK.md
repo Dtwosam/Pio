@@ -1,6 +1,6 @@
 # Phase 6 Rust Execution Runbook
 
-Status: guarded execution preflight and unsigned emergency-exit construction implemented. Live signing and transaction sending remain disabled.
+Status: standard-SPL execution lifecycle implemented through unsigned construction, guarded presign, internal deterministic signing/submission, confirmation/receipt reconciliation, and live ledger mutation. Public live signing/sending remain disabled.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The current fail-closed pipeline is:
 14. Persist the prepared transaction and exact final simulation.
 15. Only then may the durable state machine enter `SIGNING`.
 
-There is currently no public command that sends a transaction.
+There is currently no public command that signs or sends a transaction. Internal signer/submission modules exist behind persisted final-presign evidence.
 
 ## Wallet isolation
 
@@ -112,6 +112,34 @@ meteora-executor execution-wallet-authorize \
 The execution store refuses `SIGNING` state without persisted accepted wallet
 authorization.
 
+## Standard-SPL normal entry and rebalance
+
+Normal entry uses a deterministic Meteora position PDA derived from the
+executor wallet, pool, lower bin and width. This keeps the controlled-live path
+to one isolated signer and avoids a second unmanaged position private key.
+
+Chain-resolved entry:
+
+```bash
+meteora-executor build-standard-spl-entry-from-chain <ENTRY_REQUEST_JSON>
+```
+
+Before building it verifies pool ownership, standard-SPL token programs,
+executor-owned token accounts and balances, position non-existence, touched
+bin arrays and missing initialization accounts.
+
+Normal rebalance consumes a precomputed remove/add plan. The executor does not
+recompute strategy economics.
+
+```bash
+meteora-executor build-standard-spl-rebalance-from-chain <REBALANCE_REQUEST_JSON>
+```
+
+It verifies the executor owns the position, resolves the pool and standard-SPL
+accounts from chain state, derives touched bin arrays and initializes missing
+arrays. The controlled path is narrowed to auditable full-range repositioning
+and fails closed outside its supported range/bitmap rules.
+
 ## Emergency exit
 
 The first Phase 6 instruction builder removes all standard-SPL DLMM liquidity.
@@ -150,6 +178,33 @@ The output is still unsigned. It should then pass the strict transaction guard
 and simulation pipeline. Token-2022 emergency exits remain fail-closed until
 their transfer-hook/remaining-account path is implemented and validated.
 
+## Settlement and confirmed close
+
+After liquidity has been fully removed, the standard-SPL settlement builder
+claims fees, claims each active supported reward, and closes the position
+account:
+
+```bash
+meteora-executor build-standard-spl-settlement-from-chain <SETTLEMENT_REQUEST_JSON>
+```
+
+The builder refuses non-zero position liquidity, wrong ownership, alternate
+fee owners, missing reward destinations, unsupported Token-2022 reward/pool
+mints and unsupported wide positions.
+
+After the settlement receipt is confirmed, final account closure must be
+proved independently:
+
+```bash
+meteora-executor verify-position-closed <RPC_URL> <POSITION_ADDRESS> > close-proof.json
+pio finalize-live-position-closure \
+  --decision <SETTLEMENT_DECISION_ID> \
+  --file close-proof.json
+```
+
+The proof RPC slot must be at or after the confirmed settlement slot. A
+position remains `LIQUIDITY_REMOVED` until this proof is accepted.
+
 ## Exact final presign
 
 `execution-presign-prepare` refreshes the unsigned transaction to a current
@@ -163,6 +218,28 @@ The durable execution journal stores:
 - the final exact simulation result.
 
 The store refuses `SIGNING` unless all of that evidence exists and passes.
+
+## Internal signer and ambiguous submission recovery
+
+The Rust library contains a deterministic single-signer implementation bound
+to the exact persisted final-presign transaction. The fee payer must be the
+isolated executor keypair and the prepared transaction must require exactly
+one signer.
+
+The internal submission coordinator persists `SENT` and the deterministic
+signature before calling RPC. If RPC returns an ambiguous error, the intent
+remains `SENT`. A retry may only regenerate and submit the same transaction
+and signature.
+
+Expired blockhashes are not blindly resubmitted. Use the read-only recovery
+command for a persisted `SENT` intent:
+
+```bash
+meteora-executor execution-recovery \
+  <EXECUTION_DB> <DECISION_ID> [EXPIRY_GRACE_BLOCKS]
+```
+
+Public sign/send commands remain deliberately absent.
 
 ## Execution receipts
 
@@ -192,6 +269,28 @@ signature cannot be linked to two decisions. If the corresponding Solana
 transaction snapshot is already present, slot/outcome/cost fields are checked
 for consistency.
 
+## Receipt-driven live ledger
+
+After Rust receipt export and Solana transaction-event ingestion, Python can
+derive immutable atomic execution effects:
+
+```bash
+pio apply-live-execution-effect --decision <DECISION_ID>
+pio apply-live-position-effect --decision <DECISION_ID>
+```
+
+For a final settlement, use the closure proof flow above. A fully closed live
+position can then produce immutable atomic outcome evidence:
+
+```bash
+pio build-live-position-outcome --position <POSITION_ADDRESS>
+pio live-execution-ledger-audit --require-clean
+```
+
+The outcome includes exact token-X/token-Y wallet deltas, composition fees,
+earned fees/rewards, and linked network fees. It is marked `ATOMIC_ONLY`;
+quote-valued PnL and ML labels are not created until valuation evidence exists.
+
 ## Confirmation recovery
 
 For an already persisted `SENT` intent:
@@ -215,14 +314,9 @@ This does not resend the transaction.
 
 Phase 6 is not complete yet. Remaining work includes:
 
-- instruction builders for normal entry and rebalance;
-- fee/reward claim and final position-close transaction sequence;
 - Token-2022/transfer-hook execution construction and validation;
-- isolated signer implementation;
-- transaction send/retry logic that cannot duplicate execution;
-- controlled recovery for expired blockhashes and ambiguous send outcomes;
-- receipt-driven live account/PnL mutation and final learning-label reconciliation;
-- explicit operational validation of the full executor lifecycle.
+- quote-valued live PnL and final learning-label valuation from atomic outcomes;
+- explicit operational validation of the full executor lifecycle after Phase 5 promotion.
 
 Live signing/sending must not be enabled merely because the preflight layer
 passes.
