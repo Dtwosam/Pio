@@ -1,16 +1,17 @@
 use anchor_lang::{InstructionData, ToAccountMetas};
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose, Engine as _};
-use commons::dlmm::accounts::BinArray;
+use commons::dlmm::accounts::{BinArray, LbPair, PositionV2};
 use commons::dlmm::types::{
     AddLiquidityParams, RebalanceLiquidityParams, RemainingAccountsInfo,
     RemoveLiquidityParams,
 };
 use commons::{
     derive_bin_array_pda, derive_event_authority_pda, dlmm,
-    BinArrayExtension,
+    pod_read_unaligned_skip_disc, BinArrayExtension, LbPairExtension,
 };
 use serde::{Deserialize, Serialize};
+use solana_client::rpc_client::RpcClient;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::message::{Message, VersionedMessage};
 use solana_sdk::pubkey::Pubkey;
@@ -71,6 +72,44 @@ pub struct StandardSplRebalanceRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainResolvedStandardSplRebalanceRequest {
+    pub position: String,
+    pub sender: String,
+    pub user_token_x: String,
+    pub user_token_y: String,
+    pub max_active_bin_slippage: u16,
+    pub should_claim_fee: bool,
+    pub should_claim_reward: bool,
+    pub min_withdraw_x_amount: u64,
+    pub max_deposit_x_amount: u64,
+    pub min_withdraw_y_amount: u64,
+    pub max_deposit_y_amount: u64,
+    pub shrink_mode: u8,
+    pub removes: Vec<RebalanceRemovePlan>,
+    pub adds: Vec<RebalanceAddPlan>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StandardSplRebalanceChainValidation {
+    pub position: String,
+    pub lb_pair: String,
+    pub owner_matches_sender: bool,
+    pub token_programs_standard_spl: bool,
+    pub user_token_x_valid: bool,
+    pub user_token_y_valid: bool,
+    pub active_id: i32,
+    pub bin_array_indexes: Vec<i32>,
+    pub missing_bin_array_indexes: Vec<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainResolvedStandardSplRebalanceReport {
+    pub validation: StandardSplRebalanceChainValidation,
+    pub request: StandardSplRebalanceRequest,
+    pub build: StandardSplRebalanceBuildReport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StandardSplRebalanceBuildReport {
     pub transaction_base64: String,
     pub program_id: String,
@@ -87,6 +126,45 @@ pub struct StandardSplRebalanceBuildReport {
 fn parse_pubkey(name: &str, value: &str) -> Result<Pubkey> {
     Pubkey::from_str(value.trim())
         .with_context(|| format!("{name} is not a valid Solana pubkey"))
+}
+
+fn require_account<'a>(
+    name: &str,
+    account: &'a Option<solana_sdk::account::Account>,
+) -> Result<&'a solana_sdk::account::Account> {
+    account.as_ref().with_context(|| format!("{name} account is missing"))
+}
+
+fn validate_standard_token_account(
+    name: &str,
+    account: &solana_sdk::account::Account,
+    expected_mint: &Pubkey,
+    expected_owner: &Pubkey,
+    token_program: &Pubkey,
+) -> Result<()> {
+    if account.owner != *token_program {
+        anyhow::bail!("{name} is not owned by the standard SPL Token program");
+    }
+    if account.data.len() < 64 {
+        anyhow::bail!("{name} token account data is too short");
+    }
+    let mint = Pubkey::new_from_array(
+        account.data[0..32]
+            .try_into()
+            .context("invalid token-account mint bytes")?,
+    );
+    let owner = Pubkey::new_from_array(
+        account.data[32..64]
+            .try_into()
+            .context("invalid token-account owner bytes")?,
+    );
+    if mint != *expected_mint {
+        anyhow::bail!("{name} mint does not match the DLMM pool mint");
+    }
+    if owner != *expected_owner {
+        anyhow::bail!("{name} token-account owner does not match sender");
+    }
+    Ok(())
 }
 
 fn touched_bin_array_indexes(
@@ -127,6 +205,165 @@ fn touched_bin_array_indexes(
         anyhow::bail!("rebalance requires at least one remove or add range");
     }
     Ok(indexes.into_iter().collect())
+}
+
+pub fn build_standard_spl_rebalance_from_chain(
+    rpc_url: &str,
+    request: &ChainResolvedStandardSplRebalanceRequest,
+) -> Result<ChainResolvedStandardSplRebalanceReport> {
+    if rpc_url.trim().is_empty() {
+        anyhow::bail!("RPC URL is required");
+    }
+    let position_key = parse_pubkey("position", &request.position)?;
+    let sender = parse_pubkey("sender", &request.sender)?;
+    let user_token_x = parse_pubkey("user_token_x", &request.user_token_x)?;
+    let user_token_y = parse_pubkey("user_token_y", &request.user_token_y)?;
+    let token_program = Pubkey::from_str(SPL_TOKEN_PROGRAM)
+        .context("hard-coded SPL token program id is invalid")?;
+    let client = RpcClient::new(rpc_url.to_string());
+
+    let position_account = client
+        .get_account(&position_key)
+        .context("failed to fetch rebalance position")?;
+    if position_account.owner != dlmm::ID {
+        anyhow::bail!("rebalance position is not owned by Meteora DLMM");
+    }
+    let position: PositionV2 =
+        pod_read_unaligned_skip_disc(&position_account.data)
+            .context("failed to decode Meteora PositionV2")?;
+    if position.owner != sender {
+        anyhow::bail!("executor sender does not own the rebalance position");
+    }
+
+    let lb_pair_key = position.lb_pair;
+    let lb_pair_account = client
+        .get_account(&lb_pair_key)
+        .context("failed to fetch rebalance DLMM pool")?;
+    if lb_pair_account.owner != dlmm::ID {
+        anyhow::bail!("rebalance pool is not owned by Meteora DLMM");
+    }
+    let lb_pair: LbPair =
+        pod_read_unaligned_skip_disc(&lb_pair_account.data)
+            .context("failed to decode Meteora LbPair")?;
+    let [token_x_program, token_y_program] = lb_pair.get_token_programs()?;
+    if token_x_program != token_program || token_y_program != token_program {
+        anyhow::bail!(
+            "chain-resolved live rebalance currently supports standard SPL pools only"
+        );
+    }
+
+    let bin_array_indexes = touched_bin_array_indexes(
+        lb_pair.active_id,
+        &request.removes,
+        &request.adds,
+    )?;
+    if bin_array_indexes.iter().any(|index| {
+        *index < MIN_DEFAULT_BITMAP_INDEX || *index > MAX_DEFAULT_BITMAP_INDEX
+    }) {
+        anyhow::bail!(
+            "chain-resolved live rebalance currently blocks bitmap-extension ranges"
+        );
+    }
+    let bin_array_keys = bin_array_indexes
+        .iter()
+        .map(|index| derive_bin_array_pda(lb_pair_key, i64::from(*index)).0)
+        .collect::<Vec<_>>();
+
+    let mut keys = vec![
+        user_token_x,
+        user_token_y,
+        lb_pair.reserve_x,
+        lb_pair.reserve_y,
+        lb_pair.token_x_mint,
+        lb_pair.token_y_mint,
+    ];
+    keys.extend(bin_array_keys.iter().copied());
+    let accounts = client
+        .get_multiple_accounts(&keys)
+        .context("failed to fetch rebalance dependent accounts")?;
+    if accounts.len() != keys.len() {
+        anyhow::bail!("unexpected rebalance account fetch result");
+    }
+
+    validate_standard_token_account(
+        "user_token_x",
+        require_account("user_token_x", &accounts[0])?,
+        &lb_pair.token_x_mint,
+        &sender,
+        &token_program,
+    )?;
+    validate_standard_token_account(
+        "user_token_y",
+        require_account("user_token_y", &accounts[1])?,
+        &lb_pair.token_y_mint,
+        &sender,
+        &token_program,
+    )?;
+    if require_account("reserve_x", &accounts[2])?.owner != token_program
+        || require_account("reserve_y", &accounts[3])?.owner != token_program
+    {
+        anyhow::bail!("DLMM reserve accounts are not standard SPL Token accounts");
+    }
+    if require_account("token_x_mint", &accounts[4])?.owner != token_program
+        || require_account("token_y_mint", &accounts[5])?.owner != token_program
+    {
+        anyhow::bail!("DLMM mint accounts are not standard SPL Token mints");
+    }
+
+    let mut missing_bin_array_indexes = vec![];
+    for (offset, index) in bin_array_indexes.iter().enumerate() {
+        match &accounts[6 + offset] {
+            Some(account) => {
+                if account.owner != dlmm::ID {
+                    anyhow::bail!(
+                        "rebalance bin-array account is not owned by Meteora DLMM"
+                    );
+                }
+            }
+            None => missing_bin_array_indexes.push(*index),
+        }
+    }
+
+    let resolved = StandardSplRebalanceRequest {
+        position: position_key.to_string(),
+        lb_pair: lb_pair_key.to_string(),
+        sender: sender.to_string(),
+        user_token_x: user_token_x.to_string(),
+        user_token_y: user_token_y.to_string(),
+        reserve_x: lb_pair.reserve_x.to_string(),
+        reserve_y: lb_pair.reserve_y.to_string(),
+        token_x_mint: lb_pair.token_x_mint.to_string(),
+        token_y_mint: lb_pair.token_y_mint.to_string(),
+        active_id: lb_pair.active_id,
+        max_active_bin_slippage: request.max_active_bin_slippage,
+        should_claim_fee: request.should_claim_fee,
+        should_claim_reward: request.should_claim_reward,
+        min_withdraw_x_amount: request.min_withdraw_x_amount,
+        max_deposit_x_amount: request.max_deposit_x_amount,
+        min_withdraw_y_amount: request.min_withdraw_y_amount,
+        max_deposit_y_amount: request.max_deposit_y_amount,
+        shrink_mode: request.shrink_mode,
+        removes: request.removes.clone(),
+        adds: request.adds.clone(),
+        initialize_bin_array_indexes: missing_bin_array_indexes.clone(),
+    };
+    let build = build_standard_spl_rebalance(&resolved)?;
+
+    Ok(ChainResolvedStandardSplRebalanceReport {
+        validation: StandardSplRebalanceChainValidation {
+            position: position_key.to_string(),
+            lb_pair: lb_pair_key.to_string(),
+            owner_matches_sender: true,
+            token_programs_standard_spl: true,
+            user_token_x_valid: true,
+            user_token_y_valid: true,
+            active_id: lb_pair.active_id,
+            bin_array_indexes,
+            missing_bin_array_indexes,
+        },
+        request: resolved,
+        build,
+    })
 }
 
 pub fn build_standard_spl_rebalance(
