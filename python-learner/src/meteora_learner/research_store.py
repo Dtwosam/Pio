@@ -162,7 +162,8 @@ class ResearchStore:
                 SELECT observed_at, position_address, pool_address, owner, fee_owner,
                        lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
                        fee_x, fee_y, reward_one, reward_two, last_updated_at,
-                       total_claimed_fee_x_amount, total_claimed_fee_y_amount
+                       total_claimed_fee_x_amount, total_claimed_fee_y_amount,
+                       supports_limit_order, reward_mint_0, reward_mint_1
                 FROM chain_position_snapshots
                 WHERE position_address = ?
                 ORDER BY observed_at DESC, id DESC
@@ -194,7 +195,7 @@ class ResearchStore:
                        bin_x_amount, bin_y_amount, bin_liquidity,
                        bin_fee_x_per_token_stored, bin_fee_y_per_token_stored,
                        bin_reward_per_token_stored_0, bin_reward_per_token_stored_1,
-                       position_liquidity, position_x_amount, position_y_amount,
+                       reward_checkpoint_available, position_liquidity, position_x_amount, position_y_amount,
                        position_fee_x_amount, position_fee_y_amount,
                        reward_one, reward_two
                 FROM position_bin_snapshots
@@ -283,7 +284,8 @@ class ResearchStore:
                 SELECT observed_at, position_address, pool_address, owner, fee_owner,
                        lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
                        fee_x, fee_y, reward_one, reward_two, last_updated_at,
-                       total_claimed_fee_x_amount, total_claimed_fee_y_amount
+                       total_claimed_fee_x_amount, total_claimed_fee_y_amount,
+                       supports_limit_order, reward_mint_0, reward_mint_1
                 FROM chain_position_snapshots
                 WHERE position_address = ? AND observed_at = ?
                 ORDER BY id DESC
