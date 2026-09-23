@@ -75,7 +75,7 @@ def walk_forward_baseline(
     pool_address: str,
     amount_x: int,
     amount_y: int,
-    phase2_gate: Phase2PromotionGate,
+    phase2_gate: Phase2PromotionGate | None,
     config: BaselinePolicyConfig,
     lookback_observations: int = 12,
     forward_observations: int = 2,
@@ -123,6 +123,10 @@ def walk_forward_baseline(
             f"need at least {minimum} chain observations for walk-forward evaluation"
         )
 
+    phase2_ready = bool(
+        phase2_gate is not None and phase2_gate.promotion_ready
+    )
+
     steps: list[WalkForwardStep] = []
     decision_index = lookback_observations - 1
     while decision_index + forward_observations <= len(times):
@@ -160,7 +164,7 @@ def walk_forward_baseline(
                     decision_observed_at=training_times[-1],
                     training_start_observed_at=training_times[0],
                     forward_end_observed_at=forward_times[-1],
-                    phase2_ready=phase2_gate.promotion_ready,
+                    phase2_ready=phase2_ready,
                     selected=False,
                     proposal=None,
                     forward_status="NO_SELECTION",
@@ -229,7 +233,7 @@ def walk_forward_baseline(
                     decision_observed_at=training_times[-1],
                     training_start_observed_at=training_times[0],
                     forward_end_observed_at=forward_times[-1],
-                    phase2_ready=phase2_gate.promotion_ready,
+                    phase2_ready=phase2_ready,
                     selected=True,
                     proposal=proposal,
                     forward_status="REJECTED",
@@ -253,7 +257,7 @@ def walk_forward_baseline(
                     decision_observed_at=training_times[-1],
                     training_start_observed_at=training_times[0],
                     forward_end_observed_at=forward_times[-1],
-                    phase2_ready=phase2_gate.promotion_ready,
+                    phase2_ready=phase2_ready,
                     selected=True,
                     proposal=proposal,
                     forward_status=status,
@@ -298,7 +302,7 @@ def walk_forward_baseline(
         positive_excess_steps=sum(value > 0 for value in excess),
         total_excess_vs_hold_y_atomic=sum(excess) if excess else None,
         mean_excess_vs_hold_bps=float(mean(bps)) if bps else None,
-        phase2_ready=phase2_gate.promotion_ready,
+        phase2_ready=phase2_ready,
         research_only=not phase2_gate.promotion_ready,
         steps_detail=tuple(steps),
     )
