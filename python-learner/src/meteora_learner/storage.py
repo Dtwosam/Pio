@@ -108,6 +108,27 @@ CREATE TABLE IF NOT EXISTS chain_pool_snapshots (
 CREATE INDEX IF NOT EXISTS idx_chain_pool_time
 ON chain_pool_snapshots(pool_address, observed_at);
 
+CREATE TABLE IF NOT EXISTS token_mint_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    mint_address TEXT NOT NULL,
+    token_program TEXT NOT NULL,
+    capture_slot_start INTEGER NOT NULL,
+    capture_slot_end INTEGER NOT NULL,
+    supply TEXT NOT NULL,
+    decimals INTEGER NOT NULL,
+    is_initialized INTEGER NOT NULL,
+    mint_authority TEXT,
+    freeze_authority TEXT,
+    data_len INTEGER NOT NULL,
+    token_2022_extension_data_len INTEGER NOT NULL,
+    has_token_2022_extension_data INTEGER NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_mint_snapshots_mint_time
+ON token_mint_snapshots(mint_address, observed_at, id);
+
 CREATE TABLE IF NOT EXISTS chain_pool_capture_state (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
@@ -1324,6 +1345,89 @@ class Storage:
                 rows,
             )
         return len(rows)
+
+    def save_token_mint_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        observed_at: str | None = None,
+    ) -> int:
+        observed_at = observed_at or utc_now_iso()
+        required = {
+            "mint_address",
+            "token_program",
+            "capture_slot_start",
+            "capture_slot_end",
+            "supply",
+            "decimals",
+            "is_initialized",
+            "data_len",
+            "token_2022_extension_data_len",
+            "has_token_2022_extension_data",
+        }
+        missing = sorted(required - set(snapshot))
+        if missing:
+            raise ValueError(
+                f"mint snapshot missing fields: {missing}"
+            )
+        capture_start = int(snapshot["capture_slot_start"])
+        capture_end = int(snapshot["capture_slot_end"])
+        if capture_start < 0 or capture_end < capture_start:
+            raise ValueError("invalid mint capture slot range")
+        decimals = int(snapshot["decimals"])
+        if not 0 <= decimals <= 255:
+            raise ValueError("mint decimals must be between 0 and 255")
+        data_len = int(snapshot["data_len"])
+        extension_len = int(
+            snapshot["token_2022_extension_data_len"]
+        )
+        if data_len < 82 or extension_len < 0:
+            raise ValueError("invalid mint account data length")
+
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO token_mint_snapshots(
+                    observed_at, mint_address, token_program,
+                    capture_slot_start, capture_slot_end,
+                    supply, decimals, is_initialized,
+                    mint_authority, freeze_authority,
+                    data_len, token_2022_extension_data_len,
+                    has_token_2022_extension_data, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    observed_at,
+                    str(snapshot["mint_address"]),
+                    str(snapshot["token_program"]),
+                    capture_start,
+                    capture_end,
+                    str(snapshot["supply"]),
+                    decimals,
+                    int(bool(snapshot["is_initialized"])),
+                    (
+                        str(snapshot["mint_authority"])
+                        if snapshot.get("mint_authority") is not None
+                        else None
+                    ),
+                    (
+                        str(snapshot["freeze_authority"])
+                        if snapshot.get("freeze_authority") is not None
+                        else None
+                    ),
+                    data_len,
+                    extension_len,
+                    int(
+                        bool(
+                            snapshot[
+                                "has_token_2022_extension_data"
+                            ]
+                        )
+                    ),
+                    json.dumps(snapshot, separators=(",", ":")),
+                ),
+            )
+            return int(cursor.lastrowid)
 
     def save_chain_pool_snapshot(
         self,
