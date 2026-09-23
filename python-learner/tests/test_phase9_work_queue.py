@@ -1788,6 +1788,72 @@ def test_work_queue_persists_manifest_after_prewire_ready(
     )
 
 
+def test_work_queue_historical_cutoff_refuses_later_chain_backfill(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_pool(
+            storage,
+            pool,
+            "2026-09-23T14:00:00+00:00",
+        )
+
+    queue = build_phase9_work_queue(
+        storage,
+        as_of="2026-09-23T13:00:00+00:00",
+    )
+
+    assert queue.candidate_pools == ()
+    gap = next(
+        item for item in queue.items
+        if item.task_type == "HISTORICAL_CHAIN_POOL_GAP"
+    )
+    assert gap.shell_command is None
+    assert "cannot backfill" in gap.reason
+    assert not any(
+        item.task_type in {"CHAIN_POOL_CAPTURE_PLAN", "API_POOL_DISCOVERY"}
+        for item in queue.items
+    )
+
+
+def test_work_queue_historical_history_deficit_has_no_capture_command(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        for index in range(10):
+            save_pool(
+                storage,
+                pool,
+                f"2026-09-23T12:00:{index:02d}+00:00",
+            )
+        for index in range(40):
+            save_pool(
+                storage,
+                pool,
+                f"2026-09-23T14:00:{index:02d}+00:00",
+            )
+
+    queue = build_phase9_work_queue(
+        storage,
+        as_of="2026-09-23T13:00:00+00:00",
+    )
+
+    history = next(
+        item for item in queue.items
+        if item.task_type == "CHAIN_HISTORY_DEPTH"
+    )
+    assert history.shell_command is None
+    assert "cannot be backfilled" in history.reason
+    assert "pool-a:33" in history.reason
+    adaptive = next(
+        item for item in queue.items
+        if item.task_type == "ADAPTIVE_MULTI_POOL"
+    )
+    assert adaptive.shell_command is None
+
+
 def test_work_queue_surfaces_chain_capture_plan_from_api_discovery(
     tmp_path,
 ):
