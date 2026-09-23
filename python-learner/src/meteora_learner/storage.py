@@ -428,6 +428,28 @@ CREATE TABLE IF NOT EXISTS paper_scheduler_state (
 CREATE INDEX IF NOT EXISTS idx_paper_scheduler_lease
 ON paper_scheduler_state(lease_until);
 
+CREATE TABLE IF NOT EXISTS paper_scheduler_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id TEXT NOT NULL,
+    event_time TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK(
+        event_type IN (
+            'LEASE_ACQUIRED',
+            'LEASE_BUSY',
+            'LEASE_RECOVERED',
+            'TICK_FINISHED'
+        )
+    ),
+    tick_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    status TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_scheduler_events_account_time
+ON paper_scheduler_events(account_id, event_time, id);
+
+
 CREATE TABLE IF NOT EXISTS token_quote_observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     token_mint TEXT NOT NULL,
