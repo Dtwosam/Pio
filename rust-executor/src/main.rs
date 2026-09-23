@@ -43,6 +43,7 @@ fn usage() {
   meteora-executor build-emergency-exit <REQUEST_JSON_OR_->
   meteora-executor wallet-status
   meteora-executor build-standard-spl-entry <ENTRY_REQUEST_JSON_OR_->
+  meteora-executor build-standard-spl-entry-from-chain <ENTRY_REQUEST_JSON_OR_->
   meteora-executor wallet-authorize-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
   meteora-executor guard-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
@@ -703,6 +704,41 @@ RPC_URL is accepted as a compatibility fallback",
                 serde_json::from_str(&request_json)
                     .context("invalid standard-SPL entry request JSON")?;
             let report = entry::build_standard_spl_entry(&request)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        "build-standard-spl-entry-from-chain" => {
+            let request_source = args
+                .next()
+                .context("ENTRY_REQUEST_JSON_OR_- is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "build-standard-spl-entry-from-chain accepts exactly one argument"
+                );
+            }
+            let request_json = if request_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read entry request JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&request_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read entry request JSON: {request_source}"
+                        )
+                    })?
+            };
+            let request: entry::ChainResolvedStandardSplEntryRequest =
+                serde_json::from_str(&request_json)
+                    .context("invalid chain-resolved entry request JSON")?;
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let report =
+                entry::build_standard_spl_entry_from_chain(&rpc_url, &request)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         "wallet-status" => {
