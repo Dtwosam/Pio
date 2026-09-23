@@ -15,6 +15,7 @@ class PoolSafetyConfig:
     min_pool_age_hours: float = 24.0
     min_chain_observations: int = 12
     max_dynamic_fee_pct: float | None = 5.0
+    max_pool_snapshot_age_seconds: int | None = 900
     require_standard_spl: bool = True
     require_not_blacklisted: bool = True
 
@@ -29,6 +30,11 @@ class PoolSafetyConfig:
             raise ValueError("min_chain_observations cannot be negative")
         if self.max_dynamic_fee_pct is not None and self.max_dynamic_fee_pct < 0:
             raise ValueError("max_dynamic_fee_pct cannot be negative")
+        if (
+            self.max_pool_snapshot_age_seconds is not None
+            and self.max_pool_snapshot_age_seconds < 0
+        ):
+            raise ValueError("max_pool_snapshot_age_seconds cannot be negative")
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,7 @@ class PoolSafetyAssessment:
     volume_24h_usd: float | None
     fees_24h_usd: float | None
     dynamic_fee_pct: float | None
+    snapshot_age_seconds: int | None
     pool_age_hours: float | None
     chain_observations: int
     standard_spl: bool | None
@@ -120,6 +127,27 @@ def screen_pool_universe(
             if pool.get("dynamic_fee_pct") is not None
             else None
         )
+
+        snapshot_age_seconds: int | None = None
+        observed_raw = pool.get("observed_at")
+        if observed_raw is None:
+            reasons.append("pool snapshot timestamp is unknown")
+        else:
+            observed_dt = _parse_iso(str(observed_raw))
+            snapshot_age_seconds = int(
+                (as_of_dt - observed_dt).total_seconds()
+            )
+            if snapshot_age_seconds < 0:
+                reasons.append("pool snapshot is after evaluation time")
+            elif (
+                config.max_pool_snapshot_age_seconds is not None
+                and snapshot_age_seconds
+                > config.max_pool_snapshot_age_seconds
+            ):
+                reasons.append(
+                    f"pool snapshot age {snapshot_age_seconds}s > allowed "
+                    f"{config.max_pool_snapshot_age_seconds}s"
+                )
 
         if tvl is None:
             reasons.append("TVL is unknown")
@@ -213,6 +241,7 @@ def screen_pool_universe(
                 volume_24h_usd=volume,
                 fees_24h_usd=fees,
                 dynamic_fee_pct=dynamic_fee,
+                snapshot_age_seconds=snapshot_age_seconds,
                 pool_age_hours=age_hours,
                 chain_observations=chain_observations,
                 standard_spl=standard_spl,
