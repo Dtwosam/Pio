@@ -9,7 +9,7 @@ from .phase9_capture_plan import (
     Phase9ChainCaptureCriteria,
     build_phase9_chain_capture_plan,
 )
-from .storage import Storage, utc_now_iso
+from .storage import Storage
 
 
 InspectPool = Callable[[str, int], dict[str, Any]]
@@ -68,7 +68,7 @@ def run_phase9_chain_capture_batch(
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
 
-    ranking_as_of = api_ranking_as_of or utc_now_iso()
+    ranking_as_of = api_ranking_as_of
     plan = build_phase9_chain_capture_plan(
         storage,
         criteria=criteria,
