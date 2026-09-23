@@ -348,6 +348,8 @@ def run_phase9_research_refresh(
     source_freshness_report = evaluate_phase9_source_freshness(
         storage,
         as_of=refresh_as_of,
+        required_mint_pools=criteria.min_mint_risk_pools,
+        required_wallet_pools=criteria.min_wallet_flow_pools,
     )
     ranked_cohort = evaluate_phase9_pool_cohort(
         storage,
