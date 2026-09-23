@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Sequence
 
 from .composition_fee import simulate_active_bin_composition_fee
 from .deposit_plan import (
@@ -173,6 +173,7 @@ def replay_small_lp_history(
     max_bin_id: int,
     strategy: StrategyType | str,
     observation_limit: int = 12,
+    observation_times: Sequence[str] | None = None,
     max_share_bps: int = 500,
     favor_x_in_active_bin: bool = False,
 ) -> SmallLPReplayResult:
@@ -193,14 +194,26 @@ def replay_small_lp_history(
         raise ValueError("amounts cannot be negative")
     if observation_limit < 2:
         raise ValueError("observation_limit must be at least 2")
+    if observation_times is not None and len(observation_times) < 2:
+        raise ValueError("observation_times must contain at least two observations")
     if not 1 <= max_share_bps <= 10_000:
         raise ValueError("max_share_bps must be between 1 and 10000")
 
     store = ResearchStore(database_path)
-    times_desc = store.chain_observation_times(pool_address, limit=observation_limit)
-    if len(times_desc) < 2:
-        raise ValueError("need at least two chain observations for replay")
-    times = list(reversed(times_desc))
+    if observation_times is None:
+        times_desc = store.chain_observation_times(
+            pool_address,
+            limit=observation_limit,
+        )
+        if len(times_desc) < 2:
+            raise ValueError("need at least two chain observations for replay")
+        times = list(reversed(times_desc))
+    else:
+        times = [str(value) for value in observation_times]
+        if times != sorted(times) or len(set(times)) != len(times):
+            raise ValueError(
+                "observation_times must be unique and strictly ascending"
+            )
 
     pool_snapshots: list[dict[str, Any]] = []
     bin_snapshots: list[dict[int, dict[str, Any]]] = []
