@@ -116,6 +116,8 @@ pub fn evaluate_controlled_live(
 
     let reason = if !phase5.accepted {
         "phase5_promotion_gate_rejected"
+    } else if proposal.mode != crate::models::Mode::Live {
+        "controlled_live_requires_live_mode"
     } else {
         match proposal.action {
             Action::Enter => {
@@ -385,6 +387,29 @@ mod tests {
         assert_eq!(cfg.max_open_positions, 1);
         assert!(cfg.max_capital_quote_per_entry > 0.0);
         assert!(cfg.allow_exit);
+    }
+
+    #[test]
+    fn non_live_proposal_is_rejected() {
+        let path = db_path();
+        seed(&path, 0);
+        let pool = Pubkey::new_unique();
+        let mut item = proposal(pool, Action::Enter);
+        item.mode = Mode::Paper;
+
+        let report = evaluate_controlled_live(
+            &path,
+            &item,
+            &config(pool),
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(
+            report.reason,
+            "controlled_live_requires_live_mode"
+        );
+        let _ = std::fs::remove_file(path);
     }
 
 }
