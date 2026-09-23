@@ -91,6 +91,9 @@ from .phase9_policy_controlled_validation import (
     evaluate_phase9_policy_controlled_validation,
     persist_phase9_policy_controlled_validation,
 )
+from .phase9_policy_readiness import (
+    evaluate_phase9_policy_readiness,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -1849,6 +1852,15 @@ def main() -> None:
     )
     phase9_policy_controlled_audit.add_argument(
         "--require-current",
+        action="store_true",
+    )
+
+    phase9_policy_readiness = subparsers.add_parser(
+        "phase9-policy-readiness-audit",
+        help="Require current Phase 9 authorization and fresh controlled holdout evidence without granting LIVE policy authority",
+    )
+    phase9_policy_readiness.add_argument(
+        "--require-ready",
         action="store_true",
     )
 
@@ -4175,6 +4187,15 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_current and not result.current:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-readiness-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_policy_readiness(storage)
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.ready:
             raise SystemExit(2)
         return
 
