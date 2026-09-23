@@ -37,12 +37,13 @@ pub fn prepare_unsigned_transaction_with_latest_blockhash(
     }
 
     let client = RpcClient::new(rpc_url.to_string());
-    let response = client
-        .get_latest_blockhash_with_commitment_and_context(
-            CommitmentConfig::confirmed(),
-        )
+    let commitment = CommitmentConfig::confirmed();
+    let rpc_context_slot = client
+        .get_slot_with_commitment(commitment)
+        .context("failed to fetch confirmed Solana slot")?;
+    let (blockhash, last_valid_block_height) = client
+        .get_latest_blockhash_with_commitment(commitment)
         .context("failed to fetch latest confirmed Solana blockhash")?;
-    let (blockhash, last_valid_block_height) = response.value;
 
     match &mut transaction.message {
         VersionedMessage::Legacy(message) => {
@@ -61,7 +62,7 @@ pub fn prepare_unsigned_transaction_with_latest_blockhash(
         transaction_base64,
         recent_blockhash: blockhash.to_string(),
         last_valid_block_height,
-        rpc_context_slot: response.context.slot,
+        rpc_context_slot,
         signatures_all_default,
     })
 }
@@ -70,7 +71,7 @@ pub fn prepare_unsigned_transaction_with_latest_blockhash(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{engine::general_purpose, Engine as _};
+    use base64::engine::general_purpose;
     use solana_sdk::hash::Hash;
     use solana_sdk::message::{Message, VersionedMessage};
     use solana_sdk::pubkey::Pubkey;
