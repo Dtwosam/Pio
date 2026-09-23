@@ -112,16 +112,29 @@ def token_quote_status(
     now = _parse_time(as_of) if as_of is not None else datetime.now(timezone.utc)
 
     with storage.connect() as conn:
-        row = conn.execute(
-            """
-            SELECT quote_per_atomic, source, observed_at
-            FROM token_quote_observations
-            WHERE token_mint = ? AND quote_unit = ?
-            ORDER BY observed_at DESC, id DESC
-            LIMIT 1
-            """,
-            (token_mint, quote_unit),
-        ).fetchone()
+        if as_of is None:
+            row = conn.execute(
+                """
+                SELECT quote_per_atomic, source, observed_at
+                FROM token_quote_observations
+                WHERE token_mint = ? AND quote_unit = ?
+                ORDER BY observed_at DESC, id DESC
+                LIMIT 1
+                """,
+                (token_mint, quote_unit),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT quote_per_atomic, source, observed_at
+                FROM token_quote_observations
+                WHERE token_mint = ? AND quote_unit = ?
+                  AND observed_at <= ?
+                ORDER BY observed_at DESC, id DESC
+                LIMIT 1
+                """,
+                (token_mint, quote_unit, as_of),
+            ).fetchone()
 
     if row is None:
         return TokenQuoteStatus(
@@ -151,6 +164,50 @@ def token_quote_status(
         reason=None if fresh else f"quote is stale by {age} seconds",
     )
 
+
+
+def required_paper_quote_mints(
+    storage: Storage,
+    *,
+    account_id: str,
+) -> tuple[str, ...]:
+    """
+    Return quote mints required to value open chain-bound PAPER positions.
+
+    Token Y is always required because PAPER account value is expressed in the
+    account quote unit. Reward mints need an external quote only when they are
+    neither token X nor token Y for their pool.
+    """
+    if not account_id.strip():
+        raise ValueError("account_id is required")
+
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.token_x_mint, c.token_y_mint,
+                   c.reward_mint_0, c.reward_mint_1
+            FROM paper_positions p
+            JOIN paper_counterfactual_positions c
+              ON c.position_id = p.position_id
+            WHERE p.account_id = ?
+              AND p.status = 'OPEN'
+            """,
+            (account_id,),
+        ).fetchall()
+
+    required: set[str] = set()
+    for token_x, token_y, reward_0, reward_1 in rows:
+        x = str(token_x)
+        y = str(token_y)
+        if y:
+            required.add(y)
+        for reward in (reward_0, reward_1):
+            if reward is None:
+                continue
+            mint = str(reward)
+            if mint and mint not in {x, y}:
+                required.add(mint)
+    return tuple(sorted(required))
 
 def load_fresh_quote_map(
     storage: Storage,
