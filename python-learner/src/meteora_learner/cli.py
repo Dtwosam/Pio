@@ -7,6 +7,7 @@ import sys
 import pandas as pd
 
 from .add_execution import build_add_execution_calibration
+from .adaptive_range import AdaptiveRangeCriteria, research_adaptive_range
 from .baseline_policy import BaselinePolicyConfig
 from .baseline_walk_forward import walk_forward_baseline
 from .calibration_queue import build_calibration_work_queue
@@ -1040,6 +1041,47 @@ def main() -> None:
     )
     phase8_validate.add_argument("--persist-ready", action="store_true")
     phase8_validate.add_argument("--require-ready", action="store_true")
+
+    adaptive_range = subparsers.add_parser(
+        "adaptive-range-research",
+        help="Estimate a no-lookahead DLMM range width from historical active-bin movement",
+    )
+    adaptive_range.add_argument("--pool", required=True)
+    adaptive_range.add_argument(
+        "--lookback-observations",
+        type=int,
+        default=96,
+    )
+    adaptive_range.add_argument(
+        "--holding-observations",
+        type=int,
+        default=6,
+    )
+    adaptive_range.add_argument(
+        "--target-coverage",
+        type=float,
+        default=0.90,
+    )
+    adaptive_range.add_argument(
+        "--min-half-width-bins",
+        type=int,
+        default=1,
+    )
+    adaptive_range.add_argument(
+        "--max-half-width-bins",
+        type=int,
+        default=35,
+    )
+    adaptive_range.add_argument(
+        "--min-historical-windows",
+        type=int,
+        default=12,
+    )
+    adaptive_range.add_argument("--as-of")
+    adaptive_range.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
 
     ml_train = subparsers.add_parser(
         "ml-train-csv",
@@ -2413,6 +2455,29 @@ def main() -> None:
             output["persisted"] = None
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "adaptive-range-research":
+        settings = Settings.from_env()
+        result = research_adaptive_range(
+            Storage(settings.database_path),
+            pool_address=args.pool,
+            criteria=AdaptiveRangeCriteria(
+                lookback_observations=args.lookback_observations,
+                holding_observations=args.holding_observations,
+                target_coverage=args.target_coverage,
+                min_half_width_bins=args.min_half_width_bins,
+                max_half_width_bins=args.max_half_width_bins,
+                min_historical_windows=args.min_historical_windows,
+            ),
+            as_of=args.as_of,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if (
+            args.require_ready
+            and result.status != "RESEARCH_READY"
+        ):
             raise SystemExit(2)
         return
 
