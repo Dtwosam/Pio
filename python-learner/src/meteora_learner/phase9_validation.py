@@ -18,6 +18,10 @@ from .contextual_bandit import (
     ContextualBanditCriteria,
 )
 from .contextual_bandit_cycle import evaluate_cycle_contextual_bandit
+from .cross_pool_research import (
+    CrossPoolResearchCandidate,
+    CrossPoolResearchReport,
+)
 from .market_regime import DLMMRegimeCriteria
 from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .mint_snapshot_lineage import (
@@ -36,7 +40,9 @@ from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
     PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+    PortfolioAllocationCriteria,
     portfolio_candidate_artifact_sha256,
+    research_portfolio_allocation,
 )
 from .static_hedge import (
     STATIC_HEDGE_EVIDENCE_TYPE,
@@ -595,11 +601,60 @@ def _allocation_lineage_valid(storage: Storage) -> bool:
         "comparison": evidence["comparison"],
     }
     recomputed_sha = portfolio_candidate_artifact_sha256(payload)
-    return (
+    if not (
         str(evidence.get("artifact_sha256", "")).strip()
         == expected_sha
         == recomputed_sha
+    ):
+        return False
+
+    allocation_evidence = rows[0]["evidence"]
+    comparison_raw = evidence["comparison"]
+    try:
+        candidates_raw = comparison_raw["candidates"]
+        if not isinstance(candidates_raw, list):
+            return False
+        comparison = CrossPoolResearchReport(
+            plans_seen=int(comparison_raw["plans_seen"]),
+            comparable_plans=int(
+                comparison_raw["comparable_plans"]
+            ),
+            excluded_plans=int(comparison_raw["excluded_plans"]),
+            leader_pool_address=(
+                str(comparison_raw["leader_pool_address"])
+                if comparison_raw.get("leader_pool_address")
+                is not None
+                else None
+            ),
+            ranking_rule=str(comparison_raw["ranking_rule"]),
+            candidates=tuple(
+                CrossPoolResearchCandidate(**item)
+                for item in candidates_raw
+            ),
+        )
+        replay = research_portfolio_allocation(
+            storage,
+            comparison=comparison,
+            budget_quote=float(
+                allocation_evidence["budget_quote"]
+            ),
+            criteria=PortfolioAllocationCriteria(
+                **allocation_evidence["criteria"]
+            ),
+            candidate_lineage=dict(
+                allocation_evidence["candidate_lineage"]
+            ),
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+    persisted_normalized = json.loads(
+        json.dumps(allocation_evidence, sort_keys=True)
     )
+    replay_normalized = json.loads(
+        json.dumps(replay.to_record(), sort_keys=True)
+    )
+    return persisted_normalized == replay_normalized
 
 
 def _static_hedge_lineage_valid(
