@@ -57,8 +57,12 @@ def inspect_pool_with_rust(
         raise ValueError("array_radius cannot be negative")
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
-    if not os.getenv("RPC_URL"):
-        raise ValueError("RPC_URL environment variable is required")
+    rpc_url = os.getenv("SOLANA_RPC_URL") or os.getenv("RPC_URL")
+    if not rpc_url:
+        raise ValueError(
+            "SOLANA_RPC_URL environment variable is required "
+            "(RPC_URL is accepted as a compatibility fallback)"
+        )
 
     manifest = Path(rust_manifest_path or default_rust_manifest_path())
     if not manifest.exists():
