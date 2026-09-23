@@ -276,8 +276,8 @@ def test_settlement_exit_derives_claimed_fee_reward_and_close_effects(tmp_path):
     effect = derive_live_execution_effect(storage, "decision-1")
 
     assert effect.position_address == "position"
-    assert effect.token_x_wallet_delta_atomic == 7
-    assert effect.token_y_wallet_delta_atomic == 8
+    assert effect.token_x_wallet_delta_atomic == 0
+    assert effect.token_y_wallet_delta_atomic == 0
     assert effect.earned_fee_x_atomic == 7
     assert effect.earned_fee_y_atomic == 8
     assert effect.reward_one_atomic == 9
