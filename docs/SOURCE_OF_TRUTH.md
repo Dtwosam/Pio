@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Source of Truth
 
-Status: v0.2
+Status: v0.3
 Date: 2026-09-23
 
 ## 1. Mission
@@ -165,6 +165,8 @@ The gate separates:
 - operator-selected minimum sample sizes and coverage
 
 A capability that is implemented but not independently reconciled remains blocked. Missing or legacy data is ineligible; it is never treated as a zero-error sample.
+
+For standard-SPL liquidity operations, the gate is evidence-driven. Composition-fee validation requires slot-bounded prestate whose pool and active-bin-array account histories prove no intervening state mutation, target-time fee-state replay, an exactly reconstructable active-bin allocation, and a positive emitted CompositionFee event. Add/rebalance execution calibration uses the transaction's own active-bin and token-amount guard bounds plus real Solana receipt costs.
 
 ## 7. Decision flow
 
