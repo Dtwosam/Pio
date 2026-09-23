@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from .adaptive_range import AdaptiveRangeCriteria
 from .adaptive_range_validation import AdaptiveRangeValidationCriteria
@@ -98,6 +98,7 @@ def run_phase9_history_capture(
     ingest_observed_at: str | None = None,
     min_observation_interval_seconds: int = 0,
     continue_sampling_when_ready: bool = False,
+    pool_addresses: Sequence[str] | None = None,
 ) -> Phase9HistoryCaptureReport:
     if bin_array_radius < 0:
         raise ValueError("bin_array_radius cannot be negative")
@@ -115,6 +116,7 @@ def run_phase9_history_capture(
         validation_criteria=validation_criteria,
         regime_criteria=regime_criteria,
         bin_array_radius=bin_array_radius,
+        pool_addresses=pool_addresses,
     )
 
     if inspector is None:
@@ -269,6 +271,7 @@ def run_phase9_history_capture(
         validation_criteria=validation_criteria,
         regime_criteria=regime_criteria,
         bin_array_radius=bin_array_radius,
+        pool_addresses=pool_addresses,
     )
     remaining = sum(
         item.additional_observations_needed
