@@ -317,6 +317,7 @@ def build_phase9_evidence_plan(
         missing_families
         or not status.research_sources_current
     ):
+        refresh_actionable = status.phase8_current
         items.append(
             Phase9EvidenceDebtItem(
                 priority=80,
@@ -327,7 +328,7 @@ def build_phase9_evidence_plan(
                     else "SOURCE_STALE"
                 ),
                 blocking=True,
-                actionable=True,
+                actionable=refresh_actionable,
                 current=sum(
                     int(family.ready) for family in status.families
                 ),
@@ -336,10 +337,21 @@ def build_phase9_evidence_plan(
                     int(not family.ready)
                     for family in status.families
                 ),
-                shell_command="pio phase9-research-refresh-run",
+                shell_command=(
+                    "pio phase9-research-refresh-run"
+                    if refresh_actionable
+                    else None
+                ),
                 reason=(
-                    "persisted Phase 9 research must be recomputed from the "
-                    "current source corpus"
+                    (
+                        "persisted Phase 9 research must be recomputed from "
+                        "the current source corpus"
+                    )
+                    if refresh_actionable
+                    else (
+                        "research refresh is blocked until Phase 8 promotion "
+                        "is current"
+                    )
                     + (
                         "; missing/under-qualified families: "
                         + ", ".join(missing_families)
@@ -361,16 +373,25 @@ def build_phase9_evidence_plan(
                 debt_type="BUNDLE_REVALIDATION",
                 scope="__PHASE9_RESEARCH_BUNDLE__",
                 blocking=True,
-                actionable=True,
+                actionable=status.phase8_current,
                 current=0,
                 required=1,
                 remaining=1,
                 shell_command=(
                     "pio phase9-research-refresh-run --require-bundle-ready"
+                    if status.phase8_current
+                    else None
                 ),
                 reason=(
-                    "component evidence is ready/current but the consolidated "
-                    "research bundle still needs revalidation"
+                    (
+                        "component evidence is ready/current but the "
+                        "consolidated research bundle still needs revalidation"
+                    )
+                    if status.phase8_current
+                    else (
+                        "bundle revalidation is blocked until Phase 8 "
+                        "promotion is current"
+                    )
                 ),
             )
         )
