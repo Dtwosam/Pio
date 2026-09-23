@@ -1,6 +1,6 @@
 # Phase 6 Rust Execution Runbook
 
-Status: Phase 6 implementation is complete behind fail-closed gates, including standard-SPL and Token-2022 construction, guarded presign, internal deterministic signing/submission, recovery, receipts and live-ledger reconciliation. Controlled live validation is still pending. Public live signing/sending remain disabled.
+Status: Phase 6 implementation and persistent pre-live validation workflow are complete behind fail-closed gates. Real Phase 6 promotion evidence is still pending because it depends on real Phase 5 promotion and a guarded presign corpus. Default builds cannot submit live transactions.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The current fail-closed pipeline is:
 14. Persist the prepared transaction and exact final simulation.
 15. Only then may the durable state machine enter `SIGNING`.
 
-There is currently no public command that signs or sends a transaction. Internal signer/submission modules exist behind persisted final-presign evidence.
+Signing/submission exists only behind the non-default `live-submit` Cargo feature. Even that build remains runtime-disabled unless `PIO_LIVE_SUBMIT_ENABLED=1`, and submission also requires persisted Phase 5 and Phase 6 promotion evidence plus the controlled-live gate. Default builds contain no live-submit command.
 
 ## Wallet isolation
 
@@ -235,7 +235,7 @@ meteora-executor execution-recovery \
   <EXECUTION_DB> <DECISION_ID> [EXPIRY_GRACE_BLOCKS]
 ```
 
-Public sign/send commands remain deliberately absent.
+Default builds deliberately omit the live-submit command. The opt-in `live-submit` build still requires the runtime switch and all persisted promotion/readiness/controlled-live gates.
 
 ## Execution receipts
 
@@ -306,43 +306,63 @@ It is idempotent:
 
 This does not resend the transaction.
 
-## Phase 6 readiness gate
+## Phase 6 readiness and persistent promotion
 
-Before any future public live-submit command is enabled, Rust must independently
-verify the persisted Phase 5 promotion evidence and bind it to the isolated
-executor wallet plus the strict action-bound transaction policy.
+Phase 6 uses two separate gates.
 
-Check Phase 5 evidence only:
+The **readiness gate** checks current deployment state: persisted Phase 5
+promotion, isolated executor wallet and the strict action-bound transaction
+policy.
 
 ```bash
 meteora-executor phase5-promotion-gate /absolute/path/to/pio.db
-```
 
-Check full Phase 6 deployment readiness:
-
-```bash
 meteora-executor phase6-readiness \
   /absolute/path/to/pio.db \
   contracts/examples/transaction_guard.phase6.example.json
 ```
 
-The checked-in example policy is intentionally unusable until
+The checked-in policy is intentionally unusable until
 `REPLACE_WITH_EXECUTOR_PUBKEY` is replaced with the actual isolated executor
-wallet. Readiness fails if Phase 5 is unpromoted, the wallet differs from the
-policy fee payer, the Meteora program is absent, unsigned/pool/instruction
-binding is relaxed, lookup tables are enabled, or any ENTER/REBALANCE/EXIT
-instruction policy is missing.
+wallet.
 
-The internal submission coordinator also refuses to proceed without an
-accepted Phase 5 promotion gate.
+The **promotion gate** requires a persisted pre-live Rust execution corpus.
+Generate multiple guarded LIVE ENTER intents through final presign/simulation,
+including blocked-path samples, but do not enter SIGNING/SENT/CONFIRMED before
+Phase 6 promotion. Then evaluate:
+
+```bash
+pio phase6-validate \
+  --execution-db /absolute/path/to/execution.db \
+  --require-ready
+```
+
+Default promotion criteria require at least 10 complete
+`SIMULATION_PASSED` ENTER intents, at least 2 pools, at least 2 blocked-path
+intents, exactly one authorized executor wallet, complete accepted
+risk/transaction/wallet/final-simulation evidence, and zero intents that
+progressed beyond simulation.
+
+Persist only when the corpus passes:
+
+```bash
+pio phase6-validate \
+  --execution-db /absolute/path/to/execution.db \
+  --persist-ready --require-ready
+
+meteora-executor phase6-promotion-gate /absolute/path/to/pio.db
+```
+
+The feature-gated live submit path requires both the current Phase 6 readiness
+check and persisted `PHASE6_PROMOTION_V1` evidence. Code presence alone cannot
+unlock submission.
 
 ## Still required before controlled live execution
 
-Phase 6 implementation is complete. The remaining requirement is explicit
-end-to-end controlled executor validation after real Phase 5 promotion evidence
-exists.
-
-Public live signing/sending remain disabled until that validation is completed.
+The validation framework is complete. Real Phase 6 promotion evidence remains
+pending until Phase 5 is promoted and the guarded presign corpus is collected.
+After Phase 6 promotion, the next evidence milestone is the first tiny-capital
+controlled-live lifecycle with complete receipt/ledger reconciliation.
 
 
 ## Valued live outcomes and learning attribution
