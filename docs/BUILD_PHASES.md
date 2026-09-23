@@ -218,12 +218,14 @@ Built:
 - receipt-driven immutable live atomic wallet-effect ledger
 - receipt-driven live position lifecycle state for ENTER / REBALANCE / liquidity-removal EXIT / final CLOSE
 - immutable CLOSED-position atomic outcome evidence including linked network fees
-- fail-closed live execution ledger integrity audit
+- no-lookahead quote-valued CLOSED live position PnL using execution-time persisted token/SOL quotes
+- immutable Rust execution-decision context export and Python receipt-reconciled ingestion
+- immutable learner labels joining confirmed ENTER model/strategy/range/capital to realized live return and prediction error
+- fail-closed live execution ledger integrity audit including valuation/learning-label completeness
 - Phase 6 execution runbook and reproducible guard/request examples
 
 Still needed:
 - Token-2022 transfer-hook / remaining-account execution support
-- quote-valued live PnL / learning-label valuation from immutable atomic outcomes
 - end-to-end controlled executor validation after Phase 5 promotion evidence exists
 
 Live signing and transaction sending remain unavailable.
