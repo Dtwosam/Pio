@@ -239,6 +239,36 @@ pio phase9-chain-history-run --continue-sampling-when-ready
 This remains read-only chain inspection plus local append-only ingestion. It
 does not authorize or execute a trade.
 
+## Ranked pool discovery freshness
+
+Meteora API TVL/volume data is used only to rank which pools deserve new
+read-only chain evidence. It is not chain truth and it is not allowed to steer
+the cohort forever.
+
+Live cohort and chain-onboarding commands use a three-hour ranking window by
+default. Rows older than that window are excluded from steering; already
+persisted chain pools remain available only through the unranked chain-depth
+fallback.
+
+Use an explicit cutoff when reproducing a ranking decision:
+
+```bash
+pio phase9-chain-capture-plan \
+  --as-of <TIME> \
+  --max-api-snapshot-age-seconds 10800
+```
+
+For a full source pass, the equivalent control is:
+
+```bash
+pio phase9-source-capture-run \
+  --api-ranking-max-age-seconds 10800 \
+  --history-min-observation-interval-seconds 3600
+```
+
+Historical cutoffs are no-lookahead: API rows after the cutoff are excluded
+before the latest row for each pool is chosen.
+
 ## Source freshness
 
 Deterministic replay answers a different question from source freshness. A
