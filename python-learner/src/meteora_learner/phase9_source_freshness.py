@@ -10,7 +10,10 @@ from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .phase9_bandit_dataset import PHASE9_BANDIT_DATASET_EVIDENCE_TYPE
 from .phase9_explicit_inputs import load_phase9_explicit_inputs
 from .phase9_research import PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE
-from .phase9_pool_cohort import evaluate_phase9_pool_cohort
+from .phase9_pool_cohort import (
+    evaluate_phase9_pool_cohort,
+    select_phase9_cohort_source_pools,
+)
 from .portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
     PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
@@ -380,7 +383,11 @@ def _adaptive_current(
     )
 
 
-def _mint_current(storage: Storage) -> Phase9SourceFreshnessItem:
+def _mint_current(
+    storage: Storage,
+    *,
+    target_pools: tuple[str, ...] = (),
+) -> Phase9SourceFreshnessItem:
     rows = [
         row
         for row in _latest_rows(storage, edge_type=MINT_RISK_EVIDENCE_TYPE)
@@ -392,6 +399,25 @@ def _mint_current(storage: Storage) -> Phase9SourceFreshnessItem:
             current=False,
             reason="qualified mint-risk evidence is missing",
         )
+    if target_pools:
+        by_pool = {
+            str(row["pool_address"]): row
+            for row in rows
+        }
+        missing = tuple(
+            pool for pool in target_pools
+            if pool not in by_pool
+        )
+        if missing:
+            return Phase9SourceFreshnessItem(
+                family="mint_risk",
+                current=False,
+                reason=(
+                    "ranked cohort mint-risk evidence is missing for: "
+                    + ", ".join(missing)
+                ),
+            )
+        rows = [by_pool[pool] for pool in target_pools]
     for row in rows:
         evidence = row["evidence"]
         if not isinstance(evidence, dict):
@@ -499,7 +525,11 @@ def _mint_current(storage: Storage) -> Phase9SourceFreshnessItem:
     )
 
 
-def _wallet_current(storage: Storage) -> Phase9SourceFreshnessItem:
+def _wallet_current(
+    storage: Storage,
+    *,
+    target_pools: tuple[str, ...] = (),
+) -> Phase9SourceFreshnessItem:
     rows = [
         row
         for row in _latest_rows(storage, edge_type=WALLET_FLOW_EVIDENCE_TYPE)
@@ -511,6 +541,25 @@ def _wallet_current(storage: Storage) -> Phase9SourceFreshnessItem:
             current=False,
             reason="qualified wallet-flow evidence is missing",
         )
+    if target_pools:
+        by_pool = {
+            str(row["pool_address"]): row
+            for row in rows
+        }
+        missing = tuple(
+            pool for pool in target_pools
+            if pool not in by_pool
+        )
+        if missing:
+            return Phase9SourceFreshnessItem(
+                family="wallet_flow",
+                current=False,
+                reason=(
+                    "ranked cohort wallet-flow evidence is missing for: "
+                    + ", ".join(missing)
+                ),
+            )
+        rows = [by_pool[pool] for pool in target_pools]
     for row in rows:
         evidence = row["evidence"]
         ids = (
@@ -964,11 +1013,41 @@ def evaluate_phase9_source_freshness(
     storage: Storage,
     *,
     as_of: str | None = None,
+    required_mint_pools: int | None = None,
+    required_wallet_pools: int | None = None,
 ) -> Phase9SourceFreshnessReport:
+    cohort = None
+    if required_mint_pools is not None or required_wallet_pools is not None:
+        cohort = evaluate_phase9_pool_cohort(
+            storage,
+            as_of=as_of,
+        )
+
+    mint_targets = (
+        select_phase9_cohort_source_pools(
+            storage,
+            cohort=cohort,
+            limit=required_mint_pools,
+        )
+        if cohort is not None
+        and required_mint_pools is not None
+        else ()
+    )
+    wallet_targets = (
+        select_phase9_cohort_source_pools(
+            storage,
+            cohort=cohort,
+            limit=required_wallet_pools,
+        )
+        if cohort is not None
+        and required_wallet_pools is not None
+        else ()
+    )
+
     families = (
         _adaptive_current(storage, as_of=as_of),
-        _mint_current(storage),
-        _wallet_current(storage),
+        _mint_current(storage, target_pools=mint_targets),
+        _wallet_current(storage, target_pools=wallet_targets),
         _portfolio_current(storage),
         _static_hedge_current(storage),
         _bandit_current(storage),
