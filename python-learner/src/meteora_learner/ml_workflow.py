@@ -22,6 +22,7 @@ from .ml_registry import (
     register_ml_v1_bundle,
 )
 from .ml_training import MLV1Bundle, train_ml_v1_frame
+from .phase_promotion import PHASE3, PHASE3_EVIDENCE_TYPE
 from .storage import Storage
 
 
@@ -93,11 +94,14 @@ def evaluate_registered_offline_challenger(
     frame: pd.DataFrame,
     *,
     model_id: str,
-    phase3_ready: bool,
     inference_config: MLInferenceConfig = MLInferenceConfig(),
     criteria: MLChallengerCriteria = MLChallengerCriteria(),
 ) -> MLChallengerReport:
     bundle = load_registered_ml_v1(storage, model_id=model_id)
+    phase3_ready = storage.phase_is_promoted(
+        PHASE3,
+        evidence_type=PHASE3_EVIDENCE_TYPE,
+    )
     return evaluate_ml_challenger(
         bundle,
         frame,
@@ -112,7 +116,6 @@ def qualify_registered_offline_challenger(
     frame: pd.DataFrame,
     *,
     model_id: str,
-    phase3_ready: bool,
     inference_config: MLInferenceConfig = MLInferenceConfig(),
     criteria: MLChallengerCriteria = MLChallengerCriteria(),
     notes: str | None = None,
@@ -121,7 +124,6 @@ def qualify_registered_offline_challenger(
         storage,
         frame,
         model_id=model_id,
-        phase3_ready=phase3_ready,
         inference_config=inference_config,
         criteria=criteria,
     )
