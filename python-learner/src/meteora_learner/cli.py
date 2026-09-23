@@ -129,6 +129,12 @@ from .phase9_mint_capture import (
     build_phase9_mint_capture_plan,
     run_phase9_mint_capture,
 )
+from .phase9_position_discovery import (
+    discover_pool_positions_with_rust,
+)
+from .phase9_wallet_flow_capture import (
+    run_phase9_wallet_flow_capture,
+)
 from .phase9_chain_capture import run_phase9_chain_capture_batch
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
@@ -2204,6 +2210,72 @@ def main() -> None:
         help="Optional timezone-aware evaluation/capture timestamp",
     )
     phase9_mint_run.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_position_discovery = subparsers.add_parser(
+        "phase9-position-discovery",
+        help="Discover current on-chain Meteora PositionV2 accounts for one pool through read-only RPC filtering",
+    )
+    phase9_position_discovery.add_argument("--pool", required=True)
+    phase9_position_discovery.add_argument(
+        "--limit",
+        type=int,
+        default=250,
+    )
+    phase9_position_discovery.add_argument("--rust-manifest-path")
+    phase9_position_discovery.add_argument("--rust-binary-path")
+    phase9_position_discovery.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=120,
+    )
+
+    phase9_wallet_capture = subparsers.add_parser(
+        "phase9-wallet-flow-capture-run",
+        help="Collect official Meteora histories for a bounded current-position cohort until wallet-flow source thresholds are met",
+    )
+    phase9_wallet_capture.add_argument("--pool", required=True)
+    phase9_wallet_capture.add_argument(
+        "--lookback-events",
+        type=int,
+        default=500,
+    )
+    phase9_wallet_capture.add_argument(
+        "--min-events",
+        type=int,
+        default=20,
+    )
+    phase9_wallet_capture.add_argument(
+        "--min-unique-users",
+        type=int,
+        default=5,
+    )
+    phase9_wallet_capture.add_argument(
+        "--max-top-user-share-bps",
+        type=int,
+        default=4000,
+    )
+    phase9_wallet_capture.add_argument(
+        "--discovery-limit",
+        type=int,
+        default=250,
+    )
+    phase9_wallet_capture.add_argument(
+        "--max-positions-per-run",
+        type=int,
+        default=50,
+    )
+    phase9_wallet_capture.add_argument("--as-of")
+    phase9_wallet_capture.add_argument("--rust-manifest-path")
+    phase9_wallet_capture.add_argument("--rust-binary-path")
+    phase9_wallet_capture.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=120,
+    )
+    phase9_wallet_capture.add_argument(
         "--require-ready",
         action="store_true",
     )
@@ -4944,6 +5016,44 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.inputs_ready_after:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-position-discovery":
+        result = discover_pool_positions_with_rust(
+            args.pool,
+            limit=args.limit,
+            rust_manifest_path=args.rust_manifest_path,
+            rust_binary_path=args.rust_binary_path,
+            timeout_seconds=args.timeout_seconds,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase9-wallet-flow-capture-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = run_phase9_wallet_flow_capture(
+            storage,
+            pool_address=args.pool,
+            criteria=WalletFlowCriteria(
+                lookback_events=args.lookback_events,
+                min_events=args.min_events,
+                min_unique_users=args.min_unique_users,
+                max_top_user_share_bps=(
+                    args.max_top_user_share_bps
+                ),
+            ),
+            discovery_limit=args.discovery_limit,
+            max_positions_per_run=args.max_positions_per_run,
+            as_of=args.as_of,
+            settings=settings,
+            rust_manifest_path=args.rust_manifest_path,
+            rust_binary_path=args.rust_binary_path,
+            timeout_seconds=args.timeout_seconds,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.source_after.ready:
             raise SystemExit(2)
         return
 
