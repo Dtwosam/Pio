@@ -189,18 +189,32 @@ def _candidate_pools(
     storage: Storage,
     *,
     limit: int = 8,
+    as_of: str | None = None,
 ) -> tuple[str, ...]:
     with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT pool_address, COUNT(*) AS observations
-            FROM chain_pool_snapshots
-            GROUP BY pool_address
-            ORDER BY observations DESC, pool_address ASC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        if as_of is None:
+            rows = conn.execute(
+                """
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                GROUP BY pool_address
+                ORDER BY observations DESC, pool_address ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                WHERE julianday(observed_at) <= julianday(?)
+                GROUP BY pool_address
+                ORDER BY observations DESC, pool_address ASC
+                LIMIT ?
+                """,
+                (as_of, limit),
+            ).fetchall()
     return tuple(str(row[0]) for row in rows)
 
 
@@ -330,7 +344,10 @@ def build_phase9_work_queue(
         criteria=criteria,
         current_report=promotion,
     )
-    pools = _candidate_pools(storage)
+    pools = _candidate_pools(
+        storage,
+        as_of=as_of,
+    )
     items: list[Phase9WorkItem] = []
     phase9_current = promotion_audit.current
     policy_authorization_current = False
@@ -387,45 +404,60 @@ def build_phase9_work_queue(
             )
 
     if len(pools) < 3:
-        capture_plan = build_phase9_chain_capture_plan(
-            storage,
-            criteria=Phase9ChainCaptureCriteria(
-                target_chain_pools=3,
-                max_candidates=8,
-                bin_array_radius=1,
-            ),
-            rpc_url=rpc_url,
-        )
-        if capture_plan.candidates:
-            planner_command = "pio phase9-chain-capture-plan"
-            if rpc_url is not None:
-                planner_command += " --rpc-url " + _q(rpc_url)
-            planner_command += " --require-ready"
+        if as_of is not None:
             items.append(
                 Phase9WorkItem(
-                    task_type="CHAIN_POOL_CAPTURE_PLAN",
+                    task_type="HISTORICAL_CHAIN_POOL_GAP",
                     scope="PHASE9_CHAIN_POOLS",
                     reason=(
-                        f"{capture_plan.additional_chain_pools_needed} "
-                        "additional chain-observed pool(s) are required; "
-                        "discovered API candidates are available for "
-                        "read-only Rust capture"
+                        f"fewer than three chain-observed pools existed at "
+                        f"cutoff {as_of}; later chain state cannot backfill "
+                        "the historical corpus"
                     ),
-                    shell_command=planner_command,
+                    shell_command=None,
                 )
             )
         else:
-            items.append(
-                Phase9WorkItem(
-                    task_type="API_POOL_DISCOVERY",
-                    scope="METEORA_POOLS",
-                    reason=(
-                        "fewer than three chain-observed pools are available "
-                        "and no uncaptured API-discovered candidates exist"
-                    ),
-                    shell_command="pio collect-once",
-                )
+            capture_plan = build_phase9_chain_capture_plan(
+                storage,
+                criteria=Phase9ChainCaptureCriteria(
+                    target_chain_pools=3,
+                    max_candidates=8,
+                    bin_array_radius=1,
+                ),
+                rpc_url=rpc_url,
             )
+            if capture_plan.candidates:
+                planner_command = "pio phase9-chain-capture-plan"
+                if rpc_url is not None:
+                    planner_command += " --rpc-url " + _q(rpc_url)
+                planner_command += " --require-ready"
+                items.append(
+                    Phase9WorkItem(
+                        task_type="CHAIN_POOL_CAPTURE_PLAN",
+                        scope="PHASE9_CHAIN_POOLS",
+                        reason=(
+                            f"{capture_plan.additional_chain_pools_needed} "
+                            "additional chain-observed pool(s) are required; "
+                            "discovered API candidates are available for "
+                            "read-only Rust capture"
+                        ),
+                        shell_command=planner_command,
+                    )
+                )
+            else:
+                items.append(
+                    Phase9WorkItem(
+                        task_type="API_POOL_DISCOVERY",
+                        scope="METEORA_POOLS",
+                        reason=(
+                            "fewer than three chain-observed pools are "
+                            "available and no uncaptured API-discovered "
+                            "candidates exist"
+                        ),
+                        shell_command="pio collect-once",
+                    )
+                )
 
     if bundle.adaptive_multi_pool.qualified_records < 1:
         command = None
@@ -436,6 +468,7 @@ def build_phase9_work_queue(
             history_plan = build_phase9_history_plan(
                 storage,
                 rpc_url=rpc_url,
+                as_of=as_of,
             )
             if history_plan.plan_ready:
                 command = (
@@ -444,8 +477,10 @@ def build_phase9_work_queue(
                         item.pool_address
                         for item in history_plan.pools
                     ))
-                    + " --persist --require-qualified"
                 )
+                if as_of is not None:
+                    command += " --as-of " + _q(as_of)
+                command += " --persist --require-qualified"
                 adaptive_reason = (
                     "qualified adaptive/regime multi-pool evidence is missing"
                 )
@@ -462,10 +497,12 @@ def build_phase9_work_queue(
                     f"{pool}:{needed}"
                     for pool, needed in deficits
                 )
-                history_command = "pio phase9-chain-history-plan"
-                if rpc_url is not None:
-                    history_command += " --rpc-url " + _q(rpc_url)
-                history_command += " --require-ready"
+                history_command = None
+                if as_of is None:
+                    history_command = "pio phase9-chain-history-plan"
+                    if rpc_url is not None:
+                        history_command += " --rpc-url " + _q(rpc_url)
+                    history_command += " --require-ready"
                 items.append(
                     Phase9WorkItem(
                         task_type="CHAIN_HISTORY_DEPTH",
@@ -476,6 +513,12 @@ def build_phase9_work_queue(
                             + (
                                 f"; additional snapshots by pool: {detail}"
                                 if detail
+                                else ""
+                            )
+                            + (
+                                f"; cutoff {as_of} cannot be backfilled with "
+                                "later chain snapshots"
+                                if as_of is not None
                                 else ""
                             )
                         ),
