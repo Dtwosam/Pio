@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 import meteora_learner.phase9_research_refresh as refresh_module
+from meteora_learner.phase9_validation import Phase9ResearchBundleCriteria
 from meteora_learner.phase9_research_refresh import (
     _mint_evaluation_as_of,
     _persist_if_changed,
