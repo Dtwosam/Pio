@@ -66,6 +66,8 @@ def test_chain_scan_keeps_accepted_candidates_and_raw_replay(tmp_path):
         max_share_bps=500,
     )
 
+    assert result.entry_active_bin_id == 0
+    assert result.decision_active_bin_id == 0
     assert result.attempted == 4
     assert result.accepted == 4
     assert result.rejected == 0
