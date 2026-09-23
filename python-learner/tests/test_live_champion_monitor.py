@@ -60,7 +60,7 @@ def seed_phase7(storage):
     )
 
 
-def add_labels(storage, returns, model_id="model-a"):
+def add_labels(storage, returns, model_id="model-a", pool_count=2):
     with storage.connect() as conn:
         for index, realized_return_bps in enumerate(returns):
             position = f"position-{index}"
@@ -90,7 +90,7 @@ def add_labels(storage, returns, model_id="model-a"):
                 (
                     position,
                     decision,
-                    f"pool-{index % 2}",
+                    f"pool-{index % pool_count}",
                     model_id,
                     str(realized_return_bps / 100),
                     realized_return_bps,
@@ -106,6 +106,7 @@ def add_labels(storage, returns, model_id="model-a"):
 def criteria(min_labels=10):
     return LiveChampionCriteria(
         min_live_labels=min_labels,
+        min_live_pools=2,
         max_realized_drawdown_bps=2_000,
         max_single_loss_bps=1_500,
         min_win_rate=0.30,
@@ -159,6 +160,31 @@ def test_healthy_live_champion_persists_monitor_evidence(tmp_path):
     assert latest["status"] == "HEALTHY"
     assert latest["evidence"]["model_id"] == "model-a"
 
+
+
+def test_live_monitor_requires_pool_diversity(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_champion(storage)
+    seed_phase7(storage)
+    add_labels(
+        storage,
+        [100, 80, 70, 60, 50, 40, 30, 20, 10, 5],
+        pool_count=1,
+    )
+
+    report = evaluate_live_champion(
+        storage,
+        criteria=criteria(),
+    )
+
+    assert report.status == "INSUFFICIENT_EVIDENCE"
+    assert report.rollback_recommended is False
+    assert report.label_count == 10
+    assert report.distinct_pools == 1
+    assert any(
+        "distinct live pools" in reason
+        for reason in report.reasons
+    )
 
 def test_persisted_breach_can_roll_back_to_deterministic_fallback(tmp_path):
     storage = Storage(tmp_path / "pio.db")
