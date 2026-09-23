@@ -103,3 +103,33 @@ def test_pool_safety_fails_closed_when_chain_support_is_unknown(tmp_path):
     item = report.assessments[0]
     assert item.accepted is False
     assert "token program support is unknown" in item.rejection_reasons
+
+
+
+def test_pool_safety_rejects_stale_normalized_snapshot(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(
+        storage,
+        address="pool",
+        blacklisted=False,
+        observed_at="2026-09-23T09:00:00+00:00",
+    )
+    save_chain(storage, address="pool", observed_at="2026-09-23T09:10:00+00:00")
+
+    report = screen_pool_universe(
+        str(storage.path),
+        config=PoolSafetyConfig(
+            min_tvl_usd=0,
+            min_volume_24h_usd=0,
+            min_pool_age_hours=0,
+            min_chain_observations=1,
+            max_dynamic_fee_pct=10,
+            max_pool_snapshot_age_seconds=300,
+        ),
+        as_of="2026-09-23T09:10:00+00:00",
+    )
+
+    assessment = report.assessments[0]
+    assert assessment.accepted is False
+    assert assessment.snapshot_age_seconds == 600
+    assert any("snapshot age" in reason for reason in assessment.rejection_reasons)
