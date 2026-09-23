@@ -356,7 +356,11 @@ def build_phase9_work_queue(
         criteria=criteria,
         current_report=promotion,
     )
-    source_freshness_report = evaluate_phase9_source_freshness(storage)
+    source_freshness_as_of = as_of or utc_now_iso()
+    source_freshness_report = evaluate_phase9_source_freshness(
+        storage,
+        as_of=source_freshness_as_of,
+    )
     source_freshness = source_freshness_report.by_family()
     required_source_ready = {
         "adaptive_regime": (
@@ -393,7 +397,7 @@ def build_phase9_work_queue(
         storage,
         as_of=as_of,
     )
-    live_as_of = as_of or utc_now_iso()
+    live_as_of = source_freshness_as_of
     live_cohort = (
         evaluate_phase9_pool_cohort(
             storage,
