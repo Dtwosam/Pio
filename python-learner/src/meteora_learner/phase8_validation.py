@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from typing import Any
 
 from .continuous_promotion import CONTINUOUS_PROMOTION_EVIDENCE_TYPE
@@ -9,7 +10,12 @@ from .live_champion_monitor import (
     LiveChampionReport,
     evaluate_live_champion,
 )
-from .phase_promotion import PHASE7, PHASE7_EVIDENCE_TYPE
+from .phase_promotion import (
+    PHASE7,
+    PHASE7_EVIDENCE_TYPE,
+    PHASE8,
+    PHASE8_EVIDENCE_TYPE,
+)
 from .storage import Storage
 
 
