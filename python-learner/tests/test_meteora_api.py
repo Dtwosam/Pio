@@ -85,6 +85,99 @@ def test_position_pnl_maps_required_wallet_and_filters():
     }
 
 
+def test_pool_position_addresses_paginates_status_all_and_deduplicates():
+    api = MeteoraDataAPI(max_retries=0)
+    calls = []
+
+    def fake_position_pnl(
+        pool_address,
+        *,
+        user,
+        status=None,
+        page=1,
+        page_size=20,
+    ):
+        calls.append((pool_address, user, status, page, page_size))
+        if page == 1:
+            return {
+                "positions": [
+                    {"positionAddress": "position-a"},
+                    {"positionAddress": "position-b"},
+                ],
+                "hasNext": True,
+            }
+        return {
+            "positions": [
+                {"positionAddress": "position-b"},
+                {"positionAddress": "position-c"},
+            ],
+            "hasNext": False,
+        }
+
+    api.position_pnl = fake_position_pnl  # type: ignore[method-assign]
+    try:
+        result = api.pool_position_addresses(
+            "pool",
+            user="wallet",
+            max_pages=3,
+            page_size=100,
+        )
+    finally:
+        api.close()
+
+    assert result == (
+        "position-a",
+        "position-b",
+        "position-c",
+    )
+    assert calls == [
+        ("pool", "wallet", "all", 1, 100),
+        ("pool", "wallet", "all", 2, 100),
+    ]
+
+
+def test_pool_position_addresses_stops_at_max_pages():
+    api = MeteoraDataAPI(max_retries=0)
+    calls = []
+
+    def fake_position_pnl(*args, page=1, **kwargs):
+        calls.append(page)
+        return {
+            "positions": [
+                {"positionAddress": f"position-{page}"}
+            ],
+            "hasNext": True,
+        }
+
+    api.position_pnl = fake_position_pnl  # type: ignore[method-assign]
+    try:
+        result = api.pool_position_addresses(
+            "pool",
+            user="wallet",
+            max_pages=2,
+        )
+    finally:
+        api.close()
+
+    assert result == ("position-1", "position-2")
+    assert calls == [1, 2]
+
+
+def test_pool_position_addresses_rejects_malformed_response():
+    api = MeteoraDataAPI(max_retries=0)
+    api.position_pnl = (  # type: ignore[method-assign]
+        lambda *args, **kwargs: {"hasNext": False}
+    )
+    try:
+        with pytest.raises(Exception, match="positions array"):
+            api.pool_position_addresses(
+                "pool",
+                user="wallet",
+            )
+    finally:
+        api.close()
+
+
 def test_position_history_maps_filters():
     api = MeteoraDataAPI(max_retries=0)
     captured = {}
