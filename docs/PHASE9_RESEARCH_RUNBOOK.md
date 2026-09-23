@@ -711,6 +711,42 @@ This manifest remains `research_only=true`, `simulation_only=true`,
 evidence identity, not an execution authorization.
 
 
+## Bounded source-acquisition pass
+
+For a single manual pass across the source families that can be collected
+without economic assumptions:
+
+```bash
+SOLANA_RPC_URL=<RPC_URL> \
+pio phase9-source-capture-run
+```
+
+One pass may:
+
+1. refresh public Meteora API pool/history discovery;
+2. capture enough new read-only pool snapshots to reach the chain-pool target;
+3. add at most one fresh chain-history observation per currently deficient
+   selected pool;
+4. refresh missing/stale authoritative mint accounts; and
+5. collect a bounded current-position cohort of official position histories for
+   the required wallet-flow pools.
+
+Each family is isolated: a failed API/RPC/history source is reported without
+turning the other source families into synthetic success. At the end, readiness
+is recomputed from persisted local state and reported as
+`automatic_source_ready`.
+
+Use `--skip-api-refresh` when API discovery is already current, and
+`--require-automatic-ready` when the command should exit non-zero until chain
+history, mint inputs and wallet-flow source thresholds are all satisfied.
+
+This command performs source acquisition only. It does not run adaptive,
+mint-risk, wallet-flow, hedge, allocation or bandit research; it does not
+persist a Phase 9 bundle/promotion; and it cannot sign or submit Solana
+transactions. Repeated runs are manual/external-scheduler decisions. No default
+history timer is provided because the wall-clock meaning of one Phase 9
+observation has not been silently fixed by the system.
+
 ## End-to-end Phase 9 work queue
 
 `pio phase9-work-queue` is the single dependency-aware planner for both the
