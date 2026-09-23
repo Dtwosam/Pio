@@ -1,0 +1,28 @@
+{
+  "metrics": {
+    "observations": 25,
+    "closed_positions": 6,
+    "distinct_pools": 1,
+    "realized_pnl_quote": 10.0,
+    "drawdown_pct": 1.0,
+    "win_rate_pct": 60.0,
+    "mean_return_bps": 25.0,
+    "reconciliation_failures": 0,
+    "unvalued_closed_positions": 0,
+    "stale_decisions": 0,
+    "policy_errors": 0
+  },
+  "criteria": {
+    "min_observations": 20,
+    "min_closed_positions": 5,
+    "min_distinct_pools": 1,
+    "max_realized_loss_quote": 25.0,
+    "max_drawdown_pct": 2.5,
+    "min_win_rate_pct": 45.0,
+    "min_mean_return_bps": 0.0,
+    "max_reconciliation_failures": 0,
+    "max_unvalued_closed_positions": 0,
+    "max_stale_decisions": 0,
+    "max_policy_errors": 0
+  }
+}
