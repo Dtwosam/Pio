@@ -5,8 +5,15 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::message::VersionedMessage;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProgramInstructionPolicy {
+    pub program_id: String,
+    pub allowed_data_prefixes_hex: Vec<String>,
+}
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +24,19 @@ pub struct TransactionGuardConfig {
     pub max_static_accounts: usize,
     pub allow_address_lookup_tables: bool,
     pub require_unsigned: bool,
+    #[serde(default)]
+    pub require_instruction_policy: bool,
+    #[serde(default)]
+    pub instruction_policies: Vec<ProgramInstructionPolicy>,
 }
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstructionFingerprint {
+    pub program_id: String,
+    pub data_prefix_hex: String,
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionGuardReport {
@@ -31,19 +50,51 @@ pub struct TransactionGuardReport {
     pub signatures_all_default: bool,
     pub address_lookup_table_count: usize,
     pub program_ids: Vec<String>,
+    pub instruction_fingerprints: Vec<InstructionFingerprint>,
+}
+
+struct InspectedInstruction {
+    program_id: Pubkey,
+    data: Vec<u8>,
 }
 
 struct InspectedTransaction {
     fee_payer: Pubkey,
     account_keys: Vec<Pubkey>,
-    program_ids: Vec<Pubkey>,
-    instruction_count: usize,
+    instructions: Vec<InspectedInstruction>,
     required_signatures: usize,
     signatures_all_default: bool,
     address_lookup_table_count: usize,
 }
 
-fn validate_config(config: &TransactionGuardConfig) -> Result<(Pubkey, BTreeSet<Pubkey>)> {
+fn decode_hex(value: &str) -> Result<Vec<u8>> {
+    let value = value.trim();
+    if value.is_empty() || value.len() % 2 != 0 {
+        anyhow::bail!("instruction data prefix must be non-empty even-length hex");
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&value[index..index + 2], 16)
+                .with_context(|| format!("invalid hex instruction prefix: {value}"))
+        })
+        .collect()
+}
+
+fn encode_prefix(data: &[u8]) -> String {
+    data.iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
+}
+
+fn validate_config(
+    config: &TransactionGuardConfig,
+) -> Result<(
+    Pubkey,
+    BTreeSet<Pubkey>,
+    BTreeMap<Pubkey, Vec<Vec<u8>>>,
+)> {
     if config.max_instructions == 0 {
         anyhow::bail!("max_instructions must be positive");
     }
@@ -62,7 +113,33 @@ fn validate_config(config: &TransactionGuardConfig) -> Result<(Pubkey, BTreeSet<
                 .with_context(|| format!("invalid allowed program id: {raw}"))?,
         );
     }
-    Ok((payer, programs))
+
+    let mut policies: BTreeMap<Pubkey, Vec<Vec<u8>>> = BTreeMap::new();
+    for policy in &config.instruction_policies {
+        let program = Pubkey::from_str(policy.program_id.trim())
+            .with_context(|| {
+                format!(
+                    "invalid instruction policy program id: {}",
+                    policy.program_id
+                )
+            })?;
+        if !programs.contains(&program) {
+            anyhow::bail!(
+                "instruction policy program {program} is not in allowed_program_ids"
+            );
+        }
+        if policy.allowed_data_prefixes_hex.is_empty() {
+            anyhow::bail!(
+                "instruction policy for {program} has no allowed data prefixes"
+            );
+        }
+        let entry = policies.entry(program).or_default();
+        for prefix in &policy.allowed_data_prefixes_hex {
+            entry.push(decode_hex(prefix)?);
+        }
+    }
+
+    Ok((payer, programs, policies))
 }
 
 fn inspect_transaction(encoded: &str) -> Result<InspectedTransaction> {
@@ -72,80 +149,65 @@ fn inspect_transaction(encoded: &str) -> Result<InspectedTransaction> {
         .iter()
         .all(|signature| *signature == Signature::default());
 
-    match &transaction.message {
-        VersionedMessage::Legacy(message) => {
-            let fee_payer = *message
+    let (
+        fee_payer,
+        account_keys,
+        compiled_instructions,
+        required_signatures,
+        address_lookup_table_count,
+    ) = match &transaction.message {
+        VersionedMessage::Legacy(message) => (
+            *message
                 .account_keys
                 .first()
-                .context("transaction has no static account keys")?;
-            let required_signatures =
-                usize::from(message.header.num_required_signatures);
-            if transaction.signatures.len() != required_signatures {
-                anyhow::bail!(
-                    "signature vector length {} does not match required signer count {}",
-                    transaction.signatures.len(),
-                    required_signatures
-                );
-            }
-
-            let mut program_ids = Vec::with_capacity(message.instructions.len());
-            for instruction in &message.instructions {
-                let index = usize::from(instruction.program_id_index);
-                let program = message.account_keys.get(index).with_context(|| {
-                    format!(
-                        "instruction program index {index} is outside static account keys"
-                    )
-                })?;
-                program_ids.push(*program);
-            }
-
-            Ok(InspectedTransaction {
-                fee_payer,
-                account_keys: message.account_keys.clone(),
-                program_ids,
-                instruction_count: message.instructions.len(),
-                required_signatures,
-                signatures_all_default,
-                address_lookup_table_count: 0,
-            })
-        }
-        VersionedMessage::V0(message) => {
-            let fee_payer = *message
+                .context("transaction has no static account keys")?,
+            message.account_keys.clone(),
+            message.instructions.clone(),
+            usize::from(message.header.num_required_signatures),
+            0,
+        ),
+        VersionedMessage::V0(message) => (
+            *message
                 .account_keys
                 .first()
-                .context("transaction has no static account keys")?;
-            let required_signatures =
-                usize::from(message.header.num_required_signatures);
-            if transaction.signatures.len() != required_signatures {
-                anyhow::bail!(
-                    "signature vector length {} does not match required signer count {}",
-                    transaction.signatures.len(),
-                    required_signatures
-                );
-            }
+                .context("transaction has no static account keys")?,
+            message.account_keys.clone(),
+            message.instructions.clone(),
+            usize::from(message.header.num_required_signatures),
+            message.address_table_lookups.len(),
+        ),
+    };
 
-            let mut program_ids = Vec::with_capacity(message.instructions.len());
-            for instruction in &message.instructions {
-                let index = usize::from(instruction.program_id_index);
-                let program = message.account_keys.get(index).with_context(|| {
-                    format!(
-                        "instruction program index {index} is not a static account; transaction guard does not resolve lookup-table program ids"
-                    )
-                })?;
-                program_ids.push(*program);
-            }
-
-            Ok(InspectedTransaction {
-                fee_payer,
-                account_keys: message.account_keys.clone(),
-                program_ids,
-                instruction_count: message.instructions.len(),
-                required_signatures,
-                signatures_all_default,
-                address_lookup_table_count: message.address_table_lookups.len(),
-            })
-        }
+    if transaction.signatures.len() != required_signatures {
+        anyhow::bail!(
+            "signature vector length {} does not match required signer count {}",
+            transaction.signatures.len(),
+            required_signatures
+        );
     }
+
+    let mut instructions = Vec::with_capacity(compiled_instructions.len());
+    for instruction in compiled_instructions {
+        let index = usize::from(instruction.program_id_index);
+        let program = account_keys.get(index).with_context(|| {
+            format!(
+                "instruction program index {index} is not a static account; transaction guard does not resolve lookup-table program ids"
+            )
+        })?;
+        instructions.push(InspectedInstruction {
+            program_id: *program,
+            data: instruction.data,
+        });
+    }
+
+    Ok(InspectedTransaction {
+        fee_payer,
+        account_keys,
+        instructions,
+        required_signatures,
+        signatures_all_default,
+        address_lookup_table_count,
+    })
 }
 
 pub fn check_transaction(
@@ -153,26 +215,53 @@ pub fn check_transaction(
     encoded: &str,
     config: &TransactionGuardConfig,
 ) -> Result<TransactionGuardReport> {
-    let (expected_payer, allowed_programs) = validate_config(config)?;
+    let (expected_payer, allowed_programs, policies) =
+        validate_config(config)?;
     let pool = Pubkey::from_str(proposal.pool_address.trim())
         .context("proposal pool_address is not a valid Solana pubkey")?;
     let inspected = inspect_transaction(encoded)?;
 
     let pool_account_present = inspected.account_keys.contains(&pool);
-    let unique_program_ids: BTreeSet<Pubkey> =
-        inspected.program_ids.iter().copied().collect();
+    let unique_program_ids: BTreeSet<Pubkey> = inspected
+        .instructions
+        .iter()
+        .map(|instruction| instruction.program_id)
+        .collect();
     let program_ids = unique_program_ids
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>();
+    let instruction_fingerprints = inspected
+        .instructions
+        .iter()
+        .map(|instruction| InstructionFingerprint {
+            program_id: instruction.program_id.to_string(),
+            data_prefix_hex: encode_prefix(&instruction.data),
+        })
+        .collect::<Vec<_>>();
+
+    let unapproved_program = unique_program_ids
+        .iter()
+        .any(|program| !allowed_programs.contains(program));
+
+    let instruction_policy_failure = inspected.instructions.iter().any(
+        |instruction| {
+            match policies.get(&instruction.program_id) {
+                Some(prefixes) => !prefixes.iter().any(|prefix| {
+                    instruction.data.starts_with(prefix)
+                }),
+                None => config.require_instruction_policy,
+            }
+        },
+    );
 
     let rejection = if inspected.fee_payer != expected_payer {
         Some("unexpected_fee_payer")
     } else if inspected.required_signatures == 0 {
         Some("transaction_has_no_required_signer")
-    } else if inspected.instruction_count == 0 {
+    } else if inspected.instructions.is_empty() {
         Some("transaction_has_no_instructions")
-    } else if inspected.instruction_count > config.max_instructions {
+    } else if inspected.instructions.len() > config.max_instructions {
         Some("instruction_count_limit")
     } else if inspected.account_keys.len() > config.max_static_accounts {
         Some("static_account_count_limit")
@@ -182,11 +271,10 @@ pub fn check_transaction(
         Some("address_lookup_tables_not_allowed")
     } else if !pool_account_present {
         Some("proposal_pool_not_in_transaction")
-    } else if unique_program_ids
-        .iter()
-        .any(|program| !allowed_programs.contains(program))
-    {
+    } else if unapproved_program {
         Some("transaction_uses_unapproved_program")
+    } else if instruction_policy_failure {
+        Some("transaction_instruction_not_allowed")
     } else if config.require_unsigned && !inspected.signatures_all_default {
         Some("transaction_already_signed")
     } else {
@@ -198,12 +286,13 @@ pub fn check_transaction(
         reason: rejection.unwrap_or("approved").to_string(),
         fee_payer: inspected.fee_payer.to_string(),
         pool_account_present,
-        instruction_count: inspected.instruction_count,
+        instruction_count: inspected.instructions.len(),
         static_account_count: inspected.account_keys.len(),
         required_signatures: inspected.required_signatures,
         signatures_all_default: inspected.signatures_all_default,
         address_lookup_table_count: inspected.address_lookup_table_count,
         program_ids,
+        instruction_fingerprints,
     })
 }
 
@@ -244,13 +333,14 @@ mod tests {
         pool: Pubkey,
         program: Pubkey,
         signature: Signature,
+        data: Vec<u8>,
     ) -> String {
         let instruction = Instruction {
             program_id: program,
             accounts: vec![
                 solana_sdk::instruction::AccountMeta::new_readonly(pool, false),
             ],
-            data: vec![1, 2, 3],
+            data,
         };
         let message = Message::new(&[instruction], Some(&payer));
         let transaction = VersionedTransaction {
@@ -268,6 +358,11 @@ mod tests {
             max_static_accounts: 16,
             allow_address_lookup_tables: false,
             require_unsigned: true,
+            require_instruction_policy: true,
+            instruction_policies: vec![ProgramInstructionPolicy {
+                program_id: program.to_string(),
+                allowed_data_prefixes_hex: vec!["0102".into()],
+            }],
         }
     }
 
@@ -281,6 +376,7 @@ mod tests {
             pool,
             program,
             Signature::default(),
+            vec![1, 2, 3],
         );
 
         let report = check_transaction(
@@ -295,6 +391,10 @@ mod tests {
         assert!(report.pool_account_present);
         assert_eq!(report.required_signatures, 1);
         assert!(report.signatures_all_default);
+        assert_eq!(
+            report.instruction_fingerprints[0].data_prefix_hex,
+            "010203"
+        );
     }
 
     #[test]
@@ -308,6 +408,7 @@ mod tests {
             transaction_pool,
             program,
             Signature::default(),
+            vec![1, 2, 3],
         );
 
         let report = check_transaction(
@@ -332,6 +433,7 @@ mod tests {
             pool,
             actual,
             Signature::default(),
+            vec![1, 2, 3],
         );
 
         let report = check_transaction(
@@ -346,6 +448,33 @@ mod tests {
     }
 
     #[test]
+    fn unapproved_instruction_data_is_rejected() {
+        let payer = Pubkey::new_unique();
+        let pool = Pubkey::new_unique();
+        let program = Pubkey::new_unique();
+        let encoded = encoded_transaction(
+            payer,
+            pool,
+            program,
+            Signature::default(),
+            vec![9, 9, 9],
+        );
+
+        let report = check_transaction(
+            &proposal(pool),
+            &encoded,
+            &config(payer, program),
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(
+            report.reason,
+            "transaction_instruction_not_allowed"
+        );
+    }
+
+    #[test]
     fn wrong_fee_payer_is_rejected() {
         let expected = Pubkey::new_unique();
         let actual = Pubkey::new_unique();
@@ -356,6 +485,7 @@ mod tests {
             pool,
             program,
             Signature::default(),
+            vec![1, 2, 3],
         );
 
         let report = check_transaction(
@@ -379,6 +509,7 @@ mod tests {
             pool,
             program,
             Signature::new_unique(),
+            vec![1, 2, 3],
         );
 
         let report = check_transaction(
