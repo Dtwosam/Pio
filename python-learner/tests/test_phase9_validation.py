@@ -318,6 +318,10 @@ def seed_bandit_dataset_lineage(storage):
         },
     )
 
+    return "cycle"
+
+
+def seed_bandit_research_lineage(storage):
     result = evaluate_cycle_contextual_bandit(
         storage,
         cycle_id="cycle",
@@ -614,6 +618,7 @@ def seed_static_hedge_lineage(storage, pool):
 def seed_ready(storage):
     seed_bandit_dataset_lineage(storage)
     promote_phase8(storage)
+    seed_bandit_research_lineage(storage)
     portfolio_lineage = seed_portfolio_candidate_lineage(storage)
     for pool in ("pool-a", "pool-b"):
         seed_mint_risk_lineage(storage, pool)
