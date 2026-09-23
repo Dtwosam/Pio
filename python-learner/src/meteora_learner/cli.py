@@ -21,6 +21,7 @@ from .settings import Settings
 from .storage import Storage
 from .strategy import StrategyType
 from .transaction_event_ingest import ingest_transaction_events
+from .transaction_costs import build_transaction_cost_report
 
 
 def _parse_int_csv(value: str) -> tuple[int, ...]:
@@ -76,6 +77,16 @@ def main() -> None:
         "--file",
         default="-",
         help="JSON file path, or - for stdin",
+    )
+
+    transaction_costs = subparsers.add_parser(
+        "transaction-costs",
+        help="Summarize real Solana fees and compute usage for one position",
+    )
+    transaction_costs.add_argument(
+        "--position",
+        required=True,
+        help="Meteora position address",
     )
 
     composition_labels = subparsers.add_parser(
@@ -316,6 +327,15 @@ def main() -> None:
             payload,
         )
         print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "transaction-costs":
+        settings = Settings.from_env()
+        result = build_transaction_cost_report(
+            str(settings.database_path),
+            position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "composition-labels":
