@@ -670,6 +670,7 @@ pio phase9-policy-prewire-audit --require-ready
 
 The audit reports ready only when all of these are true at the same time:
 
+- Phase 9 append-only storage integrity is verified;
 - Phase 9 authorization evidence is current;
 - the fresh controlled holdout is current;
 - the disabled bounded-rollout simulation is current;
