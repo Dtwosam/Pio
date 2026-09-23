@@ -298,6 +298,20 @@ def test_portfolio_freshness_detects_chain_history_after_candidate(tmp_path):
 
 def test_bandit_freshness_detects_new_retraining_dataset_cycle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO model_registry(
+                model_id, created_at, updated_at, model_family,
+                feature_version, dataset_version, status,
+                metrics_json
+            ) VALUES (
+                'model', '2026-09-23T09:00:00+00:00',
+                '2026-09-23T09:00:00+00:00',
+                'TEST', 'TEST', 'dataset-v1', 'CHAMPION', '{}'
+            )
+            """
+        )
     storage.save_model_live_evidence(
         model_id="model",
         evidence_type="CONTINUOUS_RETRAIN_DATASET_V1",
