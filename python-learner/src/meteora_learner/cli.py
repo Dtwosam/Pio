@@ -51,6 +51,11 @@ from .phase5_validation import Phase5PromotionCriteria, evaluate_phase5_promotio
 from .phase6_validation import Phase6PromotionCriteria, evaluate_phase6_promotion
 from .phase7_validation import Phase7PromotionCriteria, evaluate_phase7_promotion
 from .phase8_validation import Phase8PromotionCriteria, evaluate_phase8_promotion
+from .phase9_research import (
+    Phase9ResearchCriteria,
+    evaluate_phase9_research,
+    persist_phase9_research,
+)
 from .phase3_workflow import (
     Phase3ValidationInput,
     validate_phase3_from_chain,
@@ -1199,6 +1204,137 @@ def main() -> None:
     adaptive_range.add_argument("--as-of")
     adaptive_range.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    phase9_research = subparsers.add_parser(
+        "phase9-research-validate",
+        help="Evaluate multi-pool research-only Phase 9 adaptive edge evidence",
+    )
+    phase9_research.add_argument(
+        "--pools",
+        required=True,
+        help="Comma-separated pool addresses",
+    )
+    phase9_research.add_argument(
+        "--min-pools",
+        type=int,
+        default=3,
+    )
+    phase9_research.add_argument(
+        "--min-qualified-pools",
+        type=int,
+        default=2,
+    )
+    phase9_research.add_argument(
+        "--min-qualified-pool-rate",
+        type=float,
+        default=0.67,
+    )
+    phase9_research.add_argument(
+        "--min-mean-survival-uplift-vs-fixed",
+        type=float,
+        default=0.0,
+    )
+    phase9_research.add_argument(
+        "--max-mean-width-multiple-vs-fixed",
+        type=float,
+        default=2.0,
+    )
+    phase9_research.add_argument(
+        "--lookback-observations",
+        type=int,
+        default=96,
+    )
+    phase9_research.add_argument(
+        "--holding-observations",
+        type=int,
+        default=6,
+    )
+    phase9_research.add_argument(
+        "--target-coverage",
+        type=float,
+        default=0.90,
+    )
+    phase9_research.add_argument(
+        "--min-half-width-bins",
+        type=int,
+        default=1,
+    )
+    phase9_research.add_argument(
+        "--max-half-width-bins",
+        type=int,
+        default=35,
+    )
+    phase9_research.add_argument(
+        "--min-historical-windows",
+        type=int,
+        default=12,
+    )
+    phase9_research.add_argument(
+        "--fixed-half-width-bins",
+        type=int,
+        default=5,
+    )
+    phase9_research.add_argument(
+        "--min-decisions",
+        type=int,
+        default=20,
+    )
+    phase9_research.add_argument(
+        "--min-adaptive-survival-rate",
+        type=float,
+        default=0.75,
+    )
+    phase9_research.add_argument(
+        "--min-survival-uplift-vs-fixed",
+        type=float,
+        default=0.0,
+    )
+    phase9_research.add_argument(
+        "--max-pool-width-multiple-vs-fixed",
+        type=float,
+        default=2.0,
+    )
+    phase9_research.add_argument(
+        "--max-cap-exceeded-rate",
+        type=float,
+        default=0.10,
+    )
+    phase9_research.add_argument(
+        "--regime-lookback-observations",
+        type=int,
+        default=72,
+    )
+    phase9_research.add_argument(
+        "--regime-recent-observations",
+        type=int,
+        default=8,
+    )
+    phase9_research.add_argument(
+        "--regime-min-observations",
+        type=int,
+        default=16,
+    )
+    phase9_research.add_argument(
+        "--trend-efficiency-threshold",
+        type=float,
+        default=0.65,
+    )
+    phase9_research.add_argument(
+        "--activity-percentile",
+        type=float,
+        default=0.75,
+    )
+    phase9_research.add_argument(
+        "--quiet-percentile",
+        type=float,
+        default=0.25,
+    )
+    phase9_research.add_argument("--as-of")
+    phase9_research.add_argument("--persist", action="store_true")
+    phase9_research.add_argument(
+        "--require-qualified",
         action="store_true",
     )
 
@@ -2666,6 +2802,78 @@ def main() -> None:
             args.require_ready
             and result.status != "RESEARCH_READY"
         ):
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-research-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        pools = tuple(
+            item.strip()
+            for item in args.pools.split(",")
+            if item.strip()
+        )
+        result = evaluate_phase9_research(
+            storage,
+            pool_addresses=pools,
+            criteria=Phase9ResearchCriteria(
+                min_pools=args.min_pools,
+                min_qualified_pools=args.min_qualified_pools,
+                min_qualified_pool_rate=args.min_qualified_pool_rate,
+                min_mean_survival_uplift_vs_fixed=(
+                    args.min_mean_survival_uplift_vs_fixed
+                ),
+                max_mean_width_multiple_vs_fixed=(
+                    args.max_mean_width_multiple_vs_fixed
+                ),
+            ),
+            adaptive_criteria=AdaptiveRangeCriteria(
+                lookback_observations=args.lookback_observations,
+                holding_observations=args.holding_observations,
+                target_coverage=args.target_coverage,
+                min_half_width_bins=args.min_half_width_bins,
+                max_half_width_bins=args.max_half_width_bins,
+                min_historical_windows=args.min_historical_windows,
+            ),
+            adaptive_validation_criteria=AdaptiveRangeValidationCriteria(
+                fixed_half_width_bins=args.fixed_half_width_bins,
+                min_decisions=args.min_decisions,
+                min_adaptive_survival_rate=(
+                    args.min_adaptive_survival_rate
+                ),
+                min_survival_uplift_vs_fixed=(
+                    args.min_survival_uplift_vs_fixed
+                ),
+                max_mean_width_multiple_vs_fixed=(
+                    args.max_pool_width_multiple_vs_fixed
+                ),
+                max_cap_exceeded_rate=args.max_cap_exceeded_rate,
+            ),
+            regime_criteria=DLMMRegimeCriteria(
+                lookback_observations=(
+                    args.regime_lookback_observations
+                ),
+                recent_observations=args.regime_recent_observations,
+                min_observations=args.regime_min_observations,
+                trend_efficiency_threshold=(
+                    args.trend_efficiency_threshold
+                ),
+                activity_percentile=args.activity_percentile,
+                quiet_percentile=args.quiet_percentile,
+            ),
+            as_of=args.as_of,
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_phase9_research(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not result.research_qualified:
             raise SystemExit(2)
         return
 
