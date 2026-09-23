@@ -333,6 +333,23 @@ must define:
 Until such a design is implemented and validated, Phase 9 stays research-only.
 
 
+## Storage integrity preflight
+
+Before trusting Phase 9 bundle or replay results, verify the SQLite immutability
+contract:
+
+```bash
+pio phase9-storage-integrity --require-verified
+```
+
+The audit checks the required fail-closed UPDATE/DELETE triggers for Phase 9
+source snapshots, position-event history, advanced-edge evidence, live-model
+evidence and immutable promotion history. Phase 9 research-bundle readiness and
+the deterministic replay audit both require this storage audit to pass.
+
+A missing or malformed trigger makes Phase 9 incomplete even when the stored
+research metrics themselves still replay.
+
 ## Deterministic replay audit
 
 Phase 9 qualification must be reproducible from persisted immutable sources.
