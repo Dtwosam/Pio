@@ -56,7 +56,7 @@ from .phase9_validation import (
     phase9_research_bundle_sha256,
 )
 from .phase9_wallet_flow_capture import wallet_flow_source_state
-from .storage import Storage
+from .storage import Storage, utc_now_iso
 from .wallet_flow import (
     WALLET_FLOW_EVIDENCE_TYPE,
     WalletFlowCriteria,
@@ -325,9 +325,11 @@ def run_phase9_research_refresh(
         storage,
         criteria=criteria,
     )
+    refresh_as_of = utc_now_iso()
 
     source_freshness_report = evaluate_phase9_source_freshness(
-        storage
+        storage,
+        as_of=refresh_as_of,
     )
     source_freshness = source_freshness_report.by_family()
     source_freshness_reasons = {
@@ -358,7 +360,10 @@ def run_phase9_research_refresh(
         )
     else:
         try:
-            cohort = evaluate_phase9_pool_cohort(storage)
+            cohort = evaluate_phase9_pool_cohort(
+                storage,
+                as_of=refresh_as_of,
+            )
             if not cohort.research_ready:
                 detail = "; ".join(cohort.reasons) or (
                     "ranked Phase 9 research cohort is below the exact "
