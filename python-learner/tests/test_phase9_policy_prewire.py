@@ -159,3 +159,40 @@ def test_prewire_fails_when_current_rollback_requires_rollback(
 
     assert result.ready is False
     assert result.rollback_clear is False
+
+
+class DummyStorageIntegrity:
+    def __init__(self, *, verified, reasons=()):
+        self.verified = verified
+        self.reasons = tuple(reasons)
+
+    def to_record(self):
+        return {
+            "verified": self.verified,
+            "reasons": list(self.reasons),
+        }
+
+
+def test_prewire_fails_when_phase9_storage_integrity_breaks(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    patch_all(monkeypatch)
+    monkeypatch.setattr(
+        prewire_module,
+        "evaluate_phase9_storage_integrity",
+        lambda storage: DummyStorageIntegrity(
+            verified=False,
+            reasons=("advanced edge evidence update trigger is missing",),
+        ),
+    )
+
+    result = evaluate_phase9_policy_prewire_audit(storage)
+
+    assert result.ready is False
+    assert result.storage_integrity_verified is False
+    assert any(
+        reason.startswith("storage integrity:")
+        for reason in result.reasons
+    )
