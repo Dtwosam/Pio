@@ -56,6 +56,7 @@ from .paper_chain import (
     paper_chain_binding,
     value_paper_position_from_chain,
 )
+from .paper_chain_runner import PaperChainBatchItem, run_chain_paper_batch
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -331,6 +332,28 @@ def main() -> None:
     paper_chain_observe.add_argument("--max-rebalances", type=int, default=3)
     paper_chain_observe.add_argument("--max-holding-observations", type=int)
     paper_chain_observe.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
+
+    paper_chain_run = subparsers.add_parser(
+        "paper-chain-run",
+        help="Value and manage multiple bound paper positions from chain state",
+    )
+    paper_chain_run.add_argument("--run-id", required=True)
+    paper_chain_run.add_argument("--observed-at", required=True)
+    paper_chain_run.add_argument(
+        "--file",
+        required=True,
+        help="JSON array with position_id and token_y_quote_per_atomic",
+    )
+    paper_chain_run.add_argument("--retry-failed", action="store_true")
+    paper_chain_run.add_argument("--stop-loss-bps", type=int, default=500)
+    paper_chain_run.add_argument("--take-profit-bps", type=int)
+    paper_chain_run.add_argument("--max-rebalances", type=int, default=3)
+    paper_chain_run.add_argument("--max-holding-observations", type=int)
+    paper_chain_run.add_argument(
         "--proactive-rebalance-buffer-bins",
         type=int,
         default=0,
@@ -1441,6 +1464,51 @@ def main() -> None:
             estimated_exit_cost_quote=args.estimated_exit_cost,
             rebalance_cost_quote=args.rebalance_cost,
             emergency_exit=args.emergency_exit,
+            config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-chain-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        with open(args.file, "r", encoding="utf-8") as handle:
+            raw_items = json.load(handle)
+        if not isinstance(raw_items, list):
+            raise ValueError("paper-chain-run file must contain a JSON array")
+        items = tuple(
+            PaperChainBatchItem(
+                position_id=str(item["position_id"]),
+                token_y_quote_per_atomic=float(
+                    item["token_y_quote_per_atomic"]
+                ),
+                pool_safe=bool(item.get("pool_safe", True)),
+                emergency_exit=bool(item.get("emergency_exit", False)),
+                estimated_exit_cost_quote=float(
+                    item.get("estimated_exit_cost_quote", 0.0)
+                ),
+                rebalance_cost_quote=(
+                    float(item["rebalance_cost_quote"])
+                    if item.get("rebalance_cost_quote") is not None
+                    else None
+                ),
+            )
+            for item in raw_items
+        )
+        result = run_chain_paper_batch(
+            storage,
+            run_id=args.run_id,
+            observed_at=args.observed_at,
+            items=items,
+            retry_failed=args.retry_failed,
             config=PositionManagementConfig(
                 stop_loss_bps=args.stop_loss_bps,
                 take_profit_bps=args.take_profit_bps,
