@@ -176,6 +176,11 @@ from .live_champion_monitor import (
     rollback_live_champion,
 )
 from .transaction_costs import build_transaction_cost_report
+from .wallet_flow import (
+    WalletFlowCriteria,
+    persist_wallet_flow_research,
+    research_wallet_flow,
+)
 
 
 def _parse_int_csv(value: str) -> tuple[int, ...]:
@@ -1210,6 +1215,38 @@ def main() -> None:
     adaptive_range.add_argument("--as-of")
     adaptive_range.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    wallet_flow = subparsers.add_parser(
+        "wallet-flow-research",
+        help="Summarize descriptive wallet activity concentration and classified LP flow",
+    )
+    wallet_flow.add_argument("--pool", required=True)
+    wallet_flow.add_argument(
+        "--lookback-events",
+        type=int,
+        default=500,
+    )
+    wallet_flow.add_argument(
+        "--min-events",
+        type=int,
+        default=20,
+    )
+    wallet_flow.add_argument(
+        "--min-unique-users",
+        type=int,
+        default=5,
+    )
+    wallet_flow.add_argument(
+        "--max-top-user-share-bps",
+        type=int,
+        default=4000,
+    )
+    wallet_flow.add_argument("--as-of")
+    wallet_flow.add_argument("--persist", action="store_true")
+    wallet_flow.add_argument(
+        "--require-qualified",
         action="store_true",
     )
 
@@ -2863,6 +2900,36 @@ def main() -> None:
             args.require_ready
             and result.status != "RESEARCH_READY"
         ):
+            raise SystemExit(2)
+        return
+
+    if args.command == "wallet-flow-research":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = research_wallet_flow(
+            storage,
+            pool_address=args.pool,
+            criteria=WalletFlowCriteria(
+                lookback_events=args.lookback_events,
+                min_events=args.min_events,
+                min_unique_users=args.min_unique_users,
+                max_top_user_share_bps=(
+                    args.max_top_user_share_bps
+                ),
+            ),
+            as_of=args.as_of,
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_wallet_flow_research(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not result.research_qualified:
             raise SystemExit(2)
         return
 
