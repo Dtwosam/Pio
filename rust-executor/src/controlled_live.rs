@@ -373,4 +373,18 @@ mod tests {
         assert!(exit.accepted);
         let _ = std::fs::remove_file(path);
     }
+    #[test]
+    fn checked_in_controlled_live_example_is_disabled() {
+        let raw = include_str!(
+            "../../contracts/examples/controlled_live.example.json"
+        );
+        let cfg: ControlledLiveConfig =
+            serde_json::from_str(raw).unwrap();
+
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.max_open_positions, 1);
+        assert!(cfg.max_capital_quote_per_entry > 0.0);
+        assert!(cfg.allow_exit);
+    }
+
 }
