@@ -225,11 +225,13 @@ Built:
 - Token-2022 transfer-hook / remaining-account entry, rebalance, exit and settlement construction
 - Rust read-only Phase 5 promotion verification against persisted Python evidence
 - Phase 6 deployment-readiness gate binding Phase 5 promotion, isolated wallet and strict action policy
-- internal submission coordinator refuses live submission without an accepted Phase 5 promotion gate
+- internal submission coordinator refuses live submission without accepted Phase 5 and Phase 6 promotion gates
+- persistent Phase 6 pre-live promotion evidence from multi-pool guarded presign and blocked-path corpus
+- Rust read-only verifier for persisted `PHASE6_PROMOTION_V1`
 - Phase 6 execution runbook and reproducible guard/request examples
 
 Still needed:
-- end-to-end controlled executor validation after Phase 5 promotion evidence exists
+- real Phase 6 promotion corpus after Phase 5 promotion evidence exists
 
 Default builds exclude the `live-submit` feature. A compile-time + runtime gated controlled-live submit path exists for later validation, but it is disabled by default and has not been approved for production live trading.
 
@@ -257,11 +259,13 @@ Built:
 - any same-day CLOSED outcome lacking valuation blocks new ENTER / REBALANCE
 - exactly one tracked active position is required for pool-level REBALANCE / EXIT authorization
 - hard per-position rebalance-count cap
+- persistent Phase 7 controlled-live promotion evidence requiring clean fully reconciled closed-position corpus
+- Rust read-only verifier for persisted `PHASE7_PROMOTION_V1`
 
 Still needed:
-- explicit Phase 6 controlled validation evidence
-- first small-capital controlled-live run with full receipt/ledger reconciliation
-- persisted controlled-live validation evidence before widening limits or enabling unattended live execution
+- real Phase 6 promotion evidence
+- first small-capital controlled-live runs with full receipt/ledger reconciliation
+- real Phase 7 promotion evidence before widening limits or enabling unattended live execution
 
 ## Phase 8 — Continuous Learning
 
