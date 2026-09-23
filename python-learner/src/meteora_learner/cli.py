@@ -57,6 +57,11 @@ from .phase9_research import (
     evaluate_phase9_research,
     persist_phase9_research,
 )
+from .phase9_validation import (
+    Phase9ResearchBundleCriteria,
+    evaluate_phase9_research_bundle,
+    persist_phase9_research_bundle,
+)
 from .phase3_workflow import (
     Phase3ValidationInput,
     validate_phase3_from_chain,
@@ -1568,6 +1573,31 @@ def main() -> None:
     phase9_research.add_argument("--persist", action="store_true")
     phase9_research.add_argument(
         "--require-qualified",
+        action="store_true",
+    )
+
+    phase9_bundle = subparsers.add_parser(
+        "phase9-research-bundle",
+        help="Validate persisted Phase 9 research families without granting live-policy authority",
+    )
+    phase9_bundle.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_bundle.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_bundle.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_bundle.add_argument("--persist", action="store_true")
+    phase9_bundle.add_argument(
+        "--require-ready",
         action="store_true",
     )
 
@@ -3401,6 +3431,31 @@ def main() -> None:
             )
         print(json.dumps(output, indent=2))
         if args.require_qualified and not result.research_qualified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-research-bundle":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_research_bundle(
+            storage,
+            criteria=Phase9ResearchBundleCriteria(
+                min_mint_risk_pools=args.min_mint_risk_pools,
+                min_wallet_flow_pools=args.min_wallet_flow_pools,
+                min_static_hedge_pools=args.min_static_hedge_pools,
+            ),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_phase9_research_bundle(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.research_ready:
             raise SystemExit(2)
         return
 
