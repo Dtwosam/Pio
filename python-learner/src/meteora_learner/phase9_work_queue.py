@@ -512,6 +512,31 @@ def build_phase9_work_queue(
 
     if (
         live_cohort is not None
+        and live_cohort.api_pools_seen
+        < live_cohort.criteria.min_research_pools
+    ):
+        items.append(
+            Phase9WorkItem(
+                task_type="API_RANKING_REFRESH",
+                scope="METEORA_POOLS",
+                reason=(
+                    "fresh API-ranked pool coverage is below the Phase 9 "
+                    "cohort minimum: "
+                    f"{live_cohort.api_pools_seen}/"
+                    f"{live_cohort.criteria.min_research_pools}"
+                    + (
+                        f"; {live_cohort.stale_api_pools_excluded} stale "
+                        "ranking snapshot(s) were excluded"
+                        if live_cohort.stale_api_pools_excluded
+                        else ""
+                    )
+                ),
+                shell_command="pio collect-once",
+            )
+        )
+
+    if (
+        live_cohort is not None
         and live_cohort.api_pools_seen > 0
     ):
         if live_cohort.missing_chain_pools:
