@@ -63,3 +63,26 @@ fail-closed when a required quote is stale or missing.
 This service never receives or uses a wallet private key. It may call the Rust
 executor only through the read-only `inspect-pool-env` command. Live signing
 remains outside Phase 5.
+
+
+## Phase 9 research progress snapshots
+
+After the Phase 9 research tooling is deployed, enable the observational
+progress timer:
+
+```bash
+sudo systemctl enable --now pio-phase9-progress.timer
+```
+
+Inspect it with:
+
+```bash
+sudo systemctl status pio-phase9-progress.timer
+journalctl -u pio-phase9-progress.service
+cd /opt/pio/python-learner
+.venv/bin/pio phase9-progress --require-snapshot --require-integrity
+```
+
+The service runs `phase9-work-queue --persist-snapshot` once per hour. It
+does not execute the emitted work-queue commands and does not require or store
+an RPC URL. Persisted snapshots are append-only and omit shell commands.
