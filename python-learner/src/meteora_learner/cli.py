@@ -35,6 +35,7 @@ from .paper_account import (
     rebalance_paper_position,
 )
 from .paper_policy import evaluate_paper_position_policy
+from .paper_cycle import apply_paper_observation
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -223,6 +224,31 @@ def main() -> None:
     paper_manage.add_argument("--max-rebalances", type=int, default=3)
     paper_manage.add_argument("--max-holding-observations", type=int)
     paper_manage.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
+
+    paper_observe = subparsers.add_parser(
+        "paper-observe",
+        help="Mark a paper position and automatically HOLD/REBALANCE/EXIT",
+    )
+    paper_observe.add_argument("--event-key-prefix", required=True)
+    paper_observe.add_argument("--position", required=True)
+    paper_observe.add_argument("--active-bin", required=True, type=int)
+    paper_observe.add_argument("--holding-observations", required=True, type=int)
+    paper_observe.add_argument("--mark", required=True, type=float)
+    paper_observe.add_argument("--fee-delta", type=float, default=0.0)
+    paper_observe.add_argument("--reward-delta", type=float, default=0.0)
+    paper_observe.add_argument("--estimated-exit-cost", type=float, default=0.0)
+    paper_observe.add_argument("--rebalance-cost", type=float)
+    paper_observe.add_argument("--pool-unsafe", action="store_true")
+    paper_observe.add_argument("--emergency-exit", action="store_true")
+    paper_observe.add_argument("--stop-loss-bps", type=int, default=500)
+    paper_observe.add_argument("--take-profit-bps", type=int)
+    paper_observe.add_argument("--max-rebalances", type=int, default=3)
+    paper_observe.add_argument("--max-holding-observations", type=int)
+    paper_observe.add_argument(
         "--proactive-rebalance-buffer-bins",
         type=int,
         default=0,
@@ -969,6 +995,35 @@ def main() -> None:
             pool_safe=not args.pool_unsafe,
             estimated_exit_cost_quote=args.estimated_exit_cost,
             emergency_exit=args.emergency_exit,
+            config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-observe":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = apply_paper_observation(
+            storage,
+            event_key_prefix=args.event_key_prefix,
+            position_id=args.position,
+            active_bin_id=args.active_bin,
+            holding_observations=args.holding_observations,
+            mark_quote=args.mark,
+            fee_delta_quote=args.fee_delta,
+            reward_delta_quote=args.reward_delta,
+            pool_safe=not args.pool_unsafe,
+            emergency_exit=args.emergency_exit,
+            estimated_exit_cost_quote=args.estimated_exit_cost,
+            rebalance_cost_quote=args.rebalance_cost,
             config=PositionManagementConfig(
                 stop_loss_bps=args.stop_loss_bps,
                 take_profit_bps=args.take_profit_bps,
