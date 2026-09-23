@@ -56,6 +56,23 @@ observations across the ranked sampling cohort. It is a sample-count measure,
 not a profit or wall-clock prediction; the configured minimum observation
 interval still controls when the next sample may be added.
 
+
+To execute exactly one planner-selected safe step without shell parsing:
+
+```bash
+pio phase9-evidence-step-run
+```
+
+This command shares the Phase 9 maintenance lease with the scheduled source
+capture/research refresh jobs. It directly calls only the existing bounded
+API/chain/history/mint/wallet collectors or research refresh. A Phase 8
+dependency or missing explicit economic assumptions returns
+`MANUAL_REQUIRED`; the runner never fills those inputs, persists promotion,
+or touches authorization/LIVE state. The original 70-minute source-capture
+timer remains unchanged until this focused runner has its own completed
+validation history.
+
+
 ## Research families
 
 ### Adaptive range + regime
