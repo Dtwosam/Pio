@@ -21,6 +21,9 @@ from .phase9_explicit_inputs import (
     load_phase9_explicit_inputs,
 )
 from .phase9_wallet_flow_capture import wallet_flow_source_state
+from .phase9_pool_activity_scan_state import (
+    phase9_pool_activity_scan_state,
+)
 from .wallet_flow import WalletFlowCriteria
 from .phase9_policy_authorization import (
     audit_persisted_phase9_policy_authorization,
@@ -664,6 +667,35 @@ def build_phase9_work_queue(
             as_of=as_of,
         )
         if not source.ready:
+            if as_of is None:
+                scan_state = phase9_pool_activity_scan_state(
+                    storage,
+                    pool_address=pool,
+                )
+                if scan_state.pages_scanned == 0:
+                    scan_detail = (
+                        "historical pool-signature backfill has not started"
+                    )
+                elif scan_state.backfill_exhausted:
+                    scan_detail = (
+                        "historical pool-signature backfill is exhausted "
+                        f"after {scan_state.pages_scanned} page(s) and "
+                        f"{scan_state.signatures_scanned} signature(s); "
+                        "recent live rescans remain available"
+                    )
+                else:
+                    scan_detail = (
+                        "historical pool-signature backfill is in progress: "
+                        f"{scan_state.pages_scanned} page(s), "
+                        f"{scan_state.signatures_scanned} signature(s), "
+                        f"{scan_state.positions_discovered} position "
+                        "candidate(s) discovered"
+                    )
+            else:
+                scan_detail = (
+                    "live pool-signature backfill is disabled at a "
+                    f"historical cutoff ({as_of}) to avoid lookahead"
+                )
             prefix = (
                 "SOLANA_RPC_URL="
                 + _q(rpc_url)
@@ -687,7 +719,8 @@ def build_phase9_work_queue(
                         "wallet-flow source corpus is below the default "
                         "event/user threshold: "
                         f"events {source.events}/20, "
-                        f"unique users {source.unique_users}/5"
+                        f"unique users {source.unique_users}/5; "
+                        + scan_detail
                     ),
                     shell_command=capture_command,
                 )
