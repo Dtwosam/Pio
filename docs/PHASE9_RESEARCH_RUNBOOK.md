@@ -293,6 +293,23 @@ The work queue surfaces this as `RESEARCH_SOURCE_REFRESH`, and progress reports
 `SOURCE_REFRESH_PENDING` until the next queue snapshot shows the refresh
 resolved.
 
+## Ranked cohort evidence alignment
+
+The ranked Phase 9 sampling cohort is shared across the automatic adaptive,
+mint-risk and wallet-flow paths. Mint/wallet source acquisition, research
+refresh and work-queue repair tasks prefer the same ranked chain-observed
+pools. If the cohort cannot supply enough observed pools, the remaining slots
+fall back to the deepest persisted chain pools.
+
+Operational source freshness also checks this membership. Old mint/wallet
+evidence can remain byte-for-byte replay-valid yet become operationally stale
+when the ranked target set moves to a different pool.
+
+`phase9-progress` exposes the current cohort, fresh/stale API ranking counts,
+each pool's chain-observation depth, observations remaining to the exact
+adaptive floor and the maximum remaining history samples across the active
+sampling cohort.
+
 ## Evidence work queue
 
 Before manually inspecting every research family, build the current evidence
