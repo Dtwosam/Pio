@@ -50,7 +50,6 @@ def inspect_pool_with_rust(
     *,
     rust_manifest_path: str | Path | None = None,
     timeout_seconds: int = 120,
-    ingest_observed_at: str | None = None,
 ) -> dict[str, Any]:
     if not pool_address.strip():
         raise ValueError("pool_address is required")
@@ -108,6 +107,7 @@ def refresh_paper_chain_state(
     inspector: InspectPool | None = None,
     rust_manifest_path: str | Path | None = None,
     timeout_seconds: int = 120,
+    ingest_observed_at: str | None = None,
 ) -> PaperChainRefreshReport:
     """
     Refresh missing/stale open-paper pool state through the read-only Rust inspector.
