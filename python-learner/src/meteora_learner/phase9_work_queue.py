@@ -567,10 +567,10 @@ def build_phase9_work_queue(
                 criteria=Phase9ChainCaptureCriteria(
                     target_chain_pools=3,
                     max_candidates=8,
-                    bin_array_radius=1,,
-                as_of=live_as_of
+                    bin_array_radius=1,
                 ),
                 rpc_url=rpc_url,
+                as_of=live_as_of,
             )
             if capture_plan.candidates:
                 planner_command = "pio phase9-chain-capture-plan"
