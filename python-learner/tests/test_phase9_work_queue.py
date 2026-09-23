@@ -172,6 +172,77 @@ def evidence(storage, edge_type, pool, *, extra=None):
     )
 
 
+def seed_mint_risk_lineage(storage, pool):
+    observed_at = "2026-09-23T12:00:00+00:00"
+    token_program = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+    x = f"{pool}-x"
+    y = f"{pool}-y"
+    with storage.connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO chain_pool_snapshots(
+                observed_at, pool_address, active_bin_id, bin_step,
+                token_x_mint, token_y_mint,
+                token_x_program, token_y_program, raw_json
+            ) VALUES (?, ?, 0, 25, ?, ?, ?, ?, '{}')
+            """,
+            (observed_at, pool, x, y, token_program, token_program),
+        )
+        pool_snapshot_id = int(cursor.lastrowid)
+
+    assessment_rows = []
+    for mint, role in ((x, "TOKEN_X"), (y, "TOKEN_Y")):
+        storage.save_token_mint_snapshot(
+            {
+                "mint_address": mint,
+                "token_program": token_program,
+                "capture_slot_start": 1,
+                "capture_slot_end": 2,
+                "supply": "1000000",
+                "decimals": 6,
+                "is_initialized": True,
+                "mint_authority": None,
+                "freeze_authority": None,
+                "data_len": 82,
+                "token_2022_extension_data_len": 0,
+                "has_token_2022_extension_data": False,
+            },
+            observed_at=observed_at,
+        )
+        with storage.connect() as conn:
+            snapshot_id = int(
+                conn.execute(
+                    """
+                    SELECT id
+                    FROM token_mint_snapshots
+                    WHERE mint_address = ? AND observed_at = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (mint, observed_at),
+                ).fetchone()[0]
+            )
+        assessment_rows.append(
+            {
+                "mint_address": mint,
+                "roles": [role],
+                "mint_snapshot_id": snapshot_id,
+                "observed_at": observed_at,
+                "accepted": True,
+            }
+        )
+
+    evidence(
+        storage,
+        MINT_RISK_EVIDENCE_TYPE,
+        pool,
+        extra={
+            "pool_snapshot_id": pool_snapshot_id,
+            "assessments": assessment_rows,
+        },
+    )
+
+
 def seed_ready(storage):
     promote_phase8(storage)
     portfolio_lineage = seed_portfolio_candidate_lineage(storage)
@@ -187,7 +258,7 @@ def seed_ready(storage):
         "__MULTI_POOL__",
     )
     for pool in ("pool-a", "pool-b"):
-        evidence(storage, MINT_RISK_EVIDENCE_TYPE, pool)
+        seed_mint_risk_lineage(storage, pool)
         evidence(storage, WALLET_FLOW_EVIDENCE_TYPE, pool)
     evidence(
         storage,
