@@ -138,8 +138,8 @@ liquidity-share or leverage assumptions.
 
 ### Contextual bandit replay
 
-The preferred Phase 9 qualification path is bound to a checksum-verified
-continuous-retraining action dataset:
+The preferred Phase 9 qualification path remains a checksum-verified
+continuous-retraining action dataset when one already exists:
 
 ```bash
 pio contextual-bandit-cycle-research \
@@ -153,6 +153,24 @@ evidence, verifies the dataset path, SHA-256, dataset version and cycle cutoff,
 then refuses any file whose decision or forward-label timestamp exceeds that
 cutoff. Persisted bandit evidence records this lineage.
 
+When continuous retraining is not due and therefore no cycle dataset exists,
+Phase 9 can derive an equivalent research-only counterfactual dataset from the
+already validated explicit pool inputs and immutable chain/bin history:
+
+```bash
+pio phase9-bandit-research-run --persist --require-qualified
+```
+
+This path requires at least three explicit pool inputs. It uses the latest
+common observation across those pools as the no-lookahead cutoff, keeps only
+the latest 96 source observations per pool, writes a deterministic
+checksum-named CSV beside the research database by default, persists a
+`PHASE9_BANDIT_DATASET_V1` artifact, then rebuilds the dataset from persisted
+sources before bandit evidence can replay-verify. The 96-observation cap keeps
+scheduled refresh bounded while still yielding up to 84 labeled decision
+points per pool under the default 12-observation lookback and two-observation
+forward label.
+
 A free-form fixed CSV can still be replayed for exploratory research:
 
 ```bash
@@ -161,9 +179,7 @@ pio contextual-bandit-research \
   --persist
 ```
 
-However, the Phase 9 research-bundle gate requires qualified contextual-bandit
-evidence with checksum-bound retraining-cycle lineage by default. Arbitrary CSV
-evidence cannot satisfy promotion readiness.
+However, the Phase 9 research-bundle gate requires qualified contextual-bandit\nevidence with checksum-verified dataset lineage: either the persisted\ncontinuous-retraining dataset or the deterministic Phase 9 research dataset\ndescribed above. Arbitrary CSV evidence cannot satisfy promotion readiness.
 
 Selection is strictly sequential: only rewards revealed by prior selected
 actions may update the pool/context-local UCB statistics. Current-decision
@@ -211,8 +227,7 @@ records:
 - portfolio candidate evidence recomputes its SHA-256 from persisted source
   inputs, account assumptions and comparison payload; matching stored labels
   alone are insufficient;
-- contextual-bandit evidence resolves to the persisted retraining-cycle dataset
-  evidence, version, cutoff, file identity and checksum.
+- contextual-bandit evidence resolves to either the persisted retraining-cycle\n  dataset or a persisted Phase 9 bandit-dataset artifact, including version,\n  cutoff, file identity, checksum and explicit-input lineage.
 
 The work queue emits lineage-repair tasks when reproducible source evidence
 exists. It does not invent missing hedge assumptions or authoritative chain
@@ -253,8 +268,7 @@ corpus:
   assumptions, criteria and price-path cutoff;
 - portfolio allocation reconstructs the immutable cross-pool candidate report
   and reruns allocation with the stored budget and criteria;
-- contextual-bandit evidence re-hashes the retraining CSV bytes and reruns the
-  cycle-bound bandit using the persisted criteria.
+- contextual-bandit evidence re-hashes its bound dataset bytes and reruns the\n  bandit with persisted criteria; Phase 9-derived datasets additionally rebuild\n  from the exact explicit-input artifact and chain history at the stored cutoff.
 
 The normalized replayed report must equal the persisted qualified evidence.
 Source-correct but metric-forged evidence therefore fails closed.
