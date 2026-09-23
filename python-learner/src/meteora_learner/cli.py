@@ -100,7 +100,10 @@ from .ml_challenger import MLChallengerCriteria
 from .ml_inference import MLInferenceConfig
 from .ml_registry import model_record, start_paper_challenger
 from .ml_retraining_dataset import MLRetrainPoolSpec
-from .retraining_workflow import start_retraining_cycle_with_dataset
+from .retraining_workflow import (
+    start_retraining_cycle_with_dataset,
+    train_retraining_cycle_challenger,
+)
 from .ml_workflow import (
     evaluate_registered_offline_challenger,
     qualify_registered_offline_challenger,
@@ -1112,6 +1115,21 @@ def main() -> None:
         type=float,
         default=14.0,
     )
+
+    ml_retrain_train = subparsers.add_parser(
+        "ml-retrain-train",
+        help="Train/register a challenger from the exact dataset bound to a retraining cycle",
+    )
+    ml_retrain_train.add_argument("--cycle-id", required=True)
+    ml_retrain_train.add_argument("--file", required=True)
+    ml_retrain_train.add_argument("--model-id", required=True)
+    ml_retrain_train.add_argument("--artifact-dir", required=True)
+    ml_retrain_train.add_argument(
+        "--split-fraction",
+        type=float,
+        default=0.8,
+    )
+    ml_retrain_train.add_argument("--min-rows", type=int, default=50)
 
     ml_retrain_start = subparsers.add_parser(
         "ml-retrain-start",
@@ -2395,6 +2413,20 @@ def main() -> None:
             center_offsets=args.center_offsets,
             max_share_bps=args.max_share_bps,
             favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "ml-retrain-train":
+        settings = Settings.from_env()
+        result = train_retraining_cycle_challenger(
+            Storage(settings.database_path),
+            cycle_id=args.cycle_id,
+            dataset_file=args.file,
+            model_id=args.model_id,
+            artifact_directory=args.artifact_dir,
+            split_fraction=args.split_fraction,
+            min_rows=args.min_rows,
         )
         print(json.dumps(result.to_record(), indent=2))
         return
