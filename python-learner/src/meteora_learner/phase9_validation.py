@@ -35,6 +35,8 @@ from .static_hedge import (
 from .storage import Storage
 from .wallet_flow import (
     WALLET_FLOW_EVIDENCE_TYPE,
+    WalletFlowCriteria,
+    research_wallet_flow,
     wallet_flow_source_sha256,
 )
 
@@ -420,6 +422,25 @@ def _wallet_flow_lineage_valid(storage: Storage) -> bool:
                 )
 
             if wallet_flow_source_sha256(records) != expected_sha:
+                return False
+
+            criteria_raw = evidence.get("criteria")
+            if not isinstance(criteria_raw, dict):
+                return False
+            try:
+                criteria = WalletFlowCriteria(**criteria_raw)
+            except (TypeError, ValueError):
+                return False
+            replay = research_wallet_flow(
+                storage,
+                pool_address=str(row["pool_address"]),
+                criteria=criteria,
+                as_of=row["as_of"],
+            )
+            replay_record = json.loads(
+                json.dumps(replay.to_record(), sort_keys=True)
+            )
+            if replay_record != evidence:
                 return False
     return True
 
