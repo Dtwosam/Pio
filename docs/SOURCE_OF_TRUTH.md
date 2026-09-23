@@ -352,10 +352,16 @@ read-only on-chain `PositionV2` scan may identify current owners and positions;
 for those owners, the official Meteora pool position-PnL endpoint with
 `status=all` may be used with bounded pagination to recover additional open
 and closed position addresses before collecting official lifecycle history.
-This remains a current-owner cohort, not a complete historical pool census,
-because owners with no current PositionV2 account may be absent. Cohort
-expansion itself is not qualification, and missing users/events are never
-synthesized. Portfolio allocation research is likewise non-actionable:
+The current-owner path alone remains an incomplete historical pool census.
+For live research only, a bounded read-only Solana signature scan may widen the
+cohort by paging transactions that mention the exact pool account and decoding
+only Meteora events whose `lb_pair` matches that pool. One recent page may be
+rescanned for new activity while a persistent cursor advances older pages.
+Historical `as_of` research must not use this present-day discovery path.
+RPC history retention, transaction-fetch failures and configured page limits
+remain explicit coverage limits, so even the expanded cohort is not asserted
+to be complete. Cohort expansion itself is not qualification, and missing
+users/events are never synthesized. Portfolio allocation research is likewise non-actionable:
 it caps per-pool concentration, number of positions and minimum budget
 utilization. Static-hedge and portfolio economic assumptions must never be synthesized by orchestration. Once a valid checksum-bound explicit input artifact exists, replay-aware research maintenance may recompute only the missing or non-replay-verified static-hedge/portfolio family from that immutable artifact. It must not alter the assumptions, and identical recomputations must reuse the latest identical evidence rather than append duplicate research rows. They may be supplied only through an explicit validated input set whose normalized bytes are checksum-bound and append-only. Generated templates may provide established methodological defaults, but token amounts, quote notionals, network costs, hedge identity/venue/liquidity/funding/trading cost, account state, drawdown and allocation budget must remain unset until explicitly provided. Candidate artifacts produced from that input set must record the source input evidence ID and SHA-256. None of these Phase 9 outputs may alter LIVE policy without a
 separate future promotion boundary.
