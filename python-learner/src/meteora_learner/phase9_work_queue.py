@@ -7,6 +7,10 @@ import shlex
 from typing import Any
 
 from .phase8_validation import audit_persisted_phase8_promotion
+from .phase9_capture_plan import (
+    Phase9ChainCaptureCriteria,
+    build_phase9_chain_capture_plan,
+)
 from .phase9_policy_authorization import (
     audit_persisted_phase9_policy_authorization,
     evaluate_phase9_policy_authorization,
@@ -370,6 +374,47 @@ def build_phase9_work_queue(
                         "pio phase8-validate "
                         "--require-ready --persist-ready"
                     ),
+                )
+            )
+
+    if len(pools) < 3:
+        capture_plan = build_phase9_chain_capture_plan(
+            storage,
+            criteria=Phase9ChainCaptureCriteria(
+                target_chain_pools=3,
+                max_candidates=8,
+                bin_array_radius=1,
+            ),
+            rpc_url=rpc_url,
+        )
+        if capture_plan.candidates:
+            planner_command = "pio phase9-chain-capture-plan"
+            if rpc_url is not None:
+                planner_command += " --rpc-url " + _q(rpc_url)
+            planner_command += " --require-ready"
+            items.append(
+                Phase9WorkItem(
+                    task_type="CHAIN_POOL_CAPTURE_PLAN",
+                    scope="PHASE9_CHAIN_POOLS",
+                    reason=(
+                        f"{capture_plan.additional_chain_pools_needed} "
+                        "additional chain-observed pool(s) are required; "
+                        "discovered API candidates are available for "
+                        "read-only Rust capture"
+                    ),
+                    shell_command=planner_command,
+                )
+            )
+        else:
+            items.append(
+                Phase9WorkItem(
+                    task_type="API_POOL_DISCOVERY",
+                    scope="METEORA_POOLS",
+                    reason=(
+                        "fewer than three chain-observed pools are available "
+                        "and no uncaptured API-discovered candidates exist"
+                    ),
+                    shell_command="pio collect-once",
                 )
             )
 
