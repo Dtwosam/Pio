@@ -156,3 +156,32 @@ def test_required_paper_quotes_include_external_rewards_only(tmp_path):
         storage,
         account_id="paper",
     ) == ("reward", "y")
+
+
+def test_quote_registry_orders_different_timezone_offsets_chronologically(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_token_quote(
+        storage,
+        token_mint="mint",
+        quote_per_atomic=1.0,
+        source="EARLIER",
+        observed_at="2026-09-23T11:00:00+01:00",
+    )
+    save_token_quote(
+        storage,
+        token_mint="mint",
+        quote_per_atomic=2.0,
+        source="LATER",
+        observed_at="2026-09-23T10:30:00+00:00",
+    )
+
+    status = token_quote_status(
+        storage,
+        token_mint="mint",
+        max_age_seconds=3600,
+        as_of="2026-09-23T10:45:00+00:00",
+    )
+
+    assert status.source == "LATER"
+    assert status.quote_per_atomic == 2.0
+    assert status.age_seconds == 900
