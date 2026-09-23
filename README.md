@@ -122,7 +122,9 @@ pio phase8-retrain-input-template > phase8-retrain-inputs.json
 pio phase8-retrain-inputs-ingest --file phase8-retrain-inputs.json
 pio phase8-retrain-inputs-audit --require-valid
 pio phase8-retrain-build-run
-pio phase8-retrain-train-run  # offline model creation only\npio phase8-retrain-offline-validate-run --require-qualified  # walk-forward + held-out offline gate\n
+pio phase8-retrain-train-run  # offline model creation only
+pio phase8-retrain-offline-validate-run --require-qualified  # walk-forward + held-out offline gate
+
 # Phase 9 research-only evidence
 pio phase9-work-queue --rpc-url <RPC_URL>
 pio phase9-storage-integrity --require-verified
