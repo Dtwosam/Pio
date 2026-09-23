@@ -332,14 +332,6 @@ def apply_chain_paper_observation(
     emergency_exit: bool = False,
     config: PositionManagementConfig = PositionManagementConfig(),
 ) -> PaperChainObservationResult:
-    if rebalance_cost_quote is not None:
-        position = paper_position_snapshot(storage, position_id=position_id)
-        if position.rebalances != 0:
-            raise ValueError(
-                "counterfactual chain compatibility path does not reset "
-                "post-rebalance state yet"
-            )
-
     valuation = _legacy_valuation(
         storage,
         position_id=position_id,
@@ -369,16 +361,9 @@ def apply_chain_paper_observation(
         pool_safe=pool_safe,
         emergency_exit=emergency_exit,
         estimated_exit_cost_quote=estimated_exit_cost_quote,
+        rebalance_cost_quote=rebalance_cost_quote,
         config=config,
     )
-    if (
-        applied.executed_action == "REBALANCE_PENDING_COST"
-        and rebalance_cost_quote is not None
-    ):
-        raise ValueError(
-            "chain-derived rebalance atomic reset is not yet supported; "
-            "leave rebalance pending"
-        )
 
     return PaperChainObservationResult(
         valuation=valuation,
