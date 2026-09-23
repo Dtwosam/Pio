@@ -1574,6 +1574,7 @@ def test_work_queue_snapshot_is_sanitized_and_immutable(tmp_path):
         persisted_text = str(row[0]) + str(row[1])
         assert secret_rpc not in persisted_text
         assert "shell_command" not in str(row[1])
+        assert "research_sources_current" in str(row[1])
         try:
             conn.execute(
                 """
