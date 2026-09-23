@@ -40,6 +40,12 @@ def evaluate_phase3_entry_gate(
     proposal = baseline.research_proposal
     baseline_selected = proposal is not None
     sizing_ready = not sizing.blocked and sizing.sized_quote > 0
+    if (
+        sizing_ready
+        and sizing.requested_quote is not None
+        and sizing.sized_quote + 1e-12 < sizing.requested_quote
+    ):
+        sizing_ready = False
 
     if not phase2_ready:
         reasons.extend(baseline.phase2_blockers or ("Phase 2 is not promoted",))
@@ -55,7 +61,16 @@ def evaluate_phase3_entry_gate(
             f"capital sizing: {reason}"
             for reason in sizing.reasons
         )
-        if not sizing.reasons:
+        if (
+            sizing.requested_quote is not None
+            and sizing.sized_quote > 0
+            and sizing.sized_quote < sizing.requested_quote
+        ):
+            reasons.append(
+                "capital sizing: requested notional exceeds allowed size; "
+                "atomic proposal must be rescaled"
+            )
+        if not sizing.reasons and sizing.sized_quote <= 0:
             reasons.append("capital sizing produced no deployable capital")
 
     research_ready = pool_safe and baseline_selected and sizing_ready
