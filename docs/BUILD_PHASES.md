@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v0.7
+Status: v0.8
 
 ## Phase 0 — Foundation
 Status: complete.
@@ -57,17 +57,34 @@ Exit condition:
 - no required capability remains unvalidated.
 
 ## Phase 3 — Deterministic Baseline Strategy
-Status: candidate comparison exists; policy not promoted.
+Status: deterministic research policy implemented; promotion blocked by Phase 2 evidence and broader validation.
 
-Next after the Phase 2 evidence gate:
-- pool safety filters
-- comparable value/PnL normalization
-- deterministic entry/range/strategy policy
-- conservative sizing
-- exit/rebalance policy
-- walk-forward evaluation
+Built:
+- fail-closed pool universe safety screen
+- standard-SPL/token-program eligibility check
+- TVL, volume, age, blacklist and dynamic-fee filters
+- trailing chain candidate comparison by range/strategy
+- decision-time proposal recentering
+- cost-aware excess-versus-hold economics
+- non-overlapping no-lookahead walk-forward evaluation
+- drawdown-aware capital sizing
+- cash reserve / per-position / total-deployment caps
+- deterministic HOLD / REBALANCE / EXIT policy
+- hard safety exit and stop-loss override
+- optional take-profit and max-hold exit
+- rebalance-count cap
+- Phase 3 entry authorization gate
+- end-to-end research planner
 
-The baseline must consume validated Phase 2 outputs. It must not rank candidates using pool APR as if it were position profit.
+Still needed before Phase 3 promotion:
+- Phase 2 evidence gate must pass on real samples
+- standardized cross-pool notional/value normalization
+- multi-pool out-of-sample comparison
+- paper-trading state/account-equity loop
+- larger walk-forward corpus across market regimes
+- explicit policy-promotion thresholds
+
+The baseline never ranks by headline APR alone. Research output can exist before Phase 2 promotion, but entry authorization remains blocked. Live transaction construction/signing remains outside Phase 3.
 
 ## Phase 4 — ML v1
 
