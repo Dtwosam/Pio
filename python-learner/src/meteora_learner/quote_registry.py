@@ -118,7 +118,7 @@ def token_quote_status(
                 SELECT quote_per_atomic, source, observed_at
                 FROM token_quote_observations
                 WHERE token_mint = ? AND quote_unit = ?
-                ORDER BY observed_at DESC, id DESC
+                ORDER BY julianday(observed_at) DESC, id DESC
                 LIMIT 1
                 """,
                 (token_mint, quote_unit),
@@ -129,8 +129,8 @@ def token_quote_status(
                 SELECT quote_per_atomic, source, observed_at
                 FROM token_quote_observations
                 WHERE token_mint = ? AND quote_unit = ?
-                  AND observed_at <= ?
-                ORDER BY observed_at DESC, id DESC
+                  AND julianday(observed_at) <= julianday(?)
+                ORDER BY julianday(observed_at) DESC, id DESC
                 LIMIT 1
                 """,
                 (token_mint, quote_unit, as_of),
