@@ -66,6 +66,7 @@ from .paper_latest import (
     LatestPaperCycleItem,
     run_latest_live_paper_cycle,
 )
+from .paper_portfolio import run_portfolio_live_paper_cycle
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -410,6 +411,34 @@ def main() -> None:
     paper_live_latest.add_argument("--min-pool-age-hours", type=float, default=24.0)
     paper_live_latest.add_argument("--min-chain-observations", type=int, default=12)
     paper_live_latest.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
+
+    paper_portfolio = subparsers.add_parser(
+        "paper-portfolio-run",
+        help="Discover and run eligible chain-bound paper positions for one account",
+    )
+    paper_portfolio.add_argument("--account", required=True)
+    paper_portfolio.add_argument("--cycle-id", required=True)
+    paper_portfolio.add_argument(
+        "--quotes-file",
+        required=True,
+        help="JSON object mapping token-Y mint to quote-per-atomic value",
+    )
+    paper_portfolio.add_argument("--max-positions", type=int)
+    paper_portfolio.add_argument("--retry-failed", action="store_true")
+    paper_portfolio.add_argument("--stop-loss-bps", type=int, default=500)
+    paper_portfolio.add_argument("--take-profit-bps", type=int)
+    paper_portfolio.add_argument("--max-rebalances", type=int, default=3)
+    paper_portfolio.add_argument("--max-holding-observations", type=int)
+    paper_portfolio.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
+    paper_portfolio.add_argument("--min-tvl-usd", type=float, default=50000.0)
+    paper_portfolio.add_argument("--min-volume-24h-usd", type=float, default=10000.0)
+    paper_portfolio.add_argument("--min-pool-age-hours", type=float, default=24.0)
+    paper_portfolio.add_argument("--min-chain-observations", type=int, default=12)
+    paper_portfolio.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
 
     paper_live_run = subparsers.add_parser(
         "paper-live-run",
@@ -1632,6 +1661,38 @@ def main() -> None:
             storage,
             cycle_id=args.cycle_id,
             items=items,
+            safety_config=_pool_safety_config_from_args(args),
+            management_config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+            retry_failed=args.retry_failed,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-portfolio-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        with open(args.quotes_file, "r", encoding="utf-8") as handle:
+            raw_quotes = json.load(handle)
+        if not isinstance(raw_quotes, dict):
+            raise ValueError("paper-portfolio-run quotes file must contain a JSON object")
+        quotes = {
+            str(mint): float(value)
+            for mint, value in raw_quotes.items()
+        }
+        result = run_portfolio_live_paper_cycle(
+            storage,
+            account_id=args.account,
+            cycle_id=args.cycle_id,
+            token_y_quotes=quotes,
+            max_positions=args.max_positions,
             safety_config=_pool_safety_config_from_args(args),
             management_config=PositionManagementConfig(
                 stop_loss_bps=args.stop_loss_bps,
