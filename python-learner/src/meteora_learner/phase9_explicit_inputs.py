@@ -10,12 +10,16 @@ from .multi_pool_research import (
     build_multi_pool_research,
 )
 from .portfolio_allocation import (
+    PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+    PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
     PortfolioAllocationCriteria,
     persist_portfolio_allocation_research,
     persist_portfolio_candidate_research,
+    portfolio_candidate_artifact_sha256,
     research_portfolio_allocation,
 )
 from .static_hedge import (
+    STATIC_HEDGE_EVIDENCE_TYPE,
     HedgeInstrumentAssumptions,
     StaticHedgeCriteria,
     persist_static_hedge_research,
@@ -114,6 +118,28 @@ class Phase9ExplicitResearchRun:
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _normalized(value: Any) -> Any:
+    return json.loads(json.dumps(value, sort_keys=True))
+
+
+def _latest_evidence_matches(
+    storage: Storage,
+    *,
+    edge_type: str,
+    pool_address: str,
+    evidence: dict[str, Any],
+) -> int | None:
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=edge_type,
+        pool_address=pool_address,
+    )
+    if latest is None:
+        return None
+    if _normalized(latest.get("evidence")) != _normalized(evidence):
+        return None
+    return int(latest["id"])
 
 
 def _canonical_sha256(payload: dict[str, Any]) -> str:
@@ -664,6 +690,7 @@ def run_phase9_explicit_research(
     *,
     artifact: Phase9ExplicitInputsArtifact,
     persist: bool = False,
+    deduplicate_persistence: bool = False,
 ) -> Phase9ExplicitResearchRun:
     static_reports = []
     static_ids: list[int] = []
@@ -679,8 +706,21 @@ def run_phase9_explicit_research(
         )
         static_reports.append(report)
         if persist:
+            static_evidence = report.to_record()
+            existing_id = (
+                _latest_evidence_matches(
+                    storage,
+                    edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+                    pool_address=report.pool_address,
+                    evidence=static_evidence,
+                )
+                if deduplicate_persistence
+                else None
+            )
             static_ids.append(
-                persist_static_hedge_research(
+                existing_id
+                if existing_id is not None
+                else persist_static_hedge_research(
                     storage,
                     report=report,
                 )
@@ -724,12 +764,39 @@ def run_phase9_explicit_research(
             "max_share_bps": portfolio.max_share_bps,
             "favor_x_in_active_bin": portfolio.favor_x_in_active_bin,
         }
-        candidate_id, candidate_sha = persist_portfolio_candidate_research(
-            storage,
-            comparison=comparison_result.comparison,
-            source_inputs=source_inputs,
-            assumptions=assumptions,
+        candidate_payload = {
+            "research_only": True,
+            "policy_actionable": False,
+            "source_inputs": source_inputs,
+            "assumptions": assumptions,
+            "comparison": comparison_result.comparison.to_record(),
+        }
+        candidate_sha = portfolio_candidate_artifact_sha256(
+            candidate_payload
         )
+        candidate_evidence = {
+            "artifact_sha256": candidate_sha,
+            **candidate_payload,
+        }
+        candidate_id = (
+            _latest_evidence_matches(
+                storage,
+                edge_type=PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+                pool_address="__PORTFOLIO_CANDIDATES__",
+                evidence=candidate_evidence,
+            )
+            if deduplicate_persistence
+            else None
+        )
+        if candidate_id is None:
+            candidate_id, candidate_sha = (
+                persist_portfolio_candidate_research(
+                    storage,
+                    comparison=comparison_result.comparison,
+                    source_inputs=source_inputs,
+                    assumptions=assumptions,
+                )
+            )
         candidate_lineage = {
             "candidate_evidence_id": candidate_id,
             "candidate_evidence_sha256": candidate_sha,
@@ -744,10 +811,22 @@ def run_phase9_explicit_research(
     )
     allocation_id = None
     if persist:
-        allocation_id = persist_portfolio_allocation_research(
-            storage,
-            report=allocation,
+        allocation_evidence = allocation.to_record()
+        allocation_id = (
+            _latest_evidence_matches(
+                storage,
+                edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+                pool_address="__PORTFOLIO__",
+                evidence=allocation_evidence,
+            )
+            if deduplicate_persistence
+            else None
         )
+        if allocation_id is None:
+            allocation_id = persist_portfolio_allocation_research(
+                storage,
+                report=allocation,
+            )
 
     return Phase9ExplicitResearchRun(
         research_only=True,
