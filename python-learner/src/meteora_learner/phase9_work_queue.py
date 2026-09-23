@@ -16,6 +16,8 @@ from .phase9_mint_capture import (
     Phase9MintCaptureCriteria,
     build_phase9_mint_capture_plan,
 )
+from .phase9_wallet_flow_capture import wallet_flow_source_state
+from .wallet_flow import WalletFlowCriteria
 from .phase9_policy_authorization import (
     audit_persisted_phase9_policy_authorization,
     evaluate_phase9_policy_authorization,
@@ -604,31 +606,82 @@ def build_phase9_work_queue(
         criteria.min_wallet_flow_pools
         - bundle.wallet_flow.qualified_records,
     )
-    for pool in [
+    wallet_candidate_pools = [
         value for value in pools if value not in qualified_wallet
-    ][:wallet_needed]:
+    ][:wallet_needed]
+    for pool in wallet_candidate_pools:
+        source = wallet_flow_source_state(
+            storage,
+            pool_address=pool,
+            criteria=WalletFlowCriteria(),
+            as_of=as_of,
+        )
+        if not source.ready:
+            prefix = (
+                "SOLANA_RPC_URL="
+                + _q(rpc_url)
+                + " "
+                if rpc_url is not None
+                else ""
+            )
+            capture_command = (
+                prefix
+                + "pio phase9-wallet-flow-capture-run --pool "
+                + _q(pool)
+            )
+            if as_of is not None:
+                capture_command += " --as-of " + _q(as_of)
+            capture_command += " --require-ready"
+            items.append(
+                Phase9WorkItem(
+                    task_type="WALLET_FLOW_CAPTURE",
+                    scope=pool,
+                    reason=(
+                        "wallet-flow source corpus is below the default "
+                        "event/user threshold: "
+                        f"events {source.events}/20, "
+                        f"unique users {source.unique_users}/5"
+                    ),
+                    shell_command=capture_command,
+                )
+            )
+            items.append(
+                Phase9WorkItem(
+                    task_type="WALLET_FLOW",
+                    scope=pool,
+                    reason=(
+                        "wallet-flow research is blocked until real "
+                        "position-history source thresholds are satisfied"
+                    ),
+                    shell_command=None,
+                )
+            )
+            continue
+
+        command = (
+            "pio wallet-flow-research --pool "
+            + _q(pool)
+        )
+        if as_of is not None:
+            command += " --as-of " + _q(as_of)
+        command += " --persist --require-qualified"
         items.append(
             Phase9WorkItem(
                 task_type="WALLET_FLOW",
                 scope=pool,
                 reason="qualified persisted wallet-flow evidence is needed",
-                shell_command=(
-                    "pio wallet-flow-research --pool "
-                    + _q(pool)
-                    + " --persist --require-qualified"
-                ),
+                shell_command=command,
             )
         )
-    if wallet_needed > 0 and not any(
-        item.task_type == "WALLET_FLOW" for item in items
-    ):
+    if wallet_needed > len(wallet_candidate_pools):
         items.append(
             Phase9WorkItem(
                 task_type="WALLET_FLOW",
                 scope="POOL_REQUIRED",
                 reason=(
-                    f"{wallet_needed} additional qualified wallet-flow "
-                    "pool(s) are required"
+                    f"{wallet_needed - len(wallet_candidate_pools)} "
+                    "additional chain-observed pool(s) are required for "
+                    "wallet-flow evidence"
                 ),
                 shell_command=None,
             )
