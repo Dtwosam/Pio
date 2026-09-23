@@ -188,3 +188,56 @@ def test_chain_capture_batch_is_noop_when_target_already_met(tmp_path):
         "already satisfied" in reason
         for reason in report.reasons
     )
+
+
+def test_chain_capture_batch_onboards_one_preferred_pool_after_target(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool, tvl in (
+        ("pool-a", 1_000.0),
+        ("pool-b", 900.0),
+        ("pool-c", 800.0),
+        ("pool-d", 700.0),
+        ("pool-e", 600.0),
+    ):
+        seed_api_pool(storage, pool, tvl=tvl)
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        storage.save_chain_pool_snapshot(
+            {
+                "pool_address": pool,
+                "active_bin_id": 0,
+                "bin_step": 25,
+                "token_x_mint": f"{pool}-x",
+                "token_y_mint": f"{pool}-y",
+                "bin_arrays": [],
+            },
+            observed_at="2026-09-23T12:00:00+00:00",
+        )
+
+    calls = []
+    report = run_phase9_chain_capture_batch(
+        storage,
+        criteria=Phase9ChainCaptureCriteria(
+            target_chain_pools=3,
+            max_candidates=4,
+        ),
+        preferred_pool_addresses=(
+            "pool-a", "pool-b", "pool-c", "pool-d", "pool-e"
+        ),
+        max_preferred_candidates=1,
+        inspector=lambda pool, radius: (
+            calls.append(pool) or payload(pool)
+        ),
+        ingest_observed_at="2026-09-23T13:00:00+00:00",
+    )
+
+    assert calls == ["pool-d"]
+    assert report.target_met is True
+    assert report.preferred_target_met is False
+    assert report.pools_captured == 1
+    assert report.current_chain_pool_count_after == 4
+    assert any(
+        "pool-e" in reason
+        for reason in report.reasons
+    )
