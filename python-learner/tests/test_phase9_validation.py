@@ -1061,6 +1061,9 @@ def test_tampered_mint_snapshot_payload_blocks_bundle(tmp_path):
     )
 
     with storage.connect() as conn:
+        # Bypass the storage-layer trigger to prove the hash/replay gate
+        # independently detects source corruption.
+        conn.execute("DROP TRIGGER token_mint_snapshots_no_update")
         conn.execute(
             """
             UPDATE token_mint_snapshots
@@ -1092,6 +1095,9 @@ def test_tampered_pool_snapshot_payload_blocks_mint_bundle(tmp_path):
     )
 
     with storage.connect() as conn:
+        # Bypass the storage-layer trigger to prove the hash/replay gate
+        # independently detects source corruption.
+        conn.execute("DROP TRIGGER chain_pool_snapshots_no_update")
         conn.execute(
             """
             UPDATE chain_pool_snapshots
