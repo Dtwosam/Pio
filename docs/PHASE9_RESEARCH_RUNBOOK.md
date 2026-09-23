@@ -795,6 +795,20 @@ Static hedge and portfolio allocation remain outside this automatic pass because
 their economics depend on the explicit checksum-bound input artifact described
 above.
 
+
+An optional hardened systemd unit can run this refresh after the source
+collector:
+
+```bash
+sudo systemctl enable --now pio-phase9-research-refresh.timer
+```
+
+The research timer uses the same 70-minute recurrence as source capture but a
+25-minute boot offset, ten minutes after the source timer's default boot offset.
+It never uses a `--require-*` readiness flag, because temporarily incomplete
+real evidence is expected while the corpus accumulates. The service does not
+invoke promotion or any LIVE/policy command.
+
 ## End-to-end Phase 9 work queue
 
 `pio phase9-work-queue` is the single dependency-aware planner for both the
