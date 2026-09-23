@@ -11,6 +11,17 @@ from meteora_learner.storage import Storage
 NOW = "2026-09-23T10:02:31+00:00"
 
 
+def scheduler_events(storage):
+    with storage.connect() as conn:
+        return conn.execute(
+            """
+            SELECT event_type, tick_id, owner_id, status
+            FROM paper_scheduler_events
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+
 def fake_tick(status="COMPLETE"):
     def run(storage, **kwargs):
         return PaperTickReport(
@@ -58,6 +69,10 @@ def test_scheduler_uses_deterministic_bucket_tick_and_releases_lease(tmp_path):
     assert state.last_status == "COMPLETE"
     assert state.total_ticks == 1
     assert state.consecutive_failures == 0
+    assert scheduler_events(storage) == [
+        ("LEASE_ACQUIRED", result.tick_id, "worker-a", "RUNNING"),
+        ("TICK_FINISHED", result.tick_id, "worker-a", "COMPLETE"),
+    ]
 
 
 def test_scheduler_refuses_overlap_while_lease_is_live(tmp_path):
@@ -94,6 +109,9 @@ def test_scheduler_refuses_overlap_while_lease_is_live(tmp_path):
     assert called == []
     assert result.scheduler_state.owner_id == "other-worker"
     assert result.scheduler_state.total_ticks == 2
+    assert scheduler_events(storage) == [
+        ("LEASE_BUSY", result.tick_id, "worker-a", "BUSY"),
+    ]
 
 
 def test_scheduler_recovers_expired_lease_and_updates_health(tmp_path):
@@ -136,6 +154,10 @@ def test_scheduler_recovers_expired_lease_and_updates_health(tmp_path):
     assert result.scheduler_state.owner_id is None
     assert result.scheduler_state.total_ticks == 5
     assert result.scheduler_state.consecutive_failures == 3
+    assert scheduler_events(storage) == [
+        ("LEASE_RECOVERED", result.tick_id, "worker-b", "RUNNING"),
+        ("TICK_FINISHED", result.tick_id, "worker-b", "FAILED"),
+    ]
 
 
 def test_scheduler_resets_failure_streak_after_success(tmp_path):
@@ -160,3 +182,39 @@ def test_scheduler_resets_failure_streak_after_success(tmp_path):
     )
     assert second.scheduler_state.total_ticks == 2
     assert second.scheduler_state.consecutive_failures == 0
+
+
+def test_scheduler_recovers_owner_with_missing_lease_deadline(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO paper_scheduler_state(
+                account_id, owner_id, lease_until, heartbeat_at,
+                last_tick_id, last_started_at, last_status,
+                consecutive_failures, total_ticks, updated_at
+            ) VALUES (
+                'paper', 'orphan-worker', NULL,
+                '2026-09-23T09:59:00+00:00', 'old',
+                '2026-09-23T09:59:00+00:00', 'RUNNING', 0, 1,
+                '2026-09-23T09:59:00+00:00'
+            )
+            """
+        )
+
+    result = run_scheduled_paper_tick(
+        storage,
+        account_id="paper",
+        interval_seconds=300,
+        lease_seconds=240,
+        owner_id="worker-c",
+        as_of=NOW,
+        tick_runner=fake_tick("COMPLETE"),
+    )
+
+    assert result.recovered_stale_lease is True
+    assert result.status == "COMPLETE"
+    assert scheduler_events(storage) == [
+        ("LEASE_RECOVERED", result.tick_id, "worker-c", "RUNNING"),
+        ("TICK_FINISHED", result.tick_id, "worker-c", "COMPLETE"),
+    ]
