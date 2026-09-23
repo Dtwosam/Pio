@@ -308,6 +308,18 @@ def build_composition_fee_reconciliation(
             for item in composition_events
         )
 
+        if not composition_events or actual_fee_x + actual_fee_y <= 0:
+            entries.append(
+                CompositionFeeReconciliationEntry(
+                    signature=candidate.signature,
+                    parent_ix_index=candidate.parent_ix_index,
+                    eligible=False,
+                    reason="no positive CompositionFee event for formula validation",
+                    sample=None,
+                )
+            )
+            continue
+
         errors = (
             predicted.composition_fee_x - actual_fee_x,
             predicted.composition_fee_y - actual_fee_y,
