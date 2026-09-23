@@ -175,3 +175,50 @@ def test_capture_plan_is_complete_when_chain_pool_target_is_met(tmp_path):
         "already satisfied" in reason
         for reason in plan.reasons
     )
+
+
+def test_capture_plan_onboards_preferred_pool_after_minimum_target(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    for pool, tvl in (
+        ("pool-a", 1_000.0),
+        ("pool-b", 900.0),
+        ("pool-c", 800.0),
+        ("pool-d", 700.0),
+        ("pool-e", 600.0),
+    ):
+        seed_api_pool(
+            storage,
+            pool,
+            tvl=tvl,
+            volume=100.0,
+            observed_at="2026-09-23T10:00:00+00:00",
+        )
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        seed_chain_pool(storage, pool)
+
+    plan = build_phase9_chain_capture_plan(
+        storage,
+        criteria=Phase9ChainCaptureCriteria(
+            target_chain_pools=3,
+            max_candidates=4,
+        ),
+        preferred_pool_addresses=(
+            "pool-a", "pool-b", "pool-c", "pool-d", "pool-e"
+        ),
+        max_preferred_candidates=1,
+    )
+
+    assert plan.additional_chain_pools_needed == 0
+    assert plan.capture_required is True
+    assert plan.preferred_pool_count == 5
+    assert plan.preferred_missing_chain_pools == ("pool-d", "pool-e")
+    assert [item.pool_address for item in plan.candidates] == ["pool-d"]
+    assert plan.plan_ready is False
+    assert any(
+        "ranked cohort onboarding is still required" in reason
+        for reason in plan.reasons
+    )
+    assert any(
+        "pool-e" in reason
+        for reason in plan.reasons
+    )
