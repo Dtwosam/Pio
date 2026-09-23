@@ -40,6 +40,7 @@ from .phase9_research import (
     Phase9ResearchCriteria,
     evaluate_phase9_research,
 )
+from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase_promotion import (
     PHASE8,
     PHASE8_EVIDENCE_TYPE,
@@ -114,6 +115,7 @@ class Phase9ResearchBundleReport:
     policy_actionable: bool
     status: str
     criteria: Phase9ResearchBundleCriteria
+    storage_integrity_verified: bool
     adaptive_multi_pool: Phase9EvidenceSummary
     mint_risk: Phase9EvidenceSummary
     wallet_flow: Phase9EvidenceSummary
@@ -917,6 +919,7 @@ def evaluate_phase9_research_bundle(
         PHASE8,
         evidence_type=PHASE8_EVIDENCE_TYPE,
     )
+    storage_integrity = evaluate_phase9_storage_integrity(storage)
 
     adaptive = _summary(
         storage,
@@ -938,6 +941,11 @@ def evaluate_phase9_research_bundle(
     if not phase8_promoted:
         reasons.append(
             "Phase 8 must be persistently promoted before Phase 9 research can be ready"
+        )
+    if not storage_integrity.verified:
+        reasons.extend(
+            f"storage integrity: {reason}"
+            for reason in storage_integrity.reasons
         )
 
     for name, summary in (
@@ -1061,6 +1069,7 @@ def evaluate_phase9_research_bundle(
         policy_actionable=False,
         status=status,
         criteria=criteria,
+        storage_integrity_verified=storage_integrity.verified,
         adaptive_multi_pool=adaptive,
         mint_risk=mint,
         wallet_flow=wallet,
