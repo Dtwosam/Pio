@@ -217,3 +217,68 @@ def test_live_effect_apply_is_idempotent(tmp_path):
         assert conn.execute(
             "SELECT COUNT(*) FROM live_execution_effects"
         ).fetchone()[0] == 1
+
+
+def test_settlement_exit_derives_claimed_fee_reward_and_close_effects(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    events = [
+        event(
+            "ClaimFee2",
+            {
+                "lb_pair": "pool",
+                "position": "position",
+                "owner": "wallet",
+                "fee_x": "7",
+                "fee_y": "8",
+                "active_bin_id": 2,
+            },
+            index=0,
+        ),
+        event(
+            "ClaimReward2",
+            {
+                "lb_pair": "pool",
+                "position": "position",
+                "owner": "wallet",
+                "reward_index": 0,
+                "total_reward": "9",
+                "active_bin_id": 2,
+            },
+            index=1,
+        ),
+        event(
+            "ClaimReward2",
+            {
+                "lb_pair": "pool",
+                "position": "position",
+                "owner": "wallet",
+                "reward_index": 1,
+                "total_reward": "10",
+                "active_bin_id": 2,
+            },
+            index=2,
+        ),
+        event(
+            "PositionClose",
+            {
+                "position": "position",
+                "owner": "wallet",
+            },
+            index=3,
+        ),
+    ]
+    storage.save_chain_transaction_events(snapshot(events))
+    ingest_execution_receipt(
+        storage,
+        receipt(action="EXIT", event_count=4),
+    )
+
+    effect = derive_live_execution_effect(storage, "decision-1")
+
+    assert effect.position_address == "position"
+    assert effect.token_x_wallet_delta_atomic == 7
+    assert effect.token_y_wallet_delta_atomic == 8
+    assert effect.earned_fee_x_atomic == 7
+    assert effect.earned_fee_y_atomic == 8
+    assert effect.reward_one_atomic == 9
+    assert effect.reward_two_atomic == 10
