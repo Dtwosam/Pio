@@ -118,6 +118,10 @@ from .phase9_policy_manifest import (
     evaluate_phase9_policy_prewire_manifest,
     persist_phase9_policy_prewire_manifest,
 )
+from .phase9_capture_plan import (
+    Phase9ChainCaptureCriteria,
+    build_phase9_chain_capture_plan,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -2094,6 +2098,39 @@ def main() -> None:
     )
     phase9_promotion_audit.add_argument(
         "--require-current",
+        action="store_true",
+    )
+
+    phase9_capture_plan = subparsers.add_parser(
+        "phase9-chain-capture-plan",
+        help="Plan read-only Rust inspect-pool captures for discovered Meteora pools that lack Phase 9 chain evidence",
+    )
+    phase9_capture_plan.add_argument(
+        "--target-chain-pools",
+        type=int,
+        default=3,
+    )
+    phase9_capture_plan.add_argument(
+        "--max-candidates",
+        type=int,
+        default=8,
+    )
+    phase9_capture_plan.add_argument(
+        "--bin-array-radius",
+        type=int,
+        default=1,
+    )
+    phase9_capture_plan.add_argument(
+        "--rpc-url",
+        help="Optional Solana RPC URL inserted into emitted read-only capture commands",
+    )
+    phase9_capture_plan.add_argument(
+        "--executor-bin",
+        default="meteora-executor",
+        help="Rust read-only executor binary used in emitted inspect-pool commands",
+    )
+    phase9_capture_plan.add_argument(
+        "--require-ready",
         action="store_true",
     )
 
@@ -4568,6 +4605,24 @@ def main() -> None:
         }
         print(json.dumps(output, indent=2))
         if args.require_current and not audit.current:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-chain-capture-plan":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_phase9_chain_capture_plan(
+            storage,
+            criteria=Phase9ChainCaptureCriteria(
+                target_chain_pools=args.target_chain_pools,
+                max_candidates=args.max_candidates,
+                bin_array_radius=args.bin_array_radius,
+            ),
+            rpc_url=args.rpc_url,
+            executor_bin=args.executor_bin,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.plan_ready:
             raise SystemExit(2)
         return
 
