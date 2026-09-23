@@ -173,8 +173,12 @@ def build_paper_health(
                 f"{scheduler.consecutive_failures}"
             )
 
-        if scheduler.owner_id is not None and scheduler.lease_until is not None:
-            if _parse_time(scheduler.lease_until) <= now:
+        if scheduler.owner_id is not None:
+            if scheduler.lease_until is None:
+                critical.append(
+                    "scheduler owner is assigned without a lease deadline"
+                )
+            elif _parse_time(scheduler.lease_until) <= now:
                 critical.append("scheduler has an expired lease still assigned")
 
         if tick_status in {"FAILED", "MARKET_REFRESH_FAILED"}:
