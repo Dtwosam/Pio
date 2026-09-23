@@ -758,6 +758,43 @@ RPC/API execution jitter from turning an intended hourly research cadence into
 near-duplicate observations. This scheduled path remains source-only,
 read-only and non-actionable.
 
+## Replay-aware automatic research refresh
+
+Once persisted sources are available, refresh the research families that do not
+require new economic assumptions with:
+
+```bash
+pio phase9-research-refresh-run
+```
+
+The pass is deliberately narrower than the full work queue. It may recompute
+adaptive/regime, mint-risk, wallet-flow and checksum-bound contextual-bandit
+research. It first requires verified Phase 9 append-only storage and a current
+Phase 8 promotion. Each family is skipped when its latest required qualified
+evidence already passes deterministic replay.
+
+For a missing or non-replay-verified family, the pass checks that family's
+persisted source gate before evaluation. Source-not-ready families are reported
+without fabricating evidence. When evaluation does run, the normalized report
+is compared with the latest append-only evidence row and is persisted only when
+it changed.
+
+Mint-risk uses a deterministic source-derived evaluation cutoff: the latest
+timestamp among the selected pool snapshots and required mint snapshots. It
+does not use a fresh wall-clock cutoff on every refresh, so identical source
+state does not create evidence churn.
+
+If all Phase 9 research families—including the separately supplied static hedge
+and portfolio-allocation evidence—are ready after refresh, the command persists
+the checksum-bound research bundle unless `--no-persist-bundle` is supplied.
+It never persists Phase 9 promotion and never changes policy. Use
+`--require-automatic-ready` for a fail-able check of the automatic research
+families, or `--require-bundle-ready` when the complete bundle must be ready.
+
+Static hedge and portfolio allocation remain outside this automatic pass because
+their economics depend on the explicit checksum-bound input artifact described
+above.
+
 ## End-to-end Phase 9 work queue
 
 `pio phase9-work-queue` is the single dependency-aware planner for both the
