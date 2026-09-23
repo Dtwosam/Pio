@@ -40,7 +40,12 @@ from .phase9_research import (
     Phase9ResearchCriteria,
     evaluate_phase9_research,
 )
-from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
+from .phase_promotion import (
+    PHASE8,
+    PHASE8_EVIDENCE_TYPE,
+    PHASE9,
+    PHASE9_EVIDENCE_TYPE,
+)
 from .portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
     PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
@@ -1164,6 +1169,20 @@ class Phase9PromotionReport:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class Phase9PersistedPromotionAudit:
+    exists: bool
+    qualified: bool
+    evidence_type_valid: bool
+    current_promotion_ready: bool
+    persisted_matches_current: bool
+    current: bool
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def evaluate_phase9_promotion(
     storage: Storage,
     *,
@@ -1260,5 +1279,79 @@ def evaluate_phase9_promotion(
         persisted_bundle_hash_valid=persisted_bundle_hash_valid,
         persisted_bundle_matches_current=persisted_matches_current,
         promotion_ready=not reasons,
+        reasons=tuple(reasons),
+    )
+
+
+def audit_persisted_phase9_promotion(
+    storage: Storage,
+    *,
+    criteria: Phase9ResearchBundleCriteria = (
+        Phase9ResearchBundleCriteria()
+    ),
+) -> Phase9PersistedPromotionAudit:
+    current_report = evaluate_phase9_promotion(
+        storage,
+        criteria=criteria,
+    )
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT evidence_type, qualified, evidence_json
+            FROM phase_promotion_evidence
+            WHERE phase_name = ?
+            LIMIT 1
+            """,
+            (PHASE9,),
+        ).fetchone()
+
+    reasons: list[str] = []
+    if row is None:
+        reasons.append("persisted Phase 9 promotion evidence is missing")
+        return Phase9PersistedPromotionAudit(
+            exists=False,
+            qualified=False,
+            evidence_type_valid=False,
+            current_promotion_ready=current_report.promotion_ready,
+            persisted_matches_current=False,
+            current=False,
+            reasons=tuple(reasons),
+        )
+
+    evidence_type_valid = str(row[0]) == PHASE9_EVIDENCE_TYPE
+    qualified = bool(row[1])
+    try:
+        persisted = json.loads(str(row[2]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        persisted = None
+
+    current_record = json.loads(
+        json.dumps(current_report.to_record(), sort_keys=True)
+    )
+    persisted_matches_current = (
+        isinstance(persisted, dict)
+        and persisted == current_record
+    )
+
+    if not evidence_type_valid:
+        reasons.append("persisted Phase 9 promotion evidence type is invalid")
+    if not qualified:
+        reasons.append("persisted Phase 9 promotion evidence is not qualified")
+    if not current_report.promotion_ready:
+        reasons.append(
+            "current Phase 9 promotion gate no longer passes"
+        )
+    if not persisted_matches_current:
+        reasons.append(
+            "persisted Phase 9 promotion report is stale versus current bundle"
+        )
+
+    return Phase9PersistedPromotionAudit(
+        exists=True,
+        qualified=qualified,
+        evidence_type_valid=evidence_type_valid,
+        current_promotion_ready=current_report.promotion_ready,
+        persisted_matches_current=persisted_matches_current,
+        current=not reasons,
         reasons=tuple(reasons),
     )
