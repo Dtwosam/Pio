@@ -1,0 +1,211 @@
+from meteora_learner.contextual_bandit import (
+    CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+)
+from meteora_learner.mint_risk import MINT_RISK_EVIDENCE_TYPE
+from meteora_learner.phase9_research import (
+    PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+)
+from meteora_learner.phase9_validation import (
+    PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
+    Phase9ResearchBundleCriteria,
+    evaluate_phase9_research_bundle,
+    persist_phase9_research_bundle,
+)
+from meteora_learner.phase_promotion import (
+    PHASE8,
+    PHASE8_EVIDENCE_TYPE,
+)
+from meteora_learner.portfolio_allocation import (
+    PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+)
+from meteora_learner.static_hedge import STATIC_HEDGE_EVIDENCE_TYPE
+from meteora_learner.storage import Storage
+from meteora_learner.wallet_flow import WALLET_FLOW_EVIDENCE_TYPE
+
+
+def promote_phase8(storage):
+    storage.save_phase_promotion_evidence(
+        phase_name=PHASE8,
+        evidence_type=PHASE8_EVIDENCE_TYPE,
+        qualified=True,
+        evidence={"promotion_ready": True},
+    )
+
+
+def evidence(
+    storage,
+    edge_type,
+    pool,
+    *,
+    qualified=True,
+    research_only=True,
+    policy_actionable=False,
+):
+    return storage.save_advanced_edge_evidence(
+        edge_type=edge_type,
+        pool_address=pool,
+        as_of="2026-09-23T12:00:00+00:00",
+        status=(
+            "QUALIFIED_RESEARCH"
+            if qualified
+            else "NOT_QUALIFIED"
+        ),
+        qualified=qualified,
+        evidence={
+            "research_qualified": qualified,
+            "research_only": research_only,
+            "policy_actionable": policy_actionable,
+        },
+    )
+
+
+def seed_ready(storage):
+    promote_phase8(storage)
+    evidence(
+        storage,
+        PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        "__MULTI_POOL__",
+    )
+    for pool in ("pool-a", "pool-b"):
+        evidence(storage, MINT_RISK_EVIDENCE_TYPE, pool)
+        evidence(storage, WALLET_FLOW_EVIDENCE_TYPE, pool)
+    evidence(
+        storage,
+        PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        "__PORTFOLIO__",
+    )
+    evidence(storage, STATIC_HEDGE_EVIDENCE_TYPE, "pool-a")
+    evidence(
+        storage,
+        CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        "__CONTEXTUAL_BANDIT__",
+    )
+
+
+def test_phase9_bundle_ready_with_complete_research_corpus(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is True
+    assert report.status == "RESEARCH_BUNDLE_READY"
+    assert report.research_only is True
+    assert report.policy_actionable is False
+    assert report.mint_risk.qualified_records == 2
+    assert report.wallet_flow.qualified_records == 2
+
+    evidence_id = persist_phase9_research_bundle(
+        storage,
+        report=report,
+    )
+    assert evidence_id > 0
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
+        pool_address="__PHASE9_RESEARCH__",
+    )
+    assert latest is not None
+    assert latest["qualified"] is True
+    assert latest["evidence"]["policy_actionable"] is False
+
+
+def test_missing_research_family_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            DELETE FROM advanced_edge_evidence
+            WHERE edge_type = ?
+            """,
+            (CONTEXTUAL_BANDIT_EVIDENCE_TYPE,),
+        )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert report.status == "RESEARCH_BUNDLE_INCOMPLETE"
+    assert any(
+        "contextual-bandit" in reason
+        for reason in report.reasons
+    )
+
+
+def test_latest_boundary_violation_invalidates_old_qualified_evidence(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    evidence(
+        storage,
+        MINT_RISK_EVIDENCE_TYPE,
+        "pool-a",
+        qualified=True,
+        research_only=False,
+        policy_actionable=True,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert report.mint_risk.boundary_valid is False
+    assert any(
+        "mint risk evidence violates" in reason
+        for reason in report.reasons
+    )
+
+
+def test_phase8_promotion_is_required(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    evidence(
+        storage,
+        PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        "__MULTI_POOL__",
+    )
+    for pool in ("pool-a", "pool-b"):
+        evidence(storage, MINT_RISK_EVIDENCE_TYPE, pool)
+        evidence(storage, WALLET_FLOW_EVIDENCE_TYPE, pool)
+    evidence(
+        storage,
+        PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        "__PORTFOLIO__",
+    )
+    evidence(storage, STATIC_HEDGE_EVIDENCE_TYPE, "pool-a")
+    evidence(
+        storage,
+        CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        "__CONTEXTUAL_BANDIT__",
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert report.status == "RESEARCH_ONLY_PHASE8_BLOCKED"
+
+
+def test_bundle_criteria_can_require_more_pool_diversity(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+
+    report = evaluate_phase9_research_bundle(
+        storage,
+        criteria=Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=3,
+            min_wallet_flow_pools=3,
+            min_static_hedge_pools=2,
+        ),
+    )
+
+    assert report.research_ready is False
+    assert any(
+        "mint-risk pools 2 are below 3" in reason
+        for reason in report.reasons
+    )
+    assert any(
+        "wallet-flow pools 2 are below 3" in reason
+        for reason in report.reasons
+    )
+    assert any(
+        "static-hedge pools 1 are below 2" in reason
+        for reason in report.reasons
+    )
