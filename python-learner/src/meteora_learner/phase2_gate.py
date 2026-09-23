@@ -17,7 +17,8 @@ class Phase2CapabilityStatus:
     composition_formula_reconciliation: bool = False
     rebalance_lifecycle: bool = True
     reward_accounting: bool = True
-    transaction_slippage_calibration: bool = False
+    transaction_fee_calibration: bool = True
+    slippage_calibration: bool = False
 
 
 CURRENT_PHASE2_CAPABILITIES = Phase2CapabilityStatus()
@@ -155,7 +156,8 @@ def evaluate_phase2_promotion_gate(
         "composition_formula_reconciliation": capabilities.composition_formula_reconciliation,
         "rebalance_lifecycle": capabilities.rebalance_lifecycle,
         "reward_accounting": capabilities.reward_accounting,
-        "transaction_slippage_calibration": capabilities.transaction_slippage_calibration,
+        "transaction_fee_calibration": capabilities.transaction_fee_calibration,
+        "slippage_calibration": capabilities.slippage_calibration,
     }
     capability_gate_passed = all(required_capabilities.values())
     for name, ready in required_capabilities.items():
