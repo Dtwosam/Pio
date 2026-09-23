@@ -4,8 +4,10 @@
     "REPLACE_WITH_APPROVED_POOL"
   ],
   "max_open_positions": 1,
-  "max_capital_quote_per_entry": 50.0,
-  "max_daily_drawdown_pct": 2.0,
+  "max_capital_quote_per_entry": 50,
+  "max_daily_entry_capital_quote": 100,
+  "max_daily_realized_loss_quote": 20,
+  "max_daily_drawdown_pct": 2,
   "allow_rebalance": true,
   "allow_exit": true
 }
