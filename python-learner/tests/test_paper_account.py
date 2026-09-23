@@ -132,3 +132,79 @@ def test_paper_entry_rejects_insufficient_cash(tmp_path):
             capital_quote=100,
             entry_cost_quote=1,
         )
+
+
+
+def test_ml_paper_entry_requires_matching_registry_stage(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(
+        storage,
+        account_id="paper",
+        starting_cash_quote=1000,
+    )
+    storage.register_model(
+        model_id="model",
+        model_family="ML_V1",
+        feature_version="features-v1",
+        dataset_version="dataset-v1",
+        metrics={},
+    )
+
+    with pytest.raises(ValueError, match="must be PAPER_CHALLENGER"):
+        open_paper_position(
+            storage,
+            event_key="enter-ml-blocked",
+            account_id="paper",
+            position_id="ml-pos",
+            pool_address="pool",
+            policy_source="ML_CHALLENGER",
+            model_id="model",
+            strategy="SPOT",
+            min_bin_id=-1,
+            max_bin_id=1,
+            capital_quote=100,
+        )
+
+    storage.update_model_status(
+        "model",
+        expected_status="OFFLINE_CANDIDATE",
+        new_status="OFFLINE_QUALIFIED",
+    )
+    storage.update_model_status(
+        "model",
+        expected_status="OFFLINE_QUALIFIED",
+        new_status="PAPER_CHALLENGER",
+    )
+    position = open_paper_position(
+        storage,
+        event_key="enter-ml",
+        account_id="paper",
+        position_id="ml-pos",
+        pool_address="pool",
+        policy_source="ML_CHALLENGER",
+        model_id="model",
+        strategy="SPOT",
+        min_bin_id=-1,
+        max_bin_id=1,
+        capital_quote=100,
+    )
+    assert position.model_id == "model"
+    assert position.policy_source == "ML_CHALLENGER"
+
+
+def test_storage_model_status_cannot_skip_promotion_stages(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    storage.register_model(
+        model_id="model",
+        model_family="ML_V1",
+        feature_version="features-v1",
+        dataset_version="dataset-v1",
+        metrics={},
+    )
+
+    with pytest.raises(ValueError, match="invalid model transition"):
+        storage.update_model_status(
+            "model",
+            expected_status="OFFLINE_CANDIDATE",
+            new_status="CHAMPION",
+        )
