@@ -695,6 +695,101 @@ def test_research_refresh_replays_only_missing_explicit_family(
     assert allocation_item.status == "UNCHANGED"
 
 
+def test_research_refresh_targets_ranked_cohort_for_mint_and_wallet(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seen = {"mint": None, "wallet": []}
+
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: SimpleNamespace(current=True),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "_replay_statuses",
+        lambda *args, **kwargs: {
+            "adaptive_regime": True,
+            "mint_risk": True,
+            "wallet_flow": True,
+            "portfolio_allocation": True,
+            "static_hedge": True,
+            "contextual_bandit": True,
+        },
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_source_freshness",
+        lambda *args, **kwargs: freshness_report(
+            mint_risk=False,
+            wallet_flow=False,
+        ),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_pool_cohort",
+        lambda *args, **kwargs: SimpleNamespace(
+            sampling_pools=("pool-b", "pool-a", "pool-c"),
+            research_pools=("pool-b", "pool-a", "pool-c"),
+            research_ready=True,
+            reasons=(),
+        ),
+    )
+
+    def mint_plan(*args, **kwargs):
+        seen["mint"] = kwargs["pool_addresses"]
+        return SimpleNamespace(
+            inputs_ready=False,
+            reasons=("mint capture required",),
+            captures_required=1,
+        )
+
+    monkeypatch.setattr(
+        refresh_module,
+        "build_phase9_mint_capture_plan",
+        mint_plan,
+    )
+
+    def wallet_state(*args, **kwargs):
+        seen["wallet"].append(kwargs["pool_address"])
+        return SimpleNamespace(
+            ready=False,
+            events=0,
+            unique_users=0,
+        )
+
+    monkeypatch.setattr(
+        refresh_module,
+        "wallet_flow_source_state",
+        wallet_state,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: bundle(
+            ready=False,
+            adaptive=1,
+            mint=0,
+            wallet=0,
+            bandit=1,
+        ),
+    )
+
+    run_phase9_research_refresh(
+        storage,
+        criteria=Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=1,
+            min_wallet_flow_pools=1,
+            min_static_hedge_pools=1,
+        ),
+    )
+
+    assert seen["mint"] == ("pool-b",)
+    assert seen["wallet"] == ["pool-b"]
+
+
 def test_research_refresh_derives_bandit_dataset_from_explicit_inputs(
     monkeypatch,
     tmp_path,
