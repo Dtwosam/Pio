@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
 import json
 import shlex
 from typing import Any
@@ -12,7 +13,7 @@ from .phase9_validation import (
     evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
 )
-from .storage import Storage
+from .storage import Storage, utc_now_iso
 
 
 DEFAULT_PUBKEY = "11111111111111111111111111111111"
@@ -36,6 +37,93 @@ class Phase9WorkQueue:
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class Phase9WorkQueueSnapshot:
+    snapshot_id: int
+    created_at: str
+    queue_sha256: str
+    task_count: int
+    phase8_promoted: bool
+    research_bundle_ready: bool
+    promotion_ready: bool
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _snapshot_state(queue: Phase9WorkQueue) -> dict[str, Any]:
+    return {
+        "phase8_promoted": queue.phase8_promoted,
+        "research_bundle_ready": queue.research_bundle_ready,
+        "promotion_ready": queue.promotion_ready,
+        "candidate_pools": list(queue.candidate_pools),
+        "items": [
+            {
+                "task_type": item.task_type,
+                "scope": item.scope,
+                "reason": item.reason,
+            }
+            for item in queue.items
+        ],
+    }
+
+
+def persist_phase9_work_queue_snapshot(
+    storage: Storage,
+    *,
+    queue: Phase9WorkQueue,
+    criteria: Phase9ResearchBundleCriteria,
+    created_at: str | None = None,
+) -> Phase9WorkQueueSnapshot:
+    timestamp = created_at or utc_now_iso()
+    criteria_record = asdict(criteria)
+    state = _snapshot_state(queue)
+    canonical = json.dumps(
+        {
+            "criteria": criteria_record,
+            "state": state,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    with storage.connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO phase9_work_queue_snapshots(
+                created_at, queue_sha256, criteria_json, state_json
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (
+                timestamp,
+                digest,
+                json.dumps(
+                    criteria_record,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                json.dumps(
+                    state,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+        snapshot_id = int(cursor.lastrowid)
+
+    return Phase9WorkQueueSnapshot(
+        snapshot_id=snapshot_id,
+        created_at=timestamp,
+        queue_sha256=digest,
+        task_count=len(queue.items),
+        phase8_promoted=queue.phase8_promoted,
+        research_bundle_ready=queue.research_bundle_ready,
+        promotion_ready=queue.promotion_ready,
+    )
 
 
 def _q(value: object) -> str:
