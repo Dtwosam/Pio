@@ -356,6 +356,63 @@ ON chain_transaction_events(signature, parent_ix_index);
 CREATE INDEX IF NOT EXISTS idx_chain_tx_event_position
 ON chain_transaction_events(position_address, signature);
 
+CREATE TABLE IF NOT EXISTS paper_accounts (
+    account_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    starting_equity_quote TEXT NOT NULL,
+    cash_quote TEXT NOT NULL,
+    high_water_equity_quote TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_positions (
+    position_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('OPEN', 'CLOSED')),
+    policy_source TEXT NOT NULL,
+    model_id TEXT,
+    strategy TEXT NOT NULL,
+    min_bin_id INTEGER NOT NULL,
+    max_bin_id INTEGER NOT NULL,
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,
+    entry_capital_quote TEXT NOT NULL,
+    entry_cost_quote TEXT NOT NULL,
+    current_mark_quote TEXT NOT NULL,
+    fee_income_quote TEXT NOT NULL,
+    reward_income_quote TEXT NOT NULL,
+    rebalance_cost_quote TEXT NOT NULL,
+    exit_cost_quote TEXT NOT NULL,
+    realized_pnl_quote TEXT,
+    rebalances INTEGER NOT NULL DEFAULT 0,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_positions_account_status
+ON paper_positions(account_id, status);
+
+CREATE TABLE IF NOT EXISTS paper_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_key TEXT NOT NULL UNIQUE,
+    account_id TEXT NOT NULL,
+    position_id TEXT,
+    event_time TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK(
+        event_type IN ('ENTER', 'MARK', 'REBALANCE', 'EXIT')
+    ),
+    cash_delta_quote TEXT NOT NULL,
+    position_mark_quote TEXT,
+    fee_delta_quote TEXT NOT NULL DEFAULT '0',
+    reward_delta_quote TEXT NOT NULL DEFAULT '0',
+    cost_quote TEXT NOT NULL DEFAULT '0',
+    realized_pnl_quote TEXT,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_events_account_time
+ON paper_events(account_id, event_time, id);
+
 CREATE TABLE IF NOT EXISTS model_registry (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model_id TEXT NOT NULL UNIQUE,
