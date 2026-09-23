@@ -322,6 +322,10 @@ Built:
 - absolute regular-file / non-symlink retraining dataset requirements with replay-time byte checksum verification
 - fail-closed range-cap and insufficient-history states
 - CLI research workflow with optional readiness exit status
+- Phase 8 promotion currentness audit required by every Phase 9 research family, bundle and work queue, so rollback/lineage/health degradation fail closed
+- consolidated Phase 9 operational audit spanning immutable storage, deterministic replay and promotion currentness
+- sanitized append-only Phase 9 work-queue progress snapshots with checksum-verified blocker delta reporting
+- optional hourly systemd progress snapshot timer that never executes research commands or changes policy
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
