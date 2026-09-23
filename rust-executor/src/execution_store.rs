@@ -212,6 +212,60 @@ impl ExecutionIntentStore {
         })
     }
 
+    pub fn register_with_transaction_policy(
+        &self,
+        request: &DryRunExecutionRequest,
+        config: &RiskConfig,
+        transaction_config: &crate::transaction_guard::TransactionGuardConfig,
+    ) -> Result<RegisteredExecutionIntent> {
+        let canonical = serde_json::to_string(&serde_json::json!({
+            "request": request,
+            "risk_config": config,
+            "transaction_guard_config": transaction_config,
+        }))?;
+        let decision_id = request.proposal.decision_id.to_string();
+        let mode = enum_text(&request.proposal.mode)?;
+        let action = enum_text(&request.proposal.action)?;
+        let now = now_unix()?;
+
+        let mut conn = self.connection()?;
+        let tx = conn.transaction()?;
+        let inserted = tx.execute(
+            r#"
+            INSERT OR IGNORE INTO execution_intents(
+                decision_id, mode, action, pool_address,
+                request_json, status, created_at_unix, updated_at_unix
+            ) VALUES (?, ?, ?, ?, ?, 'RECEIVED', ?, ?)
+            "#,
+            params![
+                decision_id.as_str(),
+                mode.as_str(),
+                action.as_str(),
+                request.proposal.pool_address.as_str(),
+                canonical.as_str(),
+                now,
+                now,
+            ],
+        )?;
+
+        let existing_request: String = tx.query_row(
+            "SELECT request_json FROM execution_intents WHERE decision_id = ?",
+            params![request.proposal.decision_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if existing_request != canonical {
+            anyhow::bail!(
+                "decision_id already exists with different execution or safety inputs"
+            );
+        }
+        tx.commit()?;
+
+        Ok(RegisteredExecutionIntent {
+            reused_existing: inserted == 0,
+            record: self.load(&request.proposal.decision_id.to_string())?,
+        })
+    }
+
     pub fn record_risk(
         &self,
         decision_id: &str,
@@ -596,6 +650,25 @@ mod tests {
         }
     }
 
+    fn guard(accepted: bool) -> TransactionGuardReport {
+        TransactionGuardReport {
+            accepted,
+            reason: if accepted {
+                "approved".into()
+            } else {
+                "transaction_rejected".into()
+            },
+            fee_payer: "payer".into(),
+            pool_account_present: true,
+            instruction_count: 1,
+            static_account_count: 3,
+            required_signatures: 1,
+            signatures_all_default: true,
+            address_lookup_table_count: 0,
+            program_ids: vec!["program".into()],
+        }
+    }
+
     fn simulation(succeeded: bool) -> SimulationReport {
         SimulationReport {
             succeeded,
@@ -660,6 +733,9 @@ mod tests {
         let after_risk = store.record_risk(&id.to_string(), &risk(true, id)).unwrap();
         assert_eq!(after_risk.status, ExecutionIntentStatus::RiskApproved);
 
+        store
+            .record_transaction_guard(&id.to_string(), &guard(true))
+            .unwrap();
         let after_simulation = store
             .record_simulation(&id.to_string(), &simulation(true))
             .unwrap();
@@ -685,6 +761,7 @@ mod tests {
         store
             .record_risk(&id, &risk(true, request.proposal.decision_id))
             .unwrap();
+        store.record_transaction_guard(&id, &guard(true)).unwrap();
         store.record_simulation(&id, &simulation(true)).unwrap();
 
         assert_eq!(
@@ -725,6 +802,7 @@ mod tests {
         store
             .record_risk(&id, &risk(true, request.proposal.decision_id))
             .unwrap();
+        store.record_transaction_guard(&id, &guard(true)).unwrap();
         store.record_simulation(&id, &simulation(true)).unwrap();
         store.begin_signing(&id).unwrap();
 
@@ -735,6 +813,54 @@ mod tests {
         let repeated = store.record_failure(&id, "signer unavailable").unwrap();
         assert_eq!(repeated.status, ExecutionIntentStatus::Failed);
         assert!(store.record_failure(&id, "different failure").is_err());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn transaction_guard_is_required_before_simulation() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+        let cfg = config();
+
+        store.register(&request, &cfg).unwrap();
+        store
+            .record_risk(&id, &risk(true, request.proposal.decision_id))
+            .unwrap();
+
+        assert!(store.record_simulation(&id, &simulation(true)).is_err());
+        store.record_transaction_guard(&id, &guard(true)).unwrap();
+        assert_eq!(
+            store
+                .record_simulation(&id, &simulation(true))
+                .unwrap()
+                .status,
+            ExecutionIntentStatus::SimulationPassed
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejected_transaction_guard_is_terminal() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+        let cfg = config();
+
+        store.register(&request, &cfg).unwrap();
+        store
+            .record_risk(&id, &risk(true, request.proposal.decision_id))
+            .unwrap();
+        let rejected = store
+            .record_transaction_guard(&id, &guard(false))
+            .unwrap();
+
+        assert_eq!(rejected.status, ExecutionIntentStatus::Rejected);
+        assert!(store.record_simulation(&id, &simulation(true)).is_err());
 
         let _ = std::fs::remove_file(path);
     }
