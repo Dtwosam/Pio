@@ -9,12 +9,17 @@ mutations.
 
 1. Install Pio at `/opt/pio` and create the Python virtualenv at
    `/opt/pio/python-learner/.venv`.
-2. Copy `.env.example` to `/etc/pio/pio.env` and fill in at least
-   `SOLANA_RPC_URL` plus the normal Pio database/API settings.
-3. Ensure the service user can write the directory containing
-   `PIO_DATABASE_PATH`.
-4. Copy the unit files to `/etc/systemd/system/`.
-5. Reload and enable a timer for the paper account:
+2. Build the read-only Rust executor once:
+   `cd /opt/pio/rust-executor && cargo build --release`.
+3. Create an unprivileged service account, for example:
+   `sudo useradd --system --home /opt/pio --shell /usr/sbin/nologin pio`.
+4. Copy `.env.example` to `/etc/pio/pio.env` and fill in at least
+   `SOLANA_RPC_URL` plus the normal Pio database/API settings. Keep
+   `PIO_RUST_EXECUTOR_BIN=rust-executor/target/release/meteora-executor`.
+5. Ensure `pio` can write the directory containing `PIO_DATABASE_PATH`
+   (the default deployment path is `/opt/pio/data`).
+6. Copy the unit files to `/etc/systemd/system/`.
+7. Reload and enable a timer for the paper account:
 
 ```bash
 sudo systemctl daemon-reload
