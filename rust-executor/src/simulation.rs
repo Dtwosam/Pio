@@ -61,6 +61,42 @@ pub fn simulate_base64_transaction(
     })
 }
 
+pub fn simulate_exact_base64_transaction(
+    rpc_url: &str,
+    encoded: &str,
+) -> Result<SimulationReport> {
+    if rpc_url.trim().is_empty() {
+        anyhow::bail!("RPC URL is required");
+    }
+    let transaction = decode_transaction_base64(encoded)?;
+    let client = RpcClient::new(rpc_url.to_string());
+    let response = client
+        .simulate_transaction_with_config(
+            &transaction,
+            RpcSimulateTransactionConfig {
+                sig_verify: false,
+                replace_recent_blockhash: false,
+                commitment: Some(CommitmentConfig::confirmed()),
+                ..RpcSimulateTransactionConfig::default()
+            },
+        )
+        .context("exact Solana transaction simulation RPC failed")?;
+
+    let result = serde_json::to_value(&response.value)
+        .context("failed to serialize exact simulation result")?;
+    let succeeded = result
+        .get("err")
+        .map(Value::is_null)
+        .unwrap_or(false);
+
+    Ok(SimulationReport {
+        succeeded,
+        rpc_context_slot: response.context.slot,
+        result,
+    })
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
