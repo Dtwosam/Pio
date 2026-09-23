@@ -3,9 +3,11 @@ from meteora_learner.capital_sizing import CapitalSizingConfig
 from meteora_learner.chain_replay import STANDARD_SPL_TOKEN_PROGRAM
 from meteora_learner.liquidity_math import Q64
 from meteora_learner.phase3_plan import build_phase3_research_plan
+from meteora_learner.phase_promotion import persist_phase2_promotion
 from meteora_learner.pool_safety import PoolSafetyConfig
 from meteora_learner.storage import Storage
 from meteora_learner.strategy import StrategyType
+from types import SimpleNamespace
 
 
 def seed(storage):
@@ -151,3 +153,42 @@ def test_phase3_plan_rejects_scan_notional_above_sizing_cap(tmp_path):
     assert plan.entry_gate is not None
     assert plan.entry_gate.sizing_ready is False
     assert any("rescaled" in reason for reason in plan.reasons)
+
+
+
+def test_phase3_plan_uses_persisted_phase2_promotion(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed(storage)
+    safety, baseline, sizing = configs()
+    persist_phase2_promotion(
+        storage,
+        report=SimpleNamespace(
+            promotion_ready=True,
+            to_record=lambda: {"promotion_ready": True},
+        ),
+    )
+
+    plan = build_phase3_research_plan(
+        str(storage.path),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=10,
+        requested_quote=100,
+        account_equity_quote=1000,
+        cash_quote=1000,
+        current_deployed_quote=0,
+        portfolio_drawdown_bps=0,
+        phase2_gate=None,
+        safety_config=safety,
+        baseline_config=baseline,
+        sizing_config=sizing,
+        observation_limit=2,
+        half_widths=(0,),
+        strategies=(StrategyType.SPOT,),
+    )
+
+    assert plan.status == "POLICY_AUTHORIZED"
+    assert plan.policy_authorized is True
+    assert plan.entry_gate is not None
+    assert plan.entry_gate.phase2_ready is True
+    assert plan.entry_gate.proposal is not None
