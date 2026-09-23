@@ -4,6 +4,7 @@ from meteora_learner.liquidity_math import (
     Q64,
     amounts_from_liquidity_share,
     fee_from_checkpoint_delta,
+    reward_from_checkpoint_delta,
     mint_liquidity_share,
     project_deposit,
     q64_liquidity,
@@ -77,3 +78,12 @@ def test_inconsistent_zero_supply_state_is_rejected():
             bin_amount_y=0,
             liquidity_supply=0,
         )
+
+
+
+def test_reward_checkpoint_delta_uses_same_q64_scaling_as_dynamic_position():
+    reward = reward_from_checkpoint_delta(
+        liquidity_share=10 * Q64,
+        reward_per_token_delta=3 * Q64,
+    )
+    assert reward == 30
