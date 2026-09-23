@@ -508,3 +508,17 @@ Even when `authorization_ready=true`, the report and persisted
 There is intentionally no executor or LIVE-policy code path that consumes this
 gate yet. A later explicit wiring change would need its own source-of-truth
 update, tests, rollback design and controlled validation.
+
+
+Audit the latest persisted authorization evidence against fresh deterministic
+replay:
+
+```bash
+pio phase9-policy-authorization-audit --require-current
+```
+
+The audit reconstructs the stored gate criteria and recomputes the gate from
+current Phase 9 plus current shadow data. A formerly ready record becomes stale
+if Phase 9 is no longer current, a shadow dataset changes, replay no longer
+matches, or the aggregate thresholds no longer pass. Historical evidence stays
+append-only.
