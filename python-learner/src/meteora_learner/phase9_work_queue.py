@@ -502,7 +502,10 @@ def build_phase9_work_queue(
                 )
             )
 
-    if live_cohort is not None:
+    if (
+        live_cohort is not None
+        and live_cohort.api_pools_seen > 0
+    ):
         if live_cohort.missing_chain_pools:
             items.append(
                 Phase9WorkItem(
