@@ -219,9 +219,16 @@ def test_phase9_promotion_persists_non_actionable_ready_bundle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_ready(storage)
 
+    bundle = evaluate_phase9_research_bundle(storage)
+    bundle_id = persist_phase9_research_bundle(
+        storage,
+        report=bundle,
+    )
     report = evaluate_phase9_promotion(storage)
 
     assert report.promotion_ready is True
+    assert report.research_bundle_evidence_id == bundle_id
+    assert report.persisted_bundle_matches_current is True
     assert report.research_only is True
     assert report.policy_actionable is False
 
@@ -255,5 +262,30 @@ def test_phase9_promotion_requires_complete_research_bundle(tmp_path):
     assert report.policy_actionable is False
     assert any(
         "static-hedge" in reason
+        for reason in report.reasons
+    )
+
+
+def test_phase9_promotion_rejects_stale_persisted_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(
+        storage,
+        report=bundle,
+    )
+
+    evidence(
+        storage,
+        MINT_RISK_EVIDENCE_TYPE,
+        "pool-c",
+    )
+
+    report = evaluate_phase9_promotion(storage)
+
+    assert report.promotion_ready is False
+    assert report.persisted_bundle_matches_current is False
+    assert any(
+        "stale versus current evidence" in reason
         for reason in report.reasons
     )
