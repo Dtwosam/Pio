@@ -1,5 +1,6 @@
 use crate::blockhash::PreparedUnsignedTransaction;
 use crate::execution_store::{ExecutionIntentStatus, ExecutionIntentStore};
+use crate::phase5_gate::Phase5PromotionGateReport;
 use crate::simulation::decode_transaction_base64;
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose, Engine as _};
@@ -108,7 +109,14 @@ pub fn sign_execution_intent(
     store: &ExecutionIntentStore,
     decision_id: &str,
     keypair: &Keypair,
+    phase5_gate: &Phase5PromotionGateReport,
 ) -> Result<SignedExecutionTransaction> {
+    if !phase5_gate.accepted {
+        anyhow::bail!(
+            "Phase 5 promotion gate rejected execution signing: {}",
+            phase5_gate.reason
+        );
+    }
     let current = store.load(decision_id)?;
     let signing = match current.status {
         ExecutionIntentStatus::SimulationPassed => {
@@ -236,6 +244,21 @@ mod tests {
         );
     }
 
+    fn accepted_phase5_gate() -> Phase5PromotionGateReport {
+        Phase5PromotionGateReport {
+            accepted: true,
+            reason: "approved".into(),
+            phase_name: "PHASE5".into(),
+            evidence_type: Some("PHASE5_PROMOTION_V1".into()),
+            promoted_at: Some("2026-09-23T12:00:00+00:00".into()),
+            qualified: true,
+            evidence_promotion_ready: true,
+            evidence_endurance_passing: true,
+            evidence_ledger_audit_passing: true,
+            evidence_phase3_promoted: true,
+        }
+    }
+
     fn ready_store(
         keypair: &Keypair,
     ) -> (ExecutionIntentStore, std::path::PathBuf, String) {
@@ -347,14 +370,26 @@ mod tests {
         let (store, path, id) = ready_store(&keypair);
 
         let first =
-            sign_execution_intent(&store, &id, &keypair).unwrap();
+            sign_execution_intent(
+                &store,
+                &id,
+                &keypair,
+                &accepted_phase5_gate(),
+            )
+            .unwrap();
         assert_eq!(
             store.load(&id).unwrap().status,
             ExecutionIntentStatus::Signing
         );
 
         let second =
-            sign_execution_intent(&store, &id, &keypair).unwrap();
+            sign_execution_intent(
+                &store,
+                &id,
+                &keypair,
+                &accepted_phase5_gate(),
+            )
+            .unwrap();
         assert_eq!(first.signature, second.signature);
         assert_eq!(
             first.transaction_base64,
@@ -370,10 +405,41 @@ mod tests {
         let other = Keypair::new();
         let (store, path, id) = ready_store(&expected);
 
-        assert!(sign_execution_intent(&store, &id, &other).is_err());
+        assert!(sign_execution_intent(
+                &store,
+                &id,
+                &other,
+                &accepted_phase5_gate(),
+            )
+            .is_err());
         assert_eq!(
             store.load(&id).unwrap().status,
             ExecutionIntentStatus::Signing
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn phase5_rejection_blocks_before_signing_state() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        let mut gate = accepted_phase5_gate();
+        gate.accepted = false;
+        gate.reason = "phase5_promotion_evidence_missing".into();
+
+        assert!(
+            sign_execution_intent(
+                &store,
+                &id,
+                &keypair,
+                &gate,
+            )
+            .is_err()
+        );
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::SimulationPassed
         );
 
         let _ = std::fs::remove_file(path);
