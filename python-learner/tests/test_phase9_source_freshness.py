@@ -227,6 +227,7 @@ def test_static_hedge_freshness_detects_new_price_path_snapshot(tmp_path):
             "source_observations": [
                 {
                     "pool_snapshot_id": first,
+                    "observed_at": "2026-09-23T10:00:00+00:00",
                 }
             ],
         },
@@ -345,3 +346,71 @@ def test_bandit_freshness_detects_new_retraining_dataset_cycle(tmp_path):
     item = freshness(storage, "contextual_bandit")
     assert item.current is False
     assert "newer retraining dataset cycle" in item.reason
+
+
+def test_adaptive_freshness_ignores_later_inserted_older_backfill(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    current_id = save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "pools": [
+                {
+                    "pool_address": "pool-a",
+                    "adaptive": {
+                        "source_snapshot_ids": [current_id],
+                    },
+                }
+            ],
+        },
+    )
+
+    # This row gets a newer database ID but represents older source time.
+    save_pool(storage, "pool-a", "2026-09-23T09:00:00+00:00")
+
+    item = freshness(storage, "adaptive_regime")
+    assert item.current is True
+
+
+def test_wallet_freshness_ignores_later_inserted_older_backfill(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    current_id = save_wallet_event(
+        storage,
+        "pool-a",
+        "current",
+        "2026-09-23T10:00:00+00:00",
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "source_event_ids": [current_id],
+        },
+    )
+
+    save_wallet_event(
+        storage,
+        "pool-a",
+        "historical",
+        "2026-09-23T09:00:00+00:00",
+    )
+
+    item = freshness(storage, "wallet_flow")
+    assert item.current is True
