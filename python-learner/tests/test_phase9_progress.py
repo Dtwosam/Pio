@@ -8,11 +8,29 @@ from meteora_learner.phase9_work_queue import (
 from meteora_learner.storage import Storage
 
 
-def queue(*, tasks, phase8=True, bundle=False, promotion=False):
+def queue(
+    *,
+    tasks,
+    phase8=True,
+    bundle=False,
+    promotion=False,
+    phase9_current=False,
+    authorization=False,
+    controlled=False,
+    rollout=False,
+    rollback=False,
+    prewire=False,
+):
     return Phase9WorkQueue(
         phase8_promoted=phase8,
         research_bundle_ready=bundle,
         promotion_ready=promotion,
+        phase9_current=phase9_current,
+        policy_authorization_current=authorization,
+        controlled_validation_current=controlled,
+        rollout_simulation_current=rollout,
+        rollback_simulation_current=rollback,
+        prewire_ready=prewire,
         candidate_pools=("pool-a",),
         items=tuple(tasks),
     )
@@ -110,3 +128,58 @@ def test_phase9_progress_fails_closed_on_bad_snapshot_checksum(tmp_path):
         "checksum does not match" in reason
         for reason in report.reasons
     )
+
+
+def test_phase9_progress_advances_through_policy_evidence_states(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    criteria = Phase9ResearchBundleCriteria(
+        min_mint_risk_pools=1,
+        min_wallet_flow_pools=1,
+        min_static_hedge_pools=1,
+    )
+
+    persist_phase9_work_queue_snapshot(
+        storage,
+        queue=queue(
+            tasks=(task("ROLLBACK_SIMULATION", "metrics"),),
+            bundle=True,
+            promotion=True,
+            phase9_current=True,
+            authorization=True,
+            controlled=True,
+            rollout=True,
+        ),
+        criteria=criteria,
+        created_at="2026-09-23T20:00:00+00:00",
+    )
+    report = evaluate_phase9_progress(storage)
+
+    assert report.status == "ROLLOUT_SIMULATION_CURRENT"
+    assert report.phase9_current is True
+    assert report.policy_authorization_current is True
+    assert report.controlled_validation_current is True
+    assert report.rollout_simulation_current is True
+    assert report.rollback_simulation_current is False
+    assert report.prewire_ready is False
+
+    persist_phase9_work_queue_snapshot(
+        storage,
+        queue=queue(
+            tasks=(),
+            bundle=True,
+            promotion=True,
+            phase9_current=True,
+            authorization=True,
+            controlled=True,
+            rollout=True,
+            rollback=True,
+            prewire=True,
+        ),
+        criteria=criteria,
+        created_at="2026-09-23T21:00:00+00:00",
+    )
+    report = evaluate_phase9_progress(storage)
+
+    assert report.status == "PREWIRE_READY"
+    assert report.rollback_simulation_current is True
+    assert report.prewire_ready is True
