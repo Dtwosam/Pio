@@ -9,6 +9,10 @@ from meteora_learner.paper_cycle import (
     apply_paper_observation,
     open_deterministic_paper_plan,
 )
+from meteora_learner.phase_promotion import (
+    persist_phase2_promotion,
+    persist_phase3_promotion,
+)
 from meteora_learner.position_policy import PositionManagementConfig
 from meteora_learner.storage import Storage
 
@@ -33,6 +37,15 @@ def authorized_plan():
     )
 
 
+def seed_phase3(storage):
+    ready = SimpleNamespace(
+        promotion_ready=True,
+        to_record=lambda: {"promotion_ready": True},
+    )
+    persist_phase2_promotion(storage, report=ready)
+    persist_phase3_promotion(storage, report=ready)
+
+
 def test_paper_plan_open_requires_phase3_promotion(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     create_paper_account(
@@ -47,18 +60,17 @@ def test_paper_plan_open_requires_phase3_promotion(tmp_path):
         position_id="pos",
         event_key="enter",
         plan=authorized_plan(),
-        phase3_ready=False,
     )
     assert blocked.opened is False
     assert blocked.account.cash_quote == 1000
 
+    seed_phase3(storage)
     opened = open_deterministic_paper_plan(
         storage,
         account_id="paper",
         position_id="pos",
         event_key="enter",
         plan=authorized_plan(),
-        phase3_ready=True,
     )
     assert opened.opened is True
     assert opened.position.min_bin_id == -1
