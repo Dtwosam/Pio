@@ -8,7 +8,10 @@ from .contextual_bandit import CONTEXTUAL_BANDIT_EVIDENCE_TYPE
 from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .phase9_research import PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE
 from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
-from .portfolio_allocation import PORTFOLIO_ALLOCATION_EVIDENCE_TYPE
+from .portfolio_allocation import (
+    PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+    PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+)
 from .static_hedge import STATIC_HEDGE_EVIDENCE_TYPE
 from .storage import Storage
 from .wallet_flow import WALLET_FLOW_EVIDENCE_TYPE
@@ -24,6 +27,7 @@ class Phase9ResearchBundleCriteria:
     min_static_hedge_pools: int = 1
     require_adaptive_multi_pool: bool = True
     require_portfolio_allocation: bool = True
+    require_portfolio_allocation_lineage: bool = True
     require_contextual_bandit: bool = True
     require_contextual_bandit_lineage: bool = True
 
@@ -135,6 +139,59 @@ def _summary(
         ),
         latest_evidence_ids=tuple(int(row["id"]) for row in rows),
         boundary_valid=boundary_valid,
+    )
+
+
+def _allocation_lineage_valid(storage: Storage) -> bool:
+    rows = _latest_by_pool(
+        storage,
+        edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+    )
+    if not rows:
+        return False
+    lineage = rows[0]["evidence"].get("candidate_lineage")
+    if not isinstance(lineage, dict):
+        return False
+    try:
+        evidence_id = int(lineage["candidate_evidence_id"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    expected_sha = str(
+        lineage.get("candidate_evidence_sha256", "")
+    ).strip()
+    if not expected_sha:
+        return False
+
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT edge_type, pool_address, status, qualified,
+                   evidence_json
+            FROM advanced_edge_evidence
+            WHERE id = ?
+            """,
+            (evidence_id,),
+        ).fetchone()
+    if row is None:
+        return False
+    if str(row[0]) != PORTFOLIO_CANDIDATE_EVIDENCE_TYPE:
+        return False
+    if str(row[1]) != "__PORTFOLIO_CANDIDATES__":
+        return False
+    if str(row[2]) != "BUILT" or not bool(row[3]):
+        return False
+    try:
+        evidence = json.loads(str(row[4]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return (
+        str(evidence.get("artifact_sha256", "")).strip()
+        == expected_sha
+        and evidence.get("research_only") is True
+        and evidence.get("policy_actionable") is False
+        and isinstance(evidence.get("comparison"), dict)
+        and isinstance(evidence.get("source_inputs"), list)
+        and isinstance(evidence.get("assumptions"), dict)
     )
 
 
@@ -294,6 +351,16 @@ def evaluate_phase9_research_bundle(
     ):
         reasons.append(
             "qualified portfolio-allocation evidence is required"
+        )
+    if (
+        criteria.require_portfolio_allocation
+        and criteria.require_portfolio_allocation_lineage
+        and allocation.qualified_records >= 1
+        and not _allocation_lineage_valid(storage)
+    ):
+        reasons.append(
+            "qualified portfolio-allocation evidence must be bound to "
+            "immutable candidate-artifact lineage"
         )
     if hedge.qualified_records < criteria.min_static_hedge_pools:
         reasons.append(
