@@ -356,6 +356,36 @@ ON chain_transaction_events(signature, parent_ix_index);
 CREATE INDEX IF NOT EXISTS idx_chain_tx_event_position
 ON chain_transaction_events(position_address, signature);
 
+CREATE TABLE IF NOT EXISTS execution_intents (
+    decision_id TEXT PRIMARY KEY,
+    mode TEXT NOT NULL,
+    action TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(
+        status IN (
+            'RECEIVED',
+            'RISK_APPROVED',
+            'REJECTED',
+            'SIMULATION_PASSED',
+            'SIMULATION_FAILED',
+            'SIGNING',
+            'SENT',
+            'CONFIRMED',
+            'FAILED'
+        )
+    ),
+    created_at_unix INTEGER NOT NULL,
+    updated_at_unix INTEGER NOT NULL,
+    risk_json TEXT,
+    simulation_json TEXT,
+    signature TEXT,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_execution_intents_status
+ON execution_intents(status, updated_at_unix);
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
