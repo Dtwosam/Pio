@@ -3,6 +3,10 @@ import pandas as pd
 from meteora_learner.ml_challenger import MLChallengerCriteria
 from meteora_learner.ml_dataset import ML_FEATURE_COLUMNS
 from meteora_learner.ml_inference import MLInferenceConfig
+from meteora_learner.phase_promotion import (
+    persist_phase2_promotion,
+    persist_phase3_promotion,
+)
 from meteora_learner.ml_workflow import (
     load_registered_ml_v1,
     qualify_registered_offline_challenger,
@@ -58,6 +62,15 @@ def action_frame(decisions=30):
     return pd.DataFrame(rows)
 
 
+def seed_phase3(storage):
+    ready = SimpleNamespace(
+        promotion_ready=True,
+        to_record=lambda: {"promotion_ready": True},
+    )
+    persist_phase2_promotion(storage, report=ready)
+    persist_phase3_promotion(storage, report=ready)
+
+
 def test_train_save_register_and_reload_round_trip(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     frame = action_frame()
@@ -83,6 +96,7 @@ def test_train_save_register_and_reload_round_trip(tmp_path):
 def test_registered_challenger_can_only_qualify_from_held_out_evidence(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     frame = action_frame()
+    seed_phase3(storage)
     train_save_register_ml_v1(
         storage,
         frame,
@@ -97,7 +111,6 @@ def test_registered_challenger_can_only_qualify_from_held_out_evidence(tmp_path)
         storage,
         frame,
         model_id="model-a",
-        phase3_ready=True,
         inference_config=MLInferenceConfig(
             risk_lambda=0.0,
             min_positive_excess_probability=0.0,
