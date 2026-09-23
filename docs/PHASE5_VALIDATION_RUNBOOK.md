@@ -116,4 +116,4 @@ Before Phase 5 can be called complete, retain a real run corpus showing:
 - current `paper-health` is acceptable at review time;
 - paper PnL/accounting remains internally reconciled over the validation window.
 
-External reward-token valuation beyond token X/Y remains a separate capability gap and must continue to fail closed where value cannot be established.
+External reward-token valuation is supported through fresh persisted ACCOUNT_QUOTE observations (including the optional Jupiter refresh path). Missing or stale reward quotes fail closed and block scheduling/valuation.
