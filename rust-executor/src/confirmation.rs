@@ -214,6 +214,7 @@ mod tests {
             signatures_all_default: true,
             address_lookup_table_count: 0,
             program_ids: vec!["program".into()],
+            instruction_fingerprints: vec![],
         }
     }
 
