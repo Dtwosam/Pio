@@ -612,3 +612,55 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def position_history_addresses(
+        self,
+        *,
+        event_type: str | None = None,
+    ) -> list[str]:
+        params: list[Any] = []
+        clause = ""
+        if event_type is not None:
+            clause = "WHERE event_type = ?"
+            params.append(event_type)
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT position_address, MAX(block_time) AS latest_block_time
+                FROM position_event_history
+                {clause}
+                GROUP BY position_address
+                ORDER BY latest_block_time DESC, position_address ASC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [str(row["position_address"]) for row in rows]
+
+    def transaction_event_position_addresses(
+        self,
+        *,
+        event_type: str | None = None,
+    ) -> list[str]:
+        params: list[Any] = []
+        clause = "WHERE position_address IS NOT NULL"
+        if event_type is not None:
+            clause += " AND event_type = ?"
+            params.append(event_type)
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT position_address, MAX(slot) AS latest_slot
+                FROM chain_transaction_events
+                {clause}
+                GROUP BY position_address
+                ORDER BY latest_slot DESC, position_address ASC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [str(row["position_address"]) for row in rows]
+
