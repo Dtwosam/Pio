@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import math
 import shlex
-from typing import Any
+from typing import Any, Sequence
 
 from .adaptive_range import AdaptiveRangeCriteria
 from .adaptive_range_validation import AdaptiveRangeValidationCriteria
@@ -125,6 +125,7 @@ def build_phase9_history_plan(
     rpc_url: str | None = None,
     bin_array_radius: int = 1,
     as_of: str | None = None,
+    pool_addresses: Sequence[str] | None = None,
 ) -> Phase9HistoryPlan:
     if not executor_bin.strip():
         raise ValueError("executor_bin is required")
@@ -161,7 +162,21 @@ def build_phase9_history_plan(
         storage,
         as_of=as_of,
     )
-    selected = counts[: research_criteria.min_pools]
+    if pool_addresses is None:
+        selected = counts[: research_criteria.min_pools]
+    else:
+        normalized_pools = tuple(
+            dict.fromkeys(
+                str(pool).strip()
+                for pool in pool_addresses
+                if str(pool).strip()
+            )
+        )
+        count_by_pool = dict(counts)
+        selected = tuple(
+            (pool, count_by_pool.get(pool, 0))
+            for pool in normalized_pools
+        )
     rpc = rpc_url if rpc_url is not None else "<RPC_URL>"
 
     pool_plans: list[Phase9HistoryPoolPlan] = []
@@ -198,10 +213,25 @@ def build_phase9_history_plan(
             )
         )
 
-    if len(counts) < research_criteria.min_pools:
+    chain_observed_selected = sum(
+        observations > 0
+        for _, observations in selected
+    )
+    if (
+        pool_addresses is None
+        and len(counts) < research_criteria.min_pools
+    ):
         reasons.append(
             f"chain-observed pools {len(counts)} are below "
             f"{research_criteria.min_pools}"
+        )
+    elif (
+        pool_addresses is not None
+        and chain_observed_selected < research_criteria.min_pools
+    ):
+        reasons.append(
+            f"selected chain-observed pools {chain_observed_selected} "
+            f"are below {research_criteria.min_pools}"
         )
 
     history_ready_count = sum(
