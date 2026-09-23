@@ -23,6 +23,7 @@ from .phase9_mint_capture import (
     build_phase9_mint_capture_plan,
 )
 from .phase9_replay_audit import evaluate_phase9_replay_audit
+from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
     evaluate_phase9_research,
@@ -63,6 +64,7 @@ class Phase9ResearchRefreshReport:
     research_only: bool
     policy_actionable: bool
     execution_wired: bool
+    storage_integrity_verified: bool
     phase8_current: bool
     automatic_families_ready: bool
     bundle_ready_after: bool
@@ -221,8 +223,40 @@ def run_phase9_research_refresh(
     wallet_criteria: WalletFlowCriteria = WalletFlowCriteria(),
     persist_bundle_when_ready: bool = True,
 ) -> Phase9ResearchRefreshReport:
-    phase8 = audit_persisted_phase8_promotion(storage)
+    storage_integrity = evaluate_phase9_storage_integrity(storage)
     items: list[Phase9ResearchRefreshItem] = []
+    if not storage_integrity.verified:
+        bundle = evaluate_phase9_research_bundle(
+            storage,
+            criteria=criteria,
+        )
+        items.append(
+            Phase9ResearchRefreshItem(
+                family="storage_integrity",
+                scope="PHASE9_STORAGE",
+                status="BLOCKED",
+                research_qualified=None,
+                persisted_evidence_id=None,
+                reason=(
+                    "Phase 9 storage integrity is not verified: "
+                    + "; ".join(storage_integrity.reasons)
+                ),
+            )
+        )
+        return Phase9ResearchRefreshReport(
+            research_only=True,
+            policy_actionable=False,
+            execution_wired=False,
+            storage_integrity_verified=False,
+            phase8_current=False,
+            automatic_families_ready=False,
+            bundle_ready_after=bundle.research_ready,
+            bundle_persisted_evidence_id=None,
+            items=tuple(items),
+            bundle_reasons=bundle.reasons,
+        )
+
+    phase8 = audit_persisted_phase8_promotion(storage)
 
     if not phase8.current:
         bundle = evaluate_phase9_research_bundle(
@@ -246,6 +280,7 @@ def run_phase9_research_refresh(
             research_only=True,
             policy_actionable=False,
             execution_wired=False,
+            storage_integrity_verified=True,
             phase8_current=False,
             automatic_families_ready=False,
             bundle_ready_after=bundle.research_ready,
@@ -630,6 +665,7 @@ def run_phase9_research_refresh(
         research_only=True,
         policy_actionable=False,
         execution_wired=False,
+        storage_integrity_verified=True,
         phase8_current=True,
         automatic_families_ready=automatic_ready,
         bundle_ready_after=bundle.research_ready,
