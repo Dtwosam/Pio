@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from types import SimpleNamespace
 
 import pandas as pd
@@ -10,6 +11,7 @@ from meteora_learner.ml_retraining_dataset import (
 )
 from meteora_learner.phase9_bandit_dataset import (
     PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+    Phase9BanditDatasetLineage,
     build_phase9_bandit_dataset,
     evaluate_phase9_contextual_bandit_from_dataset,
     load_phase9_bandit_dataset,
@@ -20,6 +22,11 @@ from meteora_learner.phase9_explicit_inputs import (
     persist_phase9_explicit_inputs,
 )
 from meteora_learner.storage import Storage
+import meteora_learner.phase9_validation as validation_module
+from meteora_learner.contextual_bandit import (
+    CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+    ContextualBanditCriteria,
+)
 
 
 def explicit_payload():
@@ -309,3 +316,71 @@ def test_bandit_dataset_requires_three_explicit_pools(tmp_path):
             artifact=artifact,
             cutoff="2026-09-23T14:00:00+00:00",
         )
+
+
+def test_phase9_validation_replays_dataset_backed_bandit_lineage(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    criteria = ContextualBanditCriteria(
+        warmup_decisions_per_context=1,
+        exploration_bonus_bps=0.0,
+        min_decisions=1,
+        min_pools=1,
+        min_selected_arms=1,
+        min_mean_uplift_vs_baseline_bps=-10_000.0,
+        max_mean_regret_vs_oracle_bps=10_000.0,
+    )
+    lineage = Phase9BanditDatasetLineage(
+        source_type=PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+        dataset_evidence_id=88,
+        dataset_artifact_sha256="b" * 64,
+        dataset_version="ML_ACTION_DATASET_V1:test",
+        dataset_sha256="a" * 64,
+        cutoff="2026-09-23T12:00:00+00:00",
+        output_file="/tmp/phase9-bandit.csv",
+        explicit_input_evidence_id=77,
+        explicit_input_artifact_sha256="c" * 64,
+    )
+    report_record = {
+        "research_only": True,
+        "policy_actionable": False,
+        "research_qualified": True,
+        "status": "QUALIFIED_RESEARCH",
+        "criteria": asdict(criteria),
+    }
+    replay_result = SimpleNamespace(
+        lineage=lineage,
+        report=SimpleNamespace(
+            to_record=lambda: dict(report_record)
+        ),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "evaluate_phase9_contextual_bandit_from_dataset",
+        lambda *args, **kwargs: replay_result,
+    )
+    evidence = {
+        **report_record,
+        "dataset_lineage": asdict(lineage),
+    }
+    storage.save_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+        as_of=lineage.cutoff,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=evidence,
+    )
+
+    assert validation_module._bandit_lineage_valid(storage) is True
+
+    monkeypatch.setattr(
+        validation_module,
+        "evaluate_phase9_contextual_bandit_from_dataset",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("tampered dataset")
+        ),
+    )
+    assert validation_module._bandit_lineage_valid(storage) is False
