@@ -468,3 +468,64 @@ def test_work_queue_prefers_cycle_bound_bandit_when_lineage_exists(tmp_path):
     assert task.shell_command is not None
     assert "contextual-bandit-cycle-research" in task.shell_command
     assert "--cycle-id cycle-lineage" in task.shell_command
+
+
+def test_work_queue_repairs_invalid_wallet_flow_lineage(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+    )
+    forged = dict(latest["evidence"])
+    forged["source_event_sha256"] = "0" * 64
+    storage.save_advanced_edge_evidence(
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:05:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "WALLET_FLOW_REPAIR"
+        and item.scope == "pool-a"
+    )
+    assert task.shell_command is not None
+    assert "wallet-flow-research --pool pool-a" in task.shell_command
+
+
+def test_work_queue_repairs_invalid_bandit_lineage(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+    )
+    forged = dict(latest["evidence"])
+    forged["dataset_lineage"] = {
+        **forged["dataset_lineage"],
+        "dataset_evidence_id": 999999,
+    }
+    storage.save_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+        as_of="2026-09-23T12:06:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "CONTEXTUAL_BANDIT_REPAIR"
+    )
+    assert task.scope == "cycle"
+    assert task.shell_command is not None
+    assert "contextual-bandit-cycle-research" in task.shell_command
