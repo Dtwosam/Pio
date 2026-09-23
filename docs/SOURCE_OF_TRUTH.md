@@ -376,7 +376,11 @@ artifact hashes are recomputed from the persisted source inputs, assumptions
 and ranked comparison rather than trusting stored SHA labels. Contextual-bandit
 evidence must resolve to the persisted retraining dataset/cycle lineage and
 matching checksum. Any missing, forged, stale or mismatched lineage fails the
-Phase 9 bundle closed.
+Phase 9 bundle closed. Qualified Phase 9 metrics are replay-verified as well:
+each deterministic research family is rerun from its persisted immutable
+sources, original cutoff and original criteria/assumptions, and the normalized
+replayed report must equal the persisted evidence. Valid source hashes alone do
+not make edited derived metrics acceptable.
 
 Portfolio-allocation qualification is artifact-bound. The preferred Phase 9
 flow persists the exact multi-pool candidate corpus, source pool inputs,
