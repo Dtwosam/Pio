@@ -413,6 +413,33 @@ CREATE TABLE IF NOT EXISTS paper_events (
 CREATE INDEX IF NOT EXISTS idx_paper_events_account_time
 ON paper_events(account_id, event_time, id);
 
+CREATE TABLE IF NOT EXISTS paper_runs (
+    run_id TEXT PRIMARY KEY,
+    observed_at TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL CHECK(status IN ('RUNNING', 'COMPLETE', 'FAILED')),
+    items_total INTEGER NOT NULL DEFAULT 0,
+    items_applied INTEGER NOT NULL DEFAULT 0,
+    items_skipped INTEGER NOT NULL DEFAULT 0,
+    items_failed INTEGER NOT NULL DEFAULT 0,
+    error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS paper_run_items (
+    run_id TEXT NOT NULL,
+    position_id TEXT NOT NULL,
+    event_key_prefix TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL CHECK(status IN ('PENDING', 'APPLIED', 'SKIPPED', 'FAILED')),
+    input_json TEXT NOT NULL,
+    result_json TEXT,
+    error TEXT,
+    PRIMARY KEY(run_id, position_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_run_items_status
+ON paper_run_items(run_id, status);
+
 CREATE TABLE IF NOT EXISTS model_registry (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model_id TEXT NOT NULL UNIQUE,
