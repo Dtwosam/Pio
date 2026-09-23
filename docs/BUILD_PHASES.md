@@ -328,7 +328,8 @@ Built:
 - optional hourly systemd progress snapshot timer that never executes research commands or changes policy
 - post-promotion checksum-bound shadow validation corpus requiring current Phase 9 promotion and newer independent retraining data while remaining non-actionable
 - replay-verified future LIVE-policy authorization evidence gate requiring multiple unique shadow cycles/datasets/cutoffs and aggregate validation depth while remaining disconnected from execution
+- fresh post-authorization simulation-only holdout validation requiring current authorization evidence, a new cycle and dataset hash, a cutoff after authorization creation, deterministic replay and persisted currentness audit
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
-- explicit future wiring/controlled validation before the non-actionable Phase 9 authorization evidence gate can influence LIVE policy
+- explicit future LIVE-policy wiring, bounded-capital rollout rules and rollback design; controlled validation remains simulation-only and non-actionable

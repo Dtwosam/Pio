@@ -85,6 +85,12 @@ from .phase9_policy_authorization import (
     evaluate_phase9_policy_authorization,
     persist_phase9_policy_authorization,
 )
+from .phase9_policy_controlled_validation import (
+    Phase9PolicyControlledValidationCriteria,
+    audit_persisted_phase9_policy_controlled_validation,
+    evaluate_phase9_policy_controlled_validation,
+    persist_phase9_policy_controlled_validation,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -1780,6 +1786,69 @@ def main() -> None:
     phase9_policy_gate.add_argument("--persist", action="store_true")
     phase9_policy_gate.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    phase9_policy_controlled = subparsers.add_parser(
+        "phase9-policy-controlled-validate",
+        help="Run a fresh simulation-only holdout validation after current Phase 9 policy authorization evidence",
+    )
+    phase9_policy_controlled.add_argument("--cycle-id", required=True)
+    phase9_policy_controlled.add_argument(
+        "--warmup-decisions-per-context",
+        type=int,
+        default=2,
+    )
+    phase9_policy_controlled.add_argument(
+        "--exploration-bonus-bps",
+        type=float,
+        default=50.0,
+    )
+    phase9_policy_controlled.add_argument(
+        "--min-decisions",
+        type=int,
+        default=50,
+    )
+    phase9_policy_controlled.add_argument(
+        "--min-pools",
+        type=int,
+        default=3,
+    )
+    phase9_policy_controlled.add_argument(
+        "--min-selected-arms",
+        type=int,
+        default=2,
+    )
+    phase9_policy_controlled.add_argument(
+        "--min-mean-uplift-vs-baseline-bps",
+        type=float,
+        default=0.0,
+    )
+    phase9_policy_controlled.add_argument(
+        "--max-mean-regret-vs-oracle-bps",
+        type=float,
+        default=250.0,
+    )
+    phase9_policy_controlled.add_argument(
+        "--min-post-authorization-seconds",
+        type=int,
+        default=1,
+    )
+    phase9_policy_controlled.add_argument(
+        "--persist",
+        action="store_true",
+    )
+    phase9_policy_controlled.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_policy_controlled_audit = subparsers.add_parser(
+        "phase9-policy-controlled-audit",
+        help="Audit whether persisted Phase 9 simulation-only controlled validation still matches current replay",
+    )
+    phase9_policy_controlled_audit.add_argument(
+        "--require-current",
         action="store_true",
     )
 
@@ -4053,6 +4122,59 @@ def main() -> None:
             )
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.authorization_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-controlled-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_policy_controlled_validation(
+            storage,
+            cycle_id=args.cycle_id,
+            criteria=Phase9PolicyControlledValidationCriteria(
+                warmup_decisions_per_context=(
+                    args.warmup_decisions_per_context
+                ),
+                exploration_bonus_bps=args.exploration_bonus_bps,
+                min_decisions=args.min_decisions,
+                min_pools=args.min_pools,
+                min_selected_arms=args.min_selected_arms,
+                min_mean_uplift_vs_baseline_bps=(
+                    args.min_mean_uplift_vs_baseline_bps
+                ),
+                max_mean_regret_vs_oracle_bps=(
+                    args.max_mean_regret_vs_oracle_bps
+                ),
+                min_post_authorization_seconds=(
+                    args.min_post_authorization_seconds
+                ),
+            ),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_phase9_policy_controlled_validation(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if (
+            args.require_ready
+            and not result.controlled_validation_ready
+        ):
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-controlled-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = audit_persisted_phase9_policy_controlled_validation(
+            storage,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_current and not result.current:
             raise SystemExit(2)
         return
 

@@ -425,3 +425,13 @@ also carries `execution_wired=false`. Persisted authorization evidence has a
 currentness audit and is considered stale whenever current deterministic replay
 no longer exactly matches it. No current LIVE executor or policy path consumes
 Phase 9 authorization evidence.
+
+A further controlled-validation boundary must use a fresh checksum-bound
+holdout cycle after authorization evidence creation. The holdout cycle ID and
+dataset SHA-256 must be independent of the corpora counted by authorization,
+and deterministic replay must pass the controlled thresholds. Persisted
+`PHASE9_POLICY_CONTROLLED_VALIDATION_V1` evidence is
+`research_only=true`, `simulation_only=true`,
+`policy_actionable=false` and `execution_wired=false`, with its own
+currentness audit. Passing this boundary is validation evidence only and still
+does not grant LIVE policy authority.
