@@ -202,6 +202,12 @@ A closed atomic outcome becomes `VALUED` only through persisted no-lookahead evi
 
 The executor now has an internal deterministic one-signer path bound to the exact persisted presign transaction and an idempotent submission coordinator that records `SENT` plus the signature before RPC submission. Ambiguous RPC submission errors remain `SENT`, and retries can only regenerate/resubmit the same signed message/signature. These capabilities are not exposed as public sign/send commands. Live public sending remains disabled while Token-2022 execution support and real end-to-end controlled lifecycle validation remain incomplete.
 
+### Phase 7 controlled-live boundary
+
+Controlled live authorization is a separate gate from strategy selection and the Phase 6 transaction executor. ENTER and REBALANCE require qualified Phase 5 promotion evidence, an explicit live enable flag, an allowlisted pool, hard quote-capital and concurrent-position caps, and acceptable daily drawdown. EXIT remains independently available for risk reduction when the live enable flag is off, the pool was removed from the allowlist, or drawdown is above the entry/rebalance limit.
+
+The controlled-live check is read-only and cannot sign or send. A future public live executor must satisfy Phase 5 promotion, Phase 6 readiness, controlled-live authorization, Rust risk checks, transaction/action/account binding, exact final simulation and wallet authorization before signing. Public live signing/sending remains disabled until controlled validation is completed.
+
 ## 7. Decision flow
 
 1. Discover pools.
