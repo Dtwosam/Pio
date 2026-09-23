@@ -327,7 +327,8 @@ Built:
 - sanitized append-only Phase 9 work-queue progress snapshots with checksum-verified blocker delta reporting
 - optional hourly systemd progress snapshot timer that never executes research commands or changes policy
 - post-promotion checksum-bound shadow validation corpus requiring current Phase 9 promotion and newer independent retraining data while remaining non-actionable
+- replay-verified future LIVE-policy authorization evidence gate requiring multiple unique shadow cycles/datasets/cutoffs and aggregate validation depth while remaining disconnected from execution
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
-- a separate future LIVE-policy authorization design and explicit promotion gate consuming independent shadow evidence before any Phase 9 signal can influence LIVE policy
+- explicit future wiring/controlled validation before the non-actionable Phase 9 authorization evidence gate can influence LIVE policy
