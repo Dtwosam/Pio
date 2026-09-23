@@ -188,6 +188,29 @@ required instead of inventing them.
 When all component evidence is qualified, the queue advances to persisting or
 refreshing the research bundle, then to the non-actionable Phase 9 promotion.
 
+## Immutable lineage requirements
+
+Qualified component evidence must remain reproducible from persisted source
+records:
+
+- adaptive range and regime reports bind the exact chain-pool snapshot IDs and
+  deterministic active-bin source hashes;
+- mint-risk reports resolve their pool snapshot and every assessed mint snapshot
+  ID to the authoritative stored rows;
+- wallet-flow reports bind the exact position-event IDs and SHA-256 of the
+  event fields used by the analysis;
+- static-hedge reports bind each pool snapshot to the exact active-bin
+  liquidity/price snapshot and SHA-256 the full price path;
+- portfolio candidate evidence recomputes its SHA-256 from persisted source
+  inputs, account assumptions and comparison payload; matching stored labels
+  alone are insufficient;
+- contextual-bandit evidence resolves to the persisted retraining-cycle dataset
+  evidence, version, cutoff, file identity and checksum.
+
+The work queue emits lineage-repair tasks when reproducible source evidence
+exists. It does not invent missing hedge assumptions or authoritative chain
+inputs.
+
 ## Research-bundle gate
 
 After the individual research families have persisted qualified evidence:
@@ -206,7 +229,9 @@ Default bundle requirements include:
 - at least 1 qualified static-hedge pool;
 - at least one qualified contextual-bandit replay;
 - every latest evidence record preserves
-  `research_only=true` and `policy_actionable=false`.
+  `research_only=true` and `policy_actionable=false`;
+- adaptive/regime, mint-risk, wallet-flow, static-hedge, portfolio-allocation
+  and contextual-bandit evidence passes its immutable lineage verification.
 
 The bundle uses the latest persisted evidence per research family/pool. A newer
 record that violates the research-only boundary invalidates readiness even if
