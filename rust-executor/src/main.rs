@@ -12,6 +12,7 @@ mod state_reader;
 mod transaction_events;
 mod transaction_guard;
 mod wallet;
+mod wallet_guard;
 
 use anyhow::{Context, Result};
 use std::io::Read;
@@ -27,6 +28,7 @@ fn usage() {
   meteora-executor preflight-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
   meteora-executor wallet-status
+  meteora-executor wallet-authorize-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
   meteora-executor guard-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>
@@ -285,6 +287,90 @@ RPC_URL is accepted as a compatibility fallback",
             }
             let status = wallet::inspect_executor_wallet_from_env()?;
             println!("{}", serde_json::to_string_pretty(&status)?);
+        }
+        "wallet-authorize-transaction" => {
+            let proposal_source = args
+                .next()
+                .context("PROPOSAL_JSON_OR_- is required")?;
+            let transaction_source = args
+                .next()
+                .context("TRANSACTION_BASE64_FILE_OR_- is required")?;
+            let config_path = args
+                .next()
+                .context("TRANSACTION_GUARD_CONFIG_JSON is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "wallet-authorize-transaction accepts exactly three arguments"
+                );
+            }
+            if proposal_source == "-" && transaction_source == "-" {
+                anyhow::bail!(
+                    "proposal and transaction cannot both be read from stdin"
+                );
+            }
+
+            let proposal_json = if proposal_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read proposal JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&proposal_source)
+                    .with_context(|| {
+                        format!("failed to read proposal JSON: {proposal_source}")
+                    })?
+            };
+            let transaction_base64 = if transaction_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read transaction base64 from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&transaction_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read transaction base64 file: {transaction_source}"
+                        )
+                    })?
+            };
+            let config_json = std::fs::read_to_string(&config_path)
+                .with_context(|| {
+                    format!(
+                        "failed to read transaction guard config JSON: {config_path}"
+                    )
+                })?;
+
+            let proposal: models::TradeProposal =
+                serde_json::from_str(&proposal_json)
+                    .context("invalid trade proposal JSON")?;
+            let config: transaction_guard::TransactionGuardConfig =
+                serde_json::from_str(&config_json)
+                    .context("invalid transaction guard config JSON")?;
+            let transaction = transaction_guard::check_transaction(
+                &proposal,
+                &transaction_base64,
+                &config,
+            )?;
+            let wallet_status = wallet::inspect_executor_wallet_from_env()?;
+            let wallet_pubkey: solana_sdk::pubkey::Pubkey =
+                wallet_status.pubkey.parse()
+                    .context("executor wallet pubkey is invalid")?;
+            let authorization = wallet_guard::authorize_wallet(
+                &wallet_pubkey,
+                &transaction,
+            )?;
+
+            let output = serde_json::json!({
+                "wallet": wallet_status,
+                "transaction": transaction,
+                "authorization": authorization,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            if !authorization.accepted {
+                std::process::exit(2);
+            }
         }
         "simulate-transaction" => {
             let transaction_source = args
