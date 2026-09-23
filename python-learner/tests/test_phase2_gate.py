@@ -1,3 +1,4 @@
+from meteora_learner.calibration_status import Phase2CalibrationEvidence
 from meteora_learner.liquidity_math import Q64
 from meteora_learner.phase2_gate import (
     Phase2CapabilityStatus,
@@ -199,3 +200,87 @@ def test_phase2_gate_can_pass_when_required_capabilities_are_validated(tmp_path)
     assert gate.sample_sufficiency_passed is True
     assert gate.capability_gate_passed is True
     assert gate.promotion_ready is True
+
+
+
+def test_phase2_gate_promotes_calibration_capabilities_from_real_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_position(storage, "a", "2026-09-22T00:00:00+00:00")
+    save_position(
+        storage,
+        "a",
+        "2026-09-22T00:05:00+00:00",
+        checkpoint=Q64,
+        fee=10,
+    )
+
+    evidence = Phase2CalibrationEvidence(
+        add_positions=1,
+        composition_add_events=1,
+        composition_eligible_samples=1,
+        composition_exact_samples=1,
+        composition_mismatched_samples=0,
+        add_execution_events=1,
+        add_execution_request_decodes=1,
+        add_execution_matched_events=1,
+        add_active_guard_samples=1,
+        add_active_guard_violations=0,
+        rebalance_positions=1,
+        rebalance_events=1,
+        rebalance_request_decodes=1,
+        rebalance_guard_samples=1,
+        rebalance_guard_violations=0,
+        transaction_receipt_samples=2,
+        transaction_fee_samples=2,
+        missing_transaction_receipts=0,
+        evidence_gaps=(),
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_gate.build_phase2_calibration_evidence",
+        lambda _: evidence,
+    )
+
+    gate = evaluate_phase2_promotion_gate(
+        str(db),
+        criteria=Phase2PromotionCriteria(
+            min_positions=1,
+            min_amount_bins=1,
+            min_fee_intervals=1,
+            min_fee_bins=1,
+            min_reward_intervals=1,
+            min_reward_growth_bins=1,
+            min_composition_samples=1,
+            min_add_execution_samples=1,
+            min_rebalance_guard_samples=1,
+            min_transaction_fee_samples=1,
+        ),
+    )
+
+    assert gate.sample_sufficiency_passed is True
+    assert gate.capability_gate_passed is True
+    assert gate.effective_capabilities.composition_formula_reconciliation is True
+    assert gate.effective_capabilities.transaction_fee_calibration is True
+    assert gate.effective_capabilities.add_execution_calibration is True
+    assert gate.effective_capabilities.slippage_calibration is True
+    assert gate.promotion_ready is True
+
+
+def test_phase2_gate_rejects_negative_calibration_threshold():
+    try:
+        Phase2PromotionCriteria(
+            min_positions=1,
+            min_amount_bins=1,
+            min_fee_intervals=1,
+            min_fee_bins=1,
+            min_reward_intervals=1,
+            min_reward_growth_bins=1,
+            min_composition_samples=-1,
+        )
+    except ValueError as exc:
+        assert "min_composition_samples" in str(exc)
+    else:
+        raise AssertionError("expected negative calibration threshold to be rejected")
