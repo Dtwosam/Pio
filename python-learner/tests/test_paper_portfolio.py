@@ -4,6 +4,7 @@ from meteora_learner.paper_account import create_paper_account, open_paper_posit
 from meteora_learner.paper_chain import bind_paper_position_to_chain
 from meteora_learner.paper_portfolio import run_portfolio_live_paper_cycle
 from meteora_learner.pool_safety import PoolSafetyConfig
+from meteora_learner.quote_registry import save_token_quote
 from meteora_learner.position_policy import PositionManagementConfig
 from meteora_learner.storage import Storage
 
@@ -200,3 +201,52 @@ def test_portfolio_cycle_prioritizes_oldest_position_when_capped(tmp_path):
     assert selected == ["pos-a"]
     deferred = next(item for item in report.schedule if item.position_id == "pos-b")
     assert deferred.reason == "eligible but deferred by max_positions cap"
+
+
+
+def test_portfolio_cycle_uses_only_fresh_persisted_quotes(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+
+    entry = "2026-09-23T09:00:00+00:00"
+    latest = "2026-09-23T09:05:00+00:00"
+    save_pool_api(storage, "a", latest)
+    save_chain(storage, "a", entry)
+    save_chain(storage, "a", latest, Q64)
+    bind(storage, "pos-a", "a", entry)
+
+    save_token_quote(
+        storage,
+        token_mint="a-y",
+        quote_per_atomic=1.0,
+        source="TEST",
+        observed_at="2026-09-23T09:04:00+00:00",
+    )
+    fresh = run_portfolio_live_paper_cycle(
+        storage,
+        account_id="paper",
+        cycle_id="registry-fresh",
+        token_y_quotes=None,
+        quote_max_age_seconds=300,
+        quote_as_of="2026-09-23T09:05:00+00:00",
+        safety_config=safety_config(),
+        management_config=PositionManagementConfig(stop_loss_bps=5000),
+    )
+    assert fresh.scheduled_positions == 1
+    assert fresh.cycle is not None
+
+    # New position on the same pool, but evaluate the stored quote as stale.
+    bind(storage, "pos-b", "a", entry)
+    stale = run_portfolio_live_paper_cycle(
+        storage,
+        account_id="paper",
+        cycle_id="registry-stale",
+        token_y_quotes=None,
+        quote_max_age_seconds=30,
+        quote_as_of="2026-09-23T09:05:00+00:00",
+        safety_config=safety_config(),
+        management_config=PositionManagementConfig(stop_loss_bps=5000),
+    )
+    item = next(value for value in stale.schedule if value.position_id == "pos-b")
+    assert item.eligible is False
+    assert "quote is stale" in item.reason
