@@ -76,10 +76,10 @@ fn validate_config(config: &ControlledLiveConfig) -> Result<BTreeSet<Pubkey>> {
         );
     }
     if !config.max_daily_realized_loss_quote.is_finite()
-        || config.max_daily_realized_loss_quote < 0.0
+        || config.max_daily_realized_loss_quote <= 0.0
     {
         anyhow::bail!(
-            "max_daily_realized_loss_quote must be finite and non-negative"
+            "max_daily_realized_loss_quote must be finite and positive"
         );
     }
     if !config.max_daily_drawdown_pct.is_finite()
@@ -281,12 +281,6 @@ fn evaluate_controlled_live_at(
                     >= config.max_daily_realized_loss_quote
                 {
                     "daily_realized_loss_budget_reached"
-                } else if unvalued_closed_positions_today > 0 {
-                    "daily_realized_loss_evidence_incomplete"
-                } else if daily_realized_loss_quote
-                    >= config.max_daily_realized_loss_quote
-                {
-                    "daily_realized_loss_budget_reached"
                 } else if !proposal.daily_drawdown_pct.is_finite()
                     || proposal.daily_drawdown_pct
                         > config.max_daily_drawdown_pct
@@ -305,6 +299,12 @@ fn evaluate_controlled_live_at(
                     "controlled_live_rebalance_disabled"
                 } else if !pool_allowed {
                     "pool_not_allowed_for_rebalance"
+                } else if unvalued_closed_positions_today > 0 {
+                    "daily_realized_loss_evidence_incomplete"
+                } else if daily_realized_loss_quote
+                    >= config.max_daily_realized_loss_quote
+                {
+                    "daily_realized_loss_budget_reached"
                 } else if !proposal.daily_drawdown_pct.is_finite()
                     || proposal.daily_drawdown_pct
                         > config.max_daily_drawdown_pct
