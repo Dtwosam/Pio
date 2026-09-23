@@ -204,6 +204,7 @@ def test_source_capture_forwards_history_observation_interval(
 
     def fake_history(*args, **kwargs):
         seen["interval"] = kwargs["min_observation_interval_seconds"]
+        seen["continue"] = kwargs["continue_sampling_when_ready"]
         return DummyRecord(history_ready_after=False)
 
     monkeypatch.setattr(
@@ -239,6 +240,7 @@ def test_source_capture_forwards_history_observation_interval(
     )
 
     assert seen["interval"] == 5400
+    assert seen["continue"] is True
 
 
 def test_source_capture_forwards_wallet_owner_expansion_bounds(
