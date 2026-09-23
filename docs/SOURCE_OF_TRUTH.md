@@ -182,6 +182,8 @@ Live paper cycles derive pool safety from the latest local normalized state rath
 
 Unattended PAPER operation is driven by idempotent ticks. A tick refreshes only the market metadata needed by open positions, refreshes stale/missing chain state through the Rust executor's read-only pool inspector, optionally refreshes token-Y USD quotes through Jupiter, and then runs the persisted portfolio supervisor. A per-account SQLite lease prevents overlapping scheduler workers. Tick IDs are deterministic by time bucket, expired leases may recover stale RUNNING ticks, and production refresh can use a prebuilt Rust binary without granting Python any signing capability.
 
+Phase 5 completion is evidence-driven. Scheduler lease acquisition, overlap, stale-worker recovery and tick completion are persisted as lifecycle events. Current health can be exported as Prometheus-compatible gauges. A configurable endurance gate evaluates accumulated runtime, terminal tick count, failure rate, dependency-blocked rate, maximum failure streak, stale RUNNING ticks, applied chain valuations and distinct valued positions. Passing this operational gate does not prove profitability; real multi-observation PAPER evidence and accounting review are still required before Phase 5 can be called complete.
+
 ## 7. Decision flow
 
 1. Discover pools.
