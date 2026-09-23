@@ -226,9 +226,9 @@ def run_phase9_research_refresh(
     storage_integrity = evaluate_phase9_storage_integrity(storage)
     items: list[Phase9ResearchRefreshItem] = []
     if not storage_integrity.verified:
-        bundle = evaluate_phase9_research_bundle(
-            storage,
-            criteria=criteria,
+        blocked_reasons = tuple(
+            f"storage integrity: {reason}"
+            for reason in storage_integrity.reasons
         )
         items.append(
             Phase9ResearchRefreshItem(
@@ -250,10 +250,10 @@ def run_phase9_research_refresh(
             storage_integrity_verified=False,
             phase8_current=False,
             automatic_families_ready=False,
-            bundle_ready_after=bundle.research_ready,
+            bundle_ready_after=False,
             bundle_persisted_evidence_id=None,
             items=tuple(items),
-            bundle_reasons=bundle.reasons,
+            bundle_reasons=blocked_reasons,
         )
 
     phase8 = audit_persisted_phase8_promotion(storage)
