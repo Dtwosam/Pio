@@ -189,6 +189,7 @@ def test_phase2_gate_can_pass_when_required_capabilities_are_validated(tmp_path)
             composition_formula_reconciliation=True,
             rebalance_lifecycle=True,
             reward_accounting=True,
+            transaction_slippage_calibration=True,
         ),
     )
 
