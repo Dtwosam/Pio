@@ -16,6 +16,7 @@ from .phase9_mint_capture import (
     Phase9MintCaptureCriteria,
     build_phase9_mint_capture_plan,
 )
+from .phase9_explicit_inputs import load_phase9_explicit_inputs
 from .phase9_wallet_flow_capture import wallet_flow_source_state
 from .wallet_flow import WalletFlowCriteria
 from .phase9_policy_authorization import (
@@ -824,23 +825,60 @@ def build_phase9_work_queue(
                 )
             )
 
-    if (
+    explicit_static_needed = (
         bundle.static_hedge.qualified_records
         < criteria.min_static_hedge_pools
-    ):
-        items.append(
-            Phase9WorkItem(
-                task_type="STATIC_HEDGE",
-                scope="EXPLICIT_INSTRUMENT_REQUIRED",
-                reason=(
-                    "hedge research requires explicit LP token amounts plus "
-                    "instrument, venue, liquidity, leverage, funding and "
-                    "trading-cost assumptions"
-                ),
-                shell_command=None,
-            )
-        )
+    )
+    explicit_allocation_needed = (
+        criteria.require_portfolio_allocation
+        and bundle.portfolio_allocation.qualified_records < 1
+    )
+    if explicit_static_needed or explicit_allocation_needed:
+        explicit_artifact = load_phase9_explicit_inputs(storage)
+        missing_families = []
+        if explicit_static_needed:
+            missing_families.append("static hedge")
+        if explicit_allocation_needed:
+            missing_families.append("portfolio allocation")
 
+        if explicit_artifact is None:
+            template_command = "pio phase9-research-input-template"
+            if pools:
+                template_command += " --pools " + _q(
+                    ",".join(pools[:3])
+                )
+            template_command += " > phase9-research-inputs.json"
+            items.append(
+                Phase9WorkItem(
+                    task_type="EXPLICIT_RESEARCH_INPUTS",
+                    scope="USER_ASSUMPTIONS_REQUIRED",
+                    reason=(
+                        " and ".join(missing_families)
+                        + " require explicit economic assumptions. Generate "
+                        "the template, fill every null economic field, then "
+                        "persist it with pio phase9-research-inputs-ingest "
+                        "--file phase9-research-inputs.json"
+                    ),
+                    shell_command=template_command,
+                )
+            )
+        else:
+            items.append(
+                Phase9WorkItem(
+                    task_type="EXPLICIT_RESEARCH_RUN",
+                    scope=str(explicit_artifact.evidence_id),
+                    reason=(
+                        "checksum-bound explicit inputs are available for "
+                        + " and ".join(missing_families)
+                    ),
+                    shell_command=(
+                        "pio phase9-explicit-research-run "
+                        "--input-evidence-id "
+                        + _q(explicit_artifact.evidence_id)
+                        + " --persist --require-ready"
+                    ),
+                )
+            )
 
     hedge_lineage_invalid = any(
         "pool/bin price-path IDs" in reason
@@ -861,34 +899,6 @@ def build_phase9_work_queue(
                     shell_command=None,
                 )
             )
-
-    if (
-        criteria.require_portfolio_allocation
-        and bundle.portfolio_allocation.qualified_records < 1
-    ):
-        items.append(
-            Phase9WorkItem(
-                task_type="PORTFOLIO_ALLOCATION",
-                scope="REPRODUCIBLE_CANDIDATE_PIPELINE",
-                reason=(
-                    "portfolio allocation requires a fixed multi-pool "
-                    "candidate corpus plus explicit account-state and quote-"
-                    "budget assumptions"
-                ),
-                shell_command=(
-                    "pio multi-pool-research "
-                    "--file <POOL_INPUTS_JSON> "
-                    "--equity <EQUITY> --cash <CASH> "
-                    "--deployed <DEPLOYED> --drawdown-bps <BPS> "
-                    "--persist-phase9-candidates "
-                    "> phase9-multi-pool.json && "
-                    "pio portfolio-allocation-research "
-                    "--file phase9-multi-pool.json "
-                    "--budget-quote <QUOTE> "
-                    "--persist --require-qualified"
-                ),
-            )
-        )
 
     allocation_lineage_invalid = any(
         "immutable candidate-artifact lineage" in reason
