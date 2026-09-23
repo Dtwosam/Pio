@@ -33,6 +33,7 @@ class Phase9HistoryPlan:
     read_only_capture: bool
     policy_actionable: bool
     execution_wired: bool
+    as_of: str | None
     chain_pools_seen: int
     research_pools_required: int
     qualified_pools_required_at_minimum: int
@@ -76,18 +77,34 @@ def adaptive_minimum_observations(
 
 def _pool_observation_counts(
     storage: Storage,
+    *,
+    as_of: str | None = None,
 ) -> tuple[tuple[str, int], ...]:
     with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT pool_address, COUNT(*) AS observations
-            FROM chain_pool_snapshots
-            WHERE pool_address IS NOT NULL
-              AND TRIM(pool_address) != ''
-            GROUP BY pool_address
-            ORDER BY observations DESC, pool_address ASC
-            """
-        ).fetchall()
+        if as_of is None:
+            rows = conn.execute(
+                """
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                WHERE pool_address IS NOT NULL
+                  AND TRIM(pool_address) != ''
+                GROUP BY pool_address
+                ORDER BY observations DESC, pool_address ASC
+                """
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                WHERE pool_address IS NOT NULL
+                  AND TRIM(pool_address) != ''
+                  AND julianday(observed_at) <= julianday(?)
+                GROUP BY pool_address
+                ORDER BY observations DESC, pool_address ASC
+                """,
+                (as_of,),
+            ).fetchall()
     return tuple((str(row[0]), int(row[1])) for row in rows)
 
 
@@ -107,6 +124,7 @@ def build_phase9_history_plan(
     executor_bin: str = "meteora-executor",
     rpc_url: str | None = None,
     bin_array_radius: int = 1,
+    as_of: str | None = None,
 ) -> Phase9HistoryPlan:
     if not executor_bin.strip():
         raise ValueError("executor_bin is required")
@@ -139,7 +157,10 @@ def build_phase9_history_plan(
         minimum_qualified_by_rate,
     )
 
-    counts = _pool_observation_counts(storage)
+    counts = _pool_observation_counts(
+        storage,
+        as_of=as_of,
+    )
     selected = counts[: research_criteria.min_pools]
     rpc = rpc_url if rpc_url is not None else "<RPC_URL>"
 
@@ -208,6 +229,7 @@ def build_phase9_history_plan(
         read_only_capture=True,
         policy_actionable=False,
         execution_wired=False,
+        as_of=as_of,
         chain_pools_seen=len(counts),
         research_pools_required=research_criteria.min_pools,
         qualified_pools_required_at_minimum=qualified_required,
