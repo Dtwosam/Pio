@@ -767,6 +767,25 @@ This path is read-only with respect to Solana. It requires no wallet key,
 cannot sign or submit transactions, and only persists the returned inspection
 snapshot locally for research evidence.
 
+
+To execute the currently selected capture candidates manually through the same
+hardened Rust inspector wrapper used by PAPER chain refresh:
+
+```bash
+SOLANA_RPC_URL=<RPC_URL> \
+pio phase9-chain-capture-run --require-target
+```
+
+Optional `--rust-binary-path` or `--rust-manifest-path` selects the local
+read-only inspector implementation, while `--timeout-seconds` bounds each
+capture. The batch re-runs the deterministic planner first, attempts only those
+candidate pools, verifies that the Rust response carries the expected
+`pool_address`, ingests successful snapshots, isolates failures per pool and
+reports whether the target chain-pool count was reached.
+
+This command is manual by design. The work queue emits the plan step, not the
+capture-run step, so evidence acquisition does not start implicitly.
+
 Persisting the queue snapshot with `--persist-snapshot` records the new
 policy-evidence readiness fields as sanitized append-only state. No emitted
 shell commands, RPC URLs or secrets are stored. `pio phase9-progress` now
