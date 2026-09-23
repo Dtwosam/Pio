@@ -108,6 +108,7 @@ from .storage import Storage
 from .strategy import StrategyType
 from .transaction_event_ingest import ingest_transaction_events
 from .execution_receipt_ingest import ingest_execution_receipt
+from .execution_decision_context_ingest import ingest_execution_decision_context
 from .execution_receipt_audit import audit_execution_receipts
 from .live_execution_effects import apply_live_execution_effect
 from .live_position_ledger import apply_live_position_effect
@@ -1000,6 +1001,16 @@ def main() -> None:
         help="JSON file path, or - for stdin",
     )
 
+    ingest_decision_context_cmd = subparsers.add_parser(
+        "ingest-execution-decision-context",
+        help="Ingest terminal Rust execution decision context for learning attribution",
+    )
+    ingest_decision_context_cmd.add_argument(
+        "--file",
+        default="-",
+        help="Rust execution-decision-context JSON file, or - for stdin",
+    )
+
     ingest_execution_receipt_cmd = subparsers.add_parser(
         "ingest-execution-receipt",
         help="Ingest a terminal receipt emitted by Rust execution-receipt",
@@ -1494,6 +1505,20 @@ def main() -> None:
         print(json.dumps(result.to_record(), indent=2))
         if args.require_clean and not result.clean:
             raise SystemExit(2)
+        return
+
+    if args.command == "ingest-execution-decision-context":
+        settings = Settings.from_env()
+        if args.file == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with open(args.file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        result = ingest_execution_decision_context(
+            Storage(settings.database_path),
+            payload,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "ingest-execution-receipt":
