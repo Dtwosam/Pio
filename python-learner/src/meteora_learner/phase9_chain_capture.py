@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from .chain_ingest import ingest_chain_snapshot
 from .paper_chain_refresh import inspect_pool_with_rust
@@ -42,6 +42,7 @@ class Phase9ChainCaptureBatchReport:
     pools_captured: int
     pools_failed: int
     target_met: bool
+    preferred_target_met: bool
     criteria: Phase9ChainCaptureCriteria
     items: tuple[Phase9ChainCaptureItem, ...]
     reasons: tuple[str, ...]
@@ -59,6 +60,8 @@ def run_phase9_chain_capture_batch(
     rust_binary_path: str | None = None,
     timeout_seconds: int = 120,
     ingest_observed_at: str | None = None,
+    preferred_pool_addresses: Sequence[str] | None = None,
+    max_preferred_candidates: int | None = None,
 ) -> Phase9ChainCaptureBatchReport:
     criteria.validate()
     if timeout_seconds <= 0:
@@ -67,6 +70,8 @@ def run_phase9_chain_capture_batch(
     plan = build_phase9_chain_capture_plan(
         storage,
         criteria=criteria,
+        preferred_pool_addresses=preferred_pool_addresses,
+        max_preferred_candidates=max_preferred_candidates,
     )
     before = plan.current_chain_pool_count
 
@@ -130,9 +135,12 @@ def run_phase9_chain_capture_batch(
     refreshed = build_phase9_chain_capture_plan(
         storage,
         criteria=criteria,
+        preferred_pool_addresses=preferred_pool_addresses,
+        max_preferred_candidates=max_preferred_candidates,
     )
     after = refreshed.current_chain_pool_count
     target_met = after >= criteria.target_chain_pools
+    preferred_target_met = not refreshed.preferred_missing_chain_pools
     reasons: list[str] = []
     if not plan.capture_required:
         reasons.append(
@@ -146,6 +154,11 @@ def run_phase9_chain_capture_batch(
         reasons.append(
             f"chain-observed pool count {after} remains below target "
             f"{criteria.target_chain_pools}"
+        )
+    if not preferred_target_met:
+        reasons.append(
+            "ranked cohort pool(s) still lack chain capture: "
+            + ", ".join(refreshed.preferred_missing_chain_pools)
         )
 
     return Phase9ChainCaptureBatchReport(
@@ -161,6 +174,7 @@ def run_phase9_chain_capture_batch(
         pools_captured=captured,
         pools_failed=failed,
         target_met=target_met,
+        preferred_target_met=preferred_target_met,
         criteria=criteria,
         items=tuple(items),
         reasons=tuple(reasons),
