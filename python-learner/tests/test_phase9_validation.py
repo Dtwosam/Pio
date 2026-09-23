@@ -37,6 +37,7 @@ from meteora_learner.phase9_research import (
 from meteora_learner.phase9_validation import (
     PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
     Phase9ResearchBundleCriteria,
+    audit_persisted_phase9_promotion,
     evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
     persist_phase9_research_bundle,
@@ -756,6 +757,44 @@ def test_phase9_promotion_rejects_tampered_bundle_payload(tmp_path):
     assert any(
         "checksum is invalid" in reason
         for reason in report.reasons
+    )
+
+
+def test_persisted_phase9_promotion_audit_is_current_after_persist(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(storage, report=bundle)
+    report = evaluate_phase9_promotion(storage)
+    assert report.promotion_ready is True
+    persist_phase9_promotion(storage, report=report)
+
+    audit = audit_persisted_phase9_promotion(storage)
+
+    assert audit.current is True
+    assert audit.persisted_matches_current is True
+    assert audit.reasons == ()
+
+
+def test_persisted_phase9_promotion_audit_detects_staleness(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(storage, report=bundle)
+    report = evaluate_phase9_promotion(storage)
+    assert report.promotion_ready is True
+    persist_phase9_promotion(storage, report=report)
+
+    seed_mint_risk_lineage(storage, "pool-c")
+
+    audit = audit_persisted_phase9_promotion(storage)
+
+    assert audit.current is False
+    assert audit.current_promotion_ready is False
+    assert any(
+        "current Phase 9 promotion gate no longer passes" in reason
+        or "stale versus current bundle" in reason
+        for reason in audit.reasons
     )
 
 def test_phase9_promotion_requires_complete_research_bundle(tmp_path):
