@@ -159,6 +159,7 @@ def build_multi_pool_ml_action_dataset(
     ),
     max_share_bps: int = 500,
     favor_x_in_active_bin: bool = False,
+    max_observed_at: str | None = None,
 ) -> MultiPoolMLDataset:
     if not pools:
         raise ValueError("at least one pool spec is required")
@@ -186,6 +187,7 @@ def build_multi_pool_ml_action_dataset(
                 strategies=strategies,
                 max_share_bps=max_share_bps,
                 favor_x_in_active_bin=favor_x_in_active_bin,
+                max_observed_at=max_observed_at,
             )
         )
     return combine_ml_action_reports(reports)
