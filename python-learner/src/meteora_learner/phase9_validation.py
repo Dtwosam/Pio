@@ -23,7 +23,11 @@ from .cross_pool_research import (
     CrossPoolResearchReport,
 )
 from .market_regime import DLMMRegimeCriteria
-from .mint_risk import MINT_RISK_EVIDENCE_TYPE
+from .mint_risk import (
+    MINT_RISK_EVIDENCE_TYPE,
+    MintRiskCriteria,
+    research_pool_mint_risk,
+)
 from .mint_snapshot_lineage import (
     MINT_SOURCE_COLUMNS,
     POOL_SOURCE_COLUMNS,
@@ -447,6 +451,25 @@ def _mint_lineage_valid(storage: Storage) -> bool:
                     != expected_mint_sha
                 ):
                     return False
+
+            criteria_raw = evidence.get("criteria")
+            if not isinstance(criteria_raw, dict):
+                return False
+            try:
+                criteria = MintRiskCriteria(**criteria_raw)
+                replay = research_pool_mint_risk(
+                    storage,
+                    pool_address=str(row["pool_address"]),
+                    criteria=criteria,
+                    as_of=str(evidence["as_of"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                return False
+            replay_record = json.loads(
+                json.dumps(replay.to_record(), sort_keys=True)
+            )
+            if replay_record != evidence:
+                return False
     return True
 
 
