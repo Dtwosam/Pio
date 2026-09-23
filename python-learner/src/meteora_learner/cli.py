@@ -113,6 +113,11 @@ from .phase9_policy_prewire import (
 from .phase9_policy_status import (
     evaluate_phase9_policy_status,
 )
+from .phase9_policy_manifest import (
+    audit_persisted_phase9_policy_prewire_manifest,
+    evaluate_phase9_policy_prewire_manifest,
+    persist_phase9_policy_prewire_manifest,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -1939,6 +1944,28 @@ def main() -> None:
     )
     phase9_policy_prewire.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    phase9_policy_manifest = subparsers.add_parser(
+        "phase9-policy-manifest",
+        help="Build and optionally persist an immutable manifest binding the exact current Phase 9 pre-wiring evidence chain",
+    )
+    phase9_policy_manifest.add_argument(
+        "--persist",
+        action="store_true",
+    )
+    phase9_policy_manifest.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_policy_manifest_audit = subparsers.add_parser(
+        "phase9-policy-manifest-audit",
+        help="Audit whether the persisted Phase 9 pre-wiring evidence manifest still matches the current evidence chain",
+    )
+    phase9_policy_manifest_audit.add_argument(
+        "--require-current",
         action="store_true",
     )
 
@@ -4397,6 +4424,35 @@ def main() -> None:
         result = evaluate_phase9_policy_prewire_audit(storage)
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-manifest":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_policy_prewire_manifest(storage)
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_phase9_policy_prewire_manifest(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.manifest_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-manifest-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = audit_persisted_phase9_policy_prewire_manifest(
+            storage,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_current and not result.current:
             raise SystemExit(2)
         return
 
