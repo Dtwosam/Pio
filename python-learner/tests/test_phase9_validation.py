@@ -719,3 +719,39 @@ def test_forged_wallet_flow_lineage_blocks_bundle(tmp_path):
         "immutable source event IDs and SHA-256" in reason
         for reason in report.reasons
     )
+
+
+def test_forged_adaptive_snapshot_lineage_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    pools = [dict(item) for item in forged["pools"]]
+    pools[0] = {
+        **pools[0],
+        "adaptive": {
+            **pools[0]["adaptive"],
+            "source_snapshot_ids": [999999],
+        },
+    }
+    forged["pools"] = pools
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+        as_of="2026-09-23T12:04:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "immutable chain snapshot IDs" in reason
+        for reason in report.reasons
+    )
