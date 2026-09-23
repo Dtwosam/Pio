@@ -361,6 +361,8 @@ def test_evidence_plan_stops_at_phase8_after_independent_debt_is_clear(
 
     assert plan.next_action is not None
     assert plan.next_action.debt_type == "PHASE8_DEPENDENCY"
+    assert plan.next_action.actionable is False
+    assert plan.next_action.shell_command == "pio phase8-evidence-plan"
     refresh = next(
         item for item in plan.items
         if item.debt_type == "RESEARCH_REFRESH"
