@@ -123,6 +123,7 @@ from .phase9_capture_plan import (
     build_phase9_chain_capture_plan,
 )
 from .phase9_history_plan import build_phase9_history_plan
+from .phase9_history_capture import run_phase9_history_capture
 from .phase9_chain_capture import run_phase9_chain_capture_batch
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
@@ -2200,6 +2201,77 @@ def main() -> None:
         default=1,
     )
     phase9_history_plan.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_history_run = subparsers.add_parser(
+        "phase9-chain-history-run",
+        help="Capture one fresh read-only chain snapshot for each Phase 9 pool still below exact adaptive/regime history depth",
+    )
+    phase9_history_run.add_argument("--min-pools", type=int, default=3)
+    phase9_history_run.add_argument(
+        "--min-qualified-pools",
+        type=int,
+        default=2,
+    )
+    phase9_history_run.add_argument(
+        "--min-qualified-pool-rate",
+        type=float,
+        default=0.67,
+    )
+    phase9_history_run.add_argument(
+        "--lookback-observations",
+        type=int,
+        default=96,
+    )
+    phase9_history_run.add_argument(
+        "--holding-observations",
+        type=int,
+        default=6,
+    )
+    phase9_history_run.add_argument(
+        "--min-historical-windows",
+        type=int,
+        default=12,
+    )
+    phase9_history_run.add_argument(
+        "--min-decisions",
+        type=int,
+        default=20,
+    )
+    phase9_history_run.add_argument(
+        "--regime-lookback-observations",
+        type=int,
+        default=72,
+    )
+    phase9_history_run.add_argument(
+        "--regime-recent-observations",
+        type=int,
+        default=8,
+    )
+    phase9_history_run.add_argument(
+        "--regime-min-observations",
+        type=int,
+        default=16,
+    )
+    phase9_history_run.add_argument(
+        "--bin-array-radius",
+        type=int,
+        default=1,
+    )
+    phase9_history_run.add_argument("--rust-manifest-path")
+    phase9_history_run.add_argument("--rust-binary-path")
+    phase9_history_run.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=120,
+    )
+    phase9_history_run.add_argument(
+        "--observed-at",
+        help="Optional timezone-aware timestamp; must be newer than each captured pool's latest snapshot",
+    )
+    phase9_history_run.add_argument(
         "--require-ready",
         action="store_true",
     )
@@ -4766,6 +4838,42 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.plan_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-chain-history-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = run_phase9_history_capture(
+            storage,
+            research_criteria=Phase9ResearchCriteria(
+                min_pools=args.min_pools,
+                min_qualified_pools=args.min_qualified_pools,
+                min_qualified_pool_rate=args.min_qualified_pool_rate,
+            ),
+            adaptive_criteria=AdaptiveRangeCriteria(
+                lookback_observations=args.lookback_observations,
+                holding_observations=args.holding_observations,
+                min_historical_windows=args.min_historical_windows,
+            ),
+            validation_criteria=AdaptiveRangeValidationCriteria(
+                min_decisions=args.min_decisions,
+            ),
+            regime_criteria=DLMMRegimeCriteria(
+                lookback_observations=(
+                    args.regime_lookback_observations
+                ),
+                recent_observations=args.regime_recent_observations,
+                min_observations=args.regime_min_observations,
+            ),
+            bin_array_radius=args.bin_array_radius,
+            rust_manifest_path=args.rust_manifest_path,
+            rust_binary_path=args.rust_binary_path,
+            timeout_seconds=args.timeout_seconds,
+            ingest_observed_at=args.observed_at,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.history_ready_after:
             raise SystemExit(2)
         return
 
