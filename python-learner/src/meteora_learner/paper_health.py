@@ -24,6 +24,8 @@ class PaperHealthReport:
     last_tick_started_at: str | None
     last_tick_age_seconds: int | None
     scheduler: PaperSchedulerState
+    lease_recoveries: int
+    lease_busy_events: int
     chain_queue: PaperChainCollectionQueue
     quote_statuses: tuple[TokenQuoteStatus, ...]
     reasons: tuple[str, ...]
@@ -112,7 +114,19 @@ def build_paper_health(
             """,
             (account_id,),
         ).fetchone()
+        scheduler_event_rows = conn.execute(
+            """
+            SELECT event_type, COUNT(*)
+            FROM paper_scheduler_events
+            WHERE account_id = ?
+            GROUP BY event_type
+            """,
+            (account_id,),
+        ).fetchall()
 
+    scheduler_event_counts = {
+        str(row[0]): int(row[1]) for row in scheduler_event_rows
+    }
     scheduler = paper_scheduler_state(storage, account_id=account_id)
     chain_queue = build_paper_chain_collection_queue(
         storage,
@@ -201,6 +215,8 @@ def build_paper_health(
         last_tick_started_at=tick_started,
         last_tick_age_seconds=tick_age,
         scheduler=scheduler,
+        lease_recoveries=scheduler_event_counts.get("LEASE_RECOVERED", 0),
+        lease_busy_events=scheduler_event_counts.get("LEASE_BUSY", 0),
         chain_queue=chain_queue,
         quote_statuses=quote_statuses,
         reasons=tuple(critical + warning),
@@ -254,6 +270,18 @@ def render_paper_health_prometheus(report: PaperHealthReport) -> str:
             "# HELP pio_paper_scheduler_lease_active Whether a scheduler lease is currently assigned.",
             "# TYPE pio_paper_scheduler_lease_active gauge",
             f'pio_paper_scheduler_lease_active{{account="{account}"}} {lease_active}',
+            "# HELP pio_paper_scheduler_lease_recoveries_total Persisted stale-lease recovery events.",
+            "# TYPE pio_paper_scheduler_lease_recoveries_total counter",
+            (
+                f'pio_paper_scheduler_lease_recoveries_total{{account="{account}"}} '
+                f'{report.lease_recoveries}'
+            ),
+            "# HELP pio_paper_scheduler_lease_busy_total Persisted overlapping-worker lease refusals.",
+            "# TYPE pio_paper_scheduler_lease_busy_total counter",
+            (
+                f'pio_paper_scheduler_lease_busy_total{{account="{account}"}} '
+                f'{report.lease_busy_events}'
+            ),
             "# HELP pio_paper_chain_pools_needing_refresh Open-position pools with stale/missing chain state.",
             "# TYPE pio_paper_chain_pools_needing_refresh gauge",
             (
