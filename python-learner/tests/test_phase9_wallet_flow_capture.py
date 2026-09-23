@@ -3,6 +3,10 @@ from meteora_learner.phase9_position_discovery import (
     Phase9PositionDiscoveryItem,
     Phase9PositionDiscoveryReport,
 )
+from meteora_learner.phase9_pool_activity_discovery import (
+    Phase9HistoricalPoolPosition,
+    Phase9PoolActivityDiscoveryReport,
+)
 from meteora_learner.phase9_wallet_flow_capture import (
     run_phase9_wallet_flow_capture,
     wallet_flow_source_state,
@@ -35,6 +39,47 @@ def discovery(pool, positions, *, truncated=False, found=None):
         truncated=truncated,
         unique_owners=len({item.owner for item in items}),
         positions=items,
+    )
+
+
+def historical_discovery(
+    pool,
+    positions,
+    *,
+    before=None,
+    scanned=2,
+    has_more=True,
+    next_before="cursor-next",
+):
+    items = tuple(
+        Phase9HistoricalPoolPosition(
+            position_address=position,
+            owner=owner,
+            latest_matching_signature=f"sig-{position}",
+            latest_matching_slot=100 + index,
+            latest_matching_block_time=1_795_000_000 + index,
+        )
+        for index, (position, owner) in enumerate(positions)
+    )
+    return Phase9PoolActivityDiscoveryReport(
+        research_only=True,
+        read_only_capture=True,
+        policy_actionable=False,
+        execution_wired=False,
+        source_scope="HISTORICAL_POOL_SIGNATURE_ACTIVITY",
+        pool_address=pool,
+        before_signature=before,
+        signatures_requested=2,
+        signatures_scanned=scanned,
+        failed_transactions=0,
+        matching_transactions=1 if items else 0,
+        positions_found=len(items),
+        has_more=has_more,
+        next_before_signature=(
+            next_before if scanned > 0 else None
+        ),
+        positions=items,
+        errors=(),
     )
 
 
@@ -340,6 +385,118 @@ def test_wallet_flow_capture_isolates_owner_expansion_failure(tmp_path):
         and "pnl unavailable" in reason
         for reason in report.reasons
     )
+
+
+def test_wallet_flow_capture_backfills_historical_pool_activity(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    discovery_calls = []
+    collected = []
+
+    def historical(pool, limit, before):
+        discovery_calls.append((pool, limit, before))
+        if before is None:
+            return historical_discovery(
+                pool,
+                (("historical-a", "owner-a"),),
+                before=None,
+                has_more=True,
+                next_before="cursor-1",
+            )
+        assert before == "cursor-1"
+        return historical_discovery(
+            pool,
+            (("historical-b", "owner-b"),),
+            before="cursor-1",
+            scanned=1,
+            has_more=False,
+            next_before="cursor-end",
+        )
+
+    def collect(position):
+        collected.append(position)
+        return 0
+
+    first = run_phase9_wallet_flow_capture(
+        storage,
+        pool_address="pool-a",
+        criteria=WalletFlowCriteria(
+            min_events=100,
+            min_unique_users=5,
+        ),
+        discover_positions=lambda pool, limit: discovery(pool, ()),
+        discover_historical_activity=historical,
+        collect_history=collect,
+        historical_signature_limit=2,
+    )
+
+    assert discovery_calls == [("pool-a", 2, None)]
+    assert first.historical_scan_enabled is True
+    assert first.historical_recent_signatures_scanned == 2
+    assert first.historical_backfill_signatures_scanned == 0
+    assert first.historical_positions_added == 1
+    assert first.historical_scan_state is not None
+    assert first.historical_scan_state.backfill_before_signature == "cursor-1"
+    assert first.historical_scan_state.backfill_exhausted is False
+    assert first.source_scope == (
+        "CURRENT_AND_HISTORICAL_POOL_ACTIVITY_COHORT"
+    )
+    assert "historical-a" in collected
+
+    discovery_calls.clear()
+    collected.clear()
+    second = run_phase9_wallet_flow_capture(
+        storage,
+        pool_address="pool-a",
+        criteria=WalletFlowCriteria(
+            min_events=100,
+            min_unique_users=5,
+        ),
+        discover_positions=lambda pool, limit: discovery(pool, ()),
+        discover_historical_activity=historical,
+        collect_history=collect,
+        historical_signature_limit=2,
+    )
+
+    assert discovery_calls == [
+        ("pool-a", 2, None),
+        ("pool-a", 2, "cursor-1"),
+    ]
+    assert second.historical_recent_signatures_scanned == 2
+    assert second.historical_backfill_signatures_scanned == 1
+    assert second.historical_positions_added == 2
+    assert second.historical_scan_state is not None
+    assert second.historical_scan_state.backfill_exhausted is True
+    assert second.historical_scan_state.pages_scanned == 2
+    assert {"historical-a", "historical-b"}.issubset(set(collected))
+
+
+def test_wallet_flow_capture_disables_historical_scan_for_as_of(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+
+    report = run_phase9_wallet_flow_capture(
+        storage,
+        pool_address="pool-a",
+        criteria=WalletFlowCriteria(
+            min_events=100,
+            min_unique_users=5,
+        ),
+        as_of="2026-09-23T12:00:00+00:00",
+        discover_positions=lambda pool, limit: discovery(pool, ()),
+        discover_historical_activity=(
+            lambda pool, limit, before: calls.append(
+                (pool, limit, before)
+            )
+        ),
+        collect_history=lambda position: 0,
+    )
+
+    assert calls == []
+    assert report.historical_scan_enabled is False
+    assert report.historical_scan_state is None
+    assert report.historical_positions_added == 0
 
 
 def test_wallet_flow_capture_isolates_position_history_failure(tmp_path):
