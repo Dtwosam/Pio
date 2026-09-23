@@ -159,7 +159,6 @@ mod tests {
 
     fn seed(
         path: &Path,
-        *,
         evidence_type: &str,
         qualified: i64,
         evidence: Value,
@@ -209,9 +208,9 @@ mod tests {
         let path = db_path();
         seed(
             &path,
-            evidence_type: EVIDENCE_TYPE,
-            qualified: 1,
-            evidence: ready_evidence(),
+            EVIDENCE_TYPE,
+            1,
+            ready_evidence(),
         );
 
         let report = verify_phase5_promotion_database(&path).unwrap();
@@ -226,9 +225,9 @@ mod tests {
         let path = db_path();
         seed(
             &path,
-            evidence_type: "PHASE5_PROMOTION_OLD",
-            qualified: 1,
-            evidence: ready_evidence(),
+            "PHASE5_PROMOTION_OLD",
+            1,
+            ready_evidence(),
         );
 
         let report = verify_phase5_promotion_database(&path).unwrap();
@@ -245,8 +244,8 @@ mod tests {
         evidence["ledger_audit"]["passing"] = Value::Bool(false);
         seed(
             &path,
-            evidence_type: EVIDENCE_TYPE,
-            qualified: 1,
+            EVIDENCE_TYPE,
+            1,
             evidence,
         );
 
