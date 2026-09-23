@@ -11,6 +11,7 @@ from .paper_latest import (
 from .pool_safety import PoolSafetyConfig
 from .position_policy import PositionManagementConfig
 from .research_store import ResearchStore
+from .quote_registry import load_fresh_quote_map
 from .storage import Storage
 
 
@@ -76,7 +77,9 @@ def run_portfolio_live_paper_cycle(
     *,
     account_id: str,
     cycle_id: str,
-    token_y_quotes: Mapping[str, float],
+    token_y_quotes: Mapping[str, float] | None = None,
+    quote_max_age_seconds: int = 300,
+    quote_as_of: str | None = None,
     max_positions: int | None = None,
     safety_config: PoolSafetyConfig = PoolSafetyConfig(),
     management_config: PositionManagementConfig = PositionManagementConfig(),
@@ -98,6 +101,22 @@ def run_portfolio_live_paper_cycle(
 
     rows = _open_bound_positions(storage, account_id=account_id)
     store = ResearchStore(storage.path)
+    registry_status: dict[str, Any] = {}
+    if token_y_quotes is None:
+        mints = [
+            str(row["token_y_mint"])
+            for row in rows
+            if row.get("token_y_mint") is not None
+        ]
+        resolved_quotes, statuses = load_fresh_quote_map(
+            storage,
+            token_mints=mints,
+            max_age_seconds=quote_max_age_seconds,
+            as_of=quote_as_of,
+        )
+        token_y_quotes = resolved_quotes
+        registry_status = {item.token_mint: item for item in statuses}
+
     scheduled: list[tuple[PortfolioScheduleItem, LatestPaperCycleItem]] = []
     report_items: list[PortfolioScheduleItem] = []
 
@@ -138,7 +157,13 @@ def run_portfolio_live_paper_cycle(
         elif latest <= last:
             reason = "no new chain observation"
         elif quote is None:
-            reason = f"missing token-Y quote for mint {token_y_mint}"
+            status = registry_status.get(str(token_y_mint))
+            reason = (
+                f"token-Y quote unavailable for mint {token_y_mint}: "
+                f"{status.reason}"
+                if status is not None and status.reason
+                else f"missing token-Y quote for mint {token_y_mint}"
+            )
         elif quote <= 0:
             reason = f"token-Y quote for mint {token_y_mint} must be positive"
 
