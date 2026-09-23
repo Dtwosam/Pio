@@ -24,6 +24,7 @@ from .paper_cycle import apply_paper_observation
 from .phase3_plan import Phase3ResearchPlan
 from .position_policy import PositionManagementConfig
 from .research_store import ResearchStore
+from .quote_registry import token_quote_status
 from .storage import Storage
 
 
@@ -413,27 +414,56 @@ def _previous_state(
 
 
 def _value_reward(
+    storage: Storage,
     *,
     amount: int,
     mint: str | None,
     token_x_mint: str,
     token_y_mint: str,
     price_q64: int,
-) -> int:
+    token_y_quote_per_atomic: Decimal,
+    observed_at: str,
+    max_quote_age_seconds: int,
+) -> tuple[Decimal, str]:
     if amount == 0:
-        return 0
+        return Decimal(0), "NO_REWARD"
     if mint is None:
         raise ValueError("reward growth exists but reward mint is unavailable")
     if mint == token_x_mint:
-        return q64_value_in_y_atomic(
+        value_y_atomic = q64_value_in_y_atomic(
             amount_x=amount,
             amount_y=0,
             price_q64=price_q64,
         )
+        return (
+            Decimal(value_y_atomic),
+            "POOL_TOKEN_X_TO_TOKEN_Y_V1",
+        )
     if mint == token_y_mint:
-        return amount
-    raise ValueError(
-        f"reward mint {mint} has no token-Y valuation in paper v1"
+        return Decimal(amount), "POOL_TOKEN_Y_V1"
+
+    status = token_quote_status(
+        storage,
+        token_mint=mint,
+        max_age_seconds=max_quote_age_seconds,
+        as_of=observed_at,
+    )
+    if not status.fresh or status.quote_per_atomic is None:
+        detail = status.reason or "no persisted account quote"
+        raise ValueError(
+            f"reward mint {mint} has no fresh account quote: {detail}"
+        )
+
+    reward_account_quote = Decimal(amount) * Decimal(
+        str(status.quote_per_atomic)
+    )
+    if token_y_quote_per_atomic <= 0:
+        raise ValueError("token-Y quote must be positive for reward valuation")
+    value_y_atomic = reward_account_quote / token_y_quote_per_atomic
+    source = status.source or "UNKNOWN"
+    return (
+        value_y_atomic,
+        f"PERSISTED_ACCOUNT_QUOTE_V1:{source}",
     )
 
 
@@ -470,9 +500,12 @@ def prepare_paper_chain_valuation(
     position_id: str,
     observed_at: str,
     token_y_quote_per_atomic: float | None = None,
+    reward_quote_max_age_seconds: int = 300,
 ) -> PaperChainValuation:
     if not observed_at.strip():
         raise ValueError("observed_at is required")
+    if reward_quote_max_age_seconds < 0:
+        raise ValueError("reward_quote_max_age_seconds cannot be negative")
     position = paper_position_snapshot(storage, position_id=position_id)
     if position.status != "OPEN":
         raise ValueError("paper position must be open")
@@ -630,7 +663,8 @@ def prepare_paper_chain_valuation(
         amount_y=fee_y,
         price_q64=price_q64,
     )
-    reward_y_atomic = _value_reward(
+    reward_one_y_atomic, reward_one_fidelity = _value_reward(
+        storage,
         amount=reward_one,
         mint=(
             str(base["reward_mint_0"])
@@ -640,7 +674,12 @@ def prepare_paper_chain_valuation(
         token_x_mint=str(base["token_x_mint"]),
         token_y_mint=str(base["token_y_mint"]),
         price_q64=price_q64,
-    ) + _value_reward(
+        token_y_quote_per_atomic=quote_rate,
+        observed_at=observed_at,
+        max_quote_age_seconds=reward_quote_max_age_seconds,
+    )
+    reward_two_y_atomic, reward_two_fidelity = _value_reward(
+        storage,
         amount=reward_two,
         mint=(
             str(base["reward_mint_1"])
@@ -650,11 +689,15 @@ def prepare_paper_chain_valuation(
         token_x_mint=str(base["token_x_mint"]),
         token_y_mint=str(base["token_y_mint"]),
         price_q64=price_q64,
+        token_y_quote_per_atomic=quote_rate,
+        observed_at=observed_at,
+        max_quote_age_seconds=reward_quote_max_age_seconds,
     )
+    reward_y_atomic = reward_one_y_atomic + reward_two_y_atomic
 
     mark_quote = _d(mark_y_atomic) * quote_rate
     fee_quote = _d(fee_y_atomic) * quote_rate
-    reward_quote = _d(reward_y_atomic) * quote_rate
+    reward_quote = reward_y_atomic * quote_rate
 
     next_state = {
         "bins": next_bins,
@@ -687,7 +730,11 @@ def prepare_paper_chain_valuation(
         "max_observed_share_bps": max_share,
         "mark_y_atomic": mark_y_atomic,
         "fee_value_y_atomic": fee_y_atomic,
-        "reward_value_y_atomic": reward_y_atomic,
+        "reward_value_y_atomic": str(reward_y_atomic),
+        "reward_quote_fidelity": [
+            reward_one_fidelity,
+            reward_two_fidelity,
+        ],
         "token_y_quote_per_atomic": str(quote_rate),
         "quote_fidelity": quote_fidelity,
     }
@@ -853,6 +900,7 @@ def apply_paper_chain_valuation(
     observed_at: str,
     holding_observations: int,
     token_y_quote_per_atomic: float | None = None,
+    reward_quote_max_age_seconds: int = 300,
     pool_safe: bool = True,
     emergency_exit: bool = False,
     estimated_exit_cost_quote: float = 0.0,
@@ -864,6 +912,7 @@ def apply_paper_chain_valuation(
         position_id=position_id,
         observed_at=observed_at,
         token_y_quote_per_atomic=token_y_quote_per_atomic,
+        reward_quote_max_age_seconds=reward_quote_max_age_seconds,
     )
     prefix = f"paper-chain:{position_id}:{observed_at}"
 
