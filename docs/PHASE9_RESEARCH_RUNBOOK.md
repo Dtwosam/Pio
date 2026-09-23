@@ -684,6 +684,33 @@ audit is the end of the simulation evidence chain, not permission to connect
 Phase 9 to the LIVE executor.
 
 
+## Immutable pre-wiring manifest
+
+Once the pre-wiring audit is ready, bind the exact current component evidence
+into one append-only manifest:
+
+```bash
+pio phase9-policy-manifest --persist --require-ready
+pio phase9-policy-manifest-audit --require-current
+```
+
+The manifest records the latest authorization, controlled-validation,
+bounded-rollout and rollback evidence IDs plus SHA-256 hashes of each normalized
+evidence payload. It also carries a deterministic manifest SHA-256 over those
+component references.
+
+The manifest can persist only when the full pre-wiring audit is ready. Any newer
+component evidence changes the current component identity and makes the old
+manifest stale automatically. The work queue surfaces
+`PERSIST_PREWIRE_MANIFEST` only after pre-wiring readiness is already current,
+and `phase9-progress` reports `PREWIRE_MANIFEST_CURRENT` as the highest
+simulation-only checkpoint.
+
+This manifest remains `research_only=true`, `simulation_only=true`,
+`policy_actionable=false` and `execution_wired=false`. It is an immutable
+evidence identity, not an execution authorization.
+
+
 ## End-to-end Phase 9 work queue
 
 `pio phase9-work-queue` is the single dependency-aware planner for both the
