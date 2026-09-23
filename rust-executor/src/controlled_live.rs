@@ -23,6 +23,7 @@ pub struct ControlledLiveConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlledLiveReport {
+    pub decision_id: String,
     pub accepted: bool,
     pub reason: String,
     pub phase5: Phase5PromotionGateReport,
@@ -172,6 +173,7 @@ pub fn evaluate_controlled_live(
     };
 
     Ok(ControlledLiveReport {
+        decision_id: proposal.decision_id.to_string(),
         accepted: reason == "approved",
         reason: reason.into(),
         phase5,
