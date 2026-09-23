@@ -1714,6 +1714,30 @@ def main() -> None:
         action="store_true",
     )
 
+    phase9_promotion_audit = subparsers.add_parser(
+        "phase9-promotion-audit",
+        help="Audit whether persisted Phase 9 research promotion still matches current replay-verified evidence",
+    )
+    phase9_promotion_audit.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_promotion_audit.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_promotion_audit.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_promotion_audit.add_argument(
+        "--require-current",
+        action="store_true",
+    )
+
     phase9_work_queue = subparsers.add_parser(
         "phase9-work-queue",
         help="Show concrete missing Phase 9 research evidence tasks",
@@ -3790,6 +3814,39 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_verified and not result.verified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-promotion-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        criteria = Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=args.min_mint_risk_pools,
+            min_wallet_flow_pools=args.min_wallet_flow_pools,
+            min_static_hedge_pools=args.min_static_hedge_pools,
+        )
+        current_report = evaluate_phase9_promotion(
+            storage,
+            criteria=criteria,
+        )
+        audit = audit_persisted_phase9_promotion(
+            storage,
+            criteria=criteria,
+            current_report=current_report,
+        )
+        output = {
+            **audit.to_record(),
+            "research_only": True,
+            "policy_actionable": False,
+            "current_research_bundle_sha256": (
+                current_report.research_bundle_sha256
+            ),
+            "persisted_research_bundle_sha256": (
+                current_report.persisted_bundle_sha256
+            ),
+        }
+        print(json.dumps(output, indent=2))
+        if args.require_current and not audit.current:
             raise SystemExit(2)
         return
 
