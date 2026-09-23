@@ -1009,6 +1009,21 @@ def build_phase9_work_queue(
                 )
             )
 
+    bandit_explicit_audit = audit_phase9_explicit_inputs(storage)
+    bandit_explicit_artifact = None
+    if (
+        bandit_explicit_audit.valid
+        and bandit_explicit_audit.evidence_id is not None
+    ):
+        bandit_explicit_artifact = load_phase9_explicit_inputs(
+            storage,
+            evidence_id=bandit_explicit_audit.evidence_id,
+        )
+    bandit_explicit_ready = (
+        bandit_explicit_artifact is not None
+        and len(bandit_explicit_artifact.inputs.pool_inputs) >= 3
+    )
+
     if (
         criteria.require_contextual_bandit
         and bundle.contextual_bandit.qualified_records < 1
@@ -1031,46 +1046,92 @@ def build_phase9_work_queue(
                     ),
                 )
             )
-        else:
+        elif bandit_explicit_ready:
             items.append(
                 Phase9WorkItem(
                     task_type="CONTEXTUAL_BANDIT",
-                    scope="LABELED_ACTION_CSV_REQUIRED",
+                    scope=str(bandit_explicit_artifact.evidence_id),
                     reason=(
-                        "contextual-bandit research requires a fixed fully "
-                        "labeled counterfactual action CSV or persisted "
-                        "retraining-cycle dataset lineage"
+                        "qualified contextual-bandit evidence is missing; "
+                        "a valid checksum-bound explicit input artifact with "
+                        "at least three pools can derive the fully labeled "
+                        "counterfactual action dataset from persisted chain "
+                        "history"
+                    ),
+                    shell_command=(
+                        "pio phase9-bandit-research-run "
+                        "--input-evidence-id "
+                        + _q(bandit_explicit_artifact.evidence_id)
+                        + " --persist --require-qualified"
+                    ),
+                )
+            )
+        else:
+            detail = (
+                "; ".join(bandit_explicit_audit.reasons)
+                if bandit_explicit_audit.reasons
+                else ""
+            )
+            items.append(
+                Phase9WorkItem(
+                    task_type="CONTEXTUAL_BANDIT",
+                    scope="CHECKSUM_BOUND_DATASET_REQUIRED",
+                    reason=(
+                        "contextual-bandit qualification requires either a "
+                        "checksum-bound retraining-cycle dataset or a valid "
+                        "Phase 9 explicit input artifact containing at least "
+                        "three pools so labels can be derived from persisted "
+                        "no-lookahead chain replay"
+                        + (": " + detail if detail else "")
                     ),
                     shell_command=None,
                 )
             )
 
     bandit_lineage_invalid = any(
-        "checksum-verified retraining dataset lineage" in reason
+        "checksum-verified dataset lineage" in reason
         for reason in bundle.reasons
     )
     if bandit_lineage_invalid:
         cycle_id = _latest_retraining_dataset_cycle(storage)
+        if cycle_id is not None:
+            repair_scope = cycle_id
+            repair_command = (
+                "pio contextual-bandit-cycle-research "
+                "--cycle-id "
+                + _q(cycle_id)
+                + " --persist --require-qualified"
+            )
+            repair_reason = (
+                "qualified contextual-bandit evidence is not bound to "
+                "valid checksum-verified retraining-cycle dataset lineage"
+            )
+        elif bandit_explicit_ready:
+            repair_scope = str(bandit_explicit_artifact.evidence_id)
+            repair_command = (
+                "pio phase9-bandit-research-run "
+                "--input-evidence-id "
+                + _q(bandit_explicit_artifact.evidence_id)
+                + " --persist --require-qualified"
+            )
+            repair_reason = (
+                "qualified contextual-bandit evidence has invalid dataset "
+                "lineage; rebuild it from the current checksum-bound Phase 9 "
+                "explicit inputs and persisted chain history"
+            )
+        else:
+            repair_scope = "CHECKSUM_BOUND_DATASET_REQUIRED"
+            repair_command = None
+            repair_reason = (
+                "qualified contextual-bandit evidence has invalid dataset "
+                "lineage and no valid repair source is available"
+            )
         items.append(
             Phase9WorkItem(
                 task_type="CONTEXTUAL_BANDIT_REPAIR",
-                scope=(
-                    cycle_id
-                    if cycle_id is not None
-                    else "RETRAINING_DATASET_REQUIRED"
-                ),
-                reason=(
-                    "qualified contextual-bandit evidence is not bound to "
-                    "valid retraining-cycle dataset lineage"
-                ),
-                shell_command=(
-                    "pio contextual-bandit-cycle-research "
-                    "--cycle-id "
-                    + _q(cycle_id)
-                    + " --persist --require-qualified"
-                    if cycle_id is not None
-                    else None
-                ),
+                scope=repair_scope,
+                reason=repair_reason,
+                shell_command=repair_command,
             )
         )
 
