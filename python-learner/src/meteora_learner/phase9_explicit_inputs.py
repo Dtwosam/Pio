@@ -112,7 +112,7 @@ class Phase9ExplicitResearchRun:
     static_hedge_evidence_ids: tuple[int, ...]
     candidate_evidence_id: int | None
     candidate_evidence_sha256: str | None
-    portfolio_allocation: dict[str, Any]
+    portfolio_allocation: dict[str, Any] | None
     portfolio_allocation_evidence_id: int | None
     explicit_research_ready: bool
 
@@ -691,11 +691,19 @@ def run_phase9_explicit_research(
     artifact: Phase9ExplicitInputsArtifact,
     persist: bool = False,
     deduplicate_persistence: bool = False,
+    include_static_hedge: bool = True,
+    include_portfolio: bool = True,
     persist_static_hedge: bool | None = None,
     persist_portfolio: bool | None = None,
 ) -> Phase9ExplicitResearchRun:
+    if not include_static_hedge and not include_portfolio:
+        raise ValueError(
+            "at least one explicit research family must be included"
+        )
+
     should_persist_static = (
         persist
+        and include_static_hedge
         and (
             True
             if persist_static_hedge is None
@@ -704,6 +712,7 @@ def run_phase9_explicit_research(
     )
     should_persist_portfolio = (
         persist
+        and include_portfolio
         and (
             True
             if persist_portfolio is None
@@ -713,139 +722,172 @@ def run_phase9_explicit_research(
 
     static_reports = []
     static_ids: list[int] = []
-    for spec in artifact.inputs.static_hedges:
-        report = research_static_inventory_hedge(
-            storage,
-            pool_address=spec.pool_address,
-            amount_x=spec.amount_x,
-            amount_y=spec.amount_y,
-            instrument=spec.instrument,
-            criteria=spec.criteria,
-            as_of=spec.as_of,
+    if include_static_hedge:
+        for spec in artifact.inputs.static_hedges:
+            report = research_static_inventory_hedge(
+                storage,
+                pool_address=spec.pool_address,
+                amount_x=spec.amount_x,
+                amount_y=spec.amount_y,
+                instrument=spec.instrument,
+                criteria=spec.criteria,
+                as_of=spec.as_of,
+            )
+            static_reports.append(report)
+            if should_persist_static:
+                static_evidence = report.to_record()
+                existing_id = (
+                    _latest_evidence_matches(
+                        storage,
+                        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+                        pool_address=report.pool_address,
+                        evidence=static_evidence,
+                    )
+                    if deduplicate_persistence
+                    else None
+                )
+                static_ids.append(
+                    existing_id
+                    if existing_id is not None
+                    else persist_static_hedge_research(
+                        storage,
+                        report=report,
+                    )
+                )
+
+    candidate_id = None
+    candidate_sha = None
+    allocation_id = None
+    allocation = None
+
+    if include_portfolio:
+        portfolio = artifact.inputs.portfolio
+        comparison_result = build_multi_pool_research(
+            str(storage.path),
+            inputs=artifact.inputs.pool_inputs,
+            account_equity_quote=portfolio.account_equity_quote,
+            cash_quote=portfolio.cash_quote,
+            current_deployed_quote=portfolio.current_deployed_quote,
+            portfolio_drawdown_bps=portfolio.portfolio_drawdown_bps,
+            phase2_gate=None,
+            observation_limit=portfolio.observation_limit,
+            half_widths=portfolio.half_widths,
+            center_offsets=portfolio.center_offsets,
+            strategies=tuple(
+                StrategyType(value) for value in portfolio.strategies
+            ),
+            max_share_bps=portfolio.max_share_bps,
+            favor_x_in_active_bin=portfolio.favor_x_in_active_bin,
         )
-        static_reports.append(report)
-        if should_persist_static:
-            static_evidence = report.to_record()
-            existing_id = (
+
+        candidate_lineage = None
+        if should_persist_portfolio:
+            source_inputs = [
+                asdict(item) for item in artifact.inputs.pool_inputs
+            ]
+            assumptions = {
+                "explicit_input_evidence_id": artifact.evidence_id,
+                "explicit_input_artifact_sha256": (
+                    artifact.artifact_sha256
+                ),
+                "account_equity_quote": portfolio.account_equity_quote,
+                "cash_quote": portfolio.cash_quote,
+                "current_deployed_quote": (
+                    portfolio.current_deployed_quote
+                ),
+                "portfolio_drawdown_bps": (
+                    portfolio.portfolio_drawdown_bps
+                ),
+                "observation_limit": portfolio.observation_limit,
+                "half_widths": list(portfolio.half_widths),
+                "center_offsets": list(portfolio.center_offsets),
+                "strategies": list(portfolio.strategies),
+                "max_share_bps": portfolio.max_share_bps,
+                "favor_x_in_active_bin": (
+                    portfolio.favor_x_in_active_bin
+                ),
+            }
+            candidate_payload = {
+                "research_only": True,
+                "policy_actionable": False,
+                "source_inputs": source_inputs,
+                "assumptions": assumptions,
+                "comparison": (
+                    comparison_result.comparison.to_record()
+                ),
+            }
+            candidate_sha = portfolio_candidate_artifact_sha256(
+                candidate_payload
+            )
+            candidate_evidence = {
+                "artifact_sha256": candidate_sha,
+                **candidate_payload,
+            }
+            candidate_id = (
                 _latest_evidence_matches(
                     storage,
-                    edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
-                    pool_address=report.pool_address,
-                    evidence=static_evidence,
+                    edge_type=PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+                    pool_address="__PORTFOLIO_CANDIDATES__",
+                    evidence=candidate_evidence,
                 )
                 if deduplicate_persistence
                 else None
             )
-            static_ids.append(
-                existing_id
-                if existing_id is not None
-                else persist_static_hedge_research(
-                    storage,
-                    report=report,
+            if candidate_id is None:
+                candidate_id, candidate_sha = (
+                    persist_portfolio_candidate_research(
+                        storage,
+                        comparison=comparison_result.comparison,
+                        source_inputs=source_inputs,
+                        assumptions=assumptions,
+                    )
                 )
-            )
+            candidate_lineage = {
+                "candidate_evidence_id": candidate_id,
+                "candidate_evidence_sha256": candidate_sha,
+            }
 
-    portfolio = artifact.inputs.portfolio
-    comparison_result = build_multi_pool_research(
-        str(storage.path),
-        inputs=artifact.inputs.pool_inputs,
-        account_equity_quote=portfolio.account_equity_quote,
-        cash_quote=portfolio.cash_quote,
-        current_deployed_quote=portfolio.current_deployed_quote,
-        portfolio_drawdown_bps=portfolio.portfolio_drawdown_bps,
-        phase2_gate=None,
-        observation_limit=portfolio.observation_limit,
-        half_widths=portfolio.half_widths,
-        center_offsets=portfolio.center_offsets,
-        strategies=tuple(
-            StrategyType(value) for value in portfolio.strategies
-        ),
-        max_share_bps=portfolio.max_share_bps,
-        favor_x_in_active_bin=portfolio.favor_x_in_active_bin,
-    )
-
-    candidate_id = None
-    candidate_sha = None
-    candidate_lineage = None
-    if should_persist_portfolio:
-        source_inputs = [asdict(item) for item in artifact.inputs.pool_inputs]
-        assumptions = {
-            "explicit_input_evidence_id": artifact.evidence_id,
-            "explicit_input_artifact_sha256": artifact.artifact_sha256,
-            "account_equity_quote": portfolio.account_equity_quote,
-            "cash_quote": portfolio.cash_quote,
-            "current_deployed_quote": portfolio.current_deployed_quote,
-            "portfolio_drawdown_bps": portfolio.portfolio_drawdown_bps,
-            "observation_limit": portfolio.observation_limit,
-            "half_widths": list(portfolio.half_widths),
-            "center_offsets": list(portfolio.center_offsets),
-            "strategies": list(portfolio.strategies),
-            "max_share_bps": portfolio.max_share_bps,
-            "favor_x_in_active_bin": portfolio.favor_x_in_active_bin,
-        }
-        candidate_payload = {
-            "research_only": True,
-            "policy_actionable": False,
-            "source_inputs": source_inputs,
-            "assumptions": assumptions,
-            "comparison": comparison_result.comparison.to_record(),
-        }
-        candidate_sha = portfolio_candidate_artifact_sha256(
-            candidate_payload
+        allocation = research_portfolio_allocation(
+            storage,
+            comparison=comparison_result.comparison,
+            budget_quote=portfolio.budget_quote,
+            criteria=portfolio.allocation_criteria,
+            candidate_lineage=candidate_lineage,
         )
-        candidate_evidence = {
-            "artifact_sha256": candidate_sha,
-            **candidate_payload,
-        }
-        candidate_id = (
-            _latest_evidence_matches(
-                storage,
-                edge_type=PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
-                pool_address="__PORTFOLIO_CANDIDATES__",
-                evidence=candidate_evidence,
-            )
-            if deduplicate_persistence
-            else None
-        )
-        if candidate_id is None:
-            candidate_id, candidate_sha = (
-                persist_portfolio_candidate_research(
+        if should_persist_portfolio:
+            allocation_evidence = allocation.to_record()
+            allocation_id = (
+                _latest_evidence_matches(
                     storage,
-                    comparison=comparison_result.comparison,
-                    source_inputs=source_inputs,
-                    assumptions=assumptions,
+                    edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+                    pool_address="__PORTFOLIO__",
+                    evidence=allocation_evidence,
                 )
+                if deduplicate_persistence
+                else None
             )
-        candidate_lineage = {
-            "candidate_evidence_id": candidate_id,
-            "candidate_evidence_sha256": candidate_sha,
-        }
+            if allocation_id is None:
+                allocation_id = persist_portfolio_allocation_research(
+                    storage,
+                    report=allocation,
+                )
 
-    allocation = research_portfolio_allocation(
-        storage,
-        comparison=comparison_result.comparison,
-        budget_quote=portfolio.budget_quote,
-        criteria=portfolio.allocation_criteria,
-        candidate_lineage=candidate_lineage,
-    )
-    allocation_id = None
-    if should_persist_portfolio:
-        allocation_evidence = allocation.to_record()
-        allocation_id = (
-            _latest_evidence_matches(
-                storage,
-                edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
-                pool_address="__PORTFOLIO__",
-                evidence=allocation_evidence,
-            )
-            if deduplicate_persistence
-            else None
+    static_ready = (
+        True
+        if not include_static_hedge
+        else any(
+            report.research_qualified
+            for report in static_reports
         )
-        if allocation_id is None:
-            allocation_id = persist_portfolio_allocation_research(
-                storage,
-                report=allocation,
-            )
+    )
+    portfolio_ready = (
+        True
+        if not include_portfolio
+        else bool(
+            allocation is not None
+            and allocation.research_qualified
+        )
+    )
 
     return Phase9ExplicitResearchRun(
         research_only=True,
@@ -859,10 +901,14 @@ def run_phase9_explicit_research(
         static_hedge_evidence_ids=tuple(static_ids),
         candidate_evidence_id=candidate_id,
         candidate_evidence_sha256=candidate_sha,
-        portfolio_allocation=allocation.to_record(),
+        portfolio_allocation=(
+            allocation.to_record()
+            if allocation is not None
+            else None
+        ),
         portfolio_allocation_evidence_id=allocation_id,
         explicit_research_ready=(
-            any(report.research_qualified for report in static_reports)
-            and allocation.research_qualified
+            static_ready and portfolio_ready
         ),
     )
+
