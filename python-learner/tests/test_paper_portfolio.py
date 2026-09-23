@@ -137,7 +137,7 @@ def test_portfolio_cycle_discovers_bound_positions_and_skips_missing_quote(tmp_p
     assert report.cycle is not None
     assert report.cycle.applied == 1
     missing = next(item for item in report.schedule if item.position_id == "pos-b")
-    assert "missing token-Y quote" in missing.reason
+    assert "token-Y quote unavailable" in missing.reason
 
 
 def test_portfolio_cycle_skips_positions_without_new_chain_state(tmp_path):
