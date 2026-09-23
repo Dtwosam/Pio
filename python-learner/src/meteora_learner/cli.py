@@ -66,6 +66,7 @@ from .phase9_validation import (
     evaluate_phase9_research_bundle,
     persist_phase9_research_bundle,
 )
+from .phase9_replay_audit import evaluate_phase9_replay_audit
 from .phase9_work_queue import build_phase9_work_queue
 from .phase3_workflow import (
     Phase3ValidationInput,
@@ -1675,6 +1676,30 @@ def main() -> None:
     phase9_bundle.add_argument("--persist", action="store_true")
     phase9_bundle.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    phase9_replay_audit = subparsers.add_parser(
+        "phase9-replay-audit",
+        help="Audit deterministic replay verification for every required Phase 9 research family",
+    )
+    phase9_replay_audit.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_replay_audit.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_replay_audit.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_replay_audit.add_argument(
+        "--require-verified",
         action="store_true",
     )
 
@@ -3713,6 +3738,22 @@ def main() -> None:
             )
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.research_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-replay-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_replay_audit(
+            storage,
+            criteria=Phase9ResearchBundleCriteria(
+                min_mint_risk_pools=args.min_mint_risk_pools,
+                min_wallet_flow_pools=args.min_wallet_flow_pools,
+                min_static_hedge_pools=args.min_static_hedge_pools,
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_verified and not result.verified:
             raise SystemExit(2)
         return
 
