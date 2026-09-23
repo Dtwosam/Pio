@@ -364,6 +364,20 @@ stale and must be revalidated and persisted again before
 `PHASE9_PROMOTION_V1` can be written.
 
 
+Phase 9 component qualification is source-lineage-bound, not merely
+self-declared in evidence JSON. Adaptive/regime evidence records exact
+`chain_pool_snapshots` IDs plus deterministic SHA-256 hashes of the active-bin
+source windows. Wallet-flow evidence records exact `position_event_history`
+IDs plus a deterministic source-event hash. Static-hedge evidence records the
+paired pool-snapshot and active-bin-liquidity IDs used for every Q64 price in
+the hedge path plus a deterministic path hash. Mint-risk evidence must resolve
+to authoritative persisted pool/mint snapshot IDs. Portfolio candidate
+artifact hashes are recomputed from the persisted source inputs, assumptions
+and ranked comparison rather than trusting stored SHA labels. Contextual-bandit
+evidence must resolve to the persisted retraining dataset/cycle lineage and
+matching checksum. Any missing, forged, stale or mismatched lineage fails the
+Phase 9 bundle closed.
+
 Portfolio-allocation qualification is artifact-bound. The preferred Phase 9
 flow persists the exact multi-pool candidate corpus, source pool inputs,
 account-state assumptions and ranked comparison as immutable
