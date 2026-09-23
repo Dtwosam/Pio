@@ -197,3 +197,23 @@ def test_portfolio_allocation_evidence_round_trip(tmp_path):
     assert latest["status"] == "QUALIFIED_RESEARCH"
     assert latest["evidence"]["allocated_quote"] == 90.0
     assert latest["evidence"]["policy_actionable"] is False
+
+
+def test_duplicate_pool_candidates_fail_closed(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    promote_phase8(storage)
+
+    try:
+        research_portfolio_allocation(
+            storage,
+            comparison(
+                candidate(1, "pool-a"),
+                candidate(2, "pool-a"),
+            ),
+            budget_quote=90.0,
+            criteria=criteria(min_positions=1),
+        )
+    except ValueError as exc:
+        assert "duplicate pool_address" in str(exc)
+    else:
+        raise AssertionError("expected duplicate-pool allocation refusal")
