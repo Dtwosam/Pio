@@ -1410,3 +1410,56 @@ def test_work_queue_persists_manifest_after_prewire_ready(
     assert task.shell_command == (
         "pio phase9-policy-manifest --persist --require-ready"
     )
+
+
+def test_work_queue_surfaces_chain_capture_plan_from_api_discovery(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    with storage.connect() as conn:
+        for rank, pool in enumerate(("pool-a", "pool-b", "pool-c"), start=1):
+            conn.execute(
+                """
+                INSERT INTO pool_snapshots(
+                    observed_at, address, name, tvl,
+                    volume_24h, fees_24h, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, '{}')
+                """,
+                (
+                    "2026-09-23T12:00:00+00:00",
+                    pool,
+                    pool,
+                    1_000.0 - rank * 100.0,
+                    100.0,
+                    1.0,
+                ),
+            )
+
+    queue = build_phase9_work_queue(
+        storage,
+        rpc_url="https://rpc.example.invalid",
+    )
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "CHAIN_POOL_CAPTURE_PLAN"
+    )
+    assert task.scope == "PHASE9_CHAIN_POOLS"
+    assert task.shell_command is not None
+    assert "phase9-chain-capture-plan" in task.shell_command
+    assert "https://rpc.example.invalid" in task.shell_command
+
+
+def test_work_queue_requests_api_pool_discovery_when_no_candidates_exist(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "API_POOL_DISCOVERY"
+    )
+    assert task.scope == "METEORA_POOLS"
+    assert task.shell_command == "pio collect-once"
