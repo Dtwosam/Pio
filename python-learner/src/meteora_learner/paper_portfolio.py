@@ -12,6 +12,7 @@ from .pool_safety import PoolSafetyConfig
 from .position_policy import PositionManagementConfig
 from .research_store import ResearchStore
 from .quote_registry import load_fresh_quote_map
+from .paper_chain_collection import build_paper_chain_collection_queue
 from .storage import Storage
 
 
@@ -80,6 +81,8 @@ def run_portfolio_live_paper_cycle(
     token_y_quotes: Mapping[str, float] | None = None,
     quote_max_age_seconds: int = 300,
     quote_as_of: str | None = None,
+    chain_max_age_seconds: int | None = None,
+    chain_as_of: str | None = None,
     max_positions: int | None = None,
     safety_config: PoolSafetyConfig = PoolSafetyConfig(),
     management_config: PositionManagementConfig = PositionManagementConfig(),
@@ -101,6 +104,19 @@ def run_portfolio_live_paper_cycle(
 
     rows = _open_bound_positions(storage, account_id=account_id)
     store = ResearchStore(storage.path)
+    chain_status: dict[str, Any] = {}
+    if chain_max_age_seconds is not None:
+        chain_queue = build_paper_chain_collection_queue(
+            storage,
+            account_id=account_id,
+            max_age_seconds=chain_max_age_seconds,
+            as_of=chain_as_of,
+        )
+        chain_status = {
+            item.pool_address: item
+            for item in chain_queue.items
+        }
+
     registry_status: dict[str, Any] = {}
     if token_y_quotes is None:
         mints = [
@@ -152,8 +168,11 @@ def run_portfolio_live_paper_cycle(
         quote = float(quote_raw) if quote_raw is not None else None
 
         reason: str | None = None
+        freshness = chain_status.get(pool_address)
         if latest is None:
             reason = "pool has no chain observation"
+        elif freshness is not None and freshness.needs_collection:
+            reason = f"chain collection required: {freshness.reason}"
         elif latest <= last:
             reason = "no new chain observation"
         elif quote is None:
