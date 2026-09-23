@@ -435,6 +435,121 @@ RPC_URL is accepted as a compatibility fallback",
                 )?;
             println!("{}", serde_json::to_string_pretty(&context)?);
         }
+        #[cfg(feature = "live-submit")]
+        "controlled-live-submit" => {
+            let live_enabled = std::env::var("PIO_LIVE_SUBMIT_ENABLED")
+                .unwrap_or_default();
+            if live_enabled != "1" {
+                anyhow::bail!(
+                    "controlled live submission is runtime-disabled; set PIO_LIVE_SUBMIT_ENABLED=1 only for an explicitly approved controlled-live run"
+                );
+            }
+
+            let database_path = args
+                .next()
+                .context("PIO_DATABASE is required")?;
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
+            let decision_id = args
+                .next()
+                .context("DECISION_ID is required")?;
+            let transaction_config_path = args
+                .next()
+                .context("TRANSACTION_GUARD_CONFIG_JSON is required")?;
+            let controlled_config_path = args
+                .next()
+                .context("CONTROLLED_LIVE_CONFIG_JSON is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "controlled-live-submit accepts exactly five arguments"
+                );
+            }
+
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let transaction_config_json =
+                std::fs::read_to_string(&transaction_config_path)
+                    .with_context(|| {
+                        format!(
+                            "failed to read transaction guard config JSON: {transaction_config_path}"
+                        )
+                    })?;
+            let transaction_config:
+                transaction_guard::TransactionGuardConfig =
+                serde_json::from_str(&transaction_config_json)
+                    .context("invalid transaction guard config JSON")?;
+            let controlled_config_json =
+                std::fs::read_to_string(&controlled_config_path)
+                    .with_context(|| {
+                        format!(
+                            "failed to read controlled-live config JSON: {controlled_config_path}"
+                        )
+                    })?;
+            let controlled_config:
+                controlled_live::ControlledLiveConfig =
+                serde_json::from_str(&controlled_config_json)
+                    .context("invalid controlled-live config JSON")?;
+
+            let phase5 =
+                phase5_gate::verify_phase5_promotion_database(
+                    std::path::Path::new(&database_path),
+                )?;
+            if !phase5.accepted {
+                anyhow::bail!(
+                    "Phase 5 promotion gate rejected controlled live submission: {}",
+                    phase5.reason
+                );
+            }
+
+            let keypair = wallet::load_executor_keypair_from_env()?;
+            use solana_sdk::signature::Signer as _;
+            let readiness =
+                phase6_readiness::evaluate_phase6_readiness(
+                    phase5.clone(),
+                    &keypair.pubkey(),
+                    &transaction_config,
+                )?;
+            if !readiness.accepted {
+                anyhow::bail!(
+                    "Phase 6 readiness rejected controlled live submission: {}",
+                    readiness.reason
+                );
+            }
+
+            let store = execution_store::ExecutionIntentStore::open(
+                &execution_db,
+            )?;
+            let live =
+                controlled_live::evaluate_controlled_live_intent(
+                    std::path::Path::new(&database_path),
+                    &store,
+                    &decision_id,
+                    &controlled_config,
+                )?;
+            if !live.accepted {
+                anyhow::bail!(
+                    "controlled-live authorization rejected submission: {}",
+                    live.reason
+                );
+            }
+
+            let report = submission::submit_execution_intent_rpc(
+                &rpc_url,
+                &store,
+                &decision_id,
+                &keypair,
+                &phase5,
+                &live,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.rpc_accepted {
+                std::process::exit(2);
+            }
+        }
         "controlled-live-intent-check" => {
             let database_path = args
                 .next()
