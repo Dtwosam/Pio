@@ -22,6 +22,12 @@ def _d(value: Any) -> Decimal:
     return result
 
 
+def _fmt(value: Decimal) -> str:
+    if value == ZERO:
+        return "0"
+    return format(value.normalize(), "f")
+
+
 def _parse_time(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
@@ -106,7 +112,7 @@ def _fresh_quote(
     return quote, {
         "token_mint": token_mint,
         "quote_unit": quote_unit,
-        "quote_per_atomic": format(quote, "f"),
+        "quote_per_atomic": _fmt(quote),
         "source": str(row[1]),
         "observed_at": str(row[2]),
         "as_of": as_of,
@@ -359,12 +365,12 @@ def value_live_position_outcome(
                     "observed_at": observed_at,
                     "pool_snapshot": pool_evidence,
                     "quotes": evidence_for_effect,
-                    "principal_cashflow_quote": format(principal, "f"),
-                    "composition_cost_quote": format(composition, "f"),
-                    "fee_income_quote": format(fees, "f"),
-                    "reward_income_quote": format(rewards, "f"),
-                    "network_cost_quote": format(network_value, "f"),
-                    "net_cashflow_quote": format(net, "f"),
+                    "principal_cashflow_quote": _fmt(principal),
+                    "composition_cost_quote": _fmt(composition),
+                    "fee_income_quote": _fmt(fees),
+                    "reward_income_quote": _fmt(rewards),
+                    "network_cost_quote": _fmt(network_value),
+                    "net_cashflow_quote": _fmt(net),
                 }
             )
 
@@ -389,13 +395,13 @@ def value_live_position_outcome(
             closed_decision_id=closed_decision_id,
             quote_unit=quote_unit,
             valued_execution_count=len(effects),
-            principal_cashflow_quote=format(principal_total, "f"),
-            composition_cost_quote=format(composition_total, "f"),
-            fee_income_quote=format(fee_total, "f"),
-            reward_income_quote=format(reward_total, "f"),
-            network_cost_quote=format(network_total, "f"),
-            realized_pnl_quote=format(realized_pnl, "f"),
-            entry_outflow_quote=format(entry_outflow, "f"),
+            principal_cashflow_quote=_fmt(principal_total),
+            composition_cost_quote=_fmt(composition_total),
+            fee_income_quote=_fmt(fee_total),
+            reward_income_quote=_fmt(reward_total),
+            network_cost_quote=_fmt(network_total),
+            realized_pnl_quote=_fmt(realized_pnl),
+            entry_outflow_quote=_fmt(entry_outflow),
             realized_return_bps=realized_return_bps,
             max_age_seconds=max_age_seconds,
             quote_evidence=tuple(quote_evidence),
