@@ -81,6 +81,10 @@ def test_history_capture_moves_three_42_observation_pools_to_ready(
     assert report.pools_attempted == 3
     assert report.pools_captured == 3
     assert report.pools_failed == 0
+    assert all(
+        item.capture_observed_at == "2026-09-23T13:00:00+00:00"
+        for item in report.items
+    )
     assert calls == [
         ("pool-a", 1),
         ("pool-b", 1),
