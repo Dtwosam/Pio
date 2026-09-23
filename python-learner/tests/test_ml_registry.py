@@ -15,6 +15,10 @@ from meteora_learner.ml_registry import (
     transition_model,
 )
 from meteora_learner.ml_training import train_ml_v1_frame
+from meteora_learner.phase_promotion import (
+    persist_phase2_promotion,
+    persist_phase3_promotion,
+)
 from meteora_learner.storage import Storage
 
 
@@ -60,9 +64,19 @@ def offline_validation(bundle):
     )
 
 
+def seed_phase3(storage):
+    ready = SimpleNamespace(
+        promotion_ready=True,
+        to_record=lambda: {"promotion_ready": True},
+    )
+    persist_phase2_promotion(storage, report=ready)
+    persist_phase3_promotion(storage, report=ready)
+
+
 def test_model_registry_enforces_staged_promotion(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     bundle = train_ml_v1_frame(training_frame(), min_rows=50)
+    seed_phase3(storage)
 
     record = register_ml_v1_bundle(
         storage,
@@ -100,6 +114,7 @@ def test_model_registry_enforces_staged_promotion(tmp_path):
 def test_registry_blocks_second_champion_until_first_is_rolled_back(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     bundle = train_ml_v1_frame(training_frame(), min_rows=50)
+    seed_phase3(storage)
 
     for model_id in ("model-a", "model-b"):
         register_ml_v1_bundle(
