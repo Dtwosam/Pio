@@ -12,6 +12,7 @@ from .phase9_capture_plan import (
     build_phase9_chain_capture_plan,
 )
 from .phase9_history_plan import build_phase9_history_plan
+from .phase9_pool_cohort import evaluate_phase9_pool_cohort
 from .phase9_source_freshness import (
     evaluate_phase9_source_freshness,
 )
@@ -392,6 +393,11 @@ def build_phase9_work_queue(
         storage,
         as_of=as_of,
     )
+    live_cohort = (
+        evaluate_phase9_pool_cohort(storage)
+        if as_of is None
+        else None
+    )
     items: list[Phase9WorkItem] = []
     stale_source_families = tuple(
         item.family
@@ -496,6 +502,44 @@ def build_phase9_work_queue(
                 )
             )
 
+    if live_cohort is not None:
+        if live_cohort.missing_chain_pools:
+            items.append(
+                Phase9WorkItem(
+                    task_type="RANKED_POOL_ONBOARDING",
+                    scope=",".join(live_cohort.missing_chain_pools),
+                    reason=(
+                        "the ranked Phase 9 evidence cohort still has "
+                        "top-ranked pool(s) without chain snapshots: "
+                        + ", ".join(live_cohort.missing_chain_pools)
+                    ),
+                    shell_command="pio phase9-source-capture-run",
+                )
+            )
+        shallow_ranked = tuple(
+            item.pool_address
+            for item in live_cohort.items
+            if (
+                item.pool_address in live_cohort.desired_pools
+                and item.chain_observed
+                and not item.history_ready
+            )
+        )
+        if shallow_ranked:
+            items.append(
+                Phase9WorkItem(
+                    task_type="RANKED_POOL_HISTORY",
+                    scope=",".join(shallow_ranked),
+                    reason=(
+                        "ranked Phase 9 pool(s) are chain-observed but still "
+                        f"below the {live_cohort.required_observations}-"
+                        "observation research depth: "
+                        + ", ".join(shallow_ranked)
+                    ),
+                    shell_command="pio phase9-source-capture-run",
+                )
+            )
+
     if len(pools) < 3:
         if as_of is not None:
             items.append(
@@ -557,7 +601,22 @@ def build_phase9_work_queue(
         adaptive_reason = (
             "at least three persisted chain-history pools are needed"
         )
-        if len(pools) >= 3:
+        selected_research_pools = (
+            live_cohort.research_pools
+            if live_cohort is not None and live_cohort.research_ready
+            else ()
+        )
+        if selected_research_pools:
+            command = (
+                "pio phase9-research-validate --pools "
+                + _q(",".join(selected_research_pools))
+                + " --persist --require-qualified"
+            )
+            adaptive_reason = (
+                "qualified adaptive/regime multi-pool evidence is missing; "
+                "the ranked history-ready research cohort is available"
+            )
+        elif len(pools) >= 3:
             history_plan = build_phase9_history_plan(
                 storage,
                 rpc_url=rpc_url,
