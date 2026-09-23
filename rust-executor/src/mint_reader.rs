@@ -213,9 +213,10 @@ mod tests {
         assert_eq!(snapshot.supply, "1000000");
         assert_eq!(snapshot.decimals, 6);
         assert!(snapshot.is_initialized);
+        let expected_authority = mint_authority.to_string();
         assert_eq!(
             snapshot.mint_authority.as_deref(),
-            Some(mint_authority.to_string().as_str())
+            Some(expected_authority.as_str())
         );
         assert!(snapshot.freeze_authority.is_none());
         assert_eq!(snapshot.token_2022_extension_data_len, 0);
