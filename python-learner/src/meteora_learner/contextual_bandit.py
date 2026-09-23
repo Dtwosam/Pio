@@ -5,7 +5,7 @@ import math
 from typing import Any, Sequence
 
 from .ml_dataset import MLTrainingExample
-from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
+from .phase8_validation import audit_persisted_phase8_promotion
 from .storage import Storage
 
 
@@ -238,10 +238,8 @@ def evaluate_contextual_bandit(
     if not examples:
         raise ValueError("at least one action example is required")
 
-    phase8_promoted = storage.phase_is_promoted(
-        PHASE8,
-        evidence_type=PHASE8_EVIDENCE_TYPE,
-    )
+    phase8_audit = audit_persisted_phase8_promotion(storage)
+    phase8_promoted = phase8_audit.current
 
     ordered = sorted(
         examples,
@@ -404,7 +402,7 @@ def evaluate_contextual_bandit(
     checks = (
         (
             phase8_promoted,
-            "Phase 8 must be persistently promoted before contextual-bandit research can qualify",
+            "Phase 8 promotion must still be current before contextual-bandit research can qualify",
         ),
         (
             evaluated >= criteria.min_decisions,
@@ -435,6 +433,11 @@ def evaluate_contextual_bandit(
         ),
     )
     reasons.extend(message for passed, message in checks if not passed)
+    if not phase8_promoted:
+        reasons.extend(
+            f"Phase 8 currentness: {reason}"
+            for reason in phase8_audit.reasons
+        )
     qualified = not reasons
 
     if not phase8_promoted:
