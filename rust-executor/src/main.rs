@@ -30,6 +30,7 @@ fn usage() {
   meteora-executor preflight-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
+  meteora-executor execution-wallet-authorize <EXECUTION_DB> <DECISION_ID>
   meteora-executor build-emergency-exit <REQUEST_JSON_OR_->
   meteora-executor wallet-status
   meteora-executor wallet-authorize-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
@@ -284,6 +285,47 @@ RPC_URL is accepted as a compatibility fallback",
             )?;
             let record = store.load(&decision_id)?;
             println!("{}", serde_json::to_string_pretty(&record)?);
+        }
+        "execution-wallet-authorize" => {
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
+            let decision_id = args
+                .next()
+                .context("DECISION_ID is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "execution-wallet-authorize accepts exactly two arguments"
+                );
+            }
+            let store = execution_store::ExecutionIntentStore::open(
+                &execution_db,
+            )?;
+            let intent = store.load(&decision_id)?;
+            let transaction = intent
+                .transaction_guard
+                .as_ref()
+                .context(
+                    "execution intent has no persisted transaction guard"
+                )?;
+            let wallet_status = wallet::inspect_executor_wallet_from_env()?;
+            let wallet_pubkey: solana_sdk::pubkey::Pubkey =
+                wallet_status.pubkey.parse()
+                    .context("executor wallet pubkey is invalid")?;
+            let authorization = wallet_guard::authorize_wallet(
+                &wallet_pubkey,
+                transaction,
+            )?;
+            let persisted = store.record_wallet_authorization(
+                &decision_id,
+                &authorization,
+            )?;
+            let output = serde_json::json!({
+                "wallet": wallet_status,
+                "authorization": authorization,
+                "intent": persisted,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
         "execution-confirmation" => {
             let execution_db = args
