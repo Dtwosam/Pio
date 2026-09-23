@@ -572,6 +572,37 @@ CREATE TABLE IF NOT EXISTS live_position_valuations (
 CREATE INDEX IF NOT EXISTS idx_live_position_valuations_pool
 ON live_position_valuations(pool_address, created_at);
 
+CREATE TABLE IF NOT EXISTS live_learning_labels (
+    position_address TEXT PRIMARY KEY,
+    decision_id TEXT NOT NULL UNIQUE,
+    pool_address TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    min_bin_id INTEGER NOT NULL,
+    max_bin_id INTEGER NOT NULL,
+    range_width_bins INTEGER NOT NULL,
+    proposed_capital_quote TEXT NOT NULL,
+    expected_net_return_pct TEXT NOT NULL,
+    expected_downside_pct TEXT NOT NULL,
+    realized_pnl_quote TEXT NOT NULL,
+    realized_return_bps INTEGER NOT NULL,
+    prediction_error_bps INTEGER NOT NULL,
+    target_positive_return INTEGER NOT NULL CHECK(
+        target_positive_return IN (0, 1)
+    ),
+    quote_unit TEXT NOT NULL,
+    opened_signature TEXT NOT NULL,
+    closed_decision_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_learning_labels_model
+ON live_learning_labels(model_version, strategy, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_live_learning_labels_pool
+ON live_learning_labels(pool_address, created_at);
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
