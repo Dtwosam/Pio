@@ -10,7 +10,11 @@ from .deposit_plan import (
     distribute_standard_spl_deposit,
     project_deposit_shares,
 )
-from .liquidity_math import amounts_from_liquidity_share, fee_from_checkpoint_delta
+from .liquidity_math import (
+    amounts_from_liquidity_share,
+    fee_from_checkpoint_delta,
+    reward_from_checkpoint_delta,
+)
 from .research_store import ResearchStore
 from .strategy import StrategyType
 
@@ -26,6 +30,8 @@ class ReplayIntervalResult:
     end_active_bin_id: int
     fee_x: int
     fee_y: int
+    reward_one: int
+    reward_two: int
     max_observed_share_bps: int
 
 
@@ -46,6 +52,8 @@ class ReplayBinResult:
     end_y_amount: int
     fee_x: int
     fee_y: int
+    reward_one: int
+    reward_two: int
 
 
 @dataclass(frozen=True)
@@ -64,6 +72,11 @@ class SmallLPReplayResult:
     ending_y: int
     fee_x: int
     fee_y: int
+    reward_one: int
+    reward_two: int
+    reward_mint_0: str | None
+    reward_mint_1: str | None
+    reward_fidelity: str
     entry_composition_fee_x: int
     entry_composition_fee_y: int
     entry_composition_protocol_fee_x: int
@@ -100,9 +113,34 @@ def _validate_pool_path(
         "y": str(first["token_y_mint"]),
     }
 
+    reward_metadata_available = all(
+        snapshot.get("supports_limit_order") is not None
+        and snapshot.get("reward_mint_0") is not None
+        and snapshot.get("reward_mint_1") is not None
+        for snapshot in snapshots
+    )
+    if reward_metadata_available:
+        expected_limit_order = bool(first["supports_limit_order"])
+        expected_reward_mints = (
+            str(first["reward_mint_0"]),
+            str(first["reward_mint_1"]),
+        )
+    else:
+        expected_limit_order = None
+        expected_reward_mints = None
+
     for snapshot in snapshots:
         if int(snapshot["bin_step"]) != expected_bin_step:
             raise ValueError("bin_step changed across replay path")
+
+        if reward_metadata_available:
+            if bool(snapshot["supports_limit_order"]) != expected_limit_order:
+                raise ValueError("limit-order support changed across replay path")
+            if (
+                str(snapshot["reward_mint_0"]),
+                str(snapshot["reward_mint_1"]),
+            ) != expected_reward_mints:
+                raise ValueError("reward mint changed across replay path")
 
         for side in ("x", "y"):
             if str(snapshot[f"token_{side}_mint"]) != expected_mints[side]:
@@ -209,6 +247,27 @@ def replay_small_lp_history(
 
     bin_fee_x = {item.bin_id: 0 for item in projected.bins}
     bin_fee_y = {item.bin_id: 0 for item in projected.bins}
+    bin_reward_one = {item.bin_id: 0 for item in projected.bins}
+    bin_reward_two = {item.bin_id: 0 for item in projected.bins}
+    reward_metadata_available = all(
+        pool.get("supports_limit_order") is not None
+        and pool.get("reward_mint_0") is not None
+        and pool.get("reward_mint_1") is not None
+        for pool in pool_snapshots
+    )
+    rewards_enabled = (
+        reward_metadata_available
+        and not bool(start_pool["supports_limit_order"])
+    )
+    reward_fidelity = (
+        "ONCHAIN_EFFECTIVE_REWARD_CHECKPOINT_V1"
+        if rewards_enabled
+        else (
+            "NOT_APPLICABLE_LIMIT_ORDER_POOL"
+            if reward_metadata_available
+            else "UNAVAILABLE_LEGACY_SNAPSHOT"
+        )
+    )
     bin_max_share_bps = {item.bin_id: 0 for item in projected.bins}
 
     # Validate the hypothetical share at every observed pool state, not only entry.
@@ -273,6 +332,8 @@ def replay_small_lp_history(
         current_rows = bin_snapshots[idx + 1]
         interval_fee_x = 0
         interval_fee_y = 0
+        interval_reward_one = 0
+        interval_reward_two = 0
         interval_max_bps = 0
 
         for projected_bin in projected.bins:
@@ -305,10 +366,43 @@ def replay_small_lp_history(
                 liquidity_share=share,
                 fee_per_token_delta=adjusted_delta_y,
             )
+
+            reward_one = 0
+            reward_two = 0
+            if rewards_enabled:
+                reward_delta_one = max(
+                    0,
+                    int(str(after["reward_per_token_stored_0"]))
+                    - int(str(before["reward_per_token_stored_0"])),
+                )
+                reward_delta_two = max(
+                    0,
+                    int(str(after["reward_per_token_stored_1"]))
+                    - int(str(before["reward_per_token_stored_1"])),
+                )
+                adjusted_reward_one = (
+                    reward_delta_one * previous_supply // (previous_supply + share)
+                )
+                adjusted_reward_two = (
+                    reward_delta_two * previous_supply // (previous_supply + share)
+                )
+                reward_one = reward_from_checkpoint_delta(
+                    liquidity_share=share,
+                    reward_per_token_delta=adjusted_reward_one,
+                )
+                reward_two = reward_from_checkpoint_delta(
+                    liquidity_share=share,
+                    reward_per_token_delta=adjusted_reward_two,
+                )
+
             bin_fee_x[projected_bin.bin_id] += fee_x
             bin_fee_y[projected_bin.bin_id] += fee_y
+            bin_reward_one[projected_bin.bin_id] += reward_one
+            bin_reward_two[projected_bin.bin_id] += reward_two
             interval_fee_x += fee_x
             interval_fee_y += fee_y
+            interval_reward_one += reward_one
+            interval_reward_two += reward_two
             interval_max_bps = max(
                 interval_max_bps,
                 _share_bps(share, previous_supply),
@@ -323,6 +417,8 @@ def replay_small_lp_history(
                 end_active_bin_id=int(pool_snapshots[idx + 1]["active_bin_id"]),
                 fee_x=interval_fee_x,
                 fee_y=interval_fee_y,
+                reward_one=interval_reward_one,
+                reward_two=interval_reward_two,
                 max_observed_share_bps=interval_max_bps,
             )
         )
@@ -368,6 +464,8 @@ def replay_small_lp_history(
                 end_y_amount=end_y,
                 fee_x=bin_fee_x[projected_bin.bin_id],
                 fee_y=bin_fee_y[projected_bin.bin_id],
+                reward_one=bin_reward_one[projected_bin.bin_id],
+                reward_two=bin_reward_two[projected_bin.bin_id],
             )
         )
 
@@ -386,6 +484,19 @@ def replay_small_lp_history(
         ending_y=sum(item.end_y_amount for item in results),
         fee_x=sum(item.fee_x for item in results),
         fee_y=sum(item.fee_y for item in results),
+        reward_one=sum(item.reward_one for item in results),
+        reward_two=sum(item.reward_two for item in results),
+        reward_mint_0=(
+            str(start_pool["reward_mint_0"])
+            if reward_metadata_available
+            else None
+        ),
+        reward_mint_1=(
+            str(start_pool["reward_mint_1"])
+            if reward_metadata_available
+            else None
+        ),
+        reward_fidelity=reward_fidelity,
         entry_composition_fee_x=sum(item.entry_composition_fee_x for item in results),
         entry_composition_fee_y=sum(item.entry_composition_fee_y for item in results),
         entry_composition_protocol_fee_x=sum(
