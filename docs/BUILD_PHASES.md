@@ -231,10 +231,10 @@ Built:
 Still needed:
 - end-to-end controlled executor validation after Phase 5 promotion evidence exists
 
-Live signing and transaction sending remain unavailable.
+Default builds exclude the `live-submit` feature. A compile-time + runtime gated controlled-live submit path exists for later validation, but it is disabled by default and has not been approved for production live trading.
 
 ## Phase 7 — Controlled Live Trading
-Status: controlled-live authorization infrastructure started; public signing/sending remains disabled.
+Status: controlled-live execution path implemented behind compile-time/runtime/promotion/risk gates; first controlled-live validation run pending.
 
 Built:
 - read-only Rust controlled-live gate against persisted Python live-position state
@@ -247,11 +247,21 @@ Built:
 - EXIT remains independently allowed for risk reduction when entry/rebalance are disabled
 - reproducible disabled example configuration
 - internal submission coordinator requires controlled-live authorization bound to the same decision ID, action, pool and Phase 5 evidence
+- compile-time `live-submit` feature is off in default builds
+- runtime `PIO_LIVE_SUBMIT_ENABLED=1` switch is additionally required
+- Phase 6 readiness must match the same isolated wallet and Phase 5 evidence
+- unresolved ENTER intents consume controlled-live concurrency
+- daily submitted ENTER capital budget
+- daily ENTER submission-count cap
+- independent daily realized-loss budget derived from confirmed valued live outcomes
+- any same-day CLOSED outcome lacking valuation blocks new ENTER / REBALANCE
+- exactly one tracked active position is required for pool-level REBALANCE / EXIT authorization
+- hard per-position rebalance-count cap
 
 Still needed:
 - explicit Phase 6 controlled validation evidence
-- public live execution command only after promotion/validation gates are satisfied
 - first small-capital controlled-live run with full receipt/ledger reconciliation
+- persisted controlled-live validation evidence before widening limits or enabling unattended live execution
 
 ## Phase 8 — Continuous Learning
 
