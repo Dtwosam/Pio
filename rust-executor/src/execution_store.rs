@@ -1,6 +1,7 @@
 use crate::dry_run::DryRunExecutionRequest;
 use crate::execution_guard::RiskCheckReport;
 use crate::simulation::SimulationReport;
+use crate::risk::RiskConfig;
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
