@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from dataclasses import asdict, dataclass
@@ -259,16 +260,34 @@ def _mint_lineage_valid(storage: Storage) -> bool:
     if not qualified:
         return False
 
+    def parse_time(value: str) -> datetime:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("timestamp must include timezone")
+        return parsed.astimezone(timezone.utc)
+
     with storage.connect() as conn:
         for row in qualified:
             evidence = row["evidence"]
+            criteria = evidence.get("criteria")
+            if not isinstance(criteria, dict):
+                return False
+            if criteria.get("include_reward_mints") is not True:
+                return False
+
             try:
                 pool_snapshot_id = int(evidence["pool_snapshot_id"])
+                as_of = parse_time(str(evidence["as_of"]))
+                max_age = int(criteria["max_snapshot_age_seconds"])
+                max_decimals = int(criteria["max_decimals"])
             except (KeyError, TypeError, ValueError):
                 return False
+
             pool_row = conn.execute(
                 """
-                SELECT pool_address
+                SELECT pool_address, token_x_mint, token_y_mint,
+                       token_x_program, token_y_program,
+                       reward_mint_0, reward_mint_1
                 FROM chain_pool_snapshots
                 WHERE id = ?
                 """,
@@ -280,19 +299,73 @@ def _mint_lineage_valid(storage: Storage) -> bool:
             ):
                 return False
 
+            required: dict[str, dict[str, Any]] = {}
+            for role, mint, program in (
+                ("TOKEN_X", pool_row[1], pool_row[3]),
+                ("TOKEN_Y", pool_row[2], pool_row[4]),
+            ):
+                mint_text = str(mint)
+                required.setdefault(
+                    mint_text,
+                    {"roles": [], "programs": set()},
+                )
+                required[mint_text]["roles"].append(role)
+                if program is not None:
+                    required[mint_text]["programs"].add(str(program))
+
+            for index, mint in enumerate((pool_row[5], pool_row[6])):
+                if mint is None or str(mint) == (
+                    "11111111111111111111111111111111"
+                ):
+                    continue
+                mint_text = str(mint)
+                required.setdefault(
+                    mint_text,
+                    {"roles": [], "programs": set()},
+                )
+                required[mint_text]["roles"].append(
+                    f"REWARD_{index}"
+                )
+
             assessments = evidence.get("assessments")
             if not isinstance(assessments, list) or not assessments:
                 return False
+            if len(assessments) != len(required):
+                return False
+
+            seen_mints: set[str] = set()
             for item in assessments:
                 if not isinstance(item, dict):
                     return False
                 try:
+                    mint_address = str(item["mint_address"])
                     snapshot_id = int(item["mint_snapshot_id"])
                 except (KeyError, TypeError, ValueError):
                     return False
+                if mint_address in seen_mints or mint_address not in required:
+                    return False
+                seen_mints.add(mint_address)
+
+                metadata = required[mint_address]
+                if sorted(item.get("roles", [])) != sorted(
+                    metadata["roles"]
+                ):
+                    return False
+                expected_programs = sorted(metadata["programs"])
+                expected_program = (
+                    expected_programs[0]
+                    if len(expected_programs) == 1
+                    else None
+                )
+                if item.get("expected_program") != expected_program:
+                    return False
+
                 mint_row = conn.execute(
                     """
-                    SELECT mint_address, observed_at
+                    SELECT mint_address, observed_at, token_program,
+                           decimals, is_initialized, mint_authority,
+                           freeze_authority,
+                           token_2022_extension_data_len
                     FROM token_mint_snapshots
                     WHERE id = ?
                     """,
@@ -300,10 +373,107 @@ def _mint_lineage_valid(storage: Storage) -> bool:
                 ).fetchone()
                 if mint_row is None:
                     return False
-                if str(mint_row[0]) != str(item.get("mint_address", "")):
+                observed_at = str(mint_row[1])
+                if str(mint_row[0]) != mint_address:
                     return False
-                if str(mint_row[1]) != str(item.get("observed_at", "")):
+                if observed_at != str(item.get("observed_at", "")):
                     return False
+
+                try:
+                    age = int(
+                        (
+                            as_of - parse_time(observed_at)
+                        ).total_seconds()
+                    )
+                except ValueError:
+                    return False
+                program = str(mint_row[2])
+                decimals = int(mint_row[3])
+                initialized = bool(mint_row[4])
+                mint_revoked = mint_row[5] is None
+                freeze_revoked = mint_row[6] is None
+                extension_len = int(mint_row[7])
+
+                if item.get("age_seconds") != age:
+                    return False
+                if item.get("observed_program") != program:
+                    return False
+                if item.get("initialized") is not initialized:
+                    return False
+                if item.get("mint_authority_revoked") is not mint_revoked:
+                    return False
+                if item.get("freeze_authority_revoked") is not freeze_revoked:
+                    return False
+                if item.get("decimals") != decimals:
+                    return False
+                if (
+                    item.get("token_2022_extension_data_len")
+                    != extension_len
+                ):
+                    return False
+
+                reasons: list[str] = []
+                if age < 0:
+                    reasons.append(
+                        "mint snapshot is after evaluation time"
+                    )
+                elif age > max_age:
+                    reasons.append("mint snapshot is stale")
+                if program not in {
+                    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+                }:
+                    reasons.append("unsupported token program")
+                if (
+                    expected_program is not None
+                    and program != expected_program
+                ):
+                    reasons.append("program mismatch")
+                if (
+                    program
+                    == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+                    and criteria.get("allow_token_2022") is not True
+                ):
+                    reasons.append("Token-2022 not allowed")
+                if (
+                    program
+                    == "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+                    and extension_len > 0
+                    and criteria.get(
+                        "allow_token_2022_extension_data"
+                    )
+                    is not True
+                ):
+                    reasons.append("extension data not allowed")
+                if (
+                    criteria.get("require_initialized") is True
+                    and not initialized
+                ):
+                    reasons.append("not initialized")
+                if (
+                    criteria.get("require_mint_authority_revoked")
+                    is True
+                    and not mint_revoked
+                ):
+                    reasons.append("mint authority active")
+                if (
+                    criteria.get("require_freeze_authority_revoked")
+                    is True
+                    and not freeze_revoked
+                ):
+                    reasons.append("freeze authority active")
+                if decimals > max_decimals:
+                    reasons.append("decimals exceed maximum")
+
+                if reasons:
+                    return False
+                if item.get("accepted") is not True:
+                    return False
+                if item.get("reasons") not in ([], ()):
+                    return False
+
+            if seen_mints != set(required):
+                return False
     return True
 
 
