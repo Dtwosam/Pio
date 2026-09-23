@@ -263,6 +263,7 @@ CREATE TABLE IF NOT EXISTS chain_add_liquidity_requests (
     min_bin_id INTEGER,
     max_bin_id INTEGER,
     strategy_variant INTEGER,
+    strategy_favor_x INTEGER,
     explicit_distribution_json TEXT,
     weighted_distribution_json TEXT,
     raw_json TEXT NOT NULL,
@@ -391,6 +392,7 @@ CHAIN_ADD_REQUEST_EXTRA_COLUMNS = {
     "min_bin_id": "INTEGER",
     "max_bin_id": "INTEGER",
     "strategy_variant": "INTEGER",
+    "strategy_favor_x": "INTEGER",
     "explicit_distribution_json": "TEXT",
     "weighted_distribution_json": "TEXT",
 }
@@ -1317,6 +1319,11 @@ class Storage:
                             if request.get("strategy_variant") is not None
                             else None
                         ),
+                        (
+                            int(bool(request["strategy_favor_x"]))
+                            if request.get("strategy_favor_x") is not None
+                            else None
+                        ),
                         json.dumps(
                             request.get("explicit_distribution") or [],
                             separators=(",", ":"),
@@ -1335,10 +1342,10 @@ class Storage:
                         observed_at, signature, instruction_index,
                         instruction_type, requested_amount_x, requested_amount_y,
                         observed_active_id, max_active_bin_slippage,
-                        min_bin_id, max_bin_id, strategy_variant,
+                        min_bin_id, max_bin_id, strategy_variant, strategy_favor_x,
                         explicit_distribution_json, weighted_distribution_json,
                         raw_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(signature, instruction_index) DO UPDATE SET
                         observed_at=excluded.observed_at,
                         instruction_type=excluded.instruction_type,
@@ -1349,6 +1356,7 @@ class Storage:
                         min_bin_id=excluded.min_bin_id,
                         max_bin_id=excluded.max_bin_id,
                         strategy_variant=excluded.strategy_variant,
+                        strategy_favor_x=excluded.strategy_favor_x,
                         explicit_distribution_json=excluded.explicit_distribution_json,
                         weighted_distribution_json=excluded.weighted_distribution_json,
                         raw_json=excluded.raw_json
