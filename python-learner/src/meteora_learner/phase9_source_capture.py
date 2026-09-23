@@ -169,6 +169,7 @@ def run_phase9_source_capture(
     mint_record = None
     wallet_records: list[dict[str, Any]] = []
     cohort_record = None
+    cohort_after_chain = None
 
     if refresh_api:
         try:
