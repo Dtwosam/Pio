@@ -1,4 +1,5 @@
 use crate::execution_store::{ExecutionIntentStatus, ExecutionIntentStore};
+use crate::phase5_gate::Phase5PromotionGateReport;
 use crate::signer::{
     sign_execution_intent, sign_prepared_transaction, SignedExecutionTransaction,
 };
@@ -93,12 +94,19 @@ pub fn submit_execution_intent_with<F>(
     store: &ExecutionIntentStore,
     decision_id: &str,
     keypair: &Keypair,
+    phase5_gate: &Phase5PromotionGateReport,
     current_block_height: u64,
     send: F,
 ) -> Result<SubmissionReport>
 where
     F: FnOnce(&SignedExecutionTransaction) -> Result<String>,
 {
+    if !phase5_gate.accepted {
+        anyhow::bail!(
+            "Phase 5 promotion gate rejected live submission: {}",
+            phase5_gate.reason
+        );
+    }
     ensure_submission_blockhash_is_live(
         store,
         decision_id,
@@ -166,6 +174,21 @@ mod tests {
     use std::cell::Cell;
     use std::path::PathBuf;
     use uuid::Uuid;
+
+    fn accepted_phase5_gate() -> Phase5PromotionGateReport {
+        Phase5PromotionGateReport {
+            accepted: true,
+            reason: "approved".into(),
+            phase_name: "PHASE5".into(),
+            evidence_type: Some("PHASE5_PROMOTION_V1".into()),
+            promoted_at: Some("2026-09-23T12:00:00+00:00".into()),
+            qualified: true,
+            evidence_promotion_ready: true,
+            evidence_endurance_passing: true,
+            evidence_ledger_audit_passing: true,
+            evidence_phase3_promoted: true,
+        }
+    }
 
     fn ready_store(
         keypair: &Keypair,
@@ -290,6 +313,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            &accepted_phase5_gate(),
             950,
             |signed| {
                 let current = store.load(&id).unwrap();
@@ -319,6 +343,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            &accepted_phase5_gate(),
             950,
             |_| anyhow::bail!("timeout after submit"),
         )
@@ -343,6 +368,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            &accepted_phase5_gate(),
             950,
             |_| anyhow::bail!("ambiguous"),
         )
@@ -351,6 +377,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            &accepted_phase5_gate(),
             950,
             |signed| Ok(signed.signature.clone()),
         )
@@ -372,6 +399,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            &accepted_phase5_gate(),
             950,
             |_| Ok(Signature::new_unique().to_string()),
         );
@@ -394,6 +422,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            &accepted_phase5_gate(),
             1_001,
             |_| {
                 called.set(true);
@@ -422,6 +451,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            &accepted_phase5_gate(),
             950,
             |_| anyhow::bail!("ambiguous"),
         )
@@ -433,6 +463,7 @@ mod tests {
             &store,
             &id,
             &keypair,
+            &accepted_phase5_gate(),
             1_001,
             |_| {
                 called.set(true);
@@ -445,6 +476,37 @@ mod tests {
         assert_eq!(
             store.load(&id).unwrap().status,
             ExecutionIntentStatus::Sent
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn phase5_rejection_blocks_before_signing_or_send() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        let called = Cell::new(false);
+        let mut gate = accepted_phase5_gate();
+        gate.accepted = false;
+        gate.reason = "phase5_promotion_evidence_missing".into();
+
+        let result = submit_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            &gate,
+            950,
+            |_| {
+                called.set(true);
+                Ok("must-not-send".into())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!called.get());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::SimulationPassed
         );
 
         let _ = std::fs::remove_file(path);
