@@ -764,6 +764,15 @@ mod tests {
         }
     }
 
+    fn wallet_authorization() -> WalletAuthorizationReport {
+        WalletAuthorizationReport {
+            accepted: true,
+            reason: "approved".into(),
+            wallet_pubkey: "payer".into(),
+            transaction_fee_payer: "payer".into(),
+        }
+    }
+
     fn simulation(succeeded: bool) -> SimulationReport {
         SimulationReport {
             succeeded,
@@ -858,6 +867,10 @@ mod tests {
             .unwrap();
         store.record_transaction_guard(&id, &guard(true)).unwrap();
         store.record_simulation(&id, &simulation(true)).unwrap();
+        assert!(store.begin_signing(&id).is_err());
+        store
+            .record_wallet_authorization(&id, &wallet_authorization())
+            .unwrap();
 
         assert_eq!(
             store.begin_signing(&id).unwrap().status,
@@ -899,6 +912,9 @@ mod tests {
             .unwrap();
         store.record_transaction_guard(&id, &guard(true)).unwrap();
         store.record_simulation(&id, &simulation(true)).unwrap();
+        store
+            .record_wallet_authorization(&id, &wallet_authorization())
+            .unwrap();
         store.begin_signing(&id).unwrap();
 
         let failed = store.record_failure(&id, "signer unavailable").unwrap();
@@ -1021,5 +1037,34 @@ mod tests {
 
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    fn wallet_authorization_cannot_precede_simulation() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+
+        store.register(&request, &config()).unwrap();
+        store
+            .record_risk(&id, &risk(true, request.proposal.decision_id))
+            .unwrap();
+        store.record_transaction_guard(&id, &guard(true)).unwrap();
+
+        assert!(
+            store
+                .record_wallet_authorization(&id, &wallet_authorization())
+                .is_err()
+        );
+        store.record_simulation(&id, &simulation(true)).unwrap();
+        assert!(
+            store
+                .record_wallet_authorization(&id, &wallet_authorization())
+                .is_ok()
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
 
 }
