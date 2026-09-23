@@ -689,6 +689,13 @@ Phase 9 to the LIVE executor.
 research milestone and the future-policy simulation evidence chain. It does not
 skip prerequisites.
 
+
+`pio phase-status` also exposes this chain under Phase 9 as
+`future_policy_simulation`, including authorization currentness, controlled
+holdout currentness, rollout simulation currentness, rollback state and final
+pre-wiring readiness. These fields are observational only and remain explicitly
+non-actionable and execution-disconnected.
+
 Before Phase 9 research promotion is current, it continues to surface storage,
 Phase 8, research-family, bundle and promotion blockers. After Phase 9
 promotion is current, the same queue advances in order through:
