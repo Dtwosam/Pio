@@ -155,7 +155,6 @@ def test_research_refresh_stops_when_storage_integrity_is_invalid(
 
     assert calls == []
     assert report.storage_integrity_verified is False
-    assert report.storage_integrity_verified is True
     assert report.phase8_current is False
     assert report.automatic_families_ready is False
     assert report.items[0].family == "storage_integrity"
@@ -189,6 +188,7 @@ def test_research_refresh_stops_when_phase8_is_not_current(
     report = run_phase9_research_refresh(storage)
 
     assert calls == []
+    assert report.storage_integrity_verified is True
     assert report.phase8_current is False
     assert report.automatic_families_ready is False
     assert report.bundle_ready_after is False
