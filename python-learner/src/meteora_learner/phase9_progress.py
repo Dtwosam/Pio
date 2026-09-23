@@ -5,7 +5,25 @@ import hashlib
 import json
 from typing import Any
 
-from .storage import Storage
+from .phase9_pool_cohort import evaluate_phase9_pool_cohort
+from .storage import Storage, utc_now_iso
+
+
+@dataclass(frozen=True)
+class Phase9PoolCohortProgress:
+    api_ranking_as_of: str
+    fresh_api_pools: int
+    stale_api_pools_excluded: int
+    required_observations: int
+    desired_pools: tuple[str, ...]
+    research_pools: tuple[str, ...]
+    sampling_pools: tuple[str, ...]
+    missing_chain_pools: tuple[str, ...]
+    research_ready: bool
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -48,6 +66,7 @@ class Phase9ProgressReport:
     prewire_manifest_current: bool
     research_sources_current: bool
     latest_queue_sha256: str | None
+    pool_cohort: Phase9PoolCohortProgress
     wallet_activity_scans: tuple[Phase9WalletActivityProgress, ...]
     reasons: tuple[str, ...]
 
@@ -115,6 +134,23 @@ def _wallet_activity_scans(
 
 
 def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
+    progress_as_of = utc_now_iso()
+    cohort = evaluate_phase9_pool_cohort(
+        storage,
+        as_of=progress_as_of,
+    )
+    pool_cohort = Phase9PoolCohortProgress(
+        api_ranking_as_of=progress_as_of,
+        fresh_api_pools=cohort.api_pools_seen,
+        stale_api_pools_excluded=cohort.stale_api_pools_excluded,
+        required_observations=cohort.required_observations,
+        desired_pools=cohort.desired_pools,
+        research_pools=cohort.research_pools,
+        sampling_pools=cohort.sampling_pools,
+        missing_chain_pools=cohort.missing_chain_pools,
+        research_ready=cohort.research_ready,
+        reasons=cohort.reasons,
+    )
     wallet_activity_scans = _wallet_activity_scans(storage)
     with storage.connect() as conn:
         rows = conn.execute(
@@ -151,6 +187,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             prewire_manifest_current=False,
             research_sources_current=False,
             latest_queue_sha256=None,
+            pool_cohort=pool_cohort,
             wallet_activity_scans=wallet_activity_scans,
             reasons=(
                 "no Phase 9 work-queue progress snapshots are persisted",
@@ -214,6 +251,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             prewire_manifest_current=False,
             research_sources_current=False,
             latest_queue_sha256=None,
+            pool_cohort=pool_cohort,
             wallet_activity_scans=wallet_activity_scans,
             reasons=tuple(reasons),
         )
@@ -309,6 +347,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         prewire_manifest_current=prewire_manifest_current,
         research_sources_current=research_sources_current,
         latest_queue_sha256=latest[2],
+        pool_cohort=pool_cohort,
         wallet_activity_scans=wallet_activity_scans,
         reasons=tuple(reasons),
     )
