@@ -15,6 +15,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - docs/PHASE5_VALIDATION_RUNBOOK.md
 - docs/PHASE6_EXECUTION_RUNBOOK.md
 - docs/PHASE7_CONTROLLED_LIVE_RUNBOOK.md
+- docs/PHASE9_RESEARCH_RUNBOOK.md
 
 ## Current status
 
@@ -25,6 +26,9 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 4: reproducible no-lookahead ML challenger workflow implemented; not promoted
 - Phase 5: implementation complete; persisted real PAPER promotion evidence pending
 - Phase 6: implementation + persistent pre-live validation workflow complete; real promotion evidence pending; default builds cannot submit
+- Phase 7: controlled-live safety/validation framework implemented; real promotion evidence pending
+- Phase 8: continuous-learning/champion monitoring workflow implemented; real promotion evidence pending
+- Phase 9: advanced research implementation complete behind a non-actionable evidence boundary; qualified research-bundle evidence pending
 - Default mode: PAPER
 - Live submit: available only in a non-default `live-submit` build, additionally runtime-disabled by default and gated by Phase 5/6 promotion plus controlled-live authorization
 
@@ -111,6 +115,16 @@ pio ml-train-csv --file <DATASET_CSV> --model-id <MODEL> \
 pio ml-offline-evaluate-csv --file <DATASET_CSV> --model-id <MODEL>
 pio ml-start-paper --model-id <MODEL>
 pio ml-model-status --model-id <MODEL>
+
+# Phase 9 research-only evidence
+pio phase9-research-validate --pools <POOL_A,POOL_B,POOL_C> --persist
+pio mint-risk-research --pool <POOL> --persist --require-qualified
+pio wallet-flow-research --pool <POOL> --persist --require-qualified
+pio static-hedge-research --pool <POOL> --amount-x <ATOMIC_X> --amount-y <ATOMIC_Y> \
+  --hedge-instrument-id <INSTRUMENT> --hedge-venue <VENUE> \
+  --hedge-available-liquidity-y-atomic <LIQUIDITY> --persist
+pio contextual-bandit-research --file <ML_ACTION_DATASET_CSV> --persist
+pio phase9-research-bundle --persist --require-ready
 ```
 
 Real execution/calibration commands:
