@@ -8,8 +8,10 @@ from meteora_learner.phase_promotion import (
 )
 from meteora_learner.portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+    PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
     PortfolioAllocationCriteria,
     persist_portfolio_allocation_research,
+    persist_portfolio_candidate_research,
     research_portfolio_allocation,
 )
 from meteora_learner.storage import Storage
@@ -217,3 +219,62 @@ def test_duplicate_pool_candidates_fail_closed(tmp_path):
         assert "duplicate pool_address" in str(exc)
     else:
         raise AssertionError("expected duplicate-pool allocation refusal")
+
+
+def test_portfolio_candidate_artifact_lineage_round_trip(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    promote_phase8(storage)
+    comp = comparison(
+        candidate(1, "pool-a"),
+        candidate(2, "pool-b"),
+    )
+    evidence_id, digest = persist_portfolio_candidate_research(
+        storage,
+        comparison=comp,
+        source_inputs=[
+            {"pool_address": "pool-a"},
+            {"pool_address": "pool-b"},
+        ],
+        assumptions={
+            "account_equity_quote": 1000.0,
+            "cash_quote": 1000.0,
+        },
+    )
+    report = research_portfolio_allocation(
+        storage,
+        comparison=comp,
+        budget_quote=100.0,
+        criteria=criteria(
+            max_positions=2,
+            min_positions=2,
+            max_pool_allocation_bps=5000,
+        ),
+        candidate_lineage={
+            "candidate_evidence_id": evidence_id,
+            "candidate_evidence_sha256": digest,
+        },
+    )
+    allocation_id = persist_portfolio_allocation_research(
+        storage,
+        report=report,
+    )
+
+    assert allocation_id > evidence_id
+    candidate_evidence = storage.latest_advanced_edge_evidence(
+        edge_type=PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO_CANDIDATES__",
+    )
+    assert candidate_evidence is not None
+    assert candidate_evidence["evidence"]["artifact_sha256"] == digest
+    assert candidate_evidence["evidence"]["research_only"] is True
+    assert candidate_evidence["evidence"]["policy_actionable"] is False
+
+    allocation = storage.latest_advanced_edge_evidence(
+        edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO__",
+    )
+    assert allocation is not None
+    assert allocation["evidence"]["candidate_lineage"] == {
+        "candidate_evidence_id": evidence_id,
+        "candidate_evidence_sha256": digest,
+    }
