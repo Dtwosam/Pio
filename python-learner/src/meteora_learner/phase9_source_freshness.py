@@ -267,7 +267,11 @@ def _latest_used_wallet_source(
     )
 
 
-def _adaptive_current(storage: Storage) -> Phase9SourceFreshnessItem:
+def _adaptive_current(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> Phase9SourceFreshnessItem:
     rows = _latest_rows(
         storage,
         edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
@@ -286,7 +290,10 @@ def _adaptive_current(storage: Storage) -> Phase9SourceFreshnessItem:
             current=False,
             reason="adaptive/regime evidence has no source pools",
         )
-    cohort = evaluate_phase9_pool_cohort(storage)
+    cohort = evaluate_phase9_pool_cohort(
+        storage,
+        as_of=as_of,
+    )
     if cohort.research_ready:
         evidence_pools = tuple(
             sorted(
@@ -955,9 +962,11 @@ def _bandit_current(storage: Storage) -> Phase9SourceFreshnessItem:
 
 def evaluate_phase9_source_freshness(
     storage: Storage,
+    *,
+    as_of: str | None = None,
 ) -> Phase9SourceFreshnessReport:
     families = (
-        _adaptive_current(storage),
+        _adaptive_current(storage, as_of=as_of),
         _mint_current(storage),
         _wallet_current(storage),
         _portfolio_current(storage),
