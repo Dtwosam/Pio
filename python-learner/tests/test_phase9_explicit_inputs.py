@@ -8,6 +8,9 @@ from meteora_learner.cross_pool_research import (
     CrossPoolResearchReport,
 )
 from meteora_learner.phase9_explicit_inputs import (
+    PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+    PHASE9_EXPLICIT_INPUTS_SCOPE,
+    audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
     load_phase9_explicit_inputs,
     parse_phase9_explicit_inputs,
@@ -306,3 +309,67 @@ def test_explicit_research_runner_binds_candidate_artifact_to_input_sha(
     )
     assert report.policy_actionable is False
     assert report.execution_wired is False
+
+
+def test_explicit_inputs_audit_accepts_valid_latest_artifact(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    artifact = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(filled_payload()),
+    )
+
+    audit = audit_phase9_explicit_inputs(storage)
+
+    assert audit.exists is True
+    assert audit.valid is True
+    assert audit.boundary_valid is True
+    assert audit.evidence_id == artifact.evidence_id
+    assert audit.artifact_sha256 == artifact.artifact_sha256
+    assert audit.reasons == ()
+
+
+def test_explicit_inputs_audit_rejects_wrong_sha(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    inputs = parse_phase9_explicit_inputs(filled_payload())
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+        pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
+        as_of=None,
+        status="INPUTS_VALIDATED",
+        qualified=False,
+        evidence={
+            "artifact_sha256": "0" * 64,
+            "inputs": inputs.to_record(),
+        },
+    )
+
+    audit = audit_phase9_explicit_inputs(storage)
+
+    assert audit.valid is False
+    assert any("SHA-256 does not match" in reason for reason in audit.reasons)
+
+
+def test_explicit_inputs_audit_rejects_qualified_input_artifact(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    inputs = parse_phase9_explicit_inputs(filled_payload())
+    record = inputs.to_record()
+    digest = inputs_module._canonical_sha256(record)
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+        pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
+        as_of=None,
+        status="INPUTS_VALIDATED",
+        qualified=True,
+        evidence={
+            "artifact_sha256": digest,
+            "inputs": record,
+        },
+    )
+
+    audit = audit_phase9_explicit_inputs(storage)
+
+    assert audit.valid is False
+    assert any(
+        "must not be marked as qualified research" in reason
+        for reason in audit.reasons
+    )
