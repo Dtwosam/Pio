@@ -205,3 +205,75 @@ def build_paper_health(
         quote_statuses=quote_statuses,
         reasons=tuple(critical + warning),
     )
+
+
+
+def _prom_label(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+    )
+
+
+def render_paper_health_prometheus(report: PaperHealthReport) -> str:
+    account = _prom_label(report.account_id)
+    statuses = ("HEALTHY", "DEGRADED", "UNHEALTHY", "IDLE")
+    stale_quotes = sum(not item.fresh for item in report.quote_statuses)
+    lease_active = int(
+        report.scheduler.owner_id is not None
+        and report.scheduler.lease_until is not None
+    )
+    lines = [
+        "# HELP pio_paper_health_status Current PAPER health state as a one-hot gauge.",
+        "# TYPE pio_paper_health_status gauge",
+    ]
+    for status in statuses:
+        lines.append(
+            'pio_paper_health_status'
+            f'{{account="{account}",status="{status}"}} '
+            f'{1 if report.status == status else 0}'
+        )
+    lines.extend(
+        [
+            "# HELP pio_paper_open_positions Number of open paper positions.",
+            "# TYPE pio_paper_open_positions gauge",
+            f'pio_paper_open_positions{{account="{account}"}} {report.open_positions}',
+            "# HELP pio_paper_scheduler_consecutive_failures Consecutive failed/degraded scheduler ticks.",
+            "# TYPE pio_paper_scheduler_consecutive_failures gauge",
+            (
+                f'pio_paper_scheduler_consecutive_failures{{account="{account}"}} '
+                f'{report.scheduler.consecutive_failures}'
+            ),
+            "# HELP pio_paper_scheduler_total_ticks Total scheduler invocations recorded.",
+            "# TYPE pio_paper_scheduler_total_ticks counter",
+            (
+                f'pio_paper_scheduler_total_ticks{{account="{account}"}} '
+                f'{report.scheduler.total_ticks}'
+            ),
+            "# HELP pio_paper_scheduler_lease_active Whether a scheduler lease is currently assigned.",
+            "# TYPE pio_paper_scheduler_lease_active gauge",
+            f'pio_paper_scheduler_lease_active{{account="{account}"}} {lease_active}',
+            "# HELP pio_paper_chain_pools_needing_refresh Open-position pools with stale/missing chain state.",
+            "# TYPE pio_paper_chain_pools_needing_refresh gauge",
+            (
+                f'pio_paper_chain_pools_needing_refresh{{account="{account}"}} '
+                f'{report.chain_queue.pools_needing_collection}'
+            ),
+            "# HELP pio_paper_quotes_stale_or_missing Required token quotes that are stale or missing.",
+            "# TYPE pio_paper_quotes_stale_or_missing gauge",
+            f'pio_paper_quotes_stale_or_missing{{account="{account}"}} {stale_quotes}',
+        ]
+    )
+    if report.last_tick_age_seconds is not None:
+        lines.extend(
+            [
+                "# HELP pio_paper_last_tick_age_seconds Age of the latest paper tick.",
+                "# TYPE pio_paper_last_tick_age_seconds gauge",
+                (
+                    f'pio_paper_last_tick_age_seconds{{account="{account}"}} '
+                    f'{report.last_tick_age_seconds}'
+                ),
+            ]
+        )
+    return "\n".join(lines) + "\n"
