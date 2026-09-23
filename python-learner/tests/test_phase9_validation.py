@@ -296,6 +296,11 @@ def test_phase9_promotion_rejects_stale_persisted_bundle(tmp_path):
 def test_phase9_promotion_refuses_live_policy_authority(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(
+        storage,
+        report=bundle,
+    )
     report = evaluate_phase9_promotion(storage)
     assert report.promotion_ready is True
 
