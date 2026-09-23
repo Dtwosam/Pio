@@ -1,7 +1,7 @@
 # Meteora Adaptive LP Bot — Source of Truth
 
-Status: v0.1
-Date: 2026-09-22
+Status: v0.2
+Date: 2026-09-23
 
 ## 1. Mission
 
@@ -149,6 +149,23 @@ Contextual bandits or reinforcement learning may be tested only after the simula
 
 Live-money exploration is never unrestricted.
 
+### Phase 2 fidelity gate
+
+Deterministic simulator math must be promoted through an explicit fail-closed gate before it can become an authoritative training-label source.
+
+The gate separates:
+- exact amount/share reconciliation
+- exact fee-checkpoint reconciliation
+- exact reward-checkpoint reconciliation with positive reward-growth samples
+- composition-fee formula reconciliation
+- rebalance lifecycle support
+- real transaction-fee calibration
+- add-execution calibration
+- broader slippage calibration
+- operator-selected minimum sample sizes and coverage
+
+A capability that is implemented but not independently reconciled remains blocked. Missing or legacy data is ineligible; it is never treated as a zero-error sample.
+
 ## 7. Decision flow
 
 1. Discover pools.
@@ -223,6 +240,8 @@ Meteora DLMM currently provides:
 - portfolio and position PnL endpoints
 - position event history
 - wallet claim data
+- Anchor event-CPI payloads for liquidity, composition-fee and rebalance flows
+- Solana transaction receipts with fee and compute-unit metadata
 - a Rust `commons` integration library for account decoding, PDA helpers, bin arrays, quotes and instruction construction
 
 Meteora DLMM program ID:
