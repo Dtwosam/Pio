@@ -288,6 +288,7 @@ Built:
 - CLI workflows for retraining planning/build/train/walk-forward, challenger validation/promotion, live monitoring/rollback and Phase 8 validation
 - consolidated Phase 8 evidence status plus advisory ordered evidence planner spanning Phase 7 dependency, champion/cycle lineage, retraining triggers, live-label health and promotion currentness
 - checksum-bound current-champion retraining input artifacts with non-inventing pool templates and a direct dataset/cycle builder; explicit token amounts and network costs remain operator-supplied while model training/promotion stay separate stages
+- checksum-verified offline retraining workflow that resolves the cycle dataset evidence/file, trains a deterministic challenger artifact, requires cycle walk-forward plus held-out offline qualification, and stops at OFFLINE_QUALIFIED before PAPER/champion promotion
 
 Still needed:
 - real Phase 7 promotion evidence
