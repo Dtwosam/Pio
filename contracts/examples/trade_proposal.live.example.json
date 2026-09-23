@@ -1,0 +1,17 @@
+{
+  "decision_id": "11111111-2222-4333-8444-555555555555",
+  "mode": "LIVE",
+  "action": "ENTER",
+  "pool_address": "ExamplePool111111111111111111111111111111111",
+  "capital_quote": 10.0,
+  "account_equity_quote": 1000.0,
+  "portfolio_deployed_quote": 100.0,
+  "daily_drawdown_pct": 0.5,
+  "min_bin_id": -10,
+  "max_bin_id": 10,
+  "strategy": "SPOT",
+  "expected_net_return_pct": 1.0,
+  "expected_downside_pct": 0.5,
+  "model_version": "baseline-v1",
+  "data_age_seconds": 5
+}
