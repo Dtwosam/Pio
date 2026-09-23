@@ -414,3 +414,60 @@ def test_wallet_freshness_ignores_later_inserted_older_backfill(tmp_path):
 
     item = freshness(storage, "wallet_flow")
     assert item.current is True
+
+
+def test_portfolio_freshness_prefers_explicit_chain_watermarks(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    first = save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    candidate_id = storage.save_advanced_edge_evidence(
+        edge_type=PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO_CANDIDATES__",
+        as_of=None,
+        status="BUILT",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "source_inputs": [{"pool_address": "pool-a"}],
+            "assumptions": {
+                "source_chain_watermarks": [
+                    {
+                        "pool_address": "pool-a",
+                        "snapshot_id": first,
+                        "observed_at": "2026-09-23T10:00:00+00:00",
+                    }
+                ],
+            },
+        },
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO__",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "candidate_lineage": {
+                "candidate_evidence_id": candidate_id,
+                "candidate_evidence_sha256": "a" * 64,
+            },
+        },
+    )
+
+    assert freshness(storage, "portfolio_allocation").current is True
+
+    save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T11:00:00+00:00",
+    )
+    item = freshness(storage, "portfolio_allocation")
+    assert item.current is False
+    assert "chain history advanced from" in item.reason
