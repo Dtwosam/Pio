@@ -84,10 +84,15 @@ def wallet_flow_source_state(
                 SELECT COUNT(*),
                        COUNT(DISTINCT user_address),
                        COUNT(DISTINCT position_address)
-                FROM position_event_history
-                WHERE pool_address = ?
+                FROM (
+                    SELECT user_address, position_address
+                    FROM position_event_history
+                    WHERE pool_address = ?
+                    ORDER BY julianday(created_at) DESC, id DESC
+                    LIMIT ?
+                )
                 """,
-                (pool_address,),
+                (pool_address, criteria.lookback_events),
             ).fetchone()
         else:
             row = conn.execute(
@@ -95,11 +100,20 @@ def wallet_flow_source_state(
                 SELECT COUNT(*),
                        COUNT(DISTINCT user_address),
                        COUNT(DISTINCT position_address)
-                FROM position_event_history
-                WHERE pool_address = ?
-                  AND julianday(created_at) <= julianday(?)
+                FROM (
+                    SELECT user_address, position_address
+                    FROM position_event_history
+                    WHERE pool_address = ?
+                      AND julianday(created_at) <= julianday(?)
+                    ORDER BY julianday(created_at) DESC, id DESC
+                    LIMIT ?
+                )
                 """,
-                (pool_address, as_of),
+                (
+                    pool_address,
+                    as_of,
+                    criteria.lookback_events,
+                ),
             ).fetchone()
     events = int(row[0] or 0)
     users = int(row[1] or 0)
@@ -120,6 +134,7 @@ def _existing_source_members(
     storage: Storage,
     *,
     pool_address: str,
+    criteria: WalletFlowCriteria,
     as_of: str | None,
 ) -> tuple[set[str], set[str]]:
     with storage.connect() as conn:
@@ -127,20 +142,34 @@ def _existing_source_members(
             rows = conn.execute(
                 """
                 SELECT DISTINCT position_address, user_address
-                FROM position_event_history
-                WHERE pool_address = ?
+                FROM (
+                    SELECT position_address, user_address
+                    FROM position_event_history
+                    WHERE pool_address = ?
+                    ORDER BY julianday(created_at) DESC, id DESC
+                    LIMIT ?
+                )
                 """,
-                (pool_address,),
+                (pool_address, criteria.lookback_events),
             ).fetchall()
         else:
             rows = conn.execute(
                 """
                 SELECT DISTINCT position_address, user_address
-                FROM position_event_history
-                WHERE pool_address = ?
-                  AND julianday(created_at) <= julianday(?)
+                FROM (
+                    SELECT position_address, user_address
+                    FROM position_event_history
+                    WHERE pool_address = ?
+                      AND julianday(created_at) <= julianday(?)
+                    ORDER BY julianday(created_at) DESC, id DESC
+                    LIMIT ?
+                )
                 """,
-                (pool_address, as_of),
+                (
+                    pool_address,
+                    as_of,
+                    criteria.lookback_events,
+                ),
             ).fetchall()
     return (
         {str(row[0]) for row in rows},
@@ -217,6 +246,7 @@ def run_phase9_wallet_flow_capture(
     existing_positions, existing_users = _existing_source_members(
         storage,
         pool_address=pool_address,
+        criteria=criteria,
         as_of=as_of,
     )
     candidates = sorted(
