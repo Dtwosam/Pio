@@ -18,6 +18,7 @@ mod simulation;
 mod signer;
 mod settlement;
 mod submission;
+mod submission_recovery;
 mod state_reader;
 mod transaction_events;
 mod transaction_guard;
@@ -39,6 +40,7 @@ fn usage() {
   meteora-executor presign-preflight <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
+  meteora-executor execution-recovery <EXECUTION_DB> <DECISION_ID> [EXPIRY_GRACE_BLOCKS]
   meteora-executor execution-receipt <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-wallet-authorize <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-presign-prepare <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
@@ -605,6 +607,44 @@ RPC_URL is accepted as a compatibility fallback",
                 &snapshot,
             )?;
             println!("{}", serde_json::to_string_pretty(&receipt)?);
+        }
+        "execution-recovery" => {
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
+            let decision_id = args
+                .next()
+                .context("DECISION_ID is required")?;
+            let expiry_grace_blocks: u64 = args
+                .next()
+                .as_deref()
+                .unwrap_or("32")
+                .parse()
+                .context("EXPIRY_GRACE_BLOCKS must be an integer")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "execution-recovery accepts two or three arguments"
+                );
+            }
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let store = execution_store::ExecutionIntentStore::open(
+                &execution_db,
+            )?;
+            let report =
+                submission_recovery::reconcile_sent_recovery_rpc(
+                    &rpc_url,
+                    &store,
+                    &decision_id,
+                    expiry_grace_blocks,
+                )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if report.expired_without_observation {
+                std::process::exit(2);
+            }
         }
         "execution-confirmation" => {
             let execution_db = args
