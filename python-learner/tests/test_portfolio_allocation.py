@@ -206,7 +206,7 @@ def test_duplicate_pool_candidates_fail_closed(tmp_path):
     try:
         research_portfolio_allocation(
             storage,
-            comparison(
+            comparison=comparison(
                 candidate(1, "pool-a"),
                 candidate(2, "pool-a"),
             ),
