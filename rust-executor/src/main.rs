@@ -48,6 +48,7 @@ fn usage() {
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
   meteora-executor inspect-mint <RPC_URL> <MINT_ADDRESS>
+  meteora-executor inspect-mint-env <MINT_ADDRESS>
   meteora-executor verify-position-closed <RPC_URL> <POSITION_ADDRESS>
   meteora-executor risk-check <PROPOSAL_JSON_OR_-> <RISK_CONFIG_JSON>
   meteora-executor dry-run-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
@@ -197,6 +198,25 @@ RPC_URL is accepted as a compatibility fallback",
             if args.next().is_some() {
                 anyhow::bail!(
                     "inspect-mint accepts exactly two arguments"
+                );
+            }
+            let snapshot =
+                mint_reader::inspect_mint(&rpc_url, &mint_address).await?;
+            println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "inspect-mint-env" => {
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let mint_address = args
+                .next()
+                .context("MINT_ADDRESS is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "inspect-mint-env accepts exactly one argument"
                 );
             }
             let snapshot =
