@@ -31,6 +31,7 @@ pub struct ControlledLiveReport {
     pub pool_address: String,
     pub live_enabled: bool,
     pub open_positions: usize,
+    pub matching_pool_positions: usize,
     pub max_open_positions: usize,
     pub pool_allowed: bool,
     pub capital_quote: f64,
@@ -72,7 +73,10 @@ fn validate_config(config: &ControlledLiveConfig) -> Result<BTreeSet<Pubkey>> {
         .collect()
 }
 
-fn open_position_count(database_path: &Path) -> Result<usize> {
+fn live_position_counts(
+    database_path: &Path,
+    pool_address: &str,
+) -> Result<(usize, usize)> {
     let conn = Connection::open_with_flags(
         database_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY
@@ -85,7 +89,7 @@ fn open_position_count(database_path: &Path) -> Result<usize> {
         )
     })?;
 
-    let count: i64 = conn
+    let total: i64 = conn
         .query_row(
             r#"
             SELECT COUNT(*)
@@ -96,7 +100,24 @@ fn open_position_count(database_path: &Path) -> Result<usize> {
             |row| row.get(0),
         )
         .context("live_positions table is unavailable")?;
-    usize::try_from(count).context("invalid live position count")
+    let matching: i64 = conn
+        .query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM live_positions
+            WHERE pool_address = ?1
+              AND status IN ('OPEN', 'LIQUIDITY_REMOVED')
+            "#,
+            [pool_address],
+            |row| row.get(0),
+        )
+        .context("failed to count live positions for proposal pool")?;
+
+    Ok((
+        usize::try_from(total).context("invalid live position count")?,
+        usize::try_from(matching)
+            .context("invalid matching live position count")?,
+    ))
 }
 
 pub fn evaluate_controlled_live(
@@ -112,7 +133,8 @@ pub fn evaluate_controlled_live(
     let proposal_pool = Pubkey::from_str(proposal.pool_address.trim())
         .context("proposal pool_address is not a valid Solana pubkey")?;
     let pool_allowed = allowed_pools.contains(&proposal_pool);
-    let open_positions = open_position_count(database_path)?;
+    let (open_positions, matching_pool_positions) =
+        live_position_counts(database_path, &proposal.pool_address)?;
 
     let reason = if !phase5.accepted {
         "phase5_promotion_gate_rejected"
@@ -145,7 +167,9 @@ pub fn evaluate_controlled_live(
                 }
             }
             Action::Rebalance => {
-                if !config.enabled {
+                if matching_pool_positions == 0 {
+                    "no_tracked_live_position_for_rebalance"
+                } else if !config.enabled {
                     "controlled_live_disabled"
                 } else if !config.allow_rebalance {
                     "controlled_live_rebalance_disabled"
@@ -161,7 +185,9 @@ pub fn evaluate_controlled_live(
                 }
             }
             Action::Exit => {
-                if !config.allow_exit {
+                if matching_pool_positions == 0 {
+                    "no_tracked_live_position_for_exit"
+                } else if !config.allow_exit {
                     "controlled_live_exit_disabled"
                 } else {
                     // Exit intentionally remains possible even when the
@@ -183,6 +209,7 @@ pub fn evaluate_controlled_live(
         pool_address: proposal.pool_address.clone(),
         live_enabled: config.enabled,
         open_positions,
+        matching_pool_positions,
         max_open_positions: config.max_open_positions,
         pool_allowed,
         capital_quote: proposal.capital_quote,
@@ -222,6 +249,7 @@ mod tests {
             );
             CREATE TABLE live_positions (
                 position_address TEXT PRIMARY KEY,
+                pool_address TEXT NOT NULL,
                 status TEXT NOT NULL
             );
             "#,
@@ -251,11 +279,26 @@ mod tests {
 
         for index in 0..open_positions {
             conn.execute(
-                "INSERT INTO live_positions(position_address, status) VALUES (?1, 'OPEN')",
-                [format!("position-{index}")],
+                "INSERT INTO live_positions(position_address, pool_address, status) VALUES (?1, ?2, 'OPEN')",
+                [
+                    format!("position-{index}"),
+                    Pubkey::default().to_string(),
+                ],
             )
             .unwrap();
         }
+    }
+
+    fn add_live_position(path: &Path, pool: Pubkey) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute(
+            "INSERT INTO live_positions(position_address, pool_address, status) VALUES (?1, ?2, 'OPEN')",
+            [
+                format!("tracked-{}", Uuid::new_v4()),
+                pool.to_string(),
+            ],
+        )
+        .unwrap();
     }
 
     fn proposal(pool: Pubkey, action: Action) -> TradeProposal {
@@ -310,8 +353,9 @@ mod tests {
     #[test]
     fn disabled_live_blocks_entry_but_not_exit() {
         let path = db_path();
-        seed(&path, 1);
+        seed(&path, 0);
         let pool = Pubkey::new_unique();
+        add_live_position(&path, pool);
         let mut cfg = config(pool);
         cfg.enabled = false;
 
@@ -323,7 +367,7 @@ mod tests {
         .unwrap();
         let exit = evaluate_controlled_live(
             &path,
-            &proposal(Pubkey::new_unique(), Action::Exit),
+            &proposal(pool, Action::Exit),
             &cfg,
         )
         .unwrap();
@@ -355,8 +399,9 @@ mod tests {
     #[test]
     fn drawdown_blocks_rebalance_but_not_exit() {
         let path = db_path();
-        seed(&path, 1);
+        seed(&path, 0);
         let pool = Pubkey::new_unique();
+        add_live_position(&path, pool);
         let cfg = config(pool);
         let mut rebalance = proposal(pool, Action::Rebalance);
         rebalance.daily_drawdown_pct = 10.0;
@@ -408,6 +453,27 @@ mod tests {
         assert_eq!(
             report.reason,
             "controlled_live_requires_live_mode"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn untracked_exit_is_rejected() {
+        let path = db_path();
+        seed(&path, 0);
+        let pool = Pubkey::new_unique();
+
+        let report = evaluate_controlled_live(
+            &path,
+            &proposal(pool, Action::Exit),
+            &config(pool),
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(
+            report.reason,
+            "no_tracked_live_position_for_exit"
         );
         let _ = std::fs::remove_file(path);
     }
