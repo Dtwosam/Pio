@@ -35,6 +35,7 @@ from .mint_snapshot_lineage import (
     mint_risk_pool_source_record,
     mint_risk_source_sha256,
 )
+from .phase8_validation import audit_persisted_phase8_promotion
 from .phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
     Phase9ResearchCriteria,
@@ -42,8 +43,6 @@ from .phase9_research import (
 )
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase_promotion import (
-    PHASE8,
-    PHASE8_EVIDENCE_TYPE,
     PHASE9,
     PHASE9_EVIDENCE_TYPE,
 )
@@ -915,10 +914,8 @@ def evaluate_phase9_research_bundle(
         Phase9ResearchBundleCriteria()
     ),
 ) -> Phase9ResearchBundleReport:
-    phase8_promoted = storage.phase_is_promoted(
-        PHASE8,
-        evidence_type=PHASE8_EVIDENCE_TYPE,
-    )
+    phase8_audit = audit_persisted_phase8_promotion(storage)
+    phase8_promoted = phase8_audit.current
     storage_integrity = evaluate_phase9_storage_integrity(storage)
 
     adaptive = _summary(
@@ -940,7 +937,11 @@ def evaluate_phase9_research_bundle(
     reasons: list[str] = []
     if not phase8_promoted:
         reasons.append(
-            "Phase 8 must be persistently promoted before Phase 9 research can be ready"
+            "Phase 8 promotion must still be current before Phase 9 research can be ready"
+        )
+        reasons.extend(
+            f"Phase 8 currentness: {reason}"
+            for reason in phase8_audit.reasons
         )
     if not storage_integrity.verified:
         reasons.extend(
