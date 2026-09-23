@@ -10,6 +10,7 @@ from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .phase9_bandit_dataset import PHASE9_BANDIT_DATASET_EVIDENCE_TYPE
 from .phase9_explicit_inputs import load_phase9_explicit_inputs
 from .phase9_research import PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE
+from .phase9_pool_cohort import evaluate_phase9_pool_cohort
 from .portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
     PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
@@ -285,6 +286,28 @@ def _adaptive_current(storage: Storage) -> Phase9SourceFreshnessItem:
             current=False,
             reason="adaptive/regime evidence has no source pools",
         )
+    cohort = evaluate_phase9_pool_cohort(storage)
+    if cohort.research_ready:
+        evidence_pools = tuple(
+            sorted(
+                str(item.get("pool_address", "")).strip()
+                for item in pools
+                if isinstance(item, dict)
+                and str(item.get("pool_address", "")).strip()
+            )
+        )
+        current_pools = tuple(sorted(cohort.research_pools))
+        if evidence_pools != current_pools:
+            return Phase9SourceFreshnessItem(
+                family="adaptive_regime",
+                current=False,
+                reason=(
+                    "ranked research cohort changed from "
+                    + ",".join(evidence_pools)
+                    + " to "
+                    + ",".join(current_pools)
+                ),
+            )
     for item in pools:
         if not isinstance(item, dict):
             return Phase9SourceFreshnessItem(
