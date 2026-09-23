@@ -18,6 +18,15 @@ from .mint_risk import (
 )
 from .phase8_validation import audit_persisted_phase8_promotion
 from .phase9_history_plan import build_phase9_history_plan
+from .phase9_explicit_inputs import (
+    audit_phase9_explicit_inputs,
+    load_phase9_explicit_inputs,
+    run_phase9_explicit_research,
+)
+from .portfolio_allocation import (
+    PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+)
+from .static_hedge import STATIC_HEDGE_EVIDENCE_TYPE
 from .phase9_mint_capture import (
     Phase9MintCaptureCriteria,
     build_phase9_mint_capture_plan,
@@ -78,6 +87,19 @@ class Phase9ResearchRefreshReport:
 
 def _normalized(value: Any) -> Any:
     return json.loads(json.dumps(value, sort_keys=True))
+
+
+def _latest_evidence_id(
+    storage: Storage,
+    *,
+    edge_type: str,
+    pool_address: str,
+) -> int | None:
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=edge_type,
+        pool_address=pool_address,
+    )
+    return int(latest["id"]) if latest is not None else None
 
 
 def _persist_if_changed(
@@ -554,6 +576,193 @@ def run_phase9_research_refresh(
                                 f"{type(exc).__name__}: "
                                 f"{str(exc)[:1000]}"
                             ),
+                        )
+                    )
+
+    # Artifact-backed static hedge and portfolio research. These families
+    # may refresh automatically only after an operator has persisted a valid,
+    # checksum-bound explicit input artifact.
+    static_required = criteria.min_static_hedge_pools > 0
+    allocation_required = criteria.require_portfolio_allocation
+    static_needs_refresh = (
+        static_required
+        and not replay.get("static_hedge", False)
+    )
+    allocation_needs_refresh = (
+        allocation_required
+        and not replay.get("portfolio_allocation", False)
+    )
+
+    if static_required and not static_needs_refresh:
+        items.append(
+            Phase9ResearchRefreshItem(
+                family="static_hedge",
+                scope="EXPLICIT_INPUT_ARTIFACT",
+                status="UNCHANGED",
+                research_qualified=True,
+                persisted_evidence_id=None,
+                reason="required qualified static-hedge evidence is replay-verified",
+            )
+        )
+    if allocation_required and not allocation_needs_refresh:
+        items.append(
+            Phase9ResearchRefreshItem(
+                family="portfolio_allocation",
+                scope="__PORTFOLIO__",
+                status="UNCHANGED",
+                research_qualified=True,
+                persisted_evidence_id=None,
+                reason="qualified portfolio-allocation evidence is replay-verified",
+            )
+        )
+
+    if static_needs_refresh or allocation_needs_refresh:
+        explicit_audit = audit_phase9_explicit_inputs(storage)
+        if (
+            not explicit_audit.valid
+            or explicit_audit.evidence_id is None
+        ):
+            detail = "; ".join(explicit_audit.reasons) or (
+                "valid checksum-bound explicit input artifact is unavailable"
+            )
+            if static_needs_refresh:
+                items.append(
+                    Phase9ResearchRefreshItem(
+                        family="static_hedge",
+                        scope="EXPLICIT_INPUT_ARTIFACT",
+                        status="SKIPPED_SOURCE_NOT_READY",
+                        research_qualified=None,
+                        persisted_evidence_id=None,
+                        reason=detail,
+                    )
+                )
+            if allocation_needs_refresh:
+                items.append(
+                    Phase9ResearchRefreshItem(
+                        family="portfolio_allocation",
+                        scope="__PORTFOLIO__",
+                        status="SKIPPED_SOURCE_NOT_READY",
+                        research_qualified=None,
+                        persisted_evidence_id=None,
+                        reason=detail,
+                    )
+                )
+        else:
+            try:
+                artifact = load_phase9_explicit_inputs(
+                    storage,
+                    evidence_id=explicit_audit.evidence_id,
+                )
+                if artifact is None:
+                    raise ValueError(
+                        "validated explicit input artifact disappeared"
+                    )
+
+                static_before = {
+                    spec.pool_address: _latest_evidence_id(
+                        storage,
+                        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+                        pool_address=spec.pool_address,
+                    )
+                    for spec in artifact.inputs.static_hedges
+                }
+                allocation_before = _latest_evidence_id(
+                    storage,
+                    edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+                    pool_address="__PORTFOLIO__",
+                )
+
+                explicit_run = run_phase9_explicit_research(
+                    storage,
+                    artifact=artifact,
+                    persist=True,
+                    deduplicate_persistence=True,
+                    include_static_hedge=static_needs_refresh,
+                    include_portfolio=allocation_needs_refresh,
+                    persist_static_hedge=static_needs_refresh,
+                    persist_portfolio=allocation_needs_refresh,
+                )
+
+                if static_needs_refresh:
+                    for report, evidence_id in zip(
+                        explicit_run.static_hedge_reports,
+                        explicit_run.static_hedge_evidence_ids,
+                    ):
+                        pool = str(report.get("pool_address", ""))
+                        previous = static_before.get(pool)
+                        items.append(
+                            Phase9ResearchRefreshItem(
+                                family="static_hedge",
+                                scope=pool or "UNKNOWN_POOL",
+                                status=(
+                                    "UNCHANGED"
+                                    if previous == evidence_id
+                                    else "PERSISTED"
+                                ),
+                                research_qualified=bool(
+                                    report.get("research_qualified")
+                                ),
+                                persisted_evidence_id=evidence_id,
+                                reason=(
+                                    "recomputed from immutable explicit "
+                                    f"input artifact {artifact.evidence_id}"
+                                ),
+                            )
+                        )
+
+                if allocation_needs_refresh:
+                    allocation_record = (
+                        explicit_run.portfolio_allocation or {}
+                    )
+                    allocation_id = (
+                        explicit_run.portfolio_allocation_evidence_id
+                    )
+                    items.append(
+                        Phase9ResearchRefreshItem(
+                            family="portfolio_allocation",
+                            scope="__PORTFOLIO__",
+                            status=(
+                                "UNCHANGED"
+                                if allocation_before == allocation_id
+                                and allocation_id is not None
+                                else "PERSISTED"
+                            ),
+                            research_qualified=bool(
+                                allocation_record.get(
+                                    "research_qualified"
+                                )
+                            ),
+                            persisted_evidence_id=allocation_id,
+                            reason=(
+                                "recomputed from immutable explicit input "
+                                f"artifact {artifact.evidence_id}"
+                            ),
+                        )
+                    )
+            except Exception as exc:
+                detail = (
+                    f"{type(exc).__name__}: {str(exc)[:1000]}"
+                )
+                if static_needs_refresh:
+                    items.append(
+                        Phase9ResearchRefreshItem(
+                            family="static_hedge",
+                            scope="EXPLICIT_INPUT_ARTIFACT",
+                            status="FAILED",
+                            research_qualified=None,
+                            persisted_evidence_id=None,
+                            reason=detail,
+                        )
+                    )
+                if allocation_needs_refresh:
+                    items.append(
+                        Phase9ResearchRefreshItem(
+                            family="portfolio_allocation",
+                            scope="__PORTFOLIO__",
+                            status="FAILED",
+                            research_qualified=None,
+                            persisted_evidence_id=None,
+                            reason=detail,
                         )
                     )
 
