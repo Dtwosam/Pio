@@ -136,6 +136,7 @@ from .phase9_wallet_flow_capture import (
     run_phase9_wallet_flow_capture,
 )
 from .phase9_explicit_inputs import (
+    audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
     load_phase9_explicit_inputs,
     parse_phase9_explicit_inputs,
@@ -2301,6 +2302,15 @@ def main() -> None:
         help="Validate and persist checksum-bound explicit hedge/portfolio research assumptions",
     )
     phase9_inputs_ingest.add_argument("--file", required=True)
+
+    phase9_inputs_audit = subparsers.add_parser(
+        "phase9-research-inputs-audit",
+        help="Audit the latest persisted Phase 9 explicit research input artifact and its SHA/boundary",
+    )
+    phase9_inputs_audit.add_argument(
+        "--require-valid",
+        action="store_true",
+    )
 
     phase9_explicit_run = subparsers.add_parser(
         "phase9-explicit-research-run",
@@ -5128,6 +5138,15 @@ def main() -> None:
             inputs=inputs,
         )
         print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase9-research-inputs-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = audit_phase9_explicit_inputs(storage)
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_valid and not result.valid:
+            raise SystemExit(2)
         return
 
     if args.command == "phase9-explicit-research-run":
