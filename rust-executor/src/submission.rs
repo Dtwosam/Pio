@@ -4,8 +4,12 @@ use crate::phase5_gate::Phase5PromotionGateReport;
 use crate::signer::{
     sign_execution_intent, sign_prepared_transaction, SignedExecutionTransaction,
 };
+#[cfg(feature = "live-submit")]
+use crate::simulation::decode_transaction_base64;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "live-submit")]
+use solana_client::rpc_client::RpcClient;
 use solana_sdk::signature::Keypair;
 
 
@@ -200,6 +204,41 @@ where
     }
 }
 
+
+#[cfg(feature = "live-submit")]
+pub fn submit_execution_intent_rpc(
+    rpc_url: &str,
+    store: &ExecutionIntentStore,
+    decision_id: &str,
+    keypair: &Keypair,
+    phase5_gate: &Phase5PromotionGateReport,
+    controlled_live: &ControlledLiveReport,
+) -> Result<SubmissionReport> {
+    if rpc_url.trim().is_empty() {
+        anyhow::bail!("RPC URL is required");
+    }
+    let client = RpcClient::new(rpc_url.to_string());
+    let current_block_height = client
+        .get_block_height()
+        .context("failed to fetch current Solana block height")?;
+
+    submit_execution_intent_with(
+        store,
+        decision_id,
+        keypair,
+        phase5_gate,
+        controlled_live,
+        current_block_height,
+        |signed| {
+            let transaction =
+                decode_transaction_base64(&signed.transaction_base64)?;
+            let signature = client
+                .send_transaction(&transaction)
+                .context("Solana send_transaction RPC failed")?;
+            Ok(signature.to_string())
+        },
+    )
+}
 
 #[cfg(test)]
 mod tests {
