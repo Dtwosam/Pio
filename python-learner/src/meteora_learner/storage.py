@@ -1708,6 +1708,48 @@ class Storage:
                         "reward_two": str(payload["reward_two"]),
                     }
                 )
+            elif event_type == "ClaimFee2":
+                common.update(
+                    {
+                        "lb_pair": payload.get("lb_pair"),
+                        "position_address": payload.get("position"),
+                        "owner_address": payload.get("owner"),
+                        "active_bin_id": int(payload["active_bin_id"]),
+                        "x_fee_amount": str(payload["fee_x"]),
+                        "y_fee_amount": str(payload["fee_y"]),
+                    }
+                )
+            elif event_type == "ClaimReward2":
+                reward_index = int(payload["reward_index"])
+                if reward_index not in (0, 1):
+                    raise ValueError(
+                        "ClaimReward2 reward_index must be 0 or 1"
+                    )
+                common.update(
+                    {
+                        "lb_pair": payload.get("lb_pair"),
+                        "position_address": payload.get("position"),
+                        "owner_address": payload.get("owner"),
+                        "active_bin_id": int(payload["active_bin_id"]),
+                        "reward_one": (
+                            str(payload["total_reward"])
+                            if reward_index == 0
+                            else None
+                        ),
+                        "reward_two": (
+                            str(payload["total_reward"])
+                            if reward_index == 1
+                            else None
+                        ),
+                    }
+                )
+            elif event_type == "PositionClose":
+                common.update(
+                    {
+                        "position_address": payload.get("position"),
+                        "owner_address": payload.get("owner"),
+                    }
+                )
             else:
                 raise ValueError(f"unsupported decoded event type: {event_type}")
 
