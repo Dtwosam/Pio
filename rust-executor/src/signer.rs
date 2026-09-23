@@ -1,0 +1,238 @@
+use crate::blockhash::PreparedUnsignedTransaction;
+use crate::execution_store::{ExecutionIntentStatus, ExecutionIntentStore};
+use crate::simulation::decode_transaction_base64;
+use anyhow::{Context, Result};
+use base64::{engine::general_purpose, Engine as _};
+use serde::{Deserialize, Serialize};
+use solana_sdk::message::VersionedMessage;
+use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::{Keypair, Signature, Signer};
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedExecutionTransaction {
+    pub decision_id: String,
+    pub signature: String,
+    pub transaction_base64: String,
+    pub recent_blockhash: String,
+    pub last_valid_block_height: u64,
+}
+
+
+fn message_metadata(
+    message: &VersionedMessage,
+) -> Result<(Pubkey, usize, String)> {
+    match message {
+        VersionedMessage::Legacy(message) => Ok((
+            *message
+                .account_keys
+                .first()
+                .context("prepared transaction has no fee payer")?,
+            usize::from(message.header.num_required_signatures),
+            message.recent_blockhash.to_string(),
+        )),
+        VersionedMessage::V0(message) => Ok((
+            *message
+                .account_keys
+                .first()
+                .context("prepared transaction has no fee payer")?,
+            usize::from(message.header.num_required_signatures),
+            message.recent_blockhash.to_string(),
+        )),
+    }
+}
+
+
+pub fn sign_prepared_transaction(
+    decision_id: &str,
+    prepared: &PreparedUnsignedTransaction,
+    keypair: &Keypair,
+) -> Result<SignedExecutionTransaction> {
+    if decision_id.trim().is_empty() {
+        anyhow::bail!("decision_id is required");
+    }
+    if !prepared.signatures_all_default {
+        anyhow::bail!("prepared transaction is not marked unsigned");
+    }
+
+    let mut transaction =
+        decode_transaction_base64(&prepared.transaction_base64)?;
+    if !transaction
+        .signatures
+        .iter()
+        .all(|signature| *signature == Signature::default())
+    {
+        anyhow::bail!("prepared transaction already contains a signature");
+    }
+
+    let (fee_payer, required_signatures, blockhash) =
+        message_metadata(&transaction.message)?;
+    if required_signatures != 1 {
+        anyhow::bail!(
+            "executor signer requires exactly one transaction signer; found {required_signatures}"
+        );
+    }
+    if transaction.signatures.len() != required_signatures {
+        anyhow::bail!(
+            "prepared signature vector length does not match required signer count"
+        );
+    }
+    if fee_payer != keypair.pubkey() {
+        anyhow::bail!(
+            "isolated executor wallet is not the prepared transaction fee payer"
+        );
+    }
+    if blockhash != prepared.recent_blockhash {
+        anyhow::bail!(
+            "prepared transaction blockhash differs from persisted presign evidence"
+        );
+    }
+
+    let message_bytes = transaction.message.serialize();
+    let signature = keypair.sign_message(&message_bytes);
+    transaction.signatures[0] = signature;
+
+    let bytes = bincode::serialize(&transaction)
+        .context("failed to serialize signed VersionedTransaction")?;
+    Ok(SignedExecutionTransaction {
+        decision_id: decision_id.to_string(),
+        signature: signature.to_string(),
+        transaction_base64: general_purpose::STANDARD.encode(bytes),
+        recent_blockhash: prepared.recent_blockhash.clone(),
+        last_valid_block_height: prepared.last_valid_block_height,
+    })
+}
+
+
+pub fn sign_execution_intent(
+    store: &ExecutionIntentStore,
+    decision_id: &str,
+    keypair: &Keypair,
+) -> Result<SignedExecutionTransaction> {
+    let current = store.load(decision_id)?;
+    let signing = match current.status {
+        ExecutionIntentStatus::SimulationPassed => {
+            store.begin_signing(decision_id)?
+        }
+        ExecutionIntentStatus::Signing => current,
+        other => {
+            anyhow::bail!(
+                "execution signing requires SIMULATION_PASSED or SIGNING status; current status is {:?}",
+                other
+            )
+        }
+    };
+
+    let authorization = signing
+        .wallet_authorization
+        .as_ref()
+        .context("signing intent is missing wallet authorization")?;
+    if !authorization.accepted {
+        anyhow::bail!("signing intent wallet authorization is not accepted");
+    }
+    if authorization.wallet_pubkey != keypair.pubkey().to_string() {
+        anyhow::bail!(
+            "loaded executor keypair differs from persisted wallet authorization"
+        );
+    }
+
+    let prepared = signing
+        .prepared_transaction
+        .as_ref()
+        .context("signing intent is missing prepared transaction")?;
+    sign_prepared_transaction(decision_id, prepared, keypair)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blockhash::PreparedUnsignedTransaction;
+    use solana_sdk::hash::Hash;
+    use solana_sdk::message::{Message, VersionedMessage};
+    use solana_sdk::transaction::VersionedTransaction;
+
+    fn prepared_for(keypair: &Keypair) -> PreparedUnsignedTransaction {
+        let mut message = Message::new(&[], Some(&keypair.pubkey()));
+        let blockhash = Hash::new_unique();
+        message.recent_blockhash = blockhash;
+        let transaction = VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::Legacy(message),
+        };
+        PreparedUnsignedTransaction {
+            transaction_base64: general_purpose::STANDARD.encode(
+                bincode::serialize(&transaction).unwrap(),
+            ),
+            recent_blockhash: blockhash.to_string(),
+            last_valid_block_height: 123,
+            rpc_context_slot: 100,
+            signatures_all_default: true,
+        }
+    }
+
+    #[test]
+    fn exact_prepared_message_is_signed_deterministically() {
+        let keypair = Keypair::new();
+        let prepared = prepared_for(&keypair);
+
+        let first =
+            sign_prepared_transaction("decision", &prepared, &keypair)
+                .unwrap();
+        let second =
+            sign_prepared_transaction("decision", &prepared, &keypair)
+                .unwrap();
+
+        assert_eq!(first.signature, second.signature);
+        assert_eq!(
+            first.transaction_base64,
+            second.transaction_base64
+        );
+        assert_ne!(first.signature, Signature::default().to_string());
+
+        let signed =
+            decode_transaction_base64(&first.transaction_base64).unwrap();
+        assert_eq!(signed.signatures[0].to_string(), first.signature);
+    }
+
+    #[test]
+    fn different_wallet_cannot_sign_prepared_message() {
+        let expected = Keypair::new();
+        let other = Keypair::new();
+        let prepared = prepared_for(&expected);
+
+        assert!(
+            sign_prepared_transaction("decision", &prepared, &other)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn changed_persisted_blockhash_fails_closed() {
+        let keypair = Keypair::new();
+        let mut prepared = prepared_for(&keypair);
+        prepared.recent_blockhash = Hash::new_unique().to_string();
+
+        assert!(
+            sign_prepared_transaction("decision", &prepared, &keypair)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn signed_input_cannot_be_signed_again() {
+        let keypair = Keypair::new();
+        let prepared = prepared_for(&keypair);
+        let signed =
+            sign_prepared_transaction("decision", &prepared, &keypair)
+                .unwrap();
+        let mut changed = prepared.clone();
+        changed.transaction_base64 = signed.transaction_base64;
+        changed.signatures_all_default = false;
+
+        assert!(
+            sign_prepared_transaction("decision", &changed, &keypair)
+                .is_err()
+        );
+    }
+}
