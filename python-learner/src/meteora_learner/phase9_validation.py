@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -302,7 +303,9 @@ def evaluate_phase9_promotion(
     persisted_matches_current = False
     if latest_bundle is not None:
         persisted = latest_bundle["evidence"]
-        current = bundle.to_record()
+        current = json.loads(
+            json.dumps(bundle.to_record(), sort_keys=True)
+        )
         persisted_matches_current = all(
             persisted.get(key) == current.get(key)
             for key in (
