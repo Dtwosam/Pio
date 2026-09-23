@@ -235,6 +235,34 @@ def test_inspect_mint_with_rust_uses_env_command_without_rpc_argument(
     assert "https://secret-rpc.invalid" not in seen["command"]
 
 
+def test_mint_capture_plan_can_target_exact_pool_set(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_pool(storage, "pool-a", token_x="a-x", token_y="a-y")
+    seed_pool(storage, "pool-b", token_x="b-x", token_y="b-y")
+    seed_pool(storage, "pool-c", token_x="c-x", token_y="c-y")
+
+    # Give pool-a extra history so automatic selection would prefer it.
+    seed_pool(
+        storage,
+        "pool-a",
+        token_x="a-x",
+        token_y="a-y",
+        observed_at="2026-09-23T12:05:00+00:00",
+    )
+
+    plan = build_phase9_mint_capture_plan(
+        storage,
+        criteria=Phase9MintCaptureCriteria(target_pools=1),
+        pool_addresses=("pool-c",),
+        as_of="2026-09-23T13:00:00+00:00",
+    )
+
+    assert plan.selected_pools == ("pool-c",)
+    assert {
+        item.mint_address for item in plan.candidates
+    } == {"c-x", "c-y"}
+
+
 def test_mint_capture_plan_reports_missing_pool_diversity(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_pool(storage, "pool-a", token_x="a-x", token_y="a-y")
