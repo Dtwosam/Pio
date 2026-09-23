@@ -4,6 +4,7 @@ mod dry_run;
 mod emergency_exit;
 mod events;
 mod execution_guard;
+mod execution_receipt;
 mod execution_store;
 mod journaled_dry_run;
 mod models;
@@ -33,6 +34,7 @@ fn usage() {
   meteora-executor presign-preflight <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
+  meteora-executor execution-receipt <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-wallet-authorize <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-presign-prepare <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
   meteora-executor build-emergency-exit <REQUEST_JSON_OR_->
@@ -556,6 +558,43 @@ RPC_URL is accepted as a compatibility fallback",
                 "intent": persisted,
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        "execution-receipt" => {
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
+            let decision_id = args
+                .next()
+                .context("DECISION_ID is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "execution-receipt accepts exactly two arguments"
+                );
+            }
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let store = execution_store::ExecutionIntentStore::open(
+                &execution_db,
+            )?;
+            let intent = store.load(&decision_id)?;
+            let signature = intent
+                .signature
+                .as_deref()
+                .context("execution intent has no signature")?;
+            let snapshot =
+                transaction_events::inspect_transaction_events(
+                    &rpc_url,
+                    signature,
+                )
+                .await?;
+            let receipt = execution_receipt::build_execution_receipt(
+                &intent,
+                &snapshot,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&receipt)?);
         }
         "execution-confirmation" => {
             let execution_db = args
