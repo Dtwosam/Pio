@@ -18,7 +18,10 @@ from .mint_risk import (
 )
 from .phase8_validation import audit_persisted_phase8_promotion
 from .phase9_history_plan import build_phase9_history_plan
-from .phase9_pool_cohort import evaluate_phase9_pool_cohort
+from .phase9_pool_cohort import (
+    evaluate_phase9_pool_cohort,
+    select_phase9_cohort_source_pools,
+)
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     load_phase9_explicit_inputs,
@@ -131,6 +134,21 @@ def _persist_if_changed(
     ):
         return "UNCHANGED", int(latest["id"])
     return "PERSISTED", int(persist())
+
+
+def _ranked_source_pools(
+    storage: Storage,
+    *,
+    cohort,
+    limit: int,
+) -> tuple[str, ...]:
+    if not getattr(cohort, "sampling_pools", ()):
+        return _top_chain_pools(storage, limit=limit)
+    return select_phase9_cohort_source_pools(
+        storage,
+        cohort=cohort,
+        limit=limit,
+    )
 
 
 def _top_chain_pools(
@@ -331,6 +349,10 @@ def run_phase9_research_refresh(
         storage,
         as_of=refresh_as_of,
     )
+    ranked_cohort = evaluate_phase9_pool_cohort(
+        storage,
+        as_of=refresh_as_of,
+    )
     source_freshness = source_freshness_report.by_family()
     source_freshness_reasons = {
         item.family: item.reason
@@ -360,10 +382,7 @@ def run_phase9_research_refresh(
         )
     else:
         try:
-            cohort = evaluate_phase9_pool_cohort(
-                storage,
-                as_of=refresh_as_of,
-            )
+            cohort = ranked_cohort
             if not cohort.research_ready:
                 detail = "; ".join(cohort.reasons) or (
                     "ranked Phase 9 research cohort is below the exact "
@@ -449,6 +468,11 @@ def run_phase9_research_refresh(
         )
     else:
         try:
+            mint_pools = _ranked_source_pools(
+                storage,
+                cohort=ranked_cohort,
+                limit=criteria.min_mint_risk_pools,
+            )
             mint_plan = build_phase9_mint_capture_plan(
                 storage,
                 criteria=Phase9MintCaptureCriteria(
@@ -460,6 +484,7 @@ def run_phase9_research_refresh(
                         mint_criteria.include_reward_mints
                     ),
                 ),
+                pool_addresses=mint_pools,
             )
             if not mint_plan.inputs_ready:
                 detail = "; ".join(mint_plan.reasons) or (
@@ -552,8 +577,9 @@ def run_phase9_research_refresh(
             )
         )
     else:
-        wallet_pools = _top_chain_pools(
+        wallet_pools = _ranked_source_pools(
             storage,
+            cohort=ranked_cohort,
             limit=criteria.min_wallet_flow_pools,
         )
         if len(wallet_pools) < criteria.min_wallet_flow_pools:
