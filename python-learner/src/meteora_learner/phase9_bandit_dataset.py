@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .contextual_bandit import (
+    CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
     ContextualBanditCriteria,
     ContextualBanditReport,
     bandit_examples_from_records,
@@ -510,4 +511,31 @@ def evaluate_phase9_contextual_bandit_from_dataset(
             ),
         ),
         report=report,
+    )
+
+
+def persist_phase9_contextual_bandit_from_dataset(
+    storage: Storage,
+    *,
+    result: Phase9BanditResearchResult,
+) -> int:
+    evidence = result.report.to_record()
+    evidence["dataset_lineage"] = asdict(result.lineage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+    )
+    if (
+        latest is not None
+        and json.loads(json.dumps(latest.get("evidence"), sort_keys=True))
+        == json.loads(json.dumps(evidence, sort_keys=True))
+    ):
+        return int(latest["id"])
+    return storage.save_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+        as_of=result.lineage.cutoff,
+        status=result.report.status,
+        qualified=result.report.research_qualified,
+        evidence=evidence,
     )
