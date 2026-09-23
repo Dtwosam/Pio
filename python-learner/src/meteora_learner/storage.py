@@ -909,6 +909,20 @@ ON continuous_learning_cycles(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_model_live_evidence_model_time
 ON model_live_evidence(model_id, created_at, id);
 
+CREATE TABLE IF NOT EXISTS advanced_edge_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    edge_type TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    as_of TEXT,
+    status TEXT NOT NULL,
+    qualified INTEGER NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_advanced_edge_evidence_lookup
+ON advanced_edge_evidence(edge_type, pool_address, id);
+
 CREATE TABLE IF NOT EXISTS data_quality_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checked_at TEXT NOT NULL,
@@ -2614,6 +2628,79 @@ class Storage:
                 raise ValueError(
                     f"model {model_id} is not in PAPER_CHALLENGER status"
                 )
+
+    def save_advanced_edge_evidence(
+        self,
+        *,
+        edge_type: str,
+        pool_address: str,
+        status: str,
+        qualified: bool,
+        evidence: dict[str, Any],
+        as_of: str | None = None,
+    ) -> int:
+        if not edge_type.strip():
+            raise ValueError("edge_type is required")
+        if not pool_address.strip():
+            raise ValueError("pool_address is required")
+        if not status.strip():
+            raise ValueError("status is required")
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO advanced_edge_evidence(
+                    created_at, edge_type, pool_address,
+                    as_of, status, qualified, evidence_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    utc_now_iso(),
+                    edge_type,
+                    pool_address,
+                    as_of,
+                    status,
+                    int(bool(qualified)),
+                    json.dumps(evidence, separators=(",", ":")),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def latest_advanced_edge_evidence(
+        self,
+        *,
+        edge_type: str,
+        pool_address: str,
+    ) -> dict[str, Any] | None:
+        if not edge_type.strip():
+            raise ValueError("edge_type is required")
+        if not pool_address.strip():
+            raise ValueError("pool_address is required")
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, created_at, edge_type, pool_address,
+                       as_of, status, qualified, evidence_json
+                FROM advanced_edge_evidence
+                WHERE edge_type = ? AND pool_address = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (edge_type, pool_address),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": int(row[0]),
+            "created_at": str(row[1]),
+            "edge_type": str(row[2]),
+            "pool_address": str(row[3]),
+            "as_of": (
+                str(row[4]) if row[4] is not None else None
+            ),
+            "status": str(row[5]),
+            "qualified": bool(row[6]),
+            "evidence": json.loads(str(row[7])),
+        }
 
     def save_quality_checks(
         self,
