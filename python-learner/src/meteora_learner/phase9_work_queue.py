@@ -13,6 +13,9 @@ from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .storage import Storage
 
 
+DEFAULT_PUBKEY = "11111111111111111111111111111111"
+
+
 @dataclass(frozen=True)
 class Phase9WorkItem:
     task_type: str
@@ -56,12 +59,62 @@ def _candidate_pools(
     return tuple(str(row[0]) for row in rows)
 
 
+def _latest_pool_mints(
+    storage: Storage,
+    *,
+    pool_address: str,
+) -> tuple[str, ...]:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT token_x_mint, token_y_mint,
+                   reward_mint_0, reward_mint_1
+            FROM chain_pool_snapshots
+            WHERE pool_address = ?
+            ORDER BY julianday(observed_at) DESC, id DESC
+            LIMIT 1
+            """,
+            (pool_address,),
+        ).fetchone()
+    if row is None:
+        return ()
+    values: list[str] = []
+    for raw in row:
+        if raw is None:
+            continue
+        mint = str(raw).strip()
+        if not mint or mint == DEFAULT_PUBKEY:
+            continue
+        if mint not in values:
+            values.append(mint)
+    return tuple(values)
+
+
+def _mint_snapshot_exists(
+    storage: Storage,
+    *,
+    mint_address: str,
+) -> bool:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM token_mint_snapshots
+            WHERE mint_address = ?
+            LIMIT 1
+            """,
+            (mint_address,),
+        ).fetchone()
+    return row is not None
+
+
 def build_phase9_work_queue(
     storage: Storage,
     *,
     criteria: Phase9ResearchBundleCriteria = (
         Phase9ResearchBundleCriteria()
     ),
+    rpc_url: str | None = None,
 ) -> Phase9WorkQueue:
     phase8_promoted = storage.phase_is_promoted(
         PHASE8,
@@ -118,31 +171,81 @@ def build_phase9_work_queue(
         criteria.min_mint_risk_pools
         - bundle.mint_risk.qualified_records,
     )
-    for pool in [
+    mint_candidate_pools = [
         value for value in pools if value not in qualified_mint
-    ][:mint_needed]:
-        items.append(
-            Phase9WorkItem(
-                task_type="MINT_RISK",
-                scope=pool,
-                reason="qualified persisted mint-risk evidence is needed",
-                shell_command=(
-                    "pio mint-risk-research --pool "
-                    + _q(pool)
-                    + " --persist --require-qualified"
-                ),
-            )
+    ][:mint_needed]
+    for pool in mint_candidate_pools:
+        required_mints = _latest_pool_mints(
+            storage,
+            pool_address=pool,
         )
-    if mint_needed > 0 and not any(
-        item.task_type == "MINT_RISK" for item in items
-    ):
+        missing_mints = [
+            mint
+            for mint in required_mints
+            if not _mint_snapshot_exists(
+                storage,
+                mint_address=mint,
+            )
+        ]
+        if missing_mints:
+            rpc = rpc_url if rpc_url is not None else "<RPC_URL>"
+            for mint in missing_mints:
+                filename = f"mint-{mint}.json"
+                items.append(
+                    Phase9WorkItem(
+                        task_type="MINT_SNAPSHOT",
+                        scope=mint,
+                        reason=(
+                            f"pool {pool} requires authoritative mint state "
+                            "before mint-risk research can run"
+                        ),
+                        shell_command=(
+                            "meteora-executor inspect-mint "
+                            + _q(rpc)
+                            + " "
+                            + _q(mint)
+                            + " > "
+                            + _q(filename)
+                            + " && pio mint-snapshot-ingest --file "
+                            + _q(filename)
+                        ),
+                    )
+                )
+            continue
+
+        if required_mints:
+            items.append(
+                Phase9WorkItem(
+                    task_type="MINT_RISK",
+                    scope=pool,
+                    reason="qualified persisted mint-risk evidence is needed",
+                    shell_command=(
+                        "pio mint-risk-research --pool "
+                        + _q(pool)
+                        + " --persist --require-qualified"
+                    ),
+                )
+            )
+        else:
+            items.append(
+                Phase9WorkItem(
+                    task_type="MINT_RISK",
+                    scope=pool,
+                    reason=(
+                        "latest chain pool snapshot does not expose token "
+                        "mints needed for mint-risk research"
+                    ),
+                    shell_command=None,
+                )
+            )
+    if mint_needed > len(mint_candidate_pools):
         items.append(
             Phase9WorkItem(
                 task_type="MINT_RISK",
                 scope="POOL_REQUIRED",
                 reason=(
-                    f"{mint_needed} additional qualified mint-risk pool(s) "
-                    "are required"
+                    f"{mint_needed - len(mint_candidate_pools)} additional "
+                    "chain-observed pool(s) are required for mint-risk evidence"
                 ),
                 shell_command=None,
             )
