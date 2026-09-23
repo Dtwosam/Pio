@@ -184,6 +184,8 @@ Unattended PAPER operation is driven by idempotent ticks. A tick refreshes only 
 
 Phase 5 completion is evidence-driven. Scheduler lease acquisition, overlap, stale-worker recovery and tick completion are persisted as lifecycle events. Current health can be exported as Prometheus-compatible gauges. A configurable endurance gate evaluates accumulated runtime, terminal tick count, failure rate, dependency-blocked rate, maximum failure streak, stale RUNNING ticks, applied chain valuations and distinct valued positions. Passing this operational gate does not prove profitability; real multi-observation PAPER evidence and accounting review are still required before Phase 5 can be called complete.
 
+Phase 5 promotion is persisted only after Phase 3 is persistently promoted, the stricter multi-day endurance gate passes, multiple positions and pools have real applied chain valuations, a minimum closed-position sample exists, and a decimal-exact audit reconciles stored PAPER account/position state back to the immutable PAPER event ledger. The persisted Phase 5 record stores the criteria and evidence used. Missing evidence keeps Phase 5 unpromoted even when all implementation code exists.
+
 ## 7. Decision flow
 
 1. Discover pools.
