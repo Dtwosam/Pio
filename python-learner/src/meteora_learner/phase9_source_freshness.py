@@ -89,15 +89,33 @@ def _latest_rows(
     return output
 
 
-def _latest_pool_snapshot_id(
+def _source_advanced(
+    *,
+    current_id: int,
+    current_at: str,
+    used_id: int,
+    used_at: str,
+) -> bool:
+    current_time = _time(current_at)
+    used_time = _time(used_at)
+    return (
+        current_time > used_time
+        or (
+            current_time == used_time
+            and current_id != used_id
+        )
+    )
+
+
+def _latest_pool_source(
     storage: Storage,
     *,
     pool_address: str,
-) -> int | None:
+) -> tuple[int, str] | None:
     with storage.connect() as conn:
         row = conn.execute(
             """
-            SELECT id
+            SELECT id, observed_at
             FROM chain_pool_snapshots
             WHERE pool_address = ?
             ORDER BY julianday(observed_at) DESC, id DESC
@@ -105,7 +123,11 @@ def _latest_pool_snapshot_id(
             """,
             (pool_address,),
         ).fetchone()
-    return int(row[0]) if row is not None else None
+    return (
+        (int(row[0]), str(row[1]))
+        if row is not None
+        else None
+    )
 
 
 def _latest_pool_observed_at(
@@ -113,29 +135,50 @@ def _latest_pool_observed_at(
     *,
     pool_address: str,
 ) -> str | None:
+    source = _latest_pool_source(
+        storage,
+        pool_address=pool_address,
+    )
+    return source[1] if source is not None else None
+
+
+def _latest_used_pool_source(
+    storage: Storage,
+    *,
+    pool_address: str,
+    snapshot_ids: list[int],
+) -> tuple[int, str] | None:
+    if not snapshot_ids:
+        return None
+    placeholders = ",".join("?" for _ in snapshot_ids)
     with storage.connect() as conn:
         row = conn.execute(
-            """
-            SELECT observed_at
+            f"""
+            SELECT id, observed_at
             FROM chain_pool_snapshots
             WHERE pool_address = ?
+              AND id IN ({placeholders})
             ORDER BY julianday(observed_at) DESC, id DESC
             LIMIT 1
             """,
-            (pool_address,),
+            (pool_address, *snapshot_ids),
         ).fetchone()
-    return str(row[0]) if row is not None else None
+    return (
+        (int(row[0]), str(row[1]))
+        if row is not None
+        else None
+    )
 
 
-def _latest_mint_snapshot_id(
+def _latest_mint_source(
     storage: Storage,
     *,
     mint_address: str,
-) -> int | None:
+) -> tuple[int, str] | None:
     with storage.connect() as conn:
         row = conn.execute(
             """
-            SELECT id
+            SELECT id, observed_at
             FROM token_mint_snapshots
             WHERE mint_address = ?
             ORDER BY julianday(observed_at) DESC, id DESC
@@ -143,18 +186,44 @@ def _latest_mint_snapshot_id(
             """,
             (mint_address,),
         ).fetchone()
-    return int(row[0]) if row is not None else None
+    return (
+        (int(row[0]), str(row[1]))
+        if row is not None
+        else None
+    )
 
 
-def _latest_wallet_event_id(
+def _mint_source_by_id(
     storage: Storage,
     *,
-    pool_address: str,
-) -> int | None:
+    snapshot_id: int,
+) -> tuple[int, str] | None:
     with storage.connect() as conn:
         row = conn.execute(
             """
-            SELECT id
+            SELECT id, observed_at
+            FROM token_mint_snapshots
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (snapshot_id,),
+        ).fetchone()
+    return (
+        (int(row[0]), str(row[1]))
+        if row is not None
+        else None
+    )
+
+
+def _latest_wallet_source(
+    storage: Storage,
+    *,
+    pool_address: str,
+) -> tuple[int, str] | None:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, created_at
             FROM position_event_history
             WHERE pool_address = ?
             ORDER BY julianday(created_at) DESC, id DESC
@@ -162,7 +231,39 @@ def _latest_wallet_event_id(
             """,
             (pool_address,),
         ).fetchone()
-    return int(row[0]) if row is not None else None
+    return (
+        (int(row[0]), str(row[1]))
+        if row is not None
+        else None
+    )
+
+
+def _latest_used_wallet_source(
+    storage: Storage,
+    *,
+    pool_address: str,
+    event_ids: list[int],
+) -> tuple[int, str] | None:
+    if not event_ids:
+        return None
+    placeholders = ",".join("?" for _ in event_ids)
+    with storage.connect() as conn:
+        row = conn.execute(
+            f"""
+            SELECT id, created_at
+            FROM position_event_history
+            WHERE pool_address = ?
+              AND id IN ({placeholders})
+            ORDER BY julianday(created_at) DESC, id DESC
+            LIMIT 1
+            """,
+            (pool_address, *event_ids),
+        ).fetchone()
+    return (
+        (int(row[0]), str(row[1]))
+        if row is not None
+        else None
+    )
 
 
 def _adaptive_current(storage: Storage) -> Phase9SourceFreshnessItem:
@@ -205,24 +306,41 @@ def _adaptive_current(storage: Storage) -> Phase9SourceFreshnessItem:
                 reason="adaptive/regime source snapshot lineage is incomplete",
             )
         try:
-            used_latest = max(int(value) for value in ids)
+            snapshot_ids = [int(value) for value in ids]
         except (TypeError, ValueError):
             return Phase9SourceFreshnessItem(
                 family="adaptive_regime",
                 current=False,
                 reason="adaptive/regime source snapshot IDs are invalid",
             )
-        current_latest = _latest_pool_snapshot_id(
+        used_source = _latest_used_pool_source(
+            storage,
+            pool_address=pool,
+            snapshot_ids=snapshot_ids,
+        )
+        current_source = _latest_pool_source(
             storage,
             pool_address=pool,
         )
-        if current_latest is None or current_latest != used_latest:
+        if used_source is None or current_source is None:
+            return Phase9SourceFreshnessItem(
+                family="adaptive_regime",
+                current=False,
+                reason=f"pool {pool} source snapshot lineage is unavailable",
+            )
+        if _source_advanced(
+            current_id=current_source[0],
+            current_at=current_source[1],
+            used_id=used_source[0],
+            used_at=used_source[1],
+        ):
             return Phase9SourceFreshnessItem(
                 family="adaptive_regime",
                 current=False,
                 reason=(
-                    f"pool {pool} chain history advanced from snapshot "
-                    f"{used_latest} to {current_latest}"
+                    f"pool {pool} chain history advanced from "
+                    f"{used_source[1]}#{used_source[0]} to "
+                    f"{current_source[1]}#{current_source[0]}"
                 ),
             )
     return Phase9SourceFreshnessItem(
@@ -261,17 +379,34 @@ def _mint_current(storage: Storage) -> Phase9SourceFreshnessItem:
                 current=False,
                 reason="mint-risk pool snapshot lineage is incomplete",
             )
-        latest_pool_id = _latest_pool_snapshot_id(
+        used_pool_source = _latest_used_pool_source(
+            storage,
+            pool_address=pool,
+            snapshot_ids=[used_pool_id],
+        )
+        latest_pool_source = _latest_pool_source(
             storage,
             pool_address=pool,
         )
-        if latest_pool_id is None or latest_pool_id != used_pool_id:
+        if used_pool_source is None or latest_pool_source is None:
+            return Phase9SourceFreshnessItem(
+                family="mint_risk",
+                current=False,
+                reason=f"pool {pool} source snapshot lineage is unavailable",
+            )
+        if _source_advanced(
+            current_id=latest_pool_source[0],
+            current_at=latest_pool_source[1],
+            used_id=used_pool_source[0],
+            used_at=used_pool_source[1],
+        ):
             return Phase9SourceFreshnessItem(
                 family="mint_risk",
                 current=False,
                 reason=(
                     f"pool {pool} source snapshot advanced from "
-                    f"{used_pool_id} to {latest_pool_id}"
+                    f"{used_pool_source[1]}#{used_pool_source[0]} to "
+                    f"{latest_pool_source[1]}#{latest_pool_source[0]}"
                 ),
             )
 
@@ -298,17 +433,33 @@ def _mint_current(storage: Storage) -> Phase9SourceFreshnessItem:
                     current=False,
                     reason=f"mint-risk snapshot lineage is incomplete for {mint}",
                 )
-            latest_mint_id = _latest_mint_snapshot_id(
+            used_mint_source = _mint_source_by_id(
+                storage,
+                snapshot_id=used_mint_id,
+            )
+            latest_mint_source = _latest_mint_source(
                 storage,
                 mint_address=mint,
             )
-            if latest_mint_id is None or latest_mint_id != used_mint_id:
+            if used_mint_source is None or latest_mint_source is None:
+                return Phase9SourceFreshnessItem(
+                    family="mint_risk",
+                    current=False,
+                    reason=f"mint {mint} snapshot lineage is unavailable",
+                )
+            if _source_advanced(
+                current_id=latest_mint_source[0],
+                current_at=latest_mint_source[1],
+                used_id=used_mint_source[0],
+                used_at=used_mint_source[1],
+            ):
                 return Phase9SourceFreshnessItem(
                     family="mint_risk",
                     current=False,
                     reason=(
                         f"mint {mint} source snapshot advanced from "
-                        f"{used_mint_id} to {latest_mint_id}"
+                        f"{used_mint_source[1]}#{used_mint_source[0]} to "
+                        f"{latest_mint_source[1]}#{latest_mint_source[0]}"
                     ),
                 )
     return Phase9SourceFreshnessItem(
@@ -344,7 +495,7 @@ def _wallet_current(storage: Storage) -> Phase9SourceFreshnessItem:
                 reason="wallet-flow source event lineage is incomplete",
             )
         try:
-            used_latest = max(int(value) for value in ids)
+            event_ids = [int(value) for value in ids]
         except (TypeError, ValueError):
             return Phase9SourceFreshnessItem(
                 family="wallet_flow",
@@ -352,17 +503,34 @@ def _wallet_current(storage: Storage) -> Phase9SourceFreshnessItem:
                 reason="wallet-flow source event IDs are invalid",
             )
         pool = str(row["pool_address"])
-        latest_event = _latest_wallet_event_id(
+        used_source = _latest_used_wallet_source(
+            storage,
+            pool_address=pool,
+            event_ids=event_ids,
+        )
+        latest_source = _latest_wallet_source(
             storage,
             pool_address=pool,
         )
-        if latest_event is None or latest_event != used_latest:
+        if used_source is None or latest_source is None:
+            return Phase9SourceFreshnessItem(
+                family="wallet_flow",
+                current=False,
+                reason=f"pool {pool} wallet-flow source lineage is unavailable",
+            )
+        if _source_advanced(
+            current_id=latest_source[0],
+            current_at=latest_source[1],
+            used_id=used_source[0],
+            used_at=used_source[1],
+        ):
             return Phase9SourceFreshnessItem(
                 family="wallet_flow",
                 current=False,
                 reason=(
-                    f"pool {pool} wallet-flow history advanced from event "
-                    f"{used_latest} to {latest_event}"
+                    f"pool {pool} wallet-flow history advanced from "
+                    f"{used_source[1]}#{used_source[0]} to "
+                    f"{latest_source[1]}#{latest_source[0]}"
                 ),
             )
     return Phase9SourceFreshnessItem(
@@ -398,29 +566,48 @@ def _static_hedge_current(storage: Storage) -> Phase9SourceFreshnessItem:
                 reason="static-hedge source path lineage is incomplete",
             )
         try:
-            used_latest = max(
-                int(item["pool_snapshot_id"])
-                for item in observations
-                if isinstance(item, dict)
+            used = max(
+                (
+                    (
+                        _time(str(item["observed_at"])),
+                        int(item["pool_snapshot_id"]),
+                        str(item["observed_at"]),
+                    )
+                    for item in observations
+                    if isinstance(item, dict)
+                ),
+                key=lambda value: (value[0], value[1]),
             )
         except (KeyError, TypeError, ValueError):
             return Phase9SourceFreshnessItem(
                 family="static_hedge",
                 current=False,
-                reason="static-hedge source snapshot IDs are invalid",
+                reason="static-hedge source snapshot metadata is invalid",
             )
         pool = str(row["pool_address"])
-        latest_pool = _latest_pool_snapshot_id(
+        latest_pool = _latest_pool_source(
             storage,
             pool_address=pool,
         )
-        if latest_pool is None or latest_pool != used_latest:
+        if latest_pool is None:
+            return Phase9SourceFreshnessItem(
+                family="static_hedge",
+                current=False,
+                reason=f"pool {pool} latest price-path source is unavailable",
+            )
+        if _source_advanced(
+            current_id=latest_pool[0],
+            current_at=latest_pool[1],
+            used_id=used[1],
+            used_at=used[2],
+        ):
             return Phase9SourceFreshnessItem(
                 family="static_hedge",
                 current=False,
                 reason=(
-                    f"pool {pool} hedge price path advanced from snapshot "
-                    f"{used_latest} to {latest_pool}"
+                    f"pool {pool} hedge price path advanced from "
+                    f"{used[2]}#{used[1]} to "
+                    f"{latest_pool[1]}#{latest_pool[0]}"
                 ),
             )
     return Phase9SourceFreshnessItem(
