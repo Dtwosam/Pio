@@ -54,7 +54,11 @@ from .phase3_validation import Phase3PromotionCriteria
 from .phase5_validation import Phase5PromotionCriteria, evaluate_phase5_promotion
 from .phase6_validation import Phase6PromotionCriteria, evaluate_phase6_promotion
 from .phase7_validation import Phase7PromotionCriteria, evaluate_phase7_promotion
-from .phase8_validation import Phase8PromotionCriteria, evaluate_phase8_promotion
+from .phase8_validation import (
+    Phase8PromotionCriteria,
+    audit_persisted_phase8_promotion,
+    evaluate_phase8_promotion,
+)
 from .phase9_research import (
     Phase9ResearchCriteria,
     evaluate_phase9_research,
@@ -1523,6 +1527,15 @@ def main() -> None:
     portfolio_allocation.add_argument("--persist", action="store_true")
     portfolio_allocation.add_argument(
         "--require-qualified",
+        action="store_true",
+    )
+
+    phase8_promotion_audit = subparsers.add_parser(
+        "phase8-promotion-audit",
+        help="Audit whether persisted Phase 8 champion promotion still matches current champion lineage and live health",
+    )
+    phase8_promotion_audit.add_argument(
+        "--require-current",
         action="store_true",
     )
 
@@ -3103,6 +3116,15 @@ def main() -> None:
     if args.command == "phase-status":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
+        phase8_state = phase_promotion_state(
+            storage,
+            phase_name=PHASE8,
+        )
+        phase8_currentness = (
+            audit_persisted_phase8_promotion(storage)
+            if phase8_state.promoted
+            else None
+        )
         phase9_state = phase_promotion_state(
             storage,
             phase_name=PHASE9,
@@ -3133,10 +3155,19 @@ def main() -> None:
                 storage,
                 phase_name=PHASE7,
             ).__dict__,
-            "phase8": phase_promotion_state(
-                storage,
-                phase_name=PHASE8,
-            ).__dict__,
+            "phase8": {
+                **phase8_state.__dict__,
+                "current": (
+                    phase8_currentness.current
+                    if phase8_currentness is not None
+                    else False
+                ),
+                "currentness": (
+                    phase8_currentness.to_record()
+                    if phase8_currentness is not None
+                    else None
+                ),
+            },
             "phase9": {
                 **phase9_state.__dict__,
                 "research_only": True,
@@ -3717,6 +3748,15 @@ def main() -> None:
             )
         print(json.dumps(output, indent=2))
         if args.require_qualified and not result.research_qualified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase8-promotion-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        audit = audit_persisted_phase8_promotion(storage)
+        print(json.dumps(audit.to_record(), indent=2))
+        if args.require_current and not audit.current:
             raise SystemExit(2)
         return
 
