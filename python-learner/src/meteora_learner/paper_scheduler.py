@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from uuid import uuid4
@@ -69,6 +70,36 @@ def _bucket_start(now: datetime, interval_seconds: int) -> datetime:
 
 def _tick_id(account_id: str, bucket: datetime) -> str:
     return f"paper-schedule:{account_id}:{int(bucket.timestamp())}"
+
+
+def _record_scheduler_event(
+    conn,
+    *,
+    account_id: str,
+    event_time: str,
+    event_type: str,
+    tick_id: str,
+    owner_id: str,
+    status: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO paper_scheduler_events(
+            account_id, event_time, event_type, tick_id,
+            owner_id, status, details_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            account_id,
+            event_time,
+            event_type,
+            tick_id,
+            owner_id,
+            status,
+            json.dumps(details or {}, separators=(",", ":")),
+        ),
+    )
 
 
 def paper_scheduler_state(
@@ -162,12 +193,34 @@ def _acquire_lease(
                     now_text,
                 ),
             )
+            _record_scheduler_event(
+                conn,
+                account_id=account_id,
+                event_time=now_text,
+                event_type="LEASE_ACQUIRED",
+                tick_id=tick_id,
+                owner_id=owner_id,
+                status="RUNNING",
+            )
             return True, False
 
         existing_owner = str(row[0]) if row[0] is not None else None
         existing_until = str(row[1]) if row[1] is not None else None
-        if existing_owner is not None and existing_until is not None:
-            if _parse_time(existing_until) > now:
+        if existing_owner is not None:
+            if existing_until is not None and _parse_time(existing_until) > now:
+                _record_scheduler_event(
+                    conn,
+                    account_id=account_id,
+                    event_time=now_text,
+                    event_type="LEASE_BUSY",
+                    tick_id=tick_id,
+                    owner_id=owner_id,
+                    status="BUSY",
+                    details={
+                        "existing_owner_id": existing_owner,
+                        "existing_lease_until": existing_until,
+                    },
+                )
                 return False, False
             recovered = True
 
@@ -187,6 +240,25 @@ def _acquire_lease(
                 now_text,
                 now_text,
                 account_id,
+            ),
+        )
+        _record_scheduler_event(
+            conn,
+            account_id=account_id,
+            event_time=now_text,
+            event_type=(
+                "LEASE_RECOVERED" if recovered else "LEASE_ACQUIRED"
+            ),
+            tick_id=tick_id,
+            owner_id=owner_id,
+            status="RUNNING",
+            details=(
+                {
+                    "previous_owner_id": existing_owner,
+                    "previous_lease_until": existing_until,
+                }
+                if recovered
+                else None
             ),
         )
     return True, recovered
@@ -235,6 +307,25 @@ def _release_lease(
                 finished,
                 account_id,
             ),
+        )
+        tick_row = conn.execute(
+            """
+            SELECT last_tick_id
+            FROM paper_scheduler_state
+            WHERE account_id = ?
+            """,
+            (account_id,),
+        ).fetchone()
+        if tick_row is None or tick_row[0] is None:
+            raise RuntimeError("paper scheduler tick identity disappeared")
+        _record_scheduler_event(
+            conn,
+            account_id=account_id,
+            event_time=finished,
+            event_type="TICK_FINISHED",
+            tick_id=str(tick_row[0]),
+            owner_id=owner_id,
+            status=status,
         )
 
 
