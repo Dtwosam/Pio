@@ -373,3 +373,181 @@ def test_explicit_inputs_audit_rejects_qualified_input_artifact(tmp_path):
         "must not be marked as qualified research" in reason
         for reason in audit.reasons
     )
+
+
+def test_explicit_research_deduplicates_identical_persistence(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    artifact = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(filled_payload()),
+    )
+    comparison = CrossPoolResearchReport(
+        plans_seen=2,
+        comparable_plans=2,
+        excluded_plans=0,
+        leader_pool_address="pool-a",
+        ranking_rule="test",
+        candidates=(
+            CrossPoolResearchCandidate(
+                rank=1,
+                pool_address="pool-a",
+                strategy="SPOT",
+                min_bin_id=-1,
+                max_bin_id=1,
+                half_width=1,
+                center_offset=0,
+                net_return_bps=100,
+                hold_return_bps=50,
+                excess_vs_hold_initial_bps=50,
+                range_survival_ratio=1.0,
+                max_observed_share_bps=100,
+                sized_quote=100.0,
+                phase2_ready=True,
+                policy_authorized=True,
+            ),
+            CrossPoolResearchCandidate(
+                rank=2,
+                pool_address="pool-b",
+                strategy="CURVE",
+                min_bin_id=-2,
+                max_bin_id=2,
+                half_width=2,
+                center_offset=0,
+                net_return_bps=90,
+                hold_return_bps=50,
+                excess_vs_hold_initial_bps=40,
+                range_survival_ratio=1.0,
+                max_observed_share_bps=100,
+                sized_quote=100.0,
+                phase2_ready=True,
+                policy_authorized=True,
+            ),
+        ),
+    )
+
+    static_report = SimpleNamespace(
+        pool_address="pool-a",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        research_qualified=True,
+        to_record=lambda: {
+            "pool_address": "pool-a",
+            "as_of": None,
+            "status": "QUALIFIED_RESEARCH",
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "value": 1,
+        },
+    )
+    allocation_report = SimpleNamespace(
+        status="QUALIFIED_RESEARCH",
+        research_qualified=True,
+        to_record=lambda: {
+            "status": "QUALIFIED_RESEARCH",
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "candidate_lineage": {
+                "candidate_evidence_id": candidate_ids[-1]
+                if candidate_ids
+                else None,
+                "candidate_evidence_sha256": candidate_shas[-1]
+                if candidate_shas
+                else None,
+            },
+            "value": 1,
+        },
+    )
+
+    monkeypatch.setattr(
+        inputs_module,
+        "research_static_inventory_hedge",
+        lambda *args, **kwargs: static_report,
+    )
+    monkeypatch.setattr(
+        inputs_module,
+        "build_multi_pool_research",
+        lambda *args, **kwargs: SimpleNamespace(comparison=comparison),
+    )
+
+    candidate_ids = []
+    candidate_shas = []
+    real_candidate_persist = (
+        inputs_module.persist_portfolio_candidate_research
+    )
+
+    def persist_candidate(*args, **kwargs):
+        evidence_id, digest = real_candidate_persist(*args, **kwargs)
+        candidate_ids.append(evidence_id)
+        candidate_shas.append(digest)
+        return evidence_id, digest
+
+    monkeypatch.setattr(
+        inputs_module,
+        "persist_portfolio_candidate_research",
+        persist_candidate,
+    )
+    monkeypatch.setattr(
+        inputs_module,
+        "research_portfolio_allocation",
+        lambda *args, **kwargs: allocation_report,
+    )
+
+    def persist_static(storage, *, report):
+        return storage.save_advanced_edge_evidence(
+            edge_type=inputs_module.STATIC_HEDGE_EVIDENCE_TYPE,
+            pool_address=report.pool_address,
+            as_of=report.as_of,
+            status=report.status,
+            qualified=report.research_qualified,
+            evidence=report.to_record(),
+        )
+
+    monkeypatch.setattr(
+        inputs_module,
+        "persist_static_hedge_research",
+        persist_static,
+    )
+
+    def persist_allocation(storage, *, report):
+        return storage.save_advanced_edge_evidence(
+            edge_type=inputs_module.PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+            pool_address="__PORTFOLIO__",
+            as_of=None,
+            status=report.status,
+            qualified=report.research_qualified,
+            evidence=report.to_record(),
+        )
+
+    monkeypatch.setattr(
+        inputs_module,
+        "persist_portfolio_allocation_research",
+        persist_allocation,
+    )
+
+    first = run_phase9_explicit_research(
+        storage,
+        artifact=artifact,
+        persist=True,
+        deduplicate_persistence=True,
+    )
+    second = run_phase9_explicit_research(
+        storage,
+        artifact=artifact,
+        persist=True,
+        deduplicate_persistence=True,
+    )
+
+    assert second.static_hedge_evidence_ids == (
+        first.static_hedge_evidence_ids
+    )
+    assert second.candidate_evidence_id == first.candidate_evidence_id
+    assert (
+        second.portfolio_allocation_evidence_id
+        == first.portfolio_allocation_evidence_id
+    )
+    assert len(candidate_ids) == 1
