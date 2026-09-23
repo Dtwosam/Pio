@@ -9,6 +9,21 @@ from .storage import Storage
 
 
 @dataclass(frozen=True)
+class Phase9WalletActivityProgress:
+    pool_address: str
+    backfill_before_signature: str | None
+    backfill_exhausted: bool
+    pages_scanned: int
+    signatures_scanned: int
+    matching_transactions: int
+    positions_discovered: int
+    updated_at: str
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Phase9ProgressReport:
     status: str
     snapshot_count: int
@@ -32,6 +47,7 @@ class Phase9ProgressReport:
     prewire_ready: bool
     prewire_manifest_current: bool
     latest_queue_sha256: str | None
+    wallet_activity_scans: tuple[Phase9WalletActivityProgress, ...]
     reasons: tuple[str, ...]
 
     def to_record(self) -> dict[str, Any]:
@@ -66,7 +82,39 @@ def _snapshot_digest(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _wallet_activity_scans(
+    storage: Storage,
+) -> tuple[Phase9WalletActivityProgress, ...]:
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT pool_address, backfill_before_signature,
+                   backfill_exhausted, pages_scanned,
+                   signatures_scanned, matching_transactions,
+                   positions_discovered, updated_at
+            FROM phase9_pool_activity_scan_state
+            ORDER BY pool_address ASC
+            """
+        ).fetchall()
+    return tuple(
+        Phase9WalletActivityProgress(
+            pool_address=str(row[0]),
+            backfill_before_signature=(
+                str(row[1]) if row[1] is not None else None
+            ),
+            backfill_exhausted=bool(row[2]),
+            pages_scanned=int(row[3]),
+            signatures_scanned=int(row[4]),
+            matching_transactions=int(row[5]),
+            positions_discovered=int(row[6]),
+            updated_at=str(row[7]),
+        )
+        for row in rows
+    )
+
+
 def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
+    wallet_activity_scans = _wallet_activity_scans(storage)
     with storage.connect() as conn:
         rows = conn.execute(
             """
@@ -101,6 +149,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             prewire_ready=False,
             prewire_manifest_current=False,
             latest_queue_sha256=None,
+            wallet_activity_scans=wallet_activity_scans,
             reasons=(
                 "no Phase 9 work-queue progress snapshots are persisted",
             ),
@@ -162,6 +211,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             prewire_ready=False,
             prewire_manifest_current=False,
             latest_queue_sha256=None,
+            wallet_activity_scans=wallet_activity_scans,
             reasons=tuple(reasons),
         )
 
@@ -245,5 +295,6 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         prewire_ready=prewire_ready,
         prewire_manifest_current=prewire_manifest_current,
         latest_queue_sha256=latest[2],
+        wallet_activity_scans=wallet_activity_scans,
         reasons=tuple(reasons),
     )
