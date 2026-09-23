@@ -26,6 +26,7 @@ from .position_history import collect_position_history
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .pool_safety import PoolSafetyConfig, screen_pool_universe
 from .position_policy import PositionManagementConfig, decide_position_action
+from .phase3_plan import build_phase3_research_plan
 from .reconciliation import reconcile_position
 from .reconciliation_corpus import build_reconciliation_corpus
 from .rebalance_execution import build_rebalance_execution_calibration
@@ -125,6 +126,38 @@ def main() -> None:
         type=int,
         default=0,
     )
+
+    phase3_plan = subparsers.add_parser(
+        "phase3-plan",
+        help="Build one end-to-end research-only Phase 3 entry plan",
+    )
+    phase3_plan.add_argument("--pool", required=True)
+    phase3_plan.add_argument("--amount-x", required=True, type=int)
+    phase3_plan.add_argument("--amount-y", required=True, type=int)
+    phase3_plan.add_argument("--requested-quote", required=True, type=float)
+    phase3_plan.add_argument("--equity", required=True, type=float)
+    phase3_plan.add_argument("--cash", required=True, type=float)
+    phase3_plan.add_argument("--deployed", required=True, type=float)
+    phase3_plan.add_argument("--drawdown-bps", required=True, type=int)
+    phase3_plan.add_argument("--network-cost-y-atomic", required=True, type=int)
+    phase3_plan.add_argument("--observations", type=int, default=12)
+    phase3_plan.add_argument(
+        "--half-widths",
+        type=_parse_int_csv,
+        default=(0, 1, 2, 5, 10),
+    )
+    phase3_plan.add_argument(
+        "--center-offsets",
+        type=_parse_int_csv,
+        default=(0,),
+    )
+    phase3_plan.add_argument(
+        "--strategies",
+        type=_parse_strategy_csv,
+        default=tuple(StrategyType),
+    )
+    phase3_plan.add_argument("--max-share-bps", type=int, default=500)
+    phase3_plan.add_argument("--favor-x-active", action="store_true")
 
     ingest = subparsers.add_parser(
         "ingest-chain-snapshot",
@@ -685,6 +718,32 @@ def main() -> None:
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
+        return
+
+    if args.command == "phase3-plan":
+        settings = Settings.from_env()
+        result = build_phase3_research_plan(
+            str(settings.database_path),
+            pool_address=args.pool,
+            amount_x=args.amount_x,
+            amount_y=args.amount_y,
+            requested_quote=args.requested_quote,
+            account_equity_quote=args.equity,
+            cash_quote=args.cash,
+            current_deployed_quote=args.deployed,
+            portfolio_drawdown_bps=args.drawdown_bps,
+            phase2_gate=None,
+            baseline_config=BaselinePolicyConfig(
+                estimated_network_cost_y_atomic=args.network_cost_y_atomic,
+            ),
+            observation_limit=args.observations,
+            half_widths=args.half_widths,
+            center_offsets=args.center_offsets,
+            strategies=args.strategies,
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "manage-position":
