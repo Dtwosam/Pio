@@ -18,6 +18,7 @@ pub struct ControlledLiveConfig {
     pub max_open_positions: usize,
     pub max_capital_quote_per_entry: f64,
     pub max_daily_entry_capital_quote: f64,
+    pub max_daily_realized_loss_quote: f64,
     pub max_daily_drawdown_pct: f64,
     pub allow_rebalance: bool,
     pub allow_exit: bool,
@@ -42,6 +43,9 @@ pub struct ControlledLiveReport {
     pub max_capital_quote_per_entry: f64,
     pub daily_submitted_entry_capital_quote: f64,
     pub max_daily_entry_capital_quote: f64,
+    pub daily_realized_loss_quote: f64,
+    pub max_daily_realized_loss_quote: f64,
+    pub unvalued_closed_positions_today: usize,
     pub daily_drawdown_pct: f64,
     pub max_daily_drawdown_pct: f64,
 }
@@ -71,6 +75,13 @@ fn validate_config(config: &ControlledLiveConfig) -> Result<BTreeSet<Pubkey>> {
             "max_daily_entry_capital_quote cannot be below the per-entry cap"
         );
     }
+    if !config.max_daily_realized_loss_quote.is_finite()
+        || config.max_daily_realized_loss_quote < 0.0
+    {
+        anyhow::bail!(
+            "max_daily_realized_loss_quote must be finite and non-negative"
+        );
+    }
     if !config.max_daily_drawdown_pct.is_finite()
         || config.max_daily_drawdown_pct < 0.0
     {
@@ -91,6 +102,73 @@ fn validate_config(config: &ControlledLiveConfig) -> Result<BTreeSet<Pubkey>> {
             })
         })
         .collect()
+}
+
+fn daily_realized_loss_state(
+    database_path: &Path,
+    as_of: Option<&str>,
+) -> Result<(f64, usize)> {
+    let conn = Connection::open_with_flags(
+        database_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| {
+        format!(
+            "failed to open controlled-live loss database read-only: {}",
+            database_path.display()
+        )
+    })?;
+
+    let mut statement = conn
+        .prepare(
+            r#"
+            SELECT o.position_address, v.realized_pnl_quote
+            FROM live_position_outcomes o
+            LEFT JOIN live_position_valuations v
+              ON v.position_address = o.position_address
+            WHERE date(o.created_at) = date(COALESCE(?1, 'now'))
+            ORDER BY o.position_address ASC
+            "#,
+        )
+        .context(
+            "live outcome/valuation tables are unavailable for daily loss gate",
+        )?;
+    let rows = statement.query_map([as_of], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+        ))
+    })?;
+
+    let mut realized_loss_quote = 0.0_f64;
+    let mut unvalued = 0_usize;
+    for row in rows {
+        let (position_address, realized_pnl_quote) = row?;
+        let Some(raw_pnl) = realized_pnl_quote else {
+            unvalued = unvalued
+                .checked_add(1)
+                .context("unvalued closed-position count overflow")?;
+            continue;
+        };
+        let pnl: f64 = raw_pnl.parse().with_context(|| {
+            format!(
+                "invalid realized_pnl_quote for live position {position_address}"
+            )
+        })?;
+        if !pnl.is_finite() {
+            anyhow::bail!(
+                "non-finite realized_pnl_quote for live position {position_address}"
+            );
+        }
+        if pnl < 0.0 {
+            realized_loss_quote += -pnl;
+            if !realized_loss_quote.is_finite() {
+                anyhow::bail!("daily realized live loss overflow");
+            }
+        }
+    }
+    Ok((realized_loss_quote, unvalued))
 }
 
 fn live_position_counts(
@@ -145,6 +223,20 @@ pub fn evaluate_controlled_live(
     proposal: &TradeProposal,
     config: &ControlledLiveConfig,
 ) -> Result<ControlledLiveReport> {
+    evaluate_controlled_live_at(
+        database_path,
+        proposal,
+        config,
+        None,
+    )
+}
+
+fn evaluate_controlled_live_at(
+    database_path: &Path,
+    proposal: &TradeProposal,
+    config: &ControlledLiveConfig,
+    as_of: Option<&str>,
+) -> Result<ControlledLiveReport> {
     if !database_path.is_absolute() {
         anyhow::bail!("controlled-live database path must be absolute");
     }
@@ -155,6 +247,12 @@ pub fn evaluate_controlled_live(
     let pool_allowed = allowed_pools.contains(&proposal_pool);
     let (open_positions, matching_pool_positions) =
         live_position_counts(database_path, &proposal.pool_address)?;
+    let (daily_realized_loss_quote, unvalued_closed_positions_today) =
+        if matches!(proposal.action, Action::Enter | Action::Rebalance) {
+            daily_realized_loss_state(database_path, as_of)?
+        } else {
+            (0.0, 0)
+        };
 
     let reason = if !phase5.accepted {
         "phase5_promotion_gate_rejected"
@@ -177,6 +275,18 @@ pub fn evaluate_controlled_live(
                     > config.max_capital_quote_per_entry
                 {
                     "entry_capital_cap_exceeded"
+                } else if unvalued_closed_positions_today > 0 {
+                    "daily_realized_loss_evidence_incomplete"
+                } else if daily_realized_loss_quote
+                    >= config.max_daily_realized_loss_quote
+                {
+                    "daily_realized_loss_budget_reached"
+                } else if unvalued_closed_positions_today > 0 {
+                    "daily_realized_loss_evidence_incomplete"
+                } else if daily_realized_loss_quote
+                    >= config.max_daily_realized_loss_quote
+                {
+                    "daily_realized_loss_budget_reached"
                 } else if !proposal.daily_drawdown_pct.is_finite()
                     || proposal.daily_drawdown_pct
                         > config.max_daily_drawdown_pct
@@ -240,6 +350,10 @@ pub fn evaluate_controlled_live(
         daily_submitted_entry_capital_quote: 0.0,
         max_daily_entry_capital_quote:
             config.max_daily_entry_capital_quote,
+        daily_realized_loss_quote,
+        max_daily_realized_loss_quote:
+            config.max_daily_realized_loss_quote,
+        unvalued_closed_positions_today,
         daily_drawdown_pct: proposal.daily_drawdown_pct,
         max_daily_drawdown_pct: config.max_daily_drawdown_pct,
     })
@@ -363,6 +477,14 @@ mod tests {
                 status TEXT NOT NULL,
                 opened_decision_id TEXT
             );
+            CREATE TABLE live_position_outcomes (
+                position_address TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE live_position_valuations (
+                position_address TEXT PRIMARY KEY,
+                realized_pnl_quote TEXT NOT NULL
+            );
             "#,
         )
         .unwrap();
@@ -412,6 +534,27 @@ mod tests {
         .unwrap();
     }
 
+    fn add_daily_closed_outcome(
+        path: &Path,
+        position_address: &str,
+        created_at: &str,
+        realized_pnl_quote: Option<&str>,
+    ) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute(
+            "INSERT INTO live_position_outcomes(position_address, created_at) VALUES (?1, ?2)",
+            [position_address, created_at],
+        )
+        .unwrap();
+        if let Some(pnl) = realized_pnl_quote {
+            conn.execute(
+                "INSERT INTO live_position_valuations(position_address, realized_pnl_quote) VALUES (?1, ?2)",
+                [position_address, pnl],
+            )
+            .unwrap();
+        }
+    }
+
     fn proposal(pool: Pubkey, action: Action) -> TradeProposal {
         TradeProposal {
             decision_id: Uuid::new_v4(),
@@ -439,6 +582,7 @@ mod tests {
             max_open_positions: 1,
             max_capital_quote_per_entry: 50.0,
             max_daily_entry_capital_quote: 100.0,
+            max_daily_realized_loss_quote: 20.0,
             max_daily_drawdown_pct: 2.0,
             allow_rebalance: true,
             allow_exit: true,
@@ -907,6 +1051,88 @@ mod tests {
 
         let _ = std::fs::remove_file(pio_path);
         let _ = std::fs::remove_file(execution_path);
+    }
+
+    #[test]
+    fn realized_daily_loss_blocks_new_risk_but_not_exit() {
+        let path = db_path();
+        seed(&path, 0);
+        let pool = Pubkey::new_unique();
+        add_live_position(&path, pool);
+        add_daily_closed_outcome(
+            &path,
+            "loss-position",
+            "2026-09-23T10:00:00+00:00",
+            Some("-25"),
+        );
+        let cfg = config(pool);
+
+        let entry = evaluate_controlled_live_at(
+            &path,
+            &proposal(pool, Action::Enter),
+            &cfg,
+            Some("2026-09-23T15:00:00+00:00"),
+        )
+        .unwrap();
+        let rebalance = evaluate_controlled_live_at(
+            &path,
+            &proposal(pool, Action::Rebalance),
+            &cfg,
+            Some("2026-09-23T15:00:00+00:00"),
+        )
+        .unwrap();
+        let exit = evaluate_controlled_live_at(
+            &path,
+            &proposal(pool, Action::Exit),
+            &cfg,
+            Some("2026-09-23T15:00:00+00:00"),
+        )
+        .unwrap();
+
+        assert!(!entry.accepted);
+        assert_eq!(
+            entry.reason,
+            "daily_realized_loss_budget_reached"
+        );
+        assert_eq!(entry.daily_realized_loss_quote, 25.0);
+        assert!(!rebalance.accepted);
+        assert_eq!(
+            rebalance.reason,
+            "daily_realized_loss_budget_reached"
+        );
+        assert!(exit.accepted);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn unvalued_daily_close_blocks_new_risk() {
+        let path = db_path();
+        seed(&path, 0);
+        let pool = Pubkey::new_unique();
+        add_daily_closed_outcome(
+            &path,
+            "unvalued-position",
+            "2026-09-23T10:00:00+00:00",
+            None,
+        );
+
+        let report = evaluate_controlled_live_at(
+            &path,
+            &proposal(pool, Action::Enter),
+            &config(pool),
+            Some("2026-09-23T15:00:00+00:00"),
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(
+            report.reason,
+            "daily_realized_loss_evidence_incomplete"
+        );
+        assert_eq!(report.unvalued_closed_positions_today, 1);
+
+        let _ = std::fs::remove_file(path);
     }
 
 }
