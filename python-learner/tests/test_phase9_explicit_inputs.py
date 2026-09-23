@@ -551,3 +551,105 @@ def test_explicit_research_deduplicates_identical_persistence(
         == first.portfolio_allocation_evidence_id
     )
     assert len(candidate_ids) == 1
+
+
+def test_explicit_research_can_run_static_hedge_without_portfolio(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    artifact = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(filled_payload()),
+    )
+    calls = []
+
+    static_report = SimpleNamespace(
+        pool_address="pool-a",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        research_qualified=True,
+        to_record=lambda: {
+            "pool_address": "pool-a",
+            "research_qualified": True,
+        },
+    )
+    monkeypatch.setattr(
+        inputs_module,
+        "research_static_inventory_hedge",
+        lambda *args, **kwargs: calls.append("static") or static_report,
+    )
+    monkeypatch.setattr(
+        inputs_module,
+        "build_multi_pool_research",
+        lambda *args, **kwargs: calls.append("portfolio"),
+    )
+
+    report = run_phase9_explicit_research(
+        storage,
+        artifact=artifact,
+        include_static_hedge=True,
+        include_portfolio=False,
+    )
+
+    assert calls == ["static"]
+    assert report.portfolio_allocation is None
+    assert report.explicit_research_ready is True
+
+
+def test_explicit_research_can_run_portfolio_without_static_hedge(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    artifact = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(filled_payload()),
+    )
+    calls = []
+    comparison = CrossPoolResearchReport(
+        plans_seen=0,
+        comparable_plans=0,
+        excluded_plans=0,
+        leader_pool_address=None,
+        ranking_rule="test",
+        candidates=(),
+    )
+    allocation = SimpleNamespace(
+        research_qualified=False,
+        to_record=lambda: {
+            "research_qualified": False,
+            "status": "NO_ELIGIBLE_ALLOCATIONS",
+        },
+    )
+
+    monkeypatch.setattr(
+        inputs_module,
+        "research_static_inventory_hedge",
+        lambda *args, **kwargs: calls.append("static"),
+    )
+    monkeypatch.setattr(
+        inputs_module,
+        "build_multi_pool_research",
+        lambda *args, **kwargs: (
+            calls.append("portfolio")
+            or SimpleNamespace(comparison=comparison)
+        ),
+    )
+    monkeypatch.setattr(
+        inputs_module,
+        "research_portfolio_allocation",
+        lambda *args, **kwargs: allocation,
+    )
+
+    report = run_phase9_explicit_research(
+        storage,
+        artifact=artifact,
+        include_static_hedge=False,
+        include_portfolio=True,
+    )
+
+    assert calls == ["portfolio"]
+    assert report.static_hedge_reports == ()
+    assert report.portfolio_allocation is not None
+    assert report.explicit_research_ready is False
