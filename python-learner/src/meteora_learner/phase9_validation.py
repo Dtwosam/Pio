@@ -550,7 +550,8 @@ def _allocation_lineage_valid(storage: Storage) -> bool:
     )
     if not rows:
         return False
-    lineage = rows[0]["evidence"].get("candidate_lineage")
+    allocation_evidence = rows[0]["evidence"]
+    lineage = allocation_evidence.get("candidate_lineage")
     if not isinstance(lineage, dict):
         return False
     try:
@@ -582,38 +583,46 @@ def _allocation_lineage_valid(storage: Storage) -> bool:
     if str(row[2]) != "BUILT" or not bool(row[3]):
         return False
     try:
-        evidence = json.loads(str(row[4]))
+        candidate_evidence = json.loads(str(row[4]))
     except (TypeError, ValueError, json.JSONDecodeError):
         return False
     if (
-        evidence.get("research_only") is not True
-        or evidence.get("policy_actionable") is not False
-        or not isinstance(evidence.get("comparison"), dict)
-        or not isinstance(evidence.get("source_inputs"), list)
-        or not isinstance(evidence.get("assumptions"), dict)
+        candidate_evidence.get("research_only") is not True
+        or candidate_evidence.get("policy_actionable") is not False
+        or not isinstance(
+            candidate_evidence.get("comparison"), dict
+        )
+        or not isinstance(
+            candidate_evidence.get("source_inputs"), list
+        )
+        or not isinstance(
+            candidate_evidence.get("assumptions"), dict
+        )
     ):
         return False
     payload = {
         "research_only": True,
         "policy_actionable": False,
-        "source_inputs": evidence["source_inputs"],
-        "assumptions": evidence["assumptions"],
-        "comparison": evidence["comparison"],
+        "source_inputs": candidate_evidence["source_inputs"],
+        "assumptions": candidate_evidence["assumptions"],
+        "comparison": candidate_evidence["comparison"],
     }
     recomputed_sha = portfolio_candidate_artifact_sha256(payload)
     if not (
-        str(evidence.get("artifact_sha256", "")).strip()
+        str(
+            candidate_evidence.get("artifact_sha256", "")
+        ).strip()
         == expected_sha
         == recomputed_sha
     ):
         return False
 
-    allocation_evidence = rows[0]["evidence"]
-    comparison_raw = evidence["comparison"]
+    comparison_raw = candidate_evidence["comparison"]
     try:
-        candidates_raw = comparison_raw["candidates"]
-        if not isinstance(candidates_raw, list):
-            return False
+        candidates = tuple(
+            CrossPoolResearchCandidate(**item)
+            for item in comparison_raw["candidates"]
+        )
         comparison = CrossPoolResearchReport(
             plans_seen=int(comparison_raw["plans_seen"]),
             comparable_plans=int(
@@ -627,34 +636,28 @@ def _allocation_lineage_valid(storage: Storage) -> bool:
                 else None
             ),
             ranking_rule=str(comparison_raw["ranking_rule"]),
-            candidates=tuple(
-                CrossPoolResearchCandidate(**item)
-                for item in candidates_raw
-            ),
+            candidates=candidates,
         )
-        replay = research_portfolio_allocation(
-            storage,
-            comparison=comparison,
-            budget_quote=float(
-                allocation_evidence["budget_quote"]
-            ),
-            criteria=PortfolioAllocationCriteria(
-                **allocation_evidence["criteria"]
-            ),
-            candidate_lineage=dict(
-                allocation_evidence["candidate_lineage"]
-            ),
+        criteria = PortfolioAllocationCriteria(
+            **allocation_evidence["criteria"]
+        )
+        budget_quote = float(
+            allocation_evidence["budget_quote"]
         )
     except (KeyError, TypeError, ValueError):
         return False
 
-    persisted_normalized = json.loads(
-        json.dumps(allocation_evidence, sort_keys=True)
+    replay = research_portfolio_allocation(
+        storage,
+        comparison=comparison,
+        budget_quote=budget_quote,
+        criteria=criteria,
+        candidate_lineage=lineage,
     )
-    replay_normalized = json.loads(
+    replay_record = json.loads(
         json.dumps(replay.to_record(), sort_keys=True)
     )
-    return persisted_normalized == replay_normalized
+    return replay_record == allocation_evidence
 
 
 def _static_hedge_lineage_valid(
