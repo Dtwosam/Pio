@@ -255,3 +255,69 @@ def test_controlled_validation_audit_is_current_when_replay_matches(
     assert audit.current_validation_ready is True
     assert audit.persisted_matches_current is True
     assert audit.reasons == ()
+
+
+def test_malformed_authorization_lineage_fails_closed_without_crashing(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_POLICY_GATE_EVIDENCE_TYPE,
+        pool_address=PHASE9_POLICY_GATE_SCOPE,
+        as_of=None,
+        status="AUTHORIZATION_EVIDENCE_READY",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "execution_wired": False,
+            "qualifying_evidence_ids": ["not-an-id"],
+            "shadow_evidence": [
+                {
+                    "evidence_id": "also-bad",
+                    "cycle_id": "cycle-a",
+                    "dataset_sha256": "a" * 64,
+                }
+            ],
+        },
+    )
+    cutoff = fresh_cutoff(storage)
+    report = shadow_report(
+        "cycle-b",
+        dataset_sha="b" * 64,
+        cutoff=cutoff,
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: type(
+            "Audit",
+            (),
+            {
+                "current": False,
+                "reasons": ("authorization evidence is malformed",),
+                "to_record": lambda self: {
+                    "current": False,
+                    "reasons": ["authorization evidence is malformed"],
+                },
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "evaluate_phase9_shadow",
+        lambda storage, cycle_id, criteria: report,
+    )
+
+    result = evaluate_phase9_policy_controlled_validation(
+        storage,
+        cycle_id="cycle-b",
+    )
+
+    assert result.controlled_validation_ready is False
+    assert result.authorization_current is False
+    assert any(
+        "authorization currentness:" in reason
+        for reason in result.reasons
+    )
