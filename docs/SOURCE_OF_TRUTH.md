@@ -311,9 +311,12 @@ Profit is evaluated over statistically meaningful samples, not one exceptional d
 
 ## Phase 9 advanced edge boundary
 
-Phase 9 advanced-edge modules are research-only unless and until a separate
-evidence gate explicitly promotes them. Phase 8 promotion alone does not make
-an advanced signal actionable.
+Phase 9 advanced-edge modules are research-only. Persisted
+`PHASE9_PROMOTION_V1` is a non-actionable research-validation milestone and
+must itself preserve `research_only=true` and `policy_actionable=false`.
+Neither Phase 8 nor Phase 9 research promotion makes an advanced signal
+actionable. Any future LIVE use requires a separate, explicitly designed
+LIVE-policy authorization gate and validation corpus.
 
 The first advanced-edge module estimates a DLMM range half-width from historical
 active-bin movement available at a decision cutoff. It constructs historical
@@ -345,3 +348,17 @@ research-qualified. Portfolio allocation research is likewise non-actionable:
 it caps per-pool concentration, number of positions and minimum budget
 utilization. None of these Phase 9 outputs may alter LIVE policy without a
 separate future promotion boundary.
+
+
+### Phase 9 evidence orchestration
+
+The Phase 9 evidence work queue inspects persisted research state and emits the
+next evidence tasks without inventing missing assumptions. It stages
+authoritative Rust mint inspection before mint-risk research, uses observed
+chain pools for adaptive/wallet-flow tasks, and leaves hedge, allocation and
+bandit artifacts explicit when they cannot be derived safely.
+
+Phase 9 research promotion is additionally bound to an immutable persisted
+research-bundle record. If newer component evidence appears, the prior bundle is
+stale and must be revalidated and persisted again before
+`PHASE9_PROMOTION_V1` can be written.
