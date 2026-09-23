@@ -1,4 +1,7 @@
 from meteora_learner.phase9_progress import evaluate_phase9_progress
+from meteora_learner.phase9_pool_activity_scan_state import (
+    record_phase9_pool_activity_page,
+)
 from meteora_learner.phase9_validation import Phase9ResearchBundleCriteria
 from meteora_learner.phase9_work_queue import (
     Phase9WorkItem,
@@ -217,3 +220,42 @@ def test_phase9_progress_reports_current_prewire_manifest(tmp_path):
     assert report.status == "PREWIRE_MANIFEST_CURRENT"
     assert report.prewire_ready is True
     assert report.prewire_manifest_current is True
+
+
+def test_phase9_progress_exposes_wallet_activity_scan_without_snapshots(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    record_phase9_pool_activity_page(
+        storage,
+        pool_address="pool-b",
+        next_before_signature="sig-b",
+        has_more=True,
+        signatures_scanned=25,
+        matching_transactions=4,
+        positions_discovered=3,
+    )
+    record_phase9_pool_activity_page(
+        storage,
+        pool_address="pool-a",
+        next_before_signature=None,
+        has_more=False,
+        signatures_scanned=12,
+        matching_transactions=2,
+        positions_discovered=1,
+    )
+
+    report = evaluate_phase9_progress(storage)
+
+    assert report.status == "NO_SNAPSHOTS"
+    assert [item.pool_address for item in report.wallet_activity_scans] == [
+        "pool-a",
+        "pool-b",
+    ]
+    first, second = report.wallet_activity_scans
+    assert first.backfill_exhausted is True
+    assert first.pages_scanned == 1
+    assert first.signatures_scanned == 12
+    assert second.backfill_exhausted is False
+    assert second.backfill_before_signature == "sig-b"
+    assert second.positions_discovered == 3
