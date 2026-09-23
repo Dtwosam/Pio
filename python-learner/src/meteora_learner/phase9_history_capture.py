@@ -136,10 +136,10 @@ def run_phase9_history_capture(
         for item in before.pools
         if item.additional_observations_needed > 0
     )
-    if deficient_pools:
-        attempted_pools = deficient_pools
-    elif continue_sampling_when_ready and before.plan_ready:
+    if continue_sampling_when_ready and before.plan_ready:
         attempted_pools = before.pools
+    elif deficient_pools:
+        attempted_pools = deficient_pools
     else:
         attempted_pools = ()
     items: list[Phase9HistoryCaptureItem] = []
