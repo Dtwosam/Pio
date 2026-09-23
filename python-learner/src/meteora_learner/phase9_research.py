@@ -10,12 +10,12 @@ from .adaptive_range_validation import (
     AdaptiveRangeValidationReport,
     validate_adaptive_range_walk_forward,
 )
+from .phase8_validation import audit_persisted_phase8_promotion
 from .market_regime import (
     DLMMRegimeCriteria,
     DLMMRegimeReport,
     classify_dlmm_regime,
 )
-from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .storage import Storage
 
 
@@ -112,10 +112,8 @@ def evaluate_phase9_research(
     if not pools:
         raise ValueError("at least one pool_address is required")
 
-    phase8_promoted = storage.phase_is_promoted(
-        PHASE8,
-        evidence_type=PHASE8_EVIDENCE_TYPE,
-    )
+    phase8_audit = audit_persisted_phase8_promotion(storage)
+    phase8_promoted = phase8_audit.current
 
     pool_reports: list[Phase9PoolResearch] = []
     for pool in pools:
@@ -181,7 +179,7 @@ def evaluate_phase9_research(
     checks = (
         (
             phase8_promoted,
-            "Phase 8 must be persistently promoted before Phase 9 research can qualify",
+            "Phase 8 promotion must still be current before Phase 9 research can qualify",
         ),
         (
             len(pool_reports) >= criteria.min_pools,
@@ -211,6 +209,11 @@ def evaluate_phase9_research(
         ),
     )
     reasons.extend(message for passed, message in checks if not passed)
+    if not phase8_promoted:
+        reasons.extend(
+            f"Phase 8 currentness: {reason}"
+            for reason in phase8_audit.reasons
+        )
     research_qualified = not reasons
 
     if not phase8_promoted:
