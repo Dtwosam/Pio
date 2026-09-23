@@ -27,6 +27,7 @@ from meteora_learner.phase_promotion import (
 )
 from meteora_learner.portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+    portfolio_candidate_artifact_sha256,
 )
 from meteora_learner.static_hedge import (
     STATIC_HEDGE_EVIDENCE_TYPE,
@@ -50,7 +51,14 @@ def promote_phase8(storage):
 
 
 def seed_portfolio_candidate_lineage(storage):
-    artifact_sha = "portfolio-deadbeef"
+    payload = {
+        "research_only": True,
+        "policy_actionable": False,
+        "source_inputs": [{"pool_address": "pool-a"}],
+        "assumptions": {"budget_context": "test"},
+        "comparison": {"candidates": [{"pool_address": "pool-a"}]},
+    }
+    artifact_sha = portfolio_candidate_artifact_sha256(payload)
     evidence_id = storage.save_advanced_edge_evidence(
         edge_type="PHASE9_PORTFOLIO_CANDIDATES_V1",
         pool_address="__PORTFOLIO_CANDIDATES__",
@@ -59,11 +67,7 @@ def seed_portfolio_candidate_lineage(storage):
         qualified=True,
         evidence={
             "artifact_sha256": artifact_sha,
-            "research_only": True,
-            "policy_actionable": False,
-            "source_inputs": [{"pool_address": "pool-a"}],
-            "assumptions": {"budget_context": "test"},
-            "comparison": {"candidates": [{"pool_address": "pool-a"}]},
+            **payload,
         },
     )
     return {
