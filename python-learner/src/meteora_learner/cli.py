@@ -2721,6 +2721,11 @@ def main() -> None:
         help="Optional timezone-aware timestamp; must be newer than each captured pool's latest snapshot",
     )
     phase9_history_run.add_argument(
+        "--continue-sampling-when-ready",
+        action="store_true",
+        help="Continue one cadence-guarded observation per selected pool after minimum Phase 9 history depth is already satisfied",
+    )
+    phase9_history_run.add_argument(
         "--require-ready",
         action="store_true",
     )
@@ -5766,6 +5771,9 @@ def main() -> None:
             ingest_observed_at=args.observed_at,
             min_observation_interval_seconds=(
                 args.min_observation_interval_seconds
+            ),
+            continue_sampling_when_ready=(
+                args.continue_sampling_when_ready
             ),
         )
         print(json.dumps(result.to_record(), indent=2))
