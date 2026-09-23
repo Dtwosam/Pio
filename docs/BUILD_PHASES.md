@@ -351,6 +351,7 @@ Built:
 - optional hardened systemd research-refresh timer offset behind source capture, with static tests preventing promotion, RPC capture, signing or LIVE-submit behavior from entering the scheduled research writer
 - shared SQLite Phase 9 maintenance lease serializing source capture and research refresh, with stale-lease recovery and a 30-minute lease around 20-minute bounded services
 - artifact-backed automatic refresh for static hedge and portfolio allocation when (and only when) a valid checksum-bound explicit-input artifact already exists; identical recomputations reuse evidence IDs instead of appending duplicates
+- freshness-bounded API pool ranking for Phase 9 cohort steering and chain onboarding, with a 3-hour live default, deterministic historical `as_of` cutoffs, future-row exclusion before per-pool ranking and chain-depth fallback when discovery is stale
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
