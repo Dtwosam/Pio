@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from .ml_training import MLV1Bundle
+from .phase_promotion import PHASE3, PHASE3_EVIDENCE_TYPE
 from .storage import Storage
 
 
@@ -123,8 +124,13 @@ def qualify_offline_challenger(
         raise ValueError("model is not in OFFLINE_CANDIDATE status")
     if not bool(getattr(validation, "offline_qualified", False)):
         raise ValueError("offline challenger has not passed validation")
+    if not storage.phase_is_promoted(
+        PHASE3,
+        evidence_type=PHASE3_EVIDENCE_TYPE,
+    ):
+        raise ValueError("Phase 3 deterministic policy is not persistently promoted")
     if not bool(getattr(validation, "phase3_ready", False)):
-        raise ValueError("Phase 3 deterministic policy is not promoted")
+        raise ValueError("offline validation was not evaluated with Phase 3 ready")
     if str(getattr(validation, "validation_start", "")) != str(
         raw.get("validation_start")
     ):
