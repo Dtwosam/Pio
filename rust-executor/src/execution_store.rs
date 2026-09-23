@@ -78,11 +78,12 @@ pub struct ExecutionIntentStore {
     path: PathBuf,
 }
 
-fn now_unix() -> Result<u64> {
-    Ok(SystemTime::now()
+fn now_unix() -> Result<i64> {
+    let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("system clock is before Unix epoch")?
-        .as_secs())
+        .as_secs();
+    i64::try_from(seconds).context("Unix timestamp exceeds SQLite integer range")
 }
 
 fn enum_text<T: Serialize>(value: &T) -> Result<String> {
@@ -162,11 +163,11 @@ impl ExecutionIntentStore {
             ) VALUES (?, ?, ?, ?, ?, 'RECEIVED', ?, ?)
             "#,
             params![
-                decision_id,
-                mode,
-                action,
-                request.proposal.pool_address,
-                canonical,
+                decision_id.as_str(),
+                mode.as_str(),
+                action.as_str(),
+                request.proposal.pool_address.as_str(),
+                canonical.as_str(),
                 now,
                 now,
             ],
@@ -316,7 +317,6 @@ mod tests {
     use super::*;
     use crate::models::{Action, Mode, TradeProposal};
     use serde_json::json;
-    use solana_sdk::transaction::VersionedTransaction;
     use uuid::Uuid;
 
     fn db_path() -> PathBuf {
