@@ -23,7 +23,28 @@ pub struct TransactionEventSnapshot {
     pub signature: String,
     pub slot: u64,
     pub block_time: Option<i64>,
+    pub network_fee_lamports: Option<u64>,
+    pub compute_units_consumed: Option<u64>,
+    pub succeeded: Option<bool>,
     pub events: Vec<TransactionEventRecord>,
+}
+
+fn extract_transaction_costs(value: &Value) -> (Option<u64>, Option<u64>, Option<bool>) {
+    let meta = value.pointer("/transaction/meta");
+    let fee = meta
+        .and_then(|value| value.get("fee"))
+        .and_then(Value::as_u64);
+    let compute_units = meta
+        .and_then(|value| {
+            value
+                .get("computeUnitsConsumed")
+                .or_else(|| value.get("compute_units_consumed"))
+        })
+        .and_then(Value::as_u64);
+    let succeeded = meta
+        .and_then(|value| value.get("err"))
+        .map(Value::is_null);
+    (fee, compute_units, succeeded)
 }
 
 fn decode_inner_events(value: &Value) -> Result<Vec<TransactionEventRecord>> {
@@ -93,11 +114,16 @@ pub async fn inspect_transaction_events(
 
     let value = serde_json::to_value(&confirmed).context("failed to serialize transaction")?;
     let events = decode_inner_events(&value)?;
+    let (network_fee_lamports, compute_units_consumed, succeeded) =
+        extract_transaction_costs(&value);
 
     Ok(TransactionEventSnapshot {
         signature: signature.to_string(),
         slot: confirmed.slot,
         block_time: confirmed.block_time,
+        network_fee_lamports,
+        compute_units_consumed,
+        succeeded,
         events,
     })
 }
@@ -159,6 +185,23 @@ mod tests {
                 amount_y: "20".to_string(),
                 active_bin_id: 5,
             })
+        );
+    }
+
+    #[test]
+    fn extracts_transaction_fee_and_compute_units() {
+        let value = serde_json::json!({
+            "transaction": {
+                "meta": {
+                    "fee": 12345,
+                    "computeUnitsConsumed": 67890,
+                    "err": null
+                }
+            }
+        });
+        assert_eq!(
+            extract_transaction_costs(&value),
+            (Some(12345), Some(67890), Some(true))
         );
     }
 
