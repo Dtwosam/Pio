@@ -224,6 +224,23 @@ CREATE TABLE IF NOT EXISTS chain_transaction_snapshots (
 CREATE INDEX IF NOT EXISTS idx_chain_tx_snapshot_time
 ON chain_transaction_snapshots(block_time, slot);
 
+CREATE TABLE IF NOT EXISTS chain_add_liquidity_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    instruction_index INTEGER NOT NULL,
+    instruction_type TEXT NOT NULL,
+    requested_amount_x TEXT NOT NULL,
+    requested_amount_y TEXT NOT NULL,
+    observed_active_id INTEGER,
+    max_active_bin_slippage INTEGER,
+    raw_json TEXT NOT NULL,
+    UNIQUE(signature, instruction_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chain_add_request_signature
+ON chain_add_liquidity_requests(signature, instruction_index);
+
 CREATE TABLE IF NOT EXISTS chain_transaction_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
@@ -931,6 +948,9 @@ class Storage:
         network_fee_raw = snapshot.get("network_fee_lamports")
         compute_units_raw = snapshot.get("compute_units_consumed")
         succeeded_raw = snapshot.get("succeeded")
+        add_requests = snapshot.get("add_requests") or []
+        if not isinstance(add_requests, list):
+            raise ValueError("add_requests must be a list")
         events = snapshot.get("events")
         if not isinstance(events, list):
             raise ValueError("transaction events must be a list")
@@ -1042,6 +1062,51 @@ class Storage:
                     json.dumps(snapshot, separators=(",", ":")),
                 ),
             )
+            request_rows = []
+            for request in add_requests:
+                if not isinstance(request, dict):
+                    raise ValueError("add request entry must be an object")
+                request_rows.append(
+                    (
+                        observed_at,
+                        signature,
+                        int(request["instruction_index"]),
+                        str(request["instruction_type"]),
+                        str(request["requested_amount_x"]),
+                        str(request["requested_amount_y"]),
+                        (
+                            int(request["observed_active_id"])
+                            if request.get("observed_active_id") is not None
+                            else None
+                        ),
+                        (
+                            int(request["max_active_bin_slippage"])
+                            if request.get("max_active_bin_slippage") is not None
+                            else None
+                        ),
+                        json.dumps(request, separators=(",", ":")),
+                    )
+                )
+            if request_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO chain_add_liquidity_requests(
+                        observed_at, signature, instruction_index,
+                        instruction_type, requested_amount_x, requested_amount_y,
+                        observed_active_id, max_active_bin_slippage, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(signature, instruction_index) DO UPDATE SET
+                        observed_at=excluded.observed_at,
+                        instruction_type=excluded.instruction_type,
+                        requested_amount_x=excluded.requested_amount_x,
+                        requested_amount_y=excluded.requested_amount_y,
+                        observed_active_id=excluded.observed_active_id,
+                        max_active_bin_slippage=excluded.max_active_bin_slippage,
+                        raw_json=excluded.raw_json
+                    """,
+                    request_rows,
+                )
+
             conn.executemany(
                 """
                 INSERT INTO chain_transaction_events(
@@ -1190,6 +1255,9 @@ class Storage:
                 FROM chain_transaction_snapshots
                 """
             ).fetchone()
+            add_requests = conn.execute(
+                "SELECT COUNT(*) FROM chain_add_liquidity_requests"
+            ).fetchone()[0]
             failures = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_checks WHERE status = 'FAIL'"
             ).fetchone()[0]
@@ -1219,6 +1287,7 @@ class Storage:
             "chain_transaction_count": chain_tx_events[1],
             "chain_transaction_snapshots": chain_tx_snapshots[0],
             "transaction_fee_samples": chain_tx_snapshots[1] or 0,
+            "chain_add_liquidity_requests": add_requests,
             "quality_failures": failures,
             "collection_errors": errors,
         }
