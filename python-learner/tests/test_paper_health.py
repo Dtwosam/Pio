@@ -255,3 +255,57 @@ def test_health_prometheus_rendering_exposes_core_gauges(tmp_path):
         'pio_paper_scheduler_lease_busy_total'
         '{account="paper"} 1'
     ) in text
+
+
+def test_health_flags_scheduler_owner_without_lease_deadline(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_open(storage)
+    storage.save_chain_pool_snapshot(
+        chain_payload(),
+        observed_at="2026-09-23T09:59:00+00:00",
+    )
+    save_token_quote(
+        storage,
+        token_mint="y",
+        quote_per_atomic=1.0,
+        source="TEST",
+        observed_at="2026-09-23T09:59:00+00:00",
+    )
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO paper_ticks(
+                tick_id, account_id, started_at, finished_at, status
+            ) VALUES (
+                'tick', 'paper', '2026-09-23T09:59:00+00:00',
+                '2026-09-23T09:59:10+00:00', 'COMPLETE'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO paper_scheduler_state(
+                account_id, owner_id, lease_until, heartbeat_at,
+                last_tick_id, last_started_at, last_finished_at,
+                last_status, consecutive_failures, total_ticks, updated_at
+            ) VALUES (
+                'paper', 'orphan-worker', NULL,
+                '2026-09-23T09:59:00+00:00', 'tick',
+                '2026-09-23T09:59:00+00:00',
+                '2026-09-23T09:59:10+00:00', 'RUNNING', 0, 1,
+                '2026-09-23T09:59:10+00:00'
+            )
+            """
+        )
+
+    report = build_paper_health(
+        storage,
+        account_id="paper",
+        as_of=NOW,
+    )
+
+    assert report.status == "UNHEALTHY"
+    assert any(
+        "without a lease deadline" in reason
+        for reason in report.reasons
+    )
