@@ -315,3 +315,83 @@ class ResearchStore:
             conn.close()
         return [str(row["position_address"]) for row in rows]
 
+    def load_position_history_events(
+        self,
+        position_address: str,
+        *,
+        event_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if event_type is None:
+                rows = conn.execute(
+                    """
+                    SELECT observed_at, position_address, signature, ix_index,
+                           event_type, block_time, slot, pool_address,
+                           user_address, token_x, token_y, amount_x, amount_y,
+                           amount_x_usd, amount_y_usd, total_usd, created_at
+                    FROM position_event_history
+                    WHERE position_address = ?
+                    ORDER BY block_time ASC, ix_index ASC, id ASC
+                    """,
+                    (position_address,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT observed_at, position_address, signature, ix_index,
+                           event_type, block_time, slot, pool_address,
+                           user_address, token_x, token_y, amount_x, amount_y,
+                           amount_x_usd, amount_y_usd, total_usd, created_at
+                    FROM position_event_history
+                    WHERE position_address = ? AND event_type = ?
+                    ORDER BY block_time ASC, ix_index ASC, id ASC
+                    """,
+                    (position_address, event_type),
+                ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
+    def load_transaction_events(
+        self,
+        signature: str,
+        *,
+        parent_ix_index: int | None = None,
+    ) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if parent_ix_index is None:
+                rows = conn.execute(
+                    """
+                    SELECT observed_at, signature, event_index, parent_ix_index,
+                           slot, block_time, event_type, lb_pair, from_address,
+                           position_address, active_bin_id, bin_id, amount_x,
+                           amount_y, token_x_fee_amount, token_y_fee_amount,
+                           protocol_token_x_fee_amount,
+                           protocol_token_y_fee_amount
+                    FROM chain_transaction_events
+                    WHERE signature = ?
+                    ORDER BY event_index ASC
+                    """,
+                    (signature,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT observed_at, signature, event_index, parent_ix_index,
+                           slot, block_time, event_type, lb_pair, from_address,
+                           position_address, active_bin_id, bin_id, amount_x,
+                           amount_y, token_x_fee_amount, token_y_fee_amount,
+                           protocol_token_x_fee_amount,
+                           protocol_token_y_fee_amount
+                    FROM chain_transaction_events
+                    WHERE signature = ? AND parent_ix_index = ?
+                    ORDER BY event_index ASC
+                    """,
+                    (signature, parent_ix_index),
+                ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
