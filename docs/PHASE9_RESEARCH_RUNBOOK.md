@@ -933,18 +933,36 @@ SOLANA_RPC_URL=<RPC_URL> \
 pio phase9-wallet-flow-capture-run --pool <POOL> --require-ready
 ```
 
-The collector prioritizes owners and positions not already represented in the
-active research window, persists only normalized real lifecycle events through
-the existing idempotent event store, isolates per-position API failures, and
-stops once the event/user source threshold is satisfied. Source readiness is
-computed from the same latest-`lookback_events` window used by
-`wallet-flow-research`, not lifetime totals.
+The collector starts from current on-chain PositionV2 addresses and owners.
+By default, it then expands up to 25 of those current owners through Meteora's
+pool position-PnL endpoint with `status=all`, following at most 3 pages per
+owner. That adds both open and closed positions for the discovered owners
+without guessing addresses. Candidates are round-robin ordered across owners so
+one wallet with many old positions cannot consume the full per-run position
+budget. Per-owner expansion failures and per-position history failures are
+isolated.
 
-This is intentionally labeled
-`CURRENT_ONCHAIN_POSITION_COHORT`. Current PositionV2 accounts do not prove a
-complete historical census of every closed position that ever existed in the
-pool. If the bounded cohort cannot reach source thresholds, the command reports
-that limitation rather than synthesizing users/events.
+Use `--skip-owner-position-expansion` to keep the original current-position
+cohort only, or tune `--owner-expansion-limit` and
+`--owner-position-max-pages` to bound the public API work. The all-in-one
+source pass exposes the equivalent
+`--skip-wallet-owner-position-expansion`,
+`--wallet-owner-expansion-limit` and
+`--wallet-owner-position-max-pages` controls.
+
+The collector persists only normalized real lifecycle events through the
+existing idempotent event store and stops once the event/user source threshold
+is satisfied. Source readiness is computed from the same latest-
+`lookback_events` window used by `wallet-flow-research`, not lifetime
+totals.
+
+A successful owner expansion is labeled
+`CURRENT_OWNER_ALL_POSITION_COHORT`; otherwise the scope remains
+`CURRENT_ONCHAIN_POSITION_COHORT`. Neither label means a complete historical
+pool census. Owners who have no current on-chain PositionV2 account can still
+be absent even if they had closed positions in the past. If the bounded cohort
+cannot reach source thresholds, the command reports that limitation rather than
+synthesizing users/events.
 
 Meeting source counts is only an input gate. It does **not** qualify wallet
 flow. `wallet-flow-research` still applies the configured user-concentration
