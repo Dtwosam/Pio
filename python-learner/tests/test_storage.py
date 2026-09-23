@@ -146,3 +146,92 @@ def test_existing_database_is_migrated_with_new_columns(tmp_path):
         "collect_fee_mode", "is_blacklisted", "pool_created_at"
     } <= pool_columns
     assert "protocol_fees" in volume_columns
+
+
+
+def test_phase9_source_tables_are_append_only(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    observed = "2026-09-23T12:00:00+00:00"
+    token_program = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+    storage.save_chain_pool_snapshot(
+        {
+            "pool_address": "pool",
+            "active_bin_id": 0,
+            "bin_step": 25,
+            "token_x_mint": "x",
+            "token_y_mint": "y",
+            "token_x_program": token_program,
+            "token_y_program": token_program,
+            "bin_arrays": [],
+        },
+        observed_at=observed,
+    )
+    storage.save_token_mint_snapshot(
+        {
+            "mint_address": "x",
+            "token_program": token_program,
+            "capture_slot_start": 1,
+            "capture_slot_end": 2,
+            "supply": "1000",
+            "decimals": 6,
+            "is_initialized": True,
+            "mint_authority": None,
+            "freeze_authority": None,
+            "data_len": 82,
+            "token_2022_extension_data_len": 0,
+            "has_token_2022_extension_data": False,
+        },
+        observed_at=observed,
+    )
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO bin_liquidity_snapshots(
+                observed_at, pool_address, bin_array_index,
+                bin_id, price, amount_x, amount_y,
+                liquidity_supply, fee_amount_x_per_token_stored,
+                fee_amount_y_per_token_stored
+            ) VALUES (?, 'pool', 0, 0, '1', '1', '1', '1', '0', '0')
+            """,
+            (observed,),
+        )
+        conn.execute(
+            """
+            INSERT INTO position_event_history(
+                observed_at, position_address, signature, ix_index,
+                event_type, block_time, slot, pool_address,
+                user_address, token_x, token_y,
+                amount_x, amount_y, amount_x_usd, amount_y_usd,
+                total_usd, created_at, raw_json
+            ) VALUES (
+                ?, 'position', 'signature', 0, 'ADD_LIQUIDITY',
+                1, 1, 'pool', 'user', 'x', 'y',
+                '1', '1', '1', '1', '2', ?, '{}'
+            )
+            """,
+            (observed, observed),
+        )
+
+        for table in (
+            "chain_pool_snapshots",
+            "token_mint_snapshots",
+            "bin_liquidity_snapshots",
+            "position_event_history",
+        ):
+            with pytest.raises(
+                sqlite3.IntegrityError,
+                match="immutable",
+            ):
+                conn.execute(
+                    f"UPDATE {table} SET id = id WHERE id = "
+                    f"(SELECT MIN(id) FROM {table})"
+                )
+            with pytest.raises(
+                sqlite3.IntegrityError,
+                match="immutable",
+            ):
+                conn.execute(
+                    f"DELETE FROM {table} WHERE id = "
+                    f"(SELECT MIN(id) FROM {table})"
+                )
