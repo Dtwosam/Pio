@@ -324,6 +324,87 @@ def build_phase9_work_queue(
             )
         )
 
+    mint_lineage_invalid = any(
+        "authoritative pool and mint snapshot IDs" in reason
+        for reason in bundle.reasons
+    )
+    if mint_lineage_invalid:
+        for pool in bundle.mint_risk.qualified_pools:
+            required_mints = _latest_pool_mints(
+                storage,
+                pool_address=pool,
+            )
+            missing_mints = [
+                mint
+                for mint in required_mints
+                if not _mint_snapshot_exists(
+                    storage,
+                    mint_address=mint,
+                )
+            ]
+            if missing_mints:
+                rpc = rpc_url if rpc_url is not None else "<RPC_URL>"
+                for mint in missing_mints:
+                    filename = f"mint-{mint}.json"
+                    items.append(
+                        Phase9WorkItem(
+                            task_type="MINT_SNAPSHOT_REPAIR",
+                            scope=mint,
+                            reason=(
+                                f"qualified mint-risk evidence for {pool} "
+                                "cannot resolve authoritative snapshot lineage"
+                            ),
+                            shell_command=(
+                                "meteora-executor inspect-mint "
+                                + _q(rpc)
+                                + " "
+                                + _q(mint)
+                                + " > "
+                                + _q(filename)
+                                + " && pio mint-snapshot-ingest --file "
+                                + _q(filename)
+                            ),
+                        )
+                    )
+            else:
+                items.append(
+                    Phase9WorkItem(
+                        task_type="MINT_RISK_REPAIR",
+                        scope=pool,
+                        reason=(
+                            "qualified mint-risk evidence is not bound to "
+                            "valid authoritative snapshot IDs"
+                        ),
+                        shell_command=(
+                            "pio mint-risk-research --pool "
+                            + _q(pool)
+                            + " --persist --require-qualified"
+                        ),
+                    )
+                )
+
+    wallet_lineage_invalid = any(
+        "immutable source event IDs and SHA-256" in reason
+        for reason in bundle.reasons
+    )
+    if wallet_lineage_invalid:
+        for pool in bundle.wallet_flow.qualified_pools:
+            items.append(
+                Phase9WorkItem(
+                    task_type="WALLET_FLOW_REPAIR",
+                    scope=pool,
+                    reason=(
+                        "qualified wallet-flow evidence does not reproduce "
+                        "from its persisted source-event window"
+                    ),
+                    shell_command=(
+                        "pio wallet-flow-research --pool "
+                        + _q(pool)
+                        + " --persist --require-qualified"
+                    ),
+                )
+            )
+
     if (
         bundle.static_hedge.qualified_records
         < criteria.min_static_hedge_pools
@@ -353,6 +434,34 @@ def build_phase9_work_queue(
                     "portfolio allocation requires a fixed multi-pool "
                     "candidate corpus plus explicit account-state and quote-"
                     "budget assumptions"
+                ),
+                shell_command=(
+                    "pio multi-pool-research "
+                    "--file <POOL_INPUTS_JSON> "
+                    "--equity <EQUITY> --cash <CASH> "
+                    "--deployed <DEPLOYED> --drawdown-bps <BPS> "
+                    "--persist-phase9-candidates "
+                    "> phase9-multi-pool.json && "
+                    "pio portfolio-allocation-research "
+                    "--file phase9-multi-pool.json "
+                    "--budget-quote <QUOTE> "
+                    "--persist --require-qualified"
+                ),
+            )
+        )
+
+    allocation_lineage_invalid = any(
+        "immutable candidate-artifact lineage" in reason
+        for reason in bundle.reasons
+    )
+    if allocation_lineage_invalid:
+        items.append(
+            Phase9WorkItem(
+                task_type="PORTFOLIO_ALLOCATION_REPAIR",
+                scope="REPRODUCIBLE_CANDIDATE_PIPELINE",
+                reason=(
+                    "qualified portfolio-allocation evidence is missing "
+                    "valid immutable candidate-artifact lineage"
                 ),
                 shell_command=(
                     "pio multi-pool-research "
@@ -404,6 +513,35 @@ def build_phase9_work_queue(
                     shell_command=None,
                 )
             )
+
+    bandit_lineage_invalid = any(
+        "checksum-verified retraining dataset lineage" in reason
+        for reason in bundle.reasons
+    )
+    if bandit_lineage_invalid:
+        cycle_id = _latest_retraining_dataset_cycle(storage)
+        items.append(
+            Phase9WorkItem(
+                task_type="CONTEXTUAL_BANDIT_REPAIR",
+                scope=(
+                    cycle_id
+                    if cycle_id is not None
+                    else "RETRAINING_DATASET_REQUIRED"
+                ),
+                reason=(
+                    "qualified contextual-bandit evidence is not bound to "
+                    "valid retraining-cycle dataset lineage"
+                ),
+                shell_command=(
+                    "pio contextual-bandit-cycle-research "
+                    "--cycle-id "
+                    + _q(cycle_id)
+                    + " --persist --require-qualified"
+                    if cycle_id is not None
+                    else None
+                ),
+            )
+        )
 
     if bundle.research_ready and not promotion.promotion_ready:
         if promotion.research_bundle_evidence_id is None:
