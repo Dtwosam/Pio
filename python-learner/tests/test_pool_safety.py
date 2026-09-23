@@ -76,7 +76,7 @@ def test_pool_safety_accepts_only_fully_observed_safe_pool(tmp_path):
             min_chain_observations=2,
             max_dynamic_fee_pct=1.0,
         ),
-        as_of="2026-09-23T00:00:00+00:00",
+        as_of="2026-09-23T00:05:00+00:00",
     )
 
     assert report.pools_seen == 3
@@ -141,3 +141,110 @@ def test_pool_safety_rejects_stale_normalized_snapshot(tmp_path):
     assert assessment.accepted is False
     assert assessment.snapshot_age_seconds == 600
     assert any("snapshot age" in reason for reason in assessment.rejection_reasons)
+
+
+def test_pool_safety_as_of_uses_only_pre_cutoff_api_and_chain_state(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    save_api_pool(
+        storage,
+        "pool",
+        tvl=100000,
+        volume=20000,
+        blacklisted=False,
+        observed_at="2026-09-23T10:00:00+00:00",
+    )
+    save_api_pool(
+        storage,
+        "pool",
+        tvl=1,
+        volume=1,
+        blacklisted=True,
+        observed_at="2026-09-23T12:00:00+00:00",
+    )
+    save_chain(
+        storage,
+        "pool",
+        "2026-09-23T09:00:00+00:00",
+    )
+    save_chain(
+        storage,
+        "pool",
+        "2026-09-23T10:00:00+00:00",
+    )
+    # A future chain row has unsupported token programs and must not leak
+    # into the historical safety evaluation.
+    storage.save_chain_pool_snapshot(
+        {
+            "pool_address": "pool",
+            "active_bin_id": 0,
+            "bin_step": 25,
+            "token_x_mint": "x",
+            "token_y_mint": "y",
+            "token_x_program": "future-unsupported",
+            "token_y_program": "future-unsupported",
+            "base_fee_rate": "0",
+            "variable_fee_rate": "0",
+            "total_fee_rate": "0",
+            "deposit_total_fee_rate": "0",
+            "protocol_share_bps": 0,
+            "collect_fee_mode": 0,
+            "bin_arrays": [],
+        },
+        observed_at="2026-09-23T12:00:00+00:00",
+    )
+
+    report = screen_pool_universe(
+        str(storage.path),
+        config=PoolSafetyConfig(
+            min_tvl_usd=50000,
+            min_volume_24h_usd=10000,
+            min_pool_age_hours=0,
+            min_chain_observations=2,
+            max_dynamic_fee_pct=1.0,
+            max_pool_snapshot_age_seconds=3600,
+        ),
+        as_of="2026-09-23T10:30:00+00:00",
+    )
+
+    assert report.as_of == "2026-09-23T10:30:00+00:00"
+    assert report.pools_seen == 1
+    assessment = report.assessments[0]
+    assert assessment.accepted is True
+    assert assessment.tvl_usd == 100000
+    assert assessment.volume_24h_usd == 20000
+    assert assessment.is_blacklisted is False
+    assert assessment.standard_spl is True
+    assert assessment.chain_observations == 2
+    assert assessment.snapshot_age_seconds == 1800
+
+
+def test_pool_safety_as_of_excludes_pool_with_only_future_api_snapshot(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    save_api_pool(
+        storage,
+        "future-pool",
+        observed_at="2026-09-23T12:00:00+00:00",
+    )
+
+    try:
+        screen_pool_universe(
+            str(storage.path),
+            config=PoolSafetyConfig(
+                min_tvl_usd=0,
+                min_volume_24h_usd=0,
+                min_pool_age_hours=0,
+                min_chain_observations=0,
+                max_dynamic_fee_pct=None,
+            ),
+            as_of="2026-09-23T10:00:00+00:00",
+        )
+    except ValueError as exc:
+        assert "no normalized pool snapshots" in str(exc)
+    else:
+        raise AssertionError(
+            "expected future-only pool universe to be excluded"
+        )
