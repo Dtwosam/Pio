@@ -147,13 +147,15 @@ Built:
 - automatic account-level discovery of open chain-bound paper positions
 - stale-first capped portfolio scheduling
 - explicit token-Y quote-map requirement with missing-quote skips
+- ledger-derived Phase 3 paper entry workflow
+- atomic paper position + ENTER event + counterfactual chain binding
+- preflight counterfactual validation before capital debit
 - paper cohort performance metrics
 - ML paper challenger versus deterministic baseline validation
 - stored paper evidence required for champion promotion
 
 Still needed:
 - unattended collector -> portfolio-cycle scheduling
-- automatic atomic binding of newly authorized Phase 3 plans into chain paper state
 - general external quote source for non-X/Y reward tokens and non-stable quote assets
 - long endurance/restart runs across many observations and positions
 - extended paper validation on real live observations
