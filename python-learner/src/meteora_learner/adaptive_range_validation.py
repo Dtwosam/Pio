@@ -12,6 +12,9 @@ from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .storage import Storage
 
 
+ADAPTIVE_RANGE_WALK_FORWARD_EVIDENCE_TYPE = "ADAPTIVE_RANGE_WALK_FORWARD_V1"
+
+
 @dataclass(frozen=True)
 class AdaptiveRangeValidationCriteria:
     fixed_half_width_bins: int = 5
@@ -276,4 +279,19 @@ def validate_adaptive_range_walk_forward(
         research_qualified=qualified,
         reasons=tuple(reasons),
         decision_results=tuple(results),
+    )
+
+
+def persist_adaptive_range_validation(
+    storage: Storage,
+    *,
+    report: AdaptiveRangeValidationReport,
+) -> int:
+    return storage.save_advanced_edge_evidence(
+        edge_type=ADAPTIVE_RANGE_WALK_FORWARD_EVIDENCE_TYPE,
+        pool_address=report.pool_address,
+        as_of=report.as_of,
+        status=report.status,
+        qualified=report.research_qualified,
+        evidence=report.to_record(),
     )
