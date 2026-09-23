@@ -150,7 +150,12 @@ def audit_paper_ledger(
                 ZERO,
             )
             realized_total = sum(
-                (_d(event[4]) for event in event_rows),
+                (
+                    _d(event[4])
+                    if event[4] is not None
+                    else ZERO
+                    for event in event_rows
+                ),
                 ZERO,
             )
             if enter_count != 1:
