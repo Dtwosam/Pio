@@ -28,6 +28,20 @@ def _d(value: float | int | str | Decimal) -> Decimal:
 
 
 @dataclass(frozen=True)
+class CounterfactualBinding:
+    position_id: str
+    pool_address: str
+    entry_observed_at: str
+    amount_x: int
+    amount_y: int
+    max_share_bps: int
+    favor_x_active: bool
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class PaperChainBinding:
     position_id: str
     pool_address: str
@@ -130,6 +144,23 @@ def _last_applied(storage: Storage, position_id: str) -> tuple[str | None, int, 
         str(last[0]) if last is not None else None,
         int(totals[0] or 0),
         int(totals[1] or 0),
+    )
+
+
+def counterfactual_binding(
+    storage: Storage,
+    *,
+    position_id: str,
+) -> CounterfactualBinding:
+    base = _base_row(storage, position_id)
+    return CounterfactualBinding(
+        position_id=position_id,
+        pool_address=str(base["pool_address"]),
+        entry_observed_at=str(base["entry_observed_at"]),
+        amount_x=int(str(base["amount_x_atomic"])),
+        amount_y=int(str(base["amount_y_atomic"])),
+        max_share_bps=int(base["max_share_bps"]),
+        favor_x_active=bool(base["favor_x_active"]),
     )
 
 
@@ -320,6 +351,21 @@ def value_paper_position_from_chain(
     )
 
 
+def prepare_chain_valuation(
+    storage: Storage,
+    *,
+    position_id: str,
+    observed_at: str,
+    token_y_quote_per_atomic: float,
+) -> PaperChainValuation:
+    return value_paper_position_from_chain(
+        storage,
+        position_id=position_id,
+        observed_at=observed_at,
+        token_y_quote_per_atomic=token_y_quote_per_atomic,
+    )
+
+
 def apply_chain_paper_observation(
     storage: Storage,
     *,
@@ -369,4 +415,30 @@ def apply_chain_paper_observation(
         valuation=valuation,
         executed_action=applied.executed_action,
         detail=applied.to_record(),
+    )
+
+
+
+def apply_prepared_chain_valuation(
+    storage: Storage,
+    *,
+    position_id: str,
+    observed_at: str,
+    token_y_quote_per_atomic: float,
+    pool_safe: bool,
+    estimated_exit_cost_quote: float = 0.0,
+    rebalance_cost_quote: float | None = None,
+    emergency_exit: bool = False,
+    config: PositionManagementConfig = PositionManagementConfig(),
+) -> PaperChainObservationResult:
+    return apply_chain_paper_observation(
+        storage,
+        position_id=position_id,
+        observed_at=observed_at,
+        token_y_quote_per_atomic=token_y_quote_per_atomic,
+        pool_safe=pool_safe,
+        estimated_exit_cost_quote=estimated_exit_cost_quote,
+        rebalance_cost_quote=rebalance_cost_quote,
+        emergency_exit=emergency_exit,
+        config=config,
     )
