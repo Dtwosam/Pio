@@ -16,6 +16,9 @@ from .phase9_policy_rollback_simulation import (
     audit_persisted_phase9_policy_rollback_simulation,
 )
 from .phase9_policy_prewire import evaluate_phase9_policy_prewire_audit
+from .phase9_policy_manifest import (
+    audit_persisted_phase9_policy_prewire_manifest,
+)
 from .storage import Storage
 
 
@@ -32,11 +35,14 @@ class Phase9PolicyStatus:
     rollback_required: bool | None
     rollback_status: str | None
     prewire_ready: bool
+    prewire_manifest_current: bool
+    prewire_manifest_sha256: str | None
     authorization: dict[str, Any]
     controlled_validation: dict[str, Any]
     rollout_simulation: dict[str, Any]
     rollback_simulation: dict[str, Any]
     prewire: dict[str, Any]
+    prewire_manifest: dict[str, Any]
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -52,6 +58,7 @@ def evaluate_phase9_policy_status(
     rollout = audit_persisted_phase9_policy_rollout_simulation(storage)
     rollback = audit_persisted_phase9_policy_rollback_simulation(storage)
     prewire = evaluate_phase9_policy_prewire_audit(storage)
+    manifest = audit_persisted_phase9_policy_prewire_manifest(storage)
 
     return Phase9PolicyStatus(
         research_only=True,
@@ -65,9 +72,12 @@ def evaluate_phase9_policy_status(
         rollback_required=rollback.rollback_required,
         rollback_status=rollback.status,
         prewire_ready=prewire.ready,
+        prewire_manifest_current=manifest.current,
+        prewire_manifest_sha256=manifest.manifest_sha256,
         authorization=authorization.to_record(),
         controlled_validation=controlled.to_record(),
         rollout_simulation=rollout.to_record(),
         rollback_simulation=rollback.to_record(),
         prewire=prewire.to_record(),
+        prewire_manifest=manifest.to_record(),
     )
