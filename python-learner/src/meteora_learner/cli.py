@@ -76,6 +76,7 @@ from .position_policy import PositionManagementConfig, decide_position_action
 from .portfolio_allocation import (
     PortfolioAllocationCriteria,
     persist_portfolio_allocation_research,
+    persist_portfolio_candidate_research,
     research_portfolio_allocation,
 )
 from .paper_account import (
@@ -1461,6 +1462,10 @@ def main() -> None:
     )
     multi_pool.add_argument("--max-share-bps", type=int, default=500)
     multi_pool.add_argument("--favor-x-active", action="store_true")
+    multi_pool.add_argument(
+        "--persist-phase9-candidates",
+        action="store_true",
+    )
 
     portfolio_allocation = subparsers.add_parser(
         "portfolio-allocation-research",
@@ -3488,7 +3493,34 @@ def main() -> None:
             max_share_bps=args.max_share_bps,
             favor_x_in_active_bin=args.favor_x_active,
         )
-        print(json.dumps(result.to_record(), indent=2))
+        output = {
+            "comparison": result.to_record(),
+            "candidate_evidence_id": None,
+            "candidate_evidence_sha256": None,
+        }
+        if args.persist_phase9_candidates:
+            evidence_id, digest = persist_portfolio_candidate_research(
+                Storage(settings.database_path),
+                comparison=result,
+                source_inputs=raw_inputs,
+                assumptions={
+                    "account_equity_quote": args.equity,
+                    "cash_quote": args.cash,
+                    "current_deployed_quote": args.deployed,
+                    "portfolio_drawdown_bps": args.drawdown_bps,
+                    "observation_limit": args.observations,
+                    "half_widths": list(args.half_widths),
+                    "center_offsets": list(args.center_offsets),
+                    "strategies": [
+                        item.value for item in args.strategies
+                    ],
+                    "max_share_bps": args.max_share_bps,
+                    "favor_x_in_active_bin": args.favor_x_active,
+                },
+            )
+            output["candidate_evidence_id"] = evidence_id
+            output["candidate_evidence_sha256"] = digest
+        print(json.dumps(output, indent=2))
         return
 
     if args.command == "portfolio-allocation-research":
@@ -3497,6 +3529,19 @@ def main() -> None:
         with open(args.file, "r", encoding="utf-8") as handle:
             raw = json.load(handle)
         raw_candidates = _portfolio_candidate_records(raw)
+        candidate_lineage = None
+        if isinstance(raw, dict):
+            evidence_id = raw.get("candidate_evidence_id")
+            digest = raw.get("candidate_evidence_sha256")
+            if evidence_id is not None or digest is not None:
+                if evidence_id is None or not str(digest or "").strip():
+                    raise ValueError(
+                        "portfolio candidate lineage requires both evidence ID and SHA-256"
+                    )
+                candidate_lineage = {
+                    "candidate_evidence_id": int(evidence_id),
+                    "candidate_evidence_sha256": str(digest),
+                }
         candidates = tuple(
             CrossPoolResearchCandidate(
                 rank=int(item["rank"]),
@@ -3541,6 +3586,7 @@ def main() -> None:
             storage,
             comparison=comparison,
             budget_quote=args.budget_quote,
+            candidate_lineage=candidate_lineage,
             criteria=PortfolioAllocationCriteria(
                 max_positions=args.max_positions,
                 min_positions=args.min_positions,
