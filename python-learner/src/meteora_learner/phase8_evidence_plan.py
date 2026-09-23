@@ -10,6 +10,7 @@ from .phase8_evidence_status import (
 )
 from .phase8_validation import Phase8PromotionCriteria
 from .phase8_retrain_inputs import audit_phase8_retrain_inputs
+from .phase8_offline_retraining import phase8_cycle_dataset_lineage
 from .storage import Storage, utc_now_iso
 
 
@@ -154,36 +155,87 @@ def build_phase8_evidence_plan(
         challenger_status = status.active_cycle_challenger_status
 
         if cycle_status == "PLANNED" and challenger is None:
-            items.append(
-                _item(
-                    20,
-                    "RETRAIN_TRAINING_INPUTS_REQUIRED",
-                    cycle_scope,
-                    (
-                        "active retraining cycle is PLANNED without a "
-                        "challenger. Training requires the exact cycle-bound "
-                        "dataset file plus an explicit model_id and artifact "
-                        "directory"
-                    ),
+            try:
+                phase8_cycle_dataset_lineage(
+                    storage,
+                    cycle_id=cycle_scope,
                 )
-            )
+            except ValueError as exc:
+                items.append(
+                    _item(
+                        20,
+                        "RETRAIN_TRAINING_INPUTS_REQUIRED",
+                        cycle_scope,
+                        (
+                            "active retraining cycle is PLANNED without a "
+                            "challenger, but its checksum-bound dataset "
+                            "lineage is not usable: "
+                            + str(exc)
+                        ),
+                    )
+                )
+            else:
+                items.append(
+                    _item(
+                        20,
+                        "RETRAIN_OFFLINE_TRAIN_READY",
+                        cycle_scope,
+                        (
+                            "active PLANNED cycle has a checksum-verified "
+                            "dataset. Deterministic offline challenger "
+                            "training can run without PAPER or champion "
+                            "promotion"
+                        ),
+                        operator_required=False,
+                        shell_command=(
+                            "pio phase8-retrain-train-run --cycle-id "
+                            + cycle_scope
+                        ),
+                    )
+                )
         elif (
             cycle_status == "CHALLENGER_REGISTERED"
             or challenger_status == "OFFLINE_CANDIDATE"
         ):
-            items.append(
-                _item(
-                    25,
-                    "RETRAIN_WALK_FORWARD_REQUIRED",
-                    challenger or cycle_scope,
-                    (
-                        "cycle challenger is registered but still offline. "
-                        "Run cycle-bound walk-forward validation against the "
-                        "exact checksum-matching dataset before any PAPER "
-                        "transition"
-                    ),
+            try:
+                phase8_cycle_dataset_lineage(
+                    storage,
+                    cycle_id=cycle_scope,
                 )
-            )
+            except ValueError as exc:
+                items.append(
+                    _item(
+                        25,
+                        "RETRAIN_WALK_FORWARD_REQUIRED",
+                        challenger or cycle_scope,
+                        (
+                            "cycle challenger is registered but the "
+                            "checksum-bound dataset lineage is not usable: "
+                            + str(exc)
+                        ),
+                    )
+                )
+            else:
+                items.append(
+                    _item(
+                        25,
+                        "RETRAIN_OFFLINE_VALIDATION_READY",
+                        challenger or cycle_scope,
+                        (
+                            "cycle challenger and checksum-verified dataset "
+                            "are ready for walk-forward plus held-out offline "
+                            "validation. Qualification stops at "
+                            "OFFLINE_QUALIFIED and does not start PAPER"
+                        ),
+                        operator_required=False,
+                        shell_command=(
+                            "pio phase8-retrain-offline-validate-run "
+                            "--cycle-id "
+                            + cycle_scope
+                            + " --require-qualified"
+                        ),
+                    )
+                )
         elif (
             cycle_status == "OFFLINE_QUALIFIED"
             or challenger_status == "OFFLINE_QUALIFIED"
