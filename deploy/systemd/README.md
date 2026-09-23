@@ -104,6 +104,7 @@ sudo systemctl status pio-phase9-source-capture.timer
 journalctl -u pio-phase9-source-capture.service
 cd /opt/pio/python-learner
 .venv/bin/pio phase9-maintenance-status
+.venv/bin/pio phase9-source-freshness
 ```
 
 The timer activates every 70 minutes. The service runs
