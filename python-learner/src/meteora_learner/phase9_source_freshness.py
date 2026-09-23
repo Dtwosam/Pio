@@ -683,6 +683,65 @@ def _portfolio_current(storage: Storage) -> Phase9SourceFreshnessItem:
             current=False,
             reason="portfolio candidate source inputs are missing",
         )
+
+    assumptions = candidate.get("assumptions")
+    watermarks = (
+        assumptions.get("source_chain_watermarks")
+        if isinstance(assumptions, dict)
+        else None
+    )
+    if isinstance(watermarks, list) and watermarks:
+        for watermark in watermarks:
+            if not isinstance(watermark, dict):
+                return Phase9SourceFreshnessItem(
+                    family="portfolio_allocation",
+                    current=False,
+                    reason="portfolio source watermark metadata is malformed",
+                )
+            pool = str(watermark.get("pool_address", "")).strip()
+            try:
+                used_id = int(watermark["snapshot_id"])
+                used_at = str(watermark["observed_at"])
+                _time(used_at)
+            except (KeyError, TypeError, ValueError):
+                return Phase9SourceFreshnessItem(
+                    family="portfolio_allocation",
+                    current=False,
+                    reason="portfolio source watermark is invalid",
+                )
+            current_source = _latest_pool_source(
+                storage,
+                pool_address=pool,
+            )
+            if not pool or current_source is None:
+                return Phase9SourceFreshnessItem(
+                    family="portfolio_allocation",
+                    current=False,
+                    reason=f"portfolio source pool {pool or '<missing>'} has no chain snapshot",
+                )
+            if _source_advanced(
+                current_id=current_source[0],
+                current_at=current_source[1],
+                used_id=used_id,
+                used_at=used_at,
+            ):
+                return Phase9SourceFreshnessItem(
+                    family="portfolio_allocation",
+                    current=False,
+                    reason=(
+                        f"pool {pool} chain history advanced from "
+                        f"{used_at}#{used_id} to "
+                        f"{current_source[1]}#{current_source[0]}"
+                    ),
+                )
+        return Phase9SourceFreshnessItem(
+            family="portfolio_allocation",
+            current=True,
+            reason="portfolio candidate artifact uses current chain source watermarks",
+        )
+
+    # Legacy candidate artifacts predate explicit chain source watermarks.
+    # Their append time remains a conservative fallback for freshness only.
     try:
         created = _time(created_at)
     except ValueError:
