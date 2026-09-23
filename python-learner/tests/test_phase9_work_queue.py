@@ -644,18 +644,55 @@ def test_work_queue_surfaces_concrete_missing_research(tmp_path):
     task_types = {item.task_type for item in queue.items}
     assert "PHASE8_PROMOTION_REQUIRED" in task_types
     assert "ADAPTIVE_MULTI_POOL" in task_types
+    assert "CHAIN_HISTORY_DEPTH" in task_types
     assert "MINT_SNAPSHOT" in task_types
     assert "WALLET_FLOW" in task_types
     assert "STATIC_HEDGE" in task_types
     assert "PORTFOLIO_ALLOCATION" in task_types
     assert "CONTEXTUAL_BANDIT" in task_types
+    history = next(
+        item for item in queue.items
+        if item.task_type == "CHAIN_HISTORY_DEPTH"
+    )
+    adaptive = next(
+        item for item in queue.items
+        if item.task_type == "ADAPTIVE_MULTI_POOL"
+    )
+    assert history.shell_command is not None
+    assert "phase9-chain-history-plan" in history.shell_command
+    assert "pool-a:42" in history.reason
+    assert "pool-b:42" in history.reason
+    assert "pool-c:42" in history.reason
+    assert adaptive.shell_command is None
+    assert "exact chain-history depth" in adaptive.reason
+    assert queue.candidate_pools == ("pool-a", "pool-b", "pool-c")
+
+
+def test_work_queue_releases_adaptive_research_after_exact_history_depth(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        for index in range(43):
+            save_pool(
+                storage,
+                pool,
+                f"2026-09-23T12:00:{index:02d}+00:00",
+            )
+
+    queue = build_phase9_work_queue(storage)
+
+    assert not any(
+        item.task_type == "CHAIN_HISTORY_DEPTH"
+        for item in queue.items
+    )
     adaptive = next(
         item for item in queue.items
         if item.task_type == "ADAPTIVE_MULTI_POOL"
     )
     assert adaptive.shell_command is not None
     assert "phase9-research-validate" in adaptive.shell_command
-    assert queue.candidate_pools == ("pool-a", "pool-b", "pool-c")
+    assert "pool-a,pool-b,pool-c" in adaptive.shell_command
 
 
 def test_work_queue_requests_bundle_refresh_after_new_evidence(tmp_path):
