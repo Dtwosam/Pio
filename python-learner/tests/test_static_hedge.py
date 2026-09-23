@@ -5,6 +5,7 @@ from meteora_learner.phase_promotion import (
 )
 from meteora_learner.static_hedge import (
     STATIC_HEDGE_EVIDENCE_TYPE,
+    HedgeInstrumentAssumptions,
     StaticHedgeCriteria,
     persist_static_hedge_research,
     research_static_inventory_hedge,
@@ -62,6 +63,19 @@ def seed_oscillating_path(storage):
         add_observation(storage, index, q64_ratio(price))
 
 
+def instrument(**overrides):
+    values = {
+        "instrument_id": "SOL-PERP",
+        "venue": "RESEARCH_VENUE",
+        "available_liquidity_y_atomic": 1_000_000.0,
+        "max_liquidity_share_bps": 1_000,
+        "max_leverage": 1.0,
+        "funding_bps_per_holding_window": 0.0,
+    }
+    values.update(overrides)
+    return HedgeInstrumentAssumptions(**values)
+
+
 def criteria(**overrides):
     values = {
         "observation_limit": 24,
@@ -87,6 +101,7 @@ def test_full_static_x_hedge_reduces_directional_variability(tmp_path):
         pool_address="pool",
         amount_x=1_000,
         amount_y=0,
+        instrument=instrument(),
         criteria=criteria(),
         as_of="2026-09-23T23:00:00+00:00",
     )
@@ -111,6 +126,7 @@ def test_hedge_cost_can_disqualify_research(tmp_path):
         pool_address="pool",
         amount_x=1_000,
         amount_y=0,
+        instrument=instrument(),
         criteria=criteria(
             hedge_round_trip_cost_bps=500.0,
             max_mean_return_drag_bps=100.0,
@@ -137,6 +153,7 @@ def test_hedge_research_is_no_lookahead(tmp_path):
         pool_address="pool",
         amount_x=1_000,
         amount_y=0,
+        instrument=instrument(),
         criteria=criteria(),
         as_of=cutoff,
     )
@@ -149,6 +166,7 @@ def test_hedge_research_is_no_lookahead(tmp_path):
         pool_address="pool",
         amount_x=1_000,
         amount_y=0,
+        instrument=instrument(),
         criteria=criteria(),
         as_of=cutoff,
     )
@@ -170,6 +188,7 @@ def test_phase8_dependency_blocks_hedge_qualification(tmp_path):
         pool_address="pool",
         amount_x=1_000,
         amount_y=0,
+        instrument=instrument(),
         criteria=criteria(),
         as_of="2026-09-23T23:00:00+00:00",
     )
@@ -188,6 +207,7 @@ def test_hedge_evidence_round_trip(tmp_path):
         pool_address="pool",
         amount_x=1_000,
         amount_y=0,
+        instrument=instrument(),
         criteria=criteria(),
         as_of="2026-09-23T23:00:00+00:00",
     )
@@ -206,3 +226,29 @@ def test_hedge_evidence_round_trip(tmp_path):
     assert latest["qualified"] is True
     assert latest["evidence"]["research_only"] is True
     assert latest["evidence"]["policy_actionable"] is False
+
+
+def test_liquidity_assumption_can_disqualify_hedge_research(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_oscillating_path(storage)
+    promote_phase8(storage)
+
+    report = research_static_inventory_hedge(
+        storage,
+        pool_address="pool",
+        amount_x=1_000,
+        amount_y=0,
+        instrument=instrument(
+            available_liquidity_y_atomic=500.0,
+            max_liquidity_share_bps=100,
+        ),
+        criteria=criteria(),
+        as_of="2026-09-23T23:00:00+00:00",
+    )
+
+    assert report.research_qualified is False
+    assert report.liquidity_constrained_windows > 0
+    assert any(
+        "liquidity-share cap" in reason
+        for reason in report.reasons
+    )
