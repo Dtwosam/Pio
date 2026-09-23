@@ -91,6 +91,8 @@ pub struct PositionChainSnapshot {
     pub last_updated_at: i64,
     pub total_claimed_fee_x_amount: String,
     pub total_claimed_fee_y_amount: String,
+    pub supports_limit_order: bool,
+    pub reward_mints: [String; 2],
     pub bins: Vec<PositionBinSnapshot>,
 }
 
@@ -458,6 +460,11 @@ pub async fn inspect_position(
         last_updated_at: parsed.last_updated_at,
         total_claimed_fee_x_amount: parsed.total_claimed_fee_x_amount.to_string(),
         total_claimed_fee_y_amount: parsed.total_claimed_fee_y_amount.to_string(),
+        supports_limit_order: lb_pair_state.is_support_limit_order(),
+        reward_mints: [
+            lb_pair_state.reward_infos[0].mint.to_string(),
+            lb_pair_state.reward_infos[1].mint.to_string(),
+        ],
         bins,
     })
 }
