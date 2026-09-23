@@ -818,8 +818,7 @@ Per-mint failures are isolated.
 `phase9-work-queue` uses the same planner. For a live queue it emits one
 exact-pool `phase9-mint-capture-run` task whenever required mint inputs are
 missing or stale, and emits `mint-risk-research` only after those inputs are
-current. An optional `phase9-work-queue --as-of <TIME>` creates a reproducible
-historical plan. If authoritative mint state was missing or stale at that
+current. An optional `phase9-work-queue --as-of <TIME>` constrains chain, mint and wallet source tasks to that cutoff. If authoritative mint state was missing or stale at that
 historical cutoff, the queue refuses to propose a later capture as a backfill;
 future state cannot prove past state.
 
