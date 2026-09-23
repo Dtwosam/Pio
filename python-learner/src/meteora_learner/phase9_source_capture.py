@@ -278,9 +278,13 @@ def run_phase9_source_capture(
         ),
     )
     cohort_record = final_cohort.to_record()
-    history_plan = build_phase9_history_plan(
-        storage,
-        pool_addresses=final_cohort.research_pools,
+    history_plan = (
+        build_phase9_history_plan(
+            storage,
+            pool_addresses=final_cohort.research_pools,
+        )
+        if final_cohort.research_pools
+        else build_phase9_history_plan(storage)
     )
     mint_plan = build_phase9_mint_capture_plan(
         storage,
