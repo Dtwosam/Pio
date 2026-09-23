@@ -1017,6 +1017,18 @@ CREATE TABLE IF NOT EXISTS advanced_edge_evidence (
 CREATE INDEX IF NOT EXISTS idx_advanced_edge_evidence_lookup
 ON advanced_edge_evidence(edge_type, pool_address, id);
 
+CREATE TRIGGER IF NOT EXISTS advanced_edge_evidence_no_update
+BEFORE UPDATE ON advanced_edge_evidence
+BEGIN
+    SELECT RAISE(ABORT, 'advanced_edge_evidence is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS advanced_edge_evidence_no_delete
+BEFORE DELETE ON advanced_edge_evidence
+BEGIN
+    SELECT RAISE(ABORT, 'advanced_edge_evidence is immutable');
+END;
+
 CREATE TABLE IF NOT EXISTS data_quality_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checked_at TEXT NOT NULL,
