@@ -392,6 +392,28 @@ CREATE TABLE IF NOT EXISTS paper_positions (
 CREATE INDEX IF NOT EXISTS idx_paper_positions_account_status
 ON paper_positions(account_id, status);
 
+CREATE TABLE IF NOT EXISTS paper_chain_bindings (
+    position_id TEXT PRIMARY KEY,
+    pool_address TEXT NOT NULL,
+    opened_observed_at TEXT NOT NULL,
+    anchor_observed_at TEXT NOT NULL,
+    amount_x TEXT NOT NULL,
+    amount_y TEXT NOT NULL,
+    min_bin_id INTEGER NOT NULL,
+    max_bin_id INTEGER NOT NULL,
+    strategy TEXT NOT NULL,
+    max_share_bps INTEGER NOT NULL,
+    favor_x_active INTEGER NOT NULL,
+    last_observed_at TEXT,
+    last_fee_x TEXT NOT NULL DEFAULT '0',
+    last_fee_y TEXT NOT NULL DEFAULT '0',
+    status TEXT NOT NULL CHECK(status IN ('ACTIVE', 'CLOSED')),
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_chain_bindings_pool_status
+ON paper_chain_bindings(pool_address, status);
+
 CREATE TABLE IF NOT EXISTS paper_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_key TEXT NOT NULL UNIQUE,
