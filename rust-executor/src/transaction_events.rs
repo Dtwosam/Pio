@@ -18,7 +18,6 @@ pub struct TransactionEventRecord {
     pub event: DecodedDlmmEvent,
 }
 
-#[derive(Debug, Serialize)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LiquidityAddRequest {
     pub instruction_index: usize,
