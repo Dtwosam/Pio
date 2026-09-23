@@ -279,6 +279,8 @@ mod tests {
                 max_static_accounts: 16,
                 allow_address_lookup_tables: false,
                 require_unsigned: true,
+                require_proposal_pool_account: true,
+                required_account_pubkeys: vec![],
                 require_instruction_policy: false,
                 instruction_policies: vec![],
             },
