@@ -113,6 +113,7 @@ from .live_execution_effects import apply_live_execution_effect
 from .live_position_ledger import apply_live_position_effect
 from .live_position_closure import finalize_live_position_closure
 from .live_position_outcome import build_live_position_outcome
+from .live_execution_audit import audit_live_execution_ledger
 from .transaction_costs import build_transaction_cost_report
 
 
@@ -1008,6 +1009,15 @@ def main() -> None:
         help="JSON file path, or - for stdin",
     )
 
+    live_ledger_audit_cmd = subparsers.add_parser(
+        "live-execution-ledger-audit",
+        help="Audit receipt/effect/position/closure/outcome live execution integrity",
+    )
+    live_ledger_audit_cmd.add_argument(
+        "--require-clean",
+        action="store_true",
+    )
+
     live_outcome_cmd = subparsers.add_parser(
         "build-live-position-outcome",
         help="Aggregate one CLOSED live position into immutable atomic outcome evidence",
@@ -1400,6 +1410,16 @@ def main() -> None:
                 payload = json.load(handle)
         result = ingest_chain_snapshot(Storage(settings.database_path), payload)
         print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "live-execution-ledger-audit":
+        settings = Settings.from_env()
+        result = audit_live_execution_ledger(
+            Storage(settings.database_path),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_clean and not result.clean:
+            raise SystemExit(2)
         return
 
     if args.command == "build-live-position-outcome":
