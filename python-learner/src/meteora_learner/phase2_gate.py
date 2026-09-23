@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .calibration_status import (
+    Phase2CalibrationEvidence,
+    build_phase2_calibration_evidence,
+)
 from .reconciliation_corpus import (
     ReconciliationCorpusReport,
     build_reconciliation_corpus,
@@ -17,8 +21,8 @@ class Phase2CapabilityStatus:
     composition_formula_reconciliation: bool = False
     rebalance_lifecycle: bool = True
     reward_accounting: bool = True
-    transaction_fee_calibration: bool = True
-    add_execution_calibration: bool = True
+    transaction_fee_calibration: bool = False
+    add_execution_calibration: bool = False
     slippage_calibration: bool = False
 
 
@@ -33,6 +37,10 @@ class Phase2PromotionCriteria:
     min_fee_bins: int
     min_reward_intervals: int
     min_reward_growth_bins: int
+    min_composition_samples: int = 0
+    min_add_execution_samples: int = 0
+    min_rebalance_guard_samples: int = 0
+    min_transaction_fee_samples: int = 0
     min_amount_coverage_rate: float = 1.0
 
     def __post_init__(self) -> None:
@@ -48,6 +56,14 @@ class Phase2PromotionCriteria:
             raise ValueError("min_reward_intervals must be positive")
         if self.min_reward_growth_bins <= 0:
             raise ValueError("min_reward_growth_bins must be positive")
+        for name in (
+            "min_composition_samples",
+            "min_add_execution_samples",
+            "min_rebalance_guard_samples",
+            "min_transaction_fee_samples",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} cannot be negative")
         if not 0.0 <= self.min_amount_coverage_rate <= 1.0:
             raise ValueError("min_amount_coverage_rate must be between 0 and 1")
 
@@ -56,11 +72,13 @@ class Phase2PromotionCriteria:
 class Phase2PromotionGate:
     criteria: Phase2PromotionCriteria
     corpus: ReconciliationCorpusReport
+    calibration_evidence: Phase2CalibrationEvidence
     amount_coverage_rate: float
     exact_math_passed: bool
     sample_sufficiency_passed: bool
     capability_gate_passed: bool
     capabilities: Phase2CapabilityStatus
+    effective_capabilities: Phase2CapabilityStatus
     promotion_ready: bool
     reasons: tuple[str, ...]
 
@@ -79,6 +97,7 @@ def evaluate_phase2_promotion_gate(
         database_path,
         position_limit=position_limit,
     )
+    calibration_evidence = build_phase2_calibration_evidence(database_path)
 
     amount_coverage_rate = (
         corpus.amount_positions_eligible / corpus.positions_seen
@@ -143,6 +162,34 @@ def evaluate_phase2_promotion_gate(
             f"{criteria.min_reward_growth_bins}",
         ),
         (
+            calibration_evidence.composition_eligible_samples
+            >= criteria.min_composition_samples,
+            f"composition_eligible_samples "
+            f"{calibration_evidence.composition_eligible_samples} < required "
+            f"{criteria.min_composition_samples}",
+        ),
+        (
+            calibration_evidence.add_execution_matched_events
+            >= criteria.min_add_execution_samples,
+            f"add_execution_matched_events "
+            f"{calibration_evidence.add_execution_matched_events} < required "
+            f"{criteria.min_add_execution_samples}",
+        ),
+        (
+            calibration_evidence.rebalance_guard_samples
+            >= criteria.min_rebalance_guard_samples,
+            f"rebalance_guard_samples "
+            f"{calibration_evidence.rebalance_guard_samples} < required "
+            f"{criteria.min_rebalance_guard_samples}",
+        ),
+        (
+            calibration_evidence.transaction_fee_samples
+            >= criteria.min_transaction_fee_samples,
+            f"transaction_fee_samples "
+            f"{calibration_evidence.transaction_fee_samples} < required "
+            f"{criteria.min_transaction_fee_samples}",
+        ),
+        (
             amount_coverage_rate >= criteria.min_amount_coverage_rate,
             f"amount_coverage_rate {amount_coverage_rate:.6f} < required "
             f"{criteria.min_amount_coverage_rate:.6f}",
@@ -151,15 +198,71 @@ def evaluate_phase2_promotion_gate(
     sample_sufficiency_passed = all(ok for ok, _ in sample_checks)
     reasons.extend(message for ok, message in sample_checks if not ok)
 
+    composition_evidence_ready = (
+        calibration_evidence.composition_eligible_samples
+        >= max(1, criteria.min_composition_samples)
+        and calibration_evidence.composition_exact_samples
+        == calibration_evidence.composition_eligible_samples
+        and calibration_evidence.composition_mismatched_samples == 0
+    )
+    transaction_fee_evidence_ready = (
+        calibration_evidence.transaction_fee_samples
+        >= max(1, criteria.min_transaction_fee_samples)
+        and calibration_evidence.missing_transaction_receipts == 0
+    )
+    add_execution_evidence_ready = (
+        calibration_evidence.add_execution_events
+        >= max(1, criteria.min_add_execution_samples)
+        and calibration_evidence.add_execution_request_decodes
+        == calibration_evidence.add_execution_events
+        and calibration_evidence.add_execution_matched_events
+        == calibration_evidence.add_execution_events
+        and calibration_evidence.add_active_guard_violations == 0
+    )
+    slippage_evidence_ready = (
+        calibration_evidence.add_active_guard_samples
+        >= max(1, criteria.min_add_execution_samples)
+        and calibration_evidence.add_active_guard_violations == 0
+        and calibration_evidence.rebalance_guard_samples
+        >= max(1, criteria.min_rebalance_guard_samples)
+        and calibration_evidence.rebalance_request_decodes
+        == calibration_evidence.rebalance_events
+        and calibration_evidence.rebalance_guard_violations == 0
+    )
+
+    effective_capabilities = Phase2CapabilityStatus(
+        position_amount_reconciliation=capabilities.position_amount_reconciliation,
+        fee_checkpoint_reconciliation=capabilities.fee_checkpoint_reconciliation,
+        composition_event_labels=capabilities.composition_event_labels,
+        composition_formula_reconciliation=(
+            capabilities.composition_formula_reconciliation
+            or composition_evidence_ready
+        ),
+        rebalance_lifecycle=capabilities.rebalance_lifecycle,
+        reward_accounting=capabilities.reward_accounting,
+        transaction_fee_calibration=(
+            capabilities.transaction_fee_calibration
+            or transaction_fee_evidence_ready
+        ),
+        add_execution_calibration=(
+            capabilities.add_execution_calibration
+            or add_execution_evidence_ready
+        ),
+        slippage_calibration=(
+            capabilities.slippage_calibration
+            or slippage_evidence_ready
+        ),
+    )
+
     required_capabilities = {
-        "position_amount_reconciliation": capabilities.position_amount_reconciliation,
-        "fee_checkpoint_reconciliation": capabilities.fee_checkpoint_reconciliation,
-        "composition_formula_reconciliation": capabilities.composition_formula_reconciliation,
-        "rebalance_lifecycle": capabilities.rebalance_lifecycle,
-        "reward_accounting": capabilities.reward_accounting,
-        "transaction_fee_calibration": capabilities.transaction_fee_calibration,
-        "add_execution_calibration": capabilities.add_execution_calibration,
-        "slippage_calibration": capabilities.slippage_calibration,
+        "position_amount_reconciliation": effective_capabilities.position_amount_reconciliation,
+        "fee_checkpoint_reconciliation": effective_capabilities.fee_checkpoint_reconciliation,
+        "composition_formula_reconciliation": effective_capabilities.composition_formula_reconciliation,
+        "rebalance_lifecycle": effective_capabilities.rebalance_lifecycle,
+        "reward_accounting": effective_capabilities.reward_accounting,
+        "transaction_fee_calibration": effective_capabilities.transaction_fee_calibration,
+        "add_execution_calibration": effective_capabilities.add_execution_calibration,
+        "slippage_calibration": effective_capabilities.slippage_calibration,
     }
     capability_gate_passed = all(required_capabilities.values())
     for name, ready in required_capabilities.items():
@@ -175,11 +278,13 @@ def evaluate_phase2_promotion_gate(
     return Phase2PromotionGate(
         criteria=criteria,
         corpus=corpus,
+        calibration_evidence=calibration_evidence,
         amount_coverage_rate=amount_coverage_rate,
         exact_math_passed=exact_math_passed,
         sample_sufficiency_passed=sample_sufficiency_passed,
         capability_gate_passed=capability_gate_passed,
         capabilities=capabilities,
+        effective_capabilities=effective_capabilities,
         promotion_ready=promotion_ready,
         reasons=tuple(reasons),
     )
