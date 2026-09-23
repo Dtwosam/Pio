@@ -26,6 +26,7 @@ mod transaction_events;
 mod transaction_guard;
 mod token_extensions;
 mod token_entry;
+mod token_rebalance;
 mod wallet;
 mod wallet_guard;
 
@@ -57,6 +58,7 @@ fn usage() {
   meteora-executor build-token-entry-from-chain <ENTRY_REQUEST_JSON_OR_->
   meteora-executor build-standard-spl-rebalance <REBALANCE_REQUEST_JSON_OR_->
   meteora-executor build-standard-spl-rebalance-from-chain <REBALANCE_REQUEST_JSON_OR_->
+  meteora-executor build-token-rebalance-from-chain <REBALANCE_REQUEST_JSON_OR_->
   meteora-executor build-standard-spl-settlement-from-chain <SETTLEMENT_REQUEST_JSON_OR_->
   meteora-executor wallet-authorize-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
@@ -898,6 +900,46 @@ RPC_URL is accepted as a compatibility fallback",
                 serde_json::from_str(&request_json)
                     .context("invalid standard-SPL rebalance request JSON")?;
             let report = rebalance::build_standard_spl_rebalance(&request)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        "build-token-rebalance-from-chain" => {
+            let request_source = args
+                .next()
+                .context("REBALANCE_REQUEST_JSON_OR_- is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "build-token-rebalance-from-chain accepts exactly one argument"
+                );
+            }
+            let request_json = if request_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read token rebalance request JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&request_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read token rebalance request JSON: {request_source}"
+                        )
+                    })?
+            };
+            let request:
+                token_rebalance::ChainResolvedTokenRebalanceRequest =
+                serde_json::from_str(&request_json)
+                    .context("invalid token rebalance request JSON")?;
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let report =
+                token_rebalance::build_token_rebalance_from_chain(
+                    &rpc_url,
+                    &request,
+                )
+                .await?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         "build-standard-spl-rebalance-from-chain" => {
