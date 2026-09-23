@@ -12,6 +12,7 @@ mod models;
 mod preflight;
 mod prestate_verifier;
 mod presign;
+mod rebalance;
 mod risk;
 mod simulation;
 mod signer;
@@ -44,6 +45,7 @@ fn usage() {
   meteora-executor wallet-status
   meteora-executor build-standard-spl-entry <ENTRY_REQUEST_JSON_OR_->
   meteora-executor build-standard-spl-entry-from-chain <ENTRY_REQUEST_JSON_OR_->
+  meteora-executor build-standard-spl-rebalance <REBALANCE_REQUEST_JSON_OR_->
   meteora-executor wallet-authorize-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
   meteora-executor guard-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
@@ -739,6 +741,35 @@ RPC_URL is accepted as a compatibility fallback",
                 )?;
             let report =
                 entry::build_standard_spl_entry_from_chain(&rpc_url, &request)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        "build-standard-spl-rebalance" => {
+            let request_source = args
+                .next()
+                .context("REBALANCE_REQUEST_JSON_OR_- is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "build-standard-spl-rebalance accepts exactly one argument"
+                );
+            }
+            let request_json = if request_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read rebalance request JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&request_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read rebalance request JSON: {request_source}"
+                        )
+                    })?
+            };
+            let request: rebalance::StandardSplRebalanceRequest =
+                serde_json::from_str(&request_json)
+                    .context("invalid standard-SPL rebalance request JSON")?;
+            let report = rebalance::build_standard_spl_rebalance(&request)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         "wallet-status" => {
