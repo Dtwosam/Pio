@@ -122,6 +122,8 @@ pio phase9-storage-integrity --require-verified
 pio phase9-replay-audit --require-verified
 pio phase9-promotion-audit --require-current
 pio phase9-operational-audit --require-verified
+pio phase9-work-queue --persist-snapshot
+pio phase9-progress --require-snapshot --require-integrity
 pio phase9-research-validate --pools <POOL_A,POOL_B,POOL_C> --persist
 pio mint-risk-research --pool <POOL> --persist --require-qualified
 pio wallet-flow-research --pool <POOL> --persist --require-qualified
