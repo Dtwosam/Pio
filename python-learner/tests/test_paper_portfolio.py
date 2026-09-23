@@ -250,3 +250,30 @@ def test_portfolio_cycle_uses_only_fresh_persisted_quotes(tmp_path):
     item = next(value for value in stale.schedule if value.position_id == "pos-b")
     assert item.eligible is False
     assert "quote is stale" in item.reason
+
+
+
+def test_portfolio_cycle_blocks_stale_chain_snapshot(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    entry = "2026-09-23T09:00:00+00:00"
+    latest = "2026-09-23T09:05:00+00:00"
+    save_pool_api(storage, "a", latest)
+    save_chain(storage, "a", entry)
+    save_chain(storage, "a", latest, Q64)
+    bind(storage, "pos-a", "a", entry)
+
+    report = run_portfolio_live_paper_cycle(
+        storage,
+        account_id="paper",
+        cycle_id="stale-chain",
+        token_y_quotes={"a-y": 1.0},
+        chain_max_age_seconds=300,
+        chain_as_of="2026-09-23T09:20:00+00:00",
+        safety_config=safety_config(),
+        management_config=PositionManagementConfig(stop_loss_bps=5000),
+    )
+
+    assert report.scheduled_positions == 0
+    assert report.cycle is None
+    assert "chain collection required" in report.schedule[0].reason
