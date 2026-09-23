@@ -80,6 +80,7 @@ def run_phase9_source_capture(
     chain_max_candidates: int = 8,
     bin_array_radius: int = 1,
     mint_max_snapshot_age_seconds: int = 3600,
+    history_min_observation_interval_seconds: int = 3600,
     wallet_discovery_limit: int = 250,
     wallet_max_positions_per_run: int = 50,
     rust_manifest_path: str | Path | None = None,
@@ -92,6 +93,10 @@ def run_phase9_source_capture(
         raise ValueError("chain_max_candidates must be positive")
     if bin_array_radius < 0:
         raise ValueError("bin_array_radius cannot be negative")
+    if history_min_observation_interval_seconds < 0:
+        raise ValueError(
+            "history_min_observation_interval_seconds cannot be negative"
+        )
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
 
@@ -143,6 +148,9 @@ def run_phase9_source_capture(
             rust_manifest_path=rust_manifest_path,
             rust_binary_path=rust_binary_path,
             timeout_seconds=timeout_seconds,
+            min_observation_interval_seconds=(
+                history_min_observation_interval_seconds
+            ),
         )
         history_record = history.to_record()
     except Exception as exc:
