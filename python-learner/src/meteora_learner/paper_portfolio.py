@@ -11,7 +11,10 @@ from .paper_latest import (
 from .pool_safety import PoolSafetyConfig
 from .position_policy import PositionManagementConfig
 from .research_store import ResearchStore
-from .quote_registry import load_fresh_quote_map
+from .quote_registry import (
+    load_fresh_quote_map,
+    required_paper_quote_mints,
+)
 from .paper_chain_collection import build_paper_chain_collection_queue
 from .storage import Storage
 
@@ -53,7 +56,8 @@ def _open_bound_positions(
         rows = conn.execute(
             """
             SELECT p.position_id, p.pool_address, p.opened_at,
-                   c.entry_observed_at, c.token_y_mint,
+                   c.entry_observed_at, c.token_x_mint, c.token_y_mint,
+                   c.reward_mint_0, c.reward_mint_1,
                    (
                        SELECT v.observed_at
                        FROM paper_chain_valuations v
@@ -117,21 +121,21 @@ def run_portfolio_live_paper_cycle(
             for item in chain_queue.items
         }
 
-    registry_status: dict[str, Any] = {}
+    required_mints = required_paper_quote_mints(
+        storage,
+        account_id=account_id,
+    )
+    resolved_quotes, statuses = load_fresh_quote_map(
+        storage,
+        token_mints=required_mints,
+        max_age_seconds=quote_max_age_seconds,
+        as_of=quote_as_of,
+    )
+    registry_status: dict[str, Any] = {
+        item.token_mint: item for item in statuses
+    }
     if token_y_quotes is None:
-        mints = [
-            str(row["token_y_mint"])
-            for row in rows
-            if row.get("token_y_mint") is not None
-        ]
-        resolved_quotes, statuses = load_fresh_quote_map(
-            storage,
-            token_mints=mints,
-            max_age_seconds=quote_max_age_seconds,
-            as_of=quote_as_of,
-        )
         token_y_quotes = resolved_quotes
-        registry_status = {item.token_mint: item for item in statuses}
 
     scheduled: list[tuple[PortfolioScheduleItem, LatestPaperCycleItem]] = []
     report_items: list[PortfolioScheduleItem] = []
@@ -140,9 +144,14 @@ def run_portfolio_live_paper_cycle(
         position_id = str(row["position_id"])
         pool_address = str(row["pool_address"])
         entry_at = row.get("entry_observed_at")
+        token_x_mint = row.get("token_x_mint")
         token_y_mint = row.get("token_y_mint")
+        reward_mints = (
+            row.get("reward_mint_0"),
+            row.get("reward_mint_1"),
+        )
 
-        if entry_at is None or token_y_mint is None:
+        if entry_at is None or token_x_mint is None or token_y_mint is None:
             report_items.append(
                 PortfolioScheduleItem(
                     position_id=position_id,
@@ -185,6 +194,29 @@ def run_portfolio_live_paper_cycle(
             )
         elif quote <= 0:
             reason = f"token-Y quote for mint {token_y_mint} must be positive"
+        else:
+            external_rewards = sorted(
+                {
+                    str(mint)
+                    for mint in reward_mints
+                    if mint is not None
+                    and str(mint)
+                    not in {str(token_x_mint), str(token_y_mint)}
+                }
+            )
+            for reward_mint in external_rewards:
+                reward_status = registry_status.get(reward_mint)
+                if reward_status is None or not reward_status.fresh:
+                    detail = (
+                        reward_status.reason
+                        if reward_status is not None and reward_status.reason
+                        else "no persisted quote observation"
+                    )
+                    reason = (
+                        f"reward quote unavailable for mint "
+                        f"{reward_mint}: {detail}"
+                    )
+                    break
 
         item = PortfolioScheduleItem(
             position_id=position_id,
@@ -205,6 +237,7 @@ def run_portfolio_live_paper_cycle(
                     LatestPaperCycleItem(
                         position_id=position_id,
                         token_y_quote_per_atomic=quote,
+                        quote_max_age_seconds=quote_max_age_seconds,
                     ),
                 )
             )
