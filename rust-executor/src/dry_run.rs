@@ -59,6 +59,7 @@ where
         stage: "SIMULATED".into(),
         reason: "risk_and_simulation_passed".into(),
         risk,
+        transaction: None,
         simulation: Some(simulation),
     })
 }
