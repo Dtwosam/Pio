@@ -122,6 +122,7 @@ from .phase9_capture_plan import (
     Phase9ChainCaptureCriteria,
     build_phase9_chain_capture_plan,
 )
+from .phase9_chain_capture import run_phase9_chain_capture_batch
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -2131,6 +2132,45 @@ def main() -> None:
     )
     phase9_capture_plan.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    phase9_capture_run = subparsers.add_parser(
+        "phase9-chain-capture-run",
+        help="Run the Phase 9 read-only Rust inspect-pool capture plan and ingest returned snapshots locally",
+    )
+    phase9_capture_run.add_argument(
+        "--target-chain-pools",
+        type=int,
+        default=3,
+    )
+    phase9_capture_run.add_argument(
+        "--max-candidates",
+        type=int,
+        default=8,
+    )
+    phase9_capture_run.add_argument(
+        "--bin-array-radius",
+        type=int,
+        default=1,
+    )
+    phase9_capture_run.add_argument(
+        "--rust-manifest-path",
+    )
+    phase9_capture_run.add_argument(
+        "--rust-binary-path",
+    )
+    phase9_capture_run.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=120,
+    )
+    phase9_capture_run.add_argument(
+        "--observed-at",
+        help="Optional timestamp used when ingesting the returned read-only snapshots",
+    )
+    phase9_capture_run.add_argument(
+        "--require-target",
         action="store_true",
     )
 
@@ -4623,6 +4663,26 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.plan_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-chain-capture-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = run_phase9_chain_capture_batch(
+            storage,
+            criteria=Phase9ChainCaptureCriteria(
+                target_chain_pools=args.target_chain_pools,
+                max_candidates=args.max_candidates,
+                bin_array_radius=args.bin_array_radius,
+            ),
+            rust_manifest_path=args.rust_manifest_path,
+            rust_binary_path=args.rust_binary_path,
+            timeout_seconds=args.timeout_seconds,
+            ingest_observed_at=args.observed_at,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_target and not result.target_met:
             raise SystemExit(2)
         return
 
