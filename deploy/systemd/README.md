@@ -120,3 +120,36 @@ Optional bounded source-capture arguments can be supplied with
 `PIO_PHASE9_SOURCE_CAPTURE_EXTRA_ARGS` in `/etc/pio/pio.env`. Do not use
 that variable to reduce the history interval below the research cadence chosen
 for the experiment.
+
+
+## Phase 9 replay-aware research refresh
+
+After the source-capture timer is enabled, the reproducible automatic research
+families can be refreshed with a second timer:
+
+```bash
+sudo systemctl enable --now pio-phase9-research-refresh.timer
+```
+
+Inspect it with:
+
+```bash
+sudo systemctl status pio-phase9-research-refresh.timer
+journalctl -u pio-phase9-research-refresh.service
+```
+
+The refresh timer starts 25 minutes after boot and then every 70 minutes, so a
+normal paired deployment begins roughly ten minutes after the source-capture
+timer's 15-minute boot offset. The service is also ordered after
+`pio-phase9-source-capture.service` when both are active in the same systemd
+transaction.
+
+It runs only `phase9-research-refresh-run`. That command requires verified
+Phase 9 storage and a current Phase 8 promotion, skips replay-verified
+automatic families, persists only changed research evidence and may persist a
+ready research bundle. It does not run Phase 9 promotion, source RPC capture,
+policy authorization, rollout, signing or transaction submission.
+
+Optional flags may be supplied with
+`PIO_PHASE9_RESEARCH_REFRESH_EXTRA_ARGS`. Keep promotion commands and any
+future LIVE wiring outside this service.
