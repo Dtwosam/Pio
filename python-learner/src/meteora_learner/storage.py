@@ -260,6 +260,11 @@ CREATE TABLE IF NOT EXISTS chain_add_liquidity_requests (
     requested_amount_y TEXT NOT NULL,
     observed_active_id INTEGER,
     max_active_bin_slippage INTEGER,
+    min_bin_id INTEGER,
+    max_bin_id INTEGER,
+    strategy_variant INTEGER,
+    explicit_distribution_json TEXT,
+    weighted_distribution_json TEXT,
     raw_json TEXT NOT NULL,
     UNIQUE(signature, instruction_index)
 );
@@ -361,6 +366,14 @@ POSITION_BIN_EXTRA_COLUMNS = {
     "bin_reward_per_token_stored_0": "TEXT NOT NULL DEFAULT '0'",
     "bin_reward_per_token_stored_1": "TEXT NOT NULL DEFAULT '0'",
     "reward_checkpoint_available": "INTEGER NOT NULL DEFAULT 0",
+}
+
+CHAIN_ADD_REQUEST_EXTRA_COLUMNS = {
+    "min_bin_id": "INTEGER",
+    "max_bin_id": "INTEGER",
+    "strategy_variant": "INTEGER",
+    "explicit_distribution_json": "TEXT",
+    "weighted_distribution_json": "TEXT",
 }
 
 CHAIN_TX_EVENT_EXTRA_COLUMNS = {
@@ -503,6 +516,7 @@ class Storage:
             _ensure_columns(conn, "position_bin_snapshots", POSITION_BIN_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_position_snapshots", CHAIN_POSITION_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_transaction_events", CHAIN_TX_EVENT_EXTRA_COLUMNS)
+            _ensure_columns(conn, "chain_add_liquidity_requests", CHAIN_ADD_REQUEST_EXTRA_COLUMNS)
 
     def save_raw(
         self,
@@ -1269,6 +1283,29 @@ class Storage:
                             if request.get("max_active_bin_slippage") is not None
                             else None
                         ),
+                        (
+                            int(request["min_bin_id"])
+                            if request.get("min_bin_id") is not None
+                            else None
+                        ),
+                        (
+                            int(request["max_bin_id"])
+                            if request.get("max_bin_id") is not None
+                            else None
+                        ),
+                        (
+                            int(request["strategy_variant"])
+                            if request.get("strategy_variant") is not None
+                            else None
+                        ),
+                        json.dumps(
+                            request.get("explicit_distribution") or [],
+                            separators=(",", ":"),
+                        ),
+                        json.dumps(
+                            request.get("weighted_distribution") or [],
+                            separators=(",", ":"),
+                        ),
                         json.dumps(request, separators=(",", ":")),
                     )
                 )
@@ -1278,8 +1315,11 @@ class Storage:
                     INSERT INTO chain_add_liquidity_requests(
                         observed_at, signature, instruction_index,
                         instruction_type, requested_amount_x, requested_amount_y,
-                        observed_active_id, max_active_bin_slippage, raw_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        observed_active_id, max_active_bin_slippage,
+                        min_bin_id, max_bin_id, strategy_variant,
+                        explicit_distribution_json, weighted_distribution_json,
+                        raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(signature, instruction_index) DO UPDATE SET
                         observed_at=excluded.observed_at,
                         instruction_type=excluded.instruction_type,
@@ -1287,6 +1327,11 @@ class Storage:
                         requested_amount_y=excluded.requested_amount_y,
                         observed_active_id=excluded.observed_active_id,
                         max_active_bin_slippage=excluded.max_active_bin_slippage,
+                        min_bin_id=excluded.min_bin_id,
+                        max_bin_id=excluded.max_bin_id,
+                        strategy_variant=excluded.strategy_variant,
+                        explicit_distribution_json=excluded.explicit_distribution_json,
+                        weighted_distribution_json=excluded.weighted_distribution_json,
                         raw_json=excluded.raw_json
                     """,
                     request_rows,
