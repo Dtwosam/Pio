@@ -572,10 +572,26 @@ def test_source_capture_forwards_ranked_cohort_to_chain_and_history(
         "run_phase9_history_capture",
         history,
     )
+    def mint(*args, **kwargs):
+        seen["mint_pools"] = kwargs["pool_addresses"]
+        return DummyRecord(inputs_ready_after=True)
+
     monkeypatch.setattr(
         source_module,
         "run_phase9_mint_capture",
-        lambda *args, **kwargs: DummyRecord(inputs_ready_after=True),
+        mint,
+    )
+
+    def wallet(*args, **kwargs):
+        seen.setdefault("wallet_pools", []).append(
+            kwargs["pool_address"]
+        )
+        return DummyRecord(pool_address=kwargs["pool_address"])
+
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_wallet_flow_capture",
+        wallet,
     )
     monkeypatch.setattr(
         source_module,
