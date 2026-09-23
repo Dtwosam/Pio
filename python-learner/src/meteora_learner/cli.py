@@ -62,6 +62,7 @@ from .phase9_research import (
 )
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
+    audit_persisted_phase9_promotion,
     evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
     persist_phase9_research_bundle,
@@ -3043,6 +3044,15 @@ def main() -> None:
     if args.command == "phase-status":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
+        phase9_state = phase_promotion_state(
+            storage,
+            phase_name=PHASE9,
+        )
+        phase9_currentness = (
+            audit_persisted_phase9_promotion(storage)
+            if phase9_state.promoted
+            else None
+        )
         output = {
             "phase2": phase_promotion_state(
                 storage,
@@ -3069,12 +3079,19 @@ def main() -> None:
                 phase_name=PHASE8,
             ).__dict__,
             "phase9": {
-                **phase_promotion_state(
-                    storage,
-                    phase_name=PHASE9,
-                ).__dict__,
+                **phase9_state.__dict__,
                 "research_only": True,
                 "policy_actionable": False,
+                "current": (
+                    phase9_currentness.current
+                    if phase9_currentness is not None
+                    else False
+                ),
+                "currentness": (
+                    phase9_currentness.to_record()
+                    if phase9_currentness is not None
+                    else None
+                ),
             },
         }
         print(json.dumps(output, indent=2))
