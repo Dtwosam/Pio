@@ -126,6 +126,7 @@ pio phase9-work-queue --persist-snapshot
 pio phase9-progress --require-snapshot --require-integrity
 pio phase9-shadow-validate --cycle-id <POST_PROMOTION_CYCLE_ID> --persist --require-ready
 pio phase9-policy-authorization-gate --persist --require-ready
+pio phase9-policy-authorization-audit --require-current
 pio phase9-research-validate --pools <POOL_A,POOL_B,POOL_C> --persist
 pio mint-risk-research --pool <POOL> --persist --require-qualified
 pio wallet-flow-research --pool <POOL> --persist --require-qualified
