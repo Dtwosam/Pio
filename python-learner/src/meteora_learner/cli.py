@@ -2318,6 +2318,12 @@ def main() -> None:
         default=3600,
     )
     phase9_source_capture.add_argument(
+        "--history-min-observation-interval-seconds",
+        type=int,
+        default=3600,
+        help="Minimum seconds between persisted chain-history observations for the same pool",
+    )
+    phase9_source_capture.add_argument(
         "--wallet-discovery-limit",
         type=int,
         default=250,
@@ -2511,6 +2517,12 @@ def main() -> None:
         "--timeout-seconds",
         type=int,
         default=120,
+    )
+    phase9_history_run.add_argument(
+        "--min-observation-interval-seconds",
+        type=int,
+        default=3600,
+        help="Minimum age of the latest pool snapshot before another history observation may be added",
     )
     phase9_history_run.add_argument(
         "--observed-at",
@@ -5172,6 +5184,9 @@ def main() -> None:
             mint_max_snapshot_age_seconds=(
                 args.mint_max_snapshot_age_seconds
             ),
+            history_min_observation_interval_seconds=(
+                args.history_min_observation_interval_seconds
+            ),
             wallet_discovery_limit=args.wallet_discovery_limit,
             wallet_max_positions_per_run=(
                 args.wallet_max_positions_per_run
@@ -5315,6 +5330,9 @@ def main() -> None:
             rust_binary_path=args.rust_binary_path,
             timeout_seconds=args.timeout_seconds,
             ingest_observed_at=args.observed_at,
+            min_observation_interval_seconds=(
+                args.min_observation_interval_seconds
+            ),
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.history_ready_after:
