@@ -138,7 +138,7 @@ class ResearchStore:
         try:
             rows = conn.execute(
                 """
-                SELECT observed_at, pool_address, bin_array_index, bin_id, price,
+                SELECT observed_at, pool_address, bin_array_index, bin_array_address, bin_id, price,
                        amount_x, amount_y, liquidity_supply,
                        fee_amount_x_per_token_stored,
                        fee_amount_y_per_token_stored,
@@ -444,12 +444,107 @@ class ResearchStore:
                 """
                 SELECT observed_at, signature, instruction_index,
                        instruction_type, requested_amount_x, requested_amount_y,
-                       observed_active_id, max_active_bin_slippage
+                       observed_active_id, max_active_bin_slippage,
+                       min_bin_id, max_bin_id, strategy_variant,
+                       explicit_distribution_json, weighted_distribution_json
                 FROM chain_add_liquidity_requests
                 WHERE signature = ? AND instruction_index = ?
                 LIMIT 1
                 """,
                 (signature, instruction_index),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
+    def pool_capture_before_slot(
+        self,
+        pool_address: str,
+        *,
+        target_slot: int,
+        active_bin_id: int,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT c.observed_at, c.pool_address,
+                       c.capture_slot_start, c.capture_slot_end,
+                       c.clock_unix_timestamp,
+                       c.fee_base_factor, c.fee_filter_period,
+                       c.fee_decay_period, c.fee_reduction_factor,
+                       c.fee_variable_fee_control,
+                       c.fee_max_volatility_accumulator,
+                       c.fee_base_fee_power_factor,
+                       c.fee_volatility_accumulator,
+                       c.fee_volatility_reference,
+                       c.fee_index_reference,
+                       c.fee_last_update_timestamp,
+                       p.active_bin_id, p.bin_step,
+                       p.protocol_share_bps,
+                       p.token_x_program, p.token_y_program
+                FROM chain_pool_capture_state c
+                JOIN chain_pool_snapshots p
+                  ON p.pool_address = c.pool_address
+                 AND p.observed_at = c.observed_at
+                WHERE c.pool_address = ?
+                  AND c.capture_slot_end IS NOT NULL
+                  AND c.capture_slot_end < ?
+                  AND p.active_bin_id = ?
+                ORDER BY c.capture_slot_end DESC, c.id DESC
+                LIMIT 1
+                """,
+                (pool_address, target_slot, active_bin_id),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
+    def bin_liquidity_at(
+        self,
+        pool_address: str,
+        *,
+        observed_at: str,
+        bin_id: int,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT observed_at, pool_address, bin_array_index,
+                       bin_array_address, bin_id, price, amount_x, amount_y,
+                       liquidity_supply, fee_amount_x_per_token_stored,
+                       fee_amount_y_per_token_stored,
+                       reward_per_token_stored_0, reward_per_token_stored_1
+                FROM bin_liquidity_snapshots
+                WHERE pool_address = ? AND observed_at = ? AND bin_id = ?
+                LIMIT 1
+                """,
+                (pool_address, observed_at, bin_id),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
+    def prestate_verification(
+        self,
+        signature: str,
+        *,
+        snapshot_observed_at: str,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT observed_at, signature, snapshot_observed_at,
+                       pool_address, transaction_slot,
+                       capture_slot_start, capture_slot_end,
+                       eligible, reasons_json, account_checks_json
+                FROM composition_prestate_verifications
+                WHERE signature = ? AND snapshot_observed_at = ?
+                LIMIT 1
+                """,
+                (signature, snapshot_observed_at),
             ).fetchone()
         finally:
             conn.close()
