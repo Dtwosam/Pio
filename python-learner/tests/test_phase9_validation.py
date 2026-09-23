@@ -1,3 +1,4 @@
+import sqlite3
 import hashlib
 from pathlib import Path
 from dataclasses import asdict, replace
@@ -578,14 +579,17 @@ def test_phase9_bundle_ready_with_complete_research_corpus(tmp_path):
 def test_missing_research_family_blocks_bundle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_ready(storage)
-    with storage.connect() as conn:
-        conn.execute(
-            """
-            DELETE FROM advanced_edge_evidence
-            WHERE edge_type = ?
-            """,
-            (CONTEXTUAL_BANDIT_EVIDENCE_TYPE,),
-        )
+    storage.save_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+        as_of="2026-09-23T12:30:00+00:00",
+        status="NOT_QUALIFIED",
+        qualified=False,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+        },
+    )
 
     report = evaluate_phase9_research_bundle(storage)
 
@@ -733,22 +737,19 @@ def test_phase9_promotion_rejects_tampered_bundle_payload(tmp_path):
     }
     assert phase9_research_bundle_sha256(payload) == expected_sha
 
-    import json
-
     payload["status"] = "TAMPERED_READY"
     tampered = {
         **payload,
         "bundle_sha256": expected_sha,
     }
-    with storage.connect() as conn:
-        conn.execute(
-            """
-            UPDATE advanced_edge_evidence
-            SET evidence_json = ?
-            WHERE id = ?
-            """,
-            (json.dumps(tampered, sort_keys=True), bundle_id),
-        )
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
+        pool_address="__PHASE9_RESEARCH__",
+        as_of="2026-09-23T12:31:00+00:00",
+        status="RESEARCH_BUNDLE_READY",
+        qualified=True,
+        evidence=tampered,
+    )
 
     report = evaluate_phase9_promotion(storage)
 
@@ -758,7 +759,6 @@ def test_phase9_promotion_rejects_tampered_bundle_payload(tmp_path):
         "checksum is invalid" in reason
         for reason in report.reasons
     )
-
 
 def test_persisted_phase9_promotion_audit_is_current_after_persist(tmp_path):
     storage = Storage(tmp_path / "pio.db")
@@ -834,14 +834,17 @@ def test_persisted_phase9_promotion_audit_detects_staleness(tmp_path):
 def test_phase9_promotion_requires_complete_research_bundle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_ready(storage)
-    with storage.connect() as conn:
-        conn.execute(
-            """
-            DELETE FROM advanced_edge_evidence
-            WHERE edge_type = ?
-            """,
-            (STATIC_HEDGE_EVIDENCE_TYPE,),
-        )
+    storage.save_advanced_edge_evidence(
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:30:00+00:00",
+        status="NOT_QUALIFIED",
+        qualified=False,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+        },
+    )
 
     report = evaluate_phase9_promotion(storage)
 
@@ -1267,7 +1270,7 @@ def test_tampered_static_hedge_assumptions_block_bundle(tmp_path):
         for reason in report.reasons
     )
 
-def test_tampered_portfolio_candidate_payload_blocks_bundle(tmp_path):
+def test_portfolio_candidate_evidence_is_immutable(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_ready(storage)
     latest_allocation = storage.latest_advanced_edge_evidence(
@@ -1288,27 +1291,21 @@ def test_tampered_portfolio_candidate_payload_blocks_bundle(tmp_path):
             (evidence_id,),
         ).fetchone()
         assert row is not None
-        import json
-
-        payload = json.loads(str(row[0]))
-        payload["source_inputs"] = [{"pool_address": "tampered"}]
-        conn.execute(
-            """
-            UPDATE advanced_edge_evidence
-            SET evidence_json = ?
-            WHERE id = ?
-            """,
-            (json.dumps(payload, sort_keys=True), evidence_id),
-        )
-
-    report = evaluate_phase9_research_bundle(storage)
-
-    assert report.research_ready is False
-    assert any(
-        "immutable candidate-artifact lineage" in reason
-        for reason in report.reasons
-    )
-
+        try:
+            conn.execute(
+                """
+                UPDATE advanced_edge_evidence
+                SET evidence_json = '{}'
+                WHERE id = ?
+                """,
+                (evidence_id,),
+            )
+        except sqlite3.IntegrityError as exc:
+            assert "immutable" in str(exc)
+        else:
+            raise AssertionError(
+                "expected immutable advanced-edge evidence update refusal"
+            )
 
 def test_tampered_bandit_dataset_file_blocks_bundle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
