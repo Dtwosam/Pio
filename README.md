@@ -11,12 +11,14 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - docs/DATA_SCHEMA.md
 - docs/SIMULATOR_DESIGN.md
 - docs/PHASE2_VALIDATION_RUNBOOK.md
+- docs/PHASE3_POLICY.md
 
 ## Current status
 
 - Phase 0: complete
 - Phase 1: implemented; extended live validation pending
 - Phase 2: standard-SPL simulator implementation complete; real promotion evidence pending
+- Phase 3: deterministic research policy implemented; not promoted
 - Default mode: PAPER
 - Live signing: not implemented
 
@@ -48,6 +50,17 @@ pio reconcile-position --position <POSITION>
 pio reconcile-corpus
 pio phase2-evidence
 pio phase2-work-queue
+
+pio screen-pools
+pio baseline-walk-forward --pool <POOL> --amount-x <ATOMIC_X> --amount-y <ATOMIC_Y> \
+  --network-cost-y-atomic <COST>
+pio size-position --equity 10000 --cash 10000 --deployed 0 --drawdown-bps 0
+pio manage-position --active-bin 100 --min-bin 95 --max-bin 105 \
+  --holding-observations 12 --rebalances-done 0
+pio phase3-plan --pool <POOL> --amount-x <ATOMIC_X> --amount-y <ATOMIC_Y> \
+  --requested-quote <NOTIONAL> --equity <EQUITY> --cash <CASH> \
+  --deployed <DEPLOYED> --drawdown-bps <BPS> \
+  --network-cost-y-atomic <COST>
 ```
 
 Real execution/calibration commands:
@@ -62,6 +75,8 @@ pio reconcile-composition --position <POSITION>
 ```
 
 The work queue emits concrete read-only Rust commands when an existing sample can be completed. If historical prestate cannot be proven, it says so instead of reconstructing it approximately.
+
+Phase 3 commands are research/policy tools. They do not build, sign or send live transactions. A pool must pass the fail-closed safety screen, a deterministic range/strategy must pass trailing replay, capital must fit sizing limits, and Phase 2 evidence must be promoted before the policy can authorize entry.
 
 ## Rust read-only inspection
 
