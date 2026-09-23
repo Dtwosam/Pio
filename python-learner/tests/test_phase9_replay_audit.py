@@ -1,3 +1,4 @@
+import meteora_learner.phase9_replay_audit as replay_audit
 from meteora_learner.phase9_replay_audit import (
     evaluate_phase9_replay_audit,
 )
@@ -86,4 +87,52 @@ def test_optional_family_does_not_block_overall_audit(tmp_path):
         "wallet_flow",
         "static_hedge",
     }
+    assert report.verified is False
+
+
+
+def test_replay_audit_isolates_family_exception(tmp_path, monkeypatch):
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_advanced_edge_evidence(
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+        },
+    )
+
+    def explode(_storage):
+        raise RuntimeError("corrupt replay artifact")
+
+    monkeypatch.setattr(
+        replay_audit,
+        "_wallet_flow_lineage_valid",
+        explode,
+    )
+
+    report = evaluate_phase9_replay_audit(
+        storage,
+        criteria=Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=1,
+            min_wallet_flow_pools=1,
+            min_static_hedge_pools=1,
+            require_adaptive_multi_pool=False,
+            require_portfolio_allocation=False,
+            require_contextual_bandit=False,
+        ),
+    )
+
+    wallet = next(
+        item for item in report.families
+        if item.family == "wallet_flow"
+    )
+    assert wallet.replay_verified is False
+    assert wallet.status == "REPLAY_ERROR"
+    assert "RuntimeError" in wallet.reason
+    assert "corrupt replay artifact" in wallet.reason
     assert report.verified is False
