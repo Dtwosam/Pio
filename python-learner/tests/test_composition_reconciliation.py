@@ -245,3 +245,28 @@ def test_composition_reconciliation_requires_verifier_verdict(tmp_path):
 
     assert report.eligible_samples == 0
     assert "verification has not been ingested" in str(report.entries[0].reason)
+
+
+
+def test_zero_fee_without_composition_event_is_not_formula_evidence(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed(storage)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            DELETE FROM chain_transaction_events
+            WHERE signature = 'sig' AND event_type = 'CompositionFee'
+            """
+        )
+
+    report = build_composition_fee_reconciliation(
+        str(storage.path),
+        position_address="position",
+    )
+
+    assert report.eligible_samples == 0
+    assert report.exact_samples == 0
+    assert (
+        report.entries[0].reason
+        == "no positive CompositionFee event for formula validation"
+    )
