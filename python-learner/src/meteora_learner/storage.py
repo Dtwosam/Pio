@@ -963,10 +963,30 @@ class Storage:
         protocol_share_bps = snapshot.get("protocol_share_bps")
         collect_fee_mode = snapshot.get("collect_fee_mode")
         supports_limit_order = snapshot.get("supports_limit_order")
-        reward_mints = snapshot.get("reward_mints") or [None, None]
-        reward_rates = snapshot.get("reward_rates") or [None, None]
-        reward_duration_ends = snapshot.get("reward_duration_ends") or [None, None]
-        reward_last_update_times = snapshot.get("reward_last_update_times") or [None, None]
+        reward_mints = snapshot.get("reward_mints")
+        if reward_mints is None:
+            reward_mints = [
+                snapshot.get("reward_mint_0"),
+                snapshot.get("reward_mint_1"),
+            ]
+        reward_rates = snapshot.get("reward_rates")
+        if reward_rates is None:
+            reward_rates = [
+                snapshot.get("reward_rate_0"),
+                snapshot.get("reward_rate_1"),
+            ]
+        reward_duration_ends = snapshot.get("reward_duration_ends")
+        if reward_duration_ends is None:
+            reward_duration_ends = [
+                snapshot.get("reward_duration_end_0"),
+                snapshot.get("reward_duration_end_1"),
+            ]
+        reward_last_update_times = snapshot.get("reward_last_update_times")
+        if reward_last_update_times is None:
+            reward_last_update_times = [
+                snapshot.get("reward_last_update_time_0"),
+                snapshot.get("reward_last_update_time_1"),
+            ]
         if not all(
             isinstance(values, list) and len(values) == 2
             for values in (
@@ -1014,8 +1034,24 @@ class Storage:
                         str(bin_row["liquidity_supply"]),
                         str(bin_row["fee_amount_x_per_token_stored"]),
                         str(bin_row["fee_amount_y_per_token_stored"]),
-                        str((bin_row.get("reward_per_token_stored") or ["0", "0"])[0]),
-                        str((bin_row.get("reward_per_token_stored") or ["0", "0"])[1]),
+                        str(
+                            (
+                                bin_row.get("reward_per_token_stored")
+                                or [
+                                    bin_row.get("reward_per_token_stored_0", "0"),
+                                    bin_row.get("reward_per_token_stored_1", "0"),
+                                ]
+                            )[0]
+                        ),
+                        str(
+                            (
+                                bin_row.get("reward_per_token_stored")
+                                or [
+                                    bin_row.get("reward_per_token_stored_0", "0"),
+                                    bin_row.get("reward_per_token_stored_1", "0"),
+                                ]
+                            )[1]
+                        ),
                     )
                 )
 
