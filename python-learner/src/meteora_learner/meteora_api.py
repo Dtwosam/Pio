@@ -232,5 +232,64 @@ class MeteoraDataAPI:
             params["status"] = status
         return self._get(f"/positions/{pool_address}/pnl", params=params)
 
+    def pool_position_addresses(
+        self,
+        pool_address: str,
+        *,
+        user: str,
+        max_pages: int = 3,
+        page_size: int = 100,
+    ) -> tuple[str, ...]:
+        if not pool_address.strip():
+            raise ValueError("pool_address is required")
+        if not user.strip():
+            raise ValueError("user wallet address is required")
+        if max_pages < 1:
+            raise ValueError("max_pages must be positive")
+        if not 1 <= page_size <= 100:
+            raise ValueError("page_size must be between 1 and 100")
+
+        addresses: list[str] = []
+        seen: set[str] = set()
+        for page in range(1, max_pages + 1):
+            payload = self.position_pnl(
+                pool_address,
+                user=user,
+                status="all",
+                page=page,
+                page_size=page_size,
+            )
+            if not isinstance(payload, dict):
+                raise MeteoraAPIError(
+                    "position PnL response must be a JSON object"
+                )
+            positions = payload.get("positions")
+            if not isinstance(positions, list):
+                raise MeteoraAPIError(
+                    "position PnL response is missing positions array"
+                )
+            for item in positions:
+                if not isinstance(item, dict):
+                    raise MeteoraAPIError(
+                        "position PnL entry must be a JSON object"
+                    )
+                address = str(
+                    item.get("positionAddress", "")
+                ).strip()
+                if not address:
+                    raise MeteoraAPIError(
+                        "position PnL entry is missing positionAddress"
+                    )
+                if address not in seen:
+                    seen.add(address)
+                    addresses.append(address)
+
+            has_next = payload.get("hasNext")
+            if has_next is not True:
+                break
+
+        return tuple(addresses)
+
+
     def protocol_metrics(self) -> Any:
         return self._get("/stats/protocol_metrics")
