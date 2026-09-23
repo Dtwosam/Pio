@@ -59,6 +59,7 @@ from .phase8_validation import (
     audit_persisted_phase8_promotion,
     evaluate_phase8_promotion,
 )
+from .phase8_evidence_status import evaluate_phase8_evidence_status
 from .phase9_research import (
     Phase9ResearchCriteria,
     evaluate_phase9_research,
@@ -1188,6 +1189,85 @@ def main() -> None:
     )
     phase7_validate.add_argument("--persist-ready", action="store_true")
     phase7_validate.add_argument("--require-ready", action="store_true")
+
+    phase8_evidence_status = subparsers.add_parser(
+        "phase8-evidence-status",
+        help="Show consolidated Phase 8 continuous-learning, live-label, cycle and promotion readiness",
+    )
+    phase8_evidence_status.add_argument(
+        "--as-of",
+        help="Optional timezone-aware evaluation cutoff; defaults to current time",
+    )
+    phase8_evidence_status.add_argument(
+        "--min-new-chain-observations",
+        type=int,
+        default=500,
+    )
+    phase8_evidence_status.add_argument(
+        "--min-new-chain-pools",
+        type=int,
+        default=3,
+    )
+    phase8_evidence_status.add_argument(
+        "--min-new-live-labels",
+        type=int,
+        default=5,
+    )
+    phase8_evidence_status.add_argument(
+        "--max-champion-age-days",
+        type=float,
+        default=14.0,
+    )
+    phase8_evidence_status.add_argument(
+        "--min-completed-cycles",
+        type=int,
+        default=1,
+    )
+    phase8_evidence_status.add_argument(
+        "--min-live-labels",
+        type=int,
+        default=10,
+    )
+    phase8_evidence_status.add_argument(
+        "--min-live-pools",
+        type=int,
+        default=2,
+    )
+    phase8_evidence_status.add_argument(
+        "--max-realized-drawdown-bps",
+        type=int,
+        default=2000,
+    )
+    phase8_evidence_status.add_argument(
+        "--max-single-loss-bps",
+        type=int,
+        default=1500,
+    )
+    phase8_evidence_status.add_argument(
+        "--min-win-rate",
+        type=float,
+        default=0.30,
+    )
+    phase8_evidence_status.add_argument(
+        "--min-mean-return-bps",
+        type=float,
+        default=-100.0,
+    )
+    phase8_evidence_status.add_argument(
+        "--max-mean-abs-prediction-error-bps",
+        type=float,
+        default=1500.0,
+    )
+    phase8_evidence_status.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Exit non-zero unless the current Phase 8 promotion gate passes",
+    )
+    phase8_evidence_status.add_argument(
+        "--require-current",
+        action="store_true",
+        help="Exit non-zero unless persisted Phase 8 promotion evidence is current",
+    )
 
     phase8_validate = subparsers.add_parser(
         "phase8-validate",
@@ -4461,6 +4541,42 @@ def main() -> None:
             output["persisted"] = None
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase8-evidence-status":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase8_evidence_status(
+            storage,
+            learning_criteria=ContinuousLearningCriteria(
+                min_new_chain_observations=(
+                    args.min_new_chain_observations
+                ),
+                min_new_chain_pools=args.min_new_chain_pools,
+                min_new_live_labels=args.min_new_live_labels,
+                max_champion_age_days=args.max_champion_age_days,
+            ),
+            promotion_criteria=Phase8PromotionCriteria(
+                min_completed_cycles=args.min_completed_cycles,
+                min_live_labels=args.min_live_labels,
+                min_live_pools=args.min_live_pools,
+                max_realized_drawdown_bps=(
+                    args.max_realized_drawdown_bps
+                ),
+                max_single_loss_bps=args.max_single_loss_bps,
+                min_win_rate=args.min_win_rate,
+                min_mean_return_bps=args.min_mean_return_bps,
+                max_mean_abs_prediction_error_bps=(
+                    args.max_mean_abs_prediction_error_bps
+                ),
+            ),
+            as_of=args.as_of or utc_now_iso(),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        if args.require_current and not result.persisted_phase8_current:
             raise SystemExit(2)
         return
 
