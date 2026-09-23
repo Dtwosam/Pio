@@ -335,7 +335,7 @@ submission.
 ### Phase 9 mint and flow research boundary
 
 Mint-risk research uses authoritative Solana mint accounts captured by the
-read-only Rust executor. Python persists those snapshots immutably and evaluates
+read-only Rust executor. Mint input readiness is freshness-bound: row existence alone is insufficient, and the Phase 9 work queue must use the same snapshot-age criterion as mint-risk evaluation. Live missing/stale inputs may be refreshed only through read-only `inspect-mint-env` capture with returned-address verification. A historical cutoff may never be repaired by assigning later authoritative state to an earlier time. Python persists those snapshots immutably and evaluates
 only observations available at or before the requested research cutoff.
 Research checks token-program consistency with the DLMM pool, initialization,
 mint/freeze authority revocation, decimal bounds, reward mints, snapshot
