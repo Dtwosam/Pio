@@ -318,6 +318,20 @@ def build_phase9_evidence_plan(
         or not status.research_sources_current
     ):
         refresh_actionable = status.phase8_current
+        refresh_reason = (
+            "persisted Phase 9 research must be recomputed from the "
+            "current source corpus"
+            if refresh_actionable
+            else (
+                "research refresh is blocked until Phase 8 promotion "
+                "is current"
+            )
+        )
+        if missing_families:
+            refresh_reason += (
+                "; missing/under-qualified families: "
+                + ", ".join(missing_families)
+            )
         items.append(
             Phase9EvidenceDebtItem(
                 priority=80,
@@ -342,23 +356,7 @@ def build_phase9_evidence_plan(
                     if refresh_actionable
                     else None
                 ),
-                reason=(
-                    (
-                        "persisted Phase 9 research must be recomputed from "
-                        "the current source corpus"
-                    )
-                    if refresh_actionable
-                    else (
-                        "research refresh is blocked until Phase 8 promotion "
-                        "is current"
-                    )
-                    + (
-                        "; missing/under-qualified families: "
-                        + ", ".join(missing_families)
-                        if missing_families
-                        else ""
-                    )
-                ),
+                reason=refresh_reason,
             )
         )
 
