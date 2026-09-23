@@ -783,24 +783,28 @@ mod tests {
     }
     #[test]
     fn claims_are_blocked_in_live_rebalance() {
-        let mut request = request();
-        request.should_claim_fee = true;
-        assert!(build_standard_spl_rebalance(&request).is_err());
+        let mut fee_request = request();
+        fee_request.should_claim_fee = true;
+        assert!(build_standard_spl_rebalance(&fee_request).is_err());
 
-        let mut request = request();
-        request.should_claim_reward = true;
-        assert!(build_standard_spl_rebalance(&request).is_err());
+        let mut reward_request = request();
+        reward_request.should_claim_reward = true;
+        assert!(build_standard_spl_rebalance(&reward_request).is_err());
     }
 
     #[test]
     fn partial_or_ambiguous_remove_plan_is_blocked() {
-        let mut request = request();
-        request.removes[0].bps = 9_999;
-        assert!(build_standard_spl_rebalance(&request).is_err());
+        let mut partial_request = request();
+        partial_request.removes[0].bps = 9_999;
+        assert!(
+            build_standard_spl_rebalance(&partial_request).is_err()
+        );
 
-        let mut request = request();
-        request.removes[0].min_bin_id = None;
-        assert!(build_standard_spl_rebalance(&request).is_err());
+        let mut ambiguous_request = request();
+        ambiguous_request.removes[0].min_bin_id = None;
+        assert!(
+            build_standard_spl_rebalance(&ambiguous_request).is_err()
+        );
     }
 
     #[test]
