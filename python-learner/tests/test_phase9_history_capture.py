@@ -117,6 +117,67 @@ def test_history_capture_rejects_non_increasing_explicit_timestamp(
     )
 
 
+def test_history_capture_skips_samples_inside_minimum_interval(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_chain_observations(storage, pool, 42)
+
+    calls = []
+    report = run_phase9_history_capture(
+        storage,
+        inspector=lambda pool, radius: calls.append((pool, radius)),
+        ingest_observed_at="2026-09-23T12:30:00+00:00",
+        min_observation_interval_seconds=3600,
+    )
+
+    assert calls == []
+    assert report.pools_attempted == 3
+    assert report.pools_captured == 0
+    assert report.pools_skipped_interval == 3
+    assert report.pools_failed == 0
+    assert report.min_observation_interval_seconds == 3600
+    assert report.history_ready_after is False
+    assert report.observations_remaining_after == 3
+    assert all(
+        item.status == "SKIPPED_INTERVAL"
+        for item in report.items
+    )
+    assert all(
+        "minimum is 3600s" in item.error
+        for item in report.items
+    )
+    assert any(
+        "minimum observation interval has not elapsed" in reason
+        for reason in report.reasons
+    )
+
+
+def test_history_capture_accepts_sample_at_exact_minimum_interval(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_chain_observations(storage, pool, 42)
+
+    calls = []
+    report = run_phase9_history_capture(
+        storage,
+        inspector=lambda pool, radius: (
+            calls.append((pool, radius)) or payload(pool)
+        ),
+        ingest_observed_at="2026-09-23T13:00:41+00:00",
+        min_observation_interval_seconds=3600,
+    )
+
+    assert report.pools_captured == 3
+    assert report.pools_skipped_interval == 0
+    assert report.pools_failed == 0
+    assert report.history_ready_after is True
+    assert len(calls) == 3
+
+
 def test_history_capture_isolates_one_pool_failure(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     for pool in ("pool-a", "pool-b", "pool-c"):
