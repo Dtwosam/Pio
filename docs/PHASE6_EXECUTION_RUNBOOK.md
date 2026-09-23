@@ -32,9 +32,14 @@ The current fail-closed pipeline is:
 7. Load the isolated executor wallet from `PIO_EXECUTOR_KEYPAIR`.
 8. Verify the wallet public key matches the guarded transaction fee payer.
 9. Persist wallet authorization.
-10. Only then may the durable state machine enter `SIGNING`.
+10. Fetch a fresh confirmed blockhash while the transaction is still unsigned.
+11. Re-run transaction/account/instruction policy against that exact prepared message.
+12. Re-authorize the isolated wallet against the exact prepared fee payer.
+13. Simulate the exact prepared transaction with blockhash replacement disabled.
+14. Persist the prepared transaction and exact final simulation.
+15. Only then may the durable state machine enter `SIGNING`.
 
-There is currently no public command that signs or sends a transaction.
+There is currently no public command that sends a transaction.
 
 ## Wallet isolation
 
@@ -145,6 +150,48 @@ The output is still unsigned. It should then pass the strict transaction guard
 and simulation pipeline. Token-2022 emergency exits remain fail-closed until
 their transfer-hook/remaining-account path is implemented and validated.
 
+## Exact final presign
+
+`execution-presign-prepare` refreshes the unsigned transaction to a current
+confirmed blockhash, then re-runs the transaction guard and wallet
+authorization against that exact message. The final RPC simulation uses the
+same blockhash and does not replace it.
+
+The durable execution journal stores:
+- the exact unsigned prepared transaction;
+- recent blockhash and last-valid block height;
+- the final exact simulation result.
+
+The store refuses `SIGNING` unless all of that evidence exists and passes.
+
+## Execution receipts
+
+A terminal Rust intent can be exported after confirmation/failure:
+
+```bash
+meteora-executor execution-receipt <EXECUTION_DB> <DECISION_ID> > receipt.json
+```
+
+The receipt binds:
+- immutable decision ID;
+- transaction signature;
+- action and pool;
+- terminal executor status;
+- Solana slot and block time;
+- network fee and compute usage when available;
+- decoded event/add/rebalance counts.
+
+Python can ingest it without any wallet access:
+
+```bash
+pio ingest-execution-receipt --file receipt.json
+```
+
+Receipt ingestion is idempotent. A decision ID cannot change receipts, and a
+signature cannot be linked to two decisions. If the corresponding Solana
+transaction snapshot is already present, slot/outcome/cost fields are checked
+for consistency.
+
 ## Confirmation recovery
 
 For an already persisted `SENT` intent:
@@ -171,11 +218,10 @@ Phase 6 is not complete yet. Remaining work includes:
 - instruction builders for normal entry and rebalance;
 - fee/reward claim and final position-close transaction sequence;
 - Token-2022/transfer-hook execution construction and validation;
-- exact recent-blockhash preparation and final pre-sign simulation;
 - isolated signer implementation;
 - transaction send/retry logic that cannot duplicate execution;
 - controlled recovery for expired blockhashes and ambiguous send outcomes;
-- live execution receipts reconciled back into the Python accounting layer;
+- receipt-driven live account/PnL mutation and final learning-label reconciliation;
 - explicit operational validation of the full executor lifecycle.
 
 Live signing/sending must not be enabled merely because the preflight layer
