@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, is_dataclass
+from pathlib import Path
 from typing import Any
 
 from .collector import collect_once
@@ -112,6 +113,10 @@ def run_phase9_evidence_step(
         raise ValueError("timeout_seconds must be positive")
 
     current_settings = settings or Settings.from_env()
+    if Path(current_settings.database_path) != Path(storage.path):
+        raise ValueError(
+            "evidence step settings database_path must match storage"
+        )
     before = build_phase9_evidence_plan(
         storage,
         criteria=criteria,
