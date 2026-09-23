@@ -58,6 +58,16 @@ REQUIRED_PHASE9_IMMUTABILITY_TRIGGERS = (
         "DELETE",
     ),
     (
+        "model_live_evidence_no_update",
+        "model_live_evidence",
+        "UPDATE",
+    ),
+    (
+        "model_live_evidence_no_delete",
+        "model_live_evidence",
+        "DELETE",
+    ),
+    (
         "phase_promotion_history_no_update",
         "phase_promotion_evidence_history",
         "UPDATE",
