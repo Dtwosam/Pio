@@ -197,14 +197,6 @@ def transition_model(
             f"invalid model transition: {current} -> {new_status}"
         )
 
-    if new_status == CHAMPION:
-        champion = storage.current_model_champion()
-        if champion is not None and champion["model_id"] != model_id:
-            raise ValueError(
-                f"champion already exists: {champion['model_id']}; "
-                "roll it back before promoting another model"
-            )
-
     storage.update_model_status(
         model_id,
         expected_status=current,
@@ -215,6 +207,17 @@ def transition_model(
     if updated is None:
         raise RuntimeError("updated model disappeared")
     return _to_record(updated)
+
+
+def model_record(
+    storage: Storage,
+    *,
+    model_id: str,
+) -> ModelRegistryRecord:
+    raw = storage.model_registry_entry(model_id)
+    if raw is None:
+        raise ValueError(f"unknown model_id: {model_id}")
+    return _to_record(raw)
 
 
 def current_champion(storage: Storage) -> ModelRegistryRecord | None:
