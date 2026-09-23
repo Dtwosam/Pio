@@ -135,7 +135,7 @@ mod tests {
     use super::*;
     use crate::models::{Action, Mode, TradeProposal};
     use crate::transaction_guard::{
-        check_transaction, TransactionGuardConfig,
+        check_transaction, ProgramInstructionPolicy, TransactionGuardConfig,
     };
     use uuid::Uuid;
 
@@ -193,6 +193,13 @@ mod tests {
                 max_static_accounts: 32,
                 allow_address_lookup_tables: false,
                 require_unsigned: true,
+                require_instruction_policy: true,
+                instruction_policies: vec![ProgramInstructionPolicy {
+                    program_id: dlmm::ID.to_string(),
+                    allowed_data_prefixes_hex: vec![
+                        "0a333d2370691855".into(),
+                    ],
+                }],
             },
         )
         .unwrap();
