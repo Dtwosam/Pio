@@ -656,8 +656,8 @@ def run_phase9_wallet_flow_capture(
             f"unique users {after.unique_users}/{criteria.min_unique_users}"
         )
         reasons.append(
-            "the wallet-flow cohort remains bounded and may still be "
-            "incomplete even after current-owner status=all expansion and "
+            "the bounded wallet-flow cohort is not a complete historical "
+            "pool census even after current-owner status=all expansion and "
             "read-only pool-signature backfill; RPC history retention and "
             "configured page limits can omit older activity"
         )
