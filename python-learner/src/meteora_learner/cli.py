@@ -136,6 +136,7 @@ from .phase9_wallet_flow_capture import (
     run_phase9_wallet_flow_capture,
 )
 from .phase9_source_capture import run_phase9_source_capture
+from .phase9_research_refresh import run_phase9_research_refresh
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
@@ -2343,6 +2344,41 @@ def main() -> None:
     phase9_source_capture.add_argument(
         "--require-automatic-ready",
         action="store_true",
+    )
+
+    phase9_research_refresh = subparsers.add_parser(
+        "phase9-research-refresh-run",
+        help="Recompute only missing/non-replay-verified automatic Phase 9 research families from persisted sources",
+    )
+    phase9_research_refresh.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_research_refresh.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_research_refresh.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_research_refresh.add_argument(
+        "--no-persist-bundle",
+        action="store_true",
+        help="Do not persist a ready research bundle after component refresh",
+    )
+    phase9_research_refresh.add_argument(
+        "--require-automatic-ready",
+        action="store_true",
+        help="Exit non-zero unless adaptive, mint-risk, wallet-flow and contextual-bandit evidence meet their automatic-family thresholds",
+    )
+    phase9_research_refresh.add_argument(
+        "--require-bundle-ready",
+        action="store_true",
+        help="Exit non-zero unless the complete Phase 9 research bundle is ready after refresh",
     )
 
     phase9_input_template = subparsers.add_parser(
@@ -5200,6 +5236,28 @@ def main() -> None:
             args.require_automatic_ready
             and not result.automatic_source_ready
         ):
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-research-refresh-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = run_phase9_research_refresh(
+            storage,
+            criteria=Phase9ResearchBundleCriteria(
+                min_mint_risk_pools=args.min_mint_risk_pools,
+                min_wallet_flow_pools=args.min_wallet_flow_pools,
+                min_static_hedge_pools=args.min_static_hedge_pools,
+            ),
+            persist_bundle_when_ready=not args.no_persist_bundle,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if (
+            args.require_automatic_ready
+            and not result.automatic_families_ready
+        ):
+            raise SystemExit(2)
+        if args.require_bundle_ready and not result.bundle_ready_after:
             raise SystemExit(2)
         return
 
