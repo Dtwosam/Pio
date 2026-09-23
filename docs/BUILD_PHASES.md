@@ -308,7 +308,8 @@ Built:
 - descriptive wallet-flow research with minimum-history/user-diversity and concentration filters
 - capped research-only multi-pool portfolio allocation with per-pool concentration and budget-utilization evidence
 - static inventory hedge research with explicit instrument identity, venue, liquidity-share, leverage, funding and trading-cost assumptions
-- offline contextual-bandit replay over fully labeled counterfactual actions, with adversarial no-lookahead tests and fixed-CSV replay workflow
+- offline contextual-bandit replay over fully labeled counterfactual actions, with adversarial no-lookahead tests and exploratory fixed-CSV replay
+- checksum-bound cycle contextual-bandit qualification tied to persisted retraining dataset version, SHA-256, cutoff and evidence ID
 - persistent Phase 9 research-bundle readiness gate spanning adaptive/regime, mint risk, wallet flow, allocation, hedge and bandit evidence while remaining `policy_actionable=false`
 - persistent non-actionable Phase 9 promotion evidence requiring Phase 8 promotion and a current immutable ready research bundle; this milestone remains `research_only=true`
 - dependency-aware Phase 9 evidence work queue that stages authoritative mint snapshots before mint-risk research and surfaces artifact/assumption gaps without inventing inputs
