@@ -11,11 +11,13 @@ PHASE3 = "PHASE3"
 PHASE5 = "PHASE5"
 PHASE6 = "PHASE6"
 PHASE7 = "PHASE7"
+PHASE8 = "PHASE8"
 PHASE2_EVIDENCE_TYPE = "PHASE2_PROMOTION_V1"
 PHASE3_EVIDENCE_TYPE = "PHASE3_PROMOTION_V1"
 PHASE5_EVIDENCE_TYPE = "PHASE5_PROMOTION_V1"
 PHASE6_EVIDENCE_TYPE = "PHASE6_PROMOTION_V1"
 PHASE7_EVIDENCE_TYPE = "PHASE7_PROMOTION_V1"
+PHASE8_EVIDENCE_TYPE = "PHASE8_PROMOTION_V1"
 
 
 @dataclass(frozen=True)
@@ -134,6 +136,27 @@ def persist_phase7_promotion(
     return phase_promotion_state(storage, phase_name=PHASE7)
 
 
+def persist_phase8_promotion(
+    storage: Storage,
+    *,
+    report: Any,
+) -> PhasePromotionState:
+    if not storage.phase_is_promoted(
+        PHASE7,
+        evidence_type=PHASE7_EVIDENCE_TYPE,
+    ):
+        raise ValueError("Phase 7 must be persistently promoted before Phase 8")
+    if not bool(getattr(report, "promotion_ready", False)):
+        raise ValueError("Phase 8 promotion report is not ready")
+    storage.save_phase_promotion_evidence(
+        phase_name=PHASE8,
+        evidence_type=PHASE8_EVIDENCE_TYPE,
+        qualified=True,
+        evidence=_record(report),
+    )
+    return phase_promotion_state(storage, phase_name=PHASE8)
+
+
 def phase_promotion_state(
     storage: Storage,
     *,
@@ -149,6 +172,8 @@ def phase_promotion_state(
         evidence_type = PHASE6_EVIDENCE_TYPE
     elif phase_name == PHASE7:
         evidence_type = PHASE7_EVIDENCE_TYPE
+    elif phase_name == PHASE8:
+        evidence_type = PHASE8_EVIDENCE_TYPE
     else:
         raise ValueError(f"unsupported phase_name: {phase_name}")
     return PhasePromotionState(
