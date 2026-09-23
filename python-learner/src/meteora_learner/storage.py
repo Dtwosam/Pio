@@ -735,6 +735,17 @@ CREATE TABLE IF NOT EXISTS paper_scheduler_events (
 CREATE INDEX IF NOT EXISTS idx_paper_scheduler_events_account_time
 ON paper_scheduler_events(account_id, event_time, id);
 
+CREATE TABLE IF NOT EXISTS phase9_operation_leases (
+    operation_key TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    lease_until TEXT NOT NULL,
+    acquired_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase9_operation_leases_until
+ON phase9_operation_leases(lease_until);
+
 
 CREATE TABLE IF NOT EXISTS token_quote_observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
