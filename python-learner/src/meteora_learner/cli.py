@@ -61,6 +61,14 @@ from .phase8_validation import (
 )
 from .phase8_evidence_status import evaluate_phase8_evidence_status
 from .phase8_evidence_plan import build_phase8_evidence_plan
+from .phase8_retrain_inputs import (
+    audit_phase8_retrain_inputs,
+    build_phase8_retrain_input_template,
+    load_phase8_retrain_inputs,
+    parse_phase8_retrain_inputs,
+    persist_phase8_retrain_inputs,
+    run_phase8_retrain_build_from_inputs,
+)
 from .phase9_research import (
     Phase9ResearchCriteria,
     evaluate_phase9_research,
@@ -1342,6 +1350,75 @@ def main() -> None:
         "--require-current",
         action="store_true",
         help="Exit non-zero unless persisted Phase 8 promotion evidence is current",
+    )
+
+    phase8_retrain_template = subparsers.add_parser(
+        "phase8-retrain-input-template",
+        help="Generate champion-bound Phase 8 retraining pool inputs without inventing token amounts or network costs",
+    )
+    phase8_retrain_template.add_argument(
+        "--pools",
+        help="Optional comma-separated pool set; defaults to highest-depth chain pools",
+    )
+    phase8_retrain_template.add_argument(
+        "--min-pools",
+        type=int,
+        default=3,
+    )
+
+    phase8_retrain_ingest = subparsers.add_parser(
+        "phase8-retrain-inputs-ingest",
+        help="Validate and persist checksum-bound Phase 8 retraining pool inputs for the current champion",
+    )
+    phase8_retrain_ingest.add_argument("--file", required=True)
+    phase8_retrain_ingest.add_argument(
+        "--min-pools",
+        type=int,
+        default=3,
+    )
+
+    phase8_retrain_audit = subparsers.add_parser(
+        "phase8-retrain-inputs-audit",
+        help="Audit current-champion Phase 8 retraining input checksum and lineage",
+    )
+    phase8_retrain_audit.add_argument(
+        "--require-valid",
+        action="store_true",
+    )
+
+    phase8_retrain_build_run = subparsers.add_parser(
+        "phase8-retrain-build-run",
+        help="Build a cutoff-bound retraining dataset and start one cycle from validated champion-bound inputs",
+    )
+    phase8_retrain_build_run.add_argument(
+        "--input-evidence-id",
+        type=int,
+        help="Retraining input evidence ID; defaults to the latest valid current-champion artifact",
+    )
+    phase8_retrain_build_run.add_argument(
+        "--output-directory",
+        help="Optional directory for the checksum/cutoff-named retraining dataset",
+    )
+    phase8_retrain_build_run.add_argument("--as-of")
+    phase8_retrain_build_run.add_argument(
+        "--min-new-chain-observations",
+        type=int,
+        default=500,
+    )
+    phase8_retrain_build_run.add_argument(
+        "--min-new-chain-pools",
+        type=int,
+        default=3,
+    )
+    phase8_retrain_build_run.add_argument(
+        "--min-new-live-labels",
+        type=int,
+        default=5,
+    )
+    phase8_retrain_build_run.add_argument(
+        "--max-champion-age-days",
+        type=float,
+        default=14.0,
     )
 
     phase8_validate = subparsers.add_parser(
@@ -4617,6 +4694,90 @@ def main() -> None:
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
+        return
+
+    if args.command == "phase8-retrain-input-template":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        pools = (
+            tuple(
+                value.strip()
+                for value in args.pools.split(",")
+                if value.strip()
+            )
+            if args.pools
+            else None
+        )
+        result = build_phase8_retrain_input_template(
+            storage,
+            pool_addresses=pools,
+            min_pools=args.min_pools,
+        )
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "phase8-retrain-inputs-ingest":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        with open(args.file, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        inputs = parse_phase8_retrain_inputs(
+            payload,
+            min_pools=args.min_pools,
+        )
+        result = persist_phase8_retrain_inputs(
+            storage,
+            inputs=inputs,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase8-retrain-inputs-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = audit_phase8_retrain_inputs(storage)
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_valid and not result.valid:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase8-retrain-build-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        if args.input_evidence_id is None:
+            audit = audit_phase8_retrain_inputs(storage)
+            if not audit.valid or audit.evidence_id is None:
+                raise ValueError(
+                    "a valid current-champion Phase 8 retraining input "
+                    "artifact is required: "
+                    + "; ".join(audit.reasons)
+                )
+            input_evidence_id = audit.evidence_id
+        else:
+            input_evidence_id = args.input_evidence_id
+        artifact = load_phase8_retrain_inputs(
+            storage,
+            evidence_id=input_evidence_id,
+        )
+        if artifact is None:
+            raise ValueError(
+                "Phase 8 retraining input artifact is missing"
+            )
+        result = run_phase8_retrain_build_from_inputs(
+            storage,
+            artifact=artifact,
+            criteria=ContinuousLearningCriteria(
+                min_new_chain_observations=(
+                    args.min_new_chain_observations
+                ),
+                min_new_chain_pools=args.min_new_chain_pools,
+                min_new_live_labels=args.min_new_live_labels,
+                max_champion_age_days=args.max_champion_age_days,
+            ),
+            as_of=args.as_of,
+            output_directory=args.output_directory,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "phase8-evidence-plan":
