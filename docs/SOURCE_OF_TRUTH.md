@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Source of Truth
 
-Status: v0.4
+Status: v0.5
 Date: 2026-09-23
 
 ## 1. Mission
@@ -177,6 +177,8 @@ Phase 3 comparison uses equal requested notional and entry-value normalized econ
 ML challengers move through evidence-backed stages. Offline qualification requires persisted Phase 3 promotion and held-out challenger evidence. Champion promotion additionally requires qualified paper evidence.
 
 Paper mode maintains a persistent, idempotent ledger. For chain-bound counterfactual positions, inventory and fee/reward accrual are derived from real DLMM bin snapshots using the same validated liquidity-share and checkpoint formulas as the simulator. Unsupported reward valuation or token programs fail closed.
+
+Live paper cycles derive pool safety from the latest local normalized state rather than caller flags. Prepared valuations and paper events use deterministic keys so restarts cannot double-count fee/reward income or repeat an exit/rebalance. Account-level scheduling discovers open chain-bound positions, skips positions with no new chain observation or missing token-Y quote data, and can cap each cycle using oldest-last-observation priority.
 
 ## 7. Decision flow
 
