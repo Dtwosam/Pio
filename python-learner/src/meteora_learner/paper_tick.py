@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
-from typing import Any
+from typing import Any, Callable
 
 from .paper_chain_refresh import InspectPool, refresh_paper_chain_state
 from .paper_market_refresh import PoolFetcher, refresh_paper_market_state
+from .jupiter_quotes import (
+    JupiterTokenUSDQuote,
+    refresh_open_paper_jupiter_quotes,
+)
 from .paper_supervisor import run_paper_supervisor
 from .pool_safety import PoolSafetyConfig
 from .position_policy import PositionManagementConfig
@@ -22,6 +26,7 @@ class PaperTickReport:
     reused_existing_tick: bool
     market: dict[str, Any] | None
     chain: dict[str, Any] | None
+    quote_refresh: dict[str, Any] | None
     supervisor: dict[str, Any] | None
     error: str | None
 
@@ -47,6 +52,7 @@ def _from_stored(
         reused_existing_tick=True,
         market=payload.get("market"),
         chain=payload.get("chain"),
+        quote_refresh=payload.get("quote_refresh"),
         supervisor=payload.get("supervisor"),
         error=error or payload.get("error"),
     )
@@ -68,6 +74,8 @@ def run_paper_tick(
     retry_failed: bool = False,
     fetch_pool: PoolFetcher | None = None,
     inspect_pool: InspectPool | None = None,
+    refresh_jupiter_quotes: bool = False,
+    fetch_jupiter_quote: Callable[[str], JupiterTokenUSDQuote] | None = None,
 ) -> PaperTickReport:
     """
     Execute one idempotent PAPER orchestration tick.
@@ -133,6 +141,7 @@ def run_paper_tick(
 
     market_record: dict[str, Any] | None = None
     chain_record: dict[str, Any] | None = None
+    quote_refresh_record: dict[str, Any] | None = None
     supervisor_record: dict[str, Any] | None = None
 
     try:
@@ -159,6 +168,15 @@ def run_paper_tick(
             )
             chain_record = chain.to_record()
 
+            if refresh_jupiter_quotes:
+                quote_refresh = refresh_open_paper_jupiter_quotes(
+                    storage,
+                    account_id=account_id,
+                    observed_at=timestamp,
+                    fetch_quote=fetch_jupiter_quote,
+                )
+                quote_refresh_record = quote_refresh.to_record()
+
             supervisor = run_paper_supervisor(
                 storage,
                 account_id=account_id,
@@ -183,6 +201,7 @@ def run_paper_tick(
             "observed_at": timestamp,
             "market": market_record,
             "chain": chain_record,
+            "quote_refresh": quote_refresh_record,
             "supervisor": supervisor_record,
             "error": None,
         }
@@ -208,6 +227,7 @@ def run_paper_tick(
             reused_existing_tick=False,
             market=market_record,
             chain=chain_record,
+            quote_refresh=quote_refresh_record,
             supervisor=supervisor_record,
             error=None,
         )
