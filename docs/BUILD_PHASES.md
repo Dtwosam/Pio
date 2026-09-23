@@ -302,14 +302,15 @@ Built:
 - empirical holding-window displacement coverage with explicit history/coverage/cap evidence
 - Phase 8 promotion visibility in advanced-edge reports
 - hard `research_only=true` / `policy_actionable=false` boundary for adaptive-range output
+- authoritative read-only Solana mint inspection with immutable Python snapshot ingestion
+- no-lookahead pool mint-risk research covering token-program consistency, initialization, mint/freeze authorities, decimals, reward mints and conservative Token-2022 extension handling
+- descriptive wallet-flow research with minimum-history/user-diversity and concentration filters
+- capped research-only multi-pool portfolio allocation with per-pool concentration and budget-utilization evidence
 - fail-closed range-cap and insufficient-history states
 - CLI research workflow with optional readiness exit status
 
 Still needed:
 - regime classification and validation
-- token/mint risk enrichment from trustworthy sources
-- wallet-flow research with anti-manipulation filters
-- portfolio-level allocation research
 - optional hedge research where instrument/liquidity assumptions are explicit
 - contextual-bandit research only after offline counterfactual validation
 - a separate evidence/promotion gate before any Phase 9 signal can influence live policy
