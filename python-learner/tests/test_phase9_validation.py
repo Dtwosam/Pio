@@ -1,5 +1,9 @@
 from dataclasses import replace
 
+from meteora_learner.chain_snapshot_lineage import (
+    chain_snapshot_source_record,
+    chain_snapshot_source_sha256,
+)
 from meteora_learner.contextual_bandit import (
     CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
 )
@@ -280,18 +284,59 @@ def seed_mint_risk_lineage(storage, pool):
     )
 
 
-def seed_ready(storage):
-    promote_phase8(storage)
-    portfolio_lineage = seed_portfolio_candidate_lineage(storage)
-    bandit_lineage = seed_bandit_dataset_lineage(storage)
+def seed_adaptive_multi_pool_lineage(storage, pools):
+    pool_records = []
+    with storage.connect() as conn:
+        for pool in pools:
+            row = conn.execute(
+                """
+                SELECT id, pool_address, observed_at, active_bin_id
+                FROM chain_pool_snapshots
+                WHERE pool_address = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (pool,),
+            ).fetchone()
+            assert row is not None
+            record = chain_snapshot_source_record(row)
+            source_ids = [int(record["id"])]
+            source_sha = chain_snapshot_source_sha256([record])
+            observed_at = str(record["observed_at"])
+            pool_records.append(
+                {
+                    "pool_address": pool,
+                    "adaptive": {
+                        "as_of": observed_at,
+                        "source_snapshot_ids": source_ids,
+                        "source_snapshot_sha256": source_sha,
+                    },
+                    "regime": {
+                        "as_of": observed_at,
+                        "source_snapshot_ids": source_ids,
+                        "source_snapshot_sha256": source_sha,
+                    },
+                }
+            )
+
     evidence(
         storage,
         PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
         "__MULTI_POOL__",
+        extra={"pools": pool_records},
     )
+
+def seed_ready(storage):
+    promote_phase8(storage)
+    portfolio_lineage = seed_portfolio_candidate_lineage(storage)
+    bandit_lineage = seed_bandit_dataset_lineage(storage)
     for pool in ("pool-a", "pool-b"):
         seed_mint_risk_lineage(storage, pool)
         seed_wallet_flow_lineage(storage, pool)
+    seed_adaptive_multi_pool_lineage(
+        storage,
+        ("pool-a", "pool-b"),
+    )
     evidence(
         storage,
         PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
