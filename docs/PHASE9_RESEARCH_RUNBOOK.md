@@ -69,6 +69,40 @@ Token-2022 extension bytes.
 
 ### Wallet-flow research
 
+Collect source history with the bounded read-only capture path:
+
+```bash
+pio phase9-wallet-flow-capture-run \
+  --pool <POOL> \
+  --historical-signature-limit 25 \
+  --require-ready
+```
+
+The collector starts from current on-chain `PositionV2` accounts, expands
+those current owners through Meteora `status=all` position PnL when enabled,
+and can additionally inspect recent Solana signatures that mention the exact
+pool account. The Rust scanner decodes only Meteora liquidity/fee/reward events
+whose `lb_pair` exactly equals the requested pool and returns their historical
+position/owner candidates.
+
+For live research, the collector rescans one recent signature page for newly
+appearing activity and advances at most one persisted older backfill page per
+run. Inspect or advance that backfill independently with:
+
+```bash
+pio phase9-pool-activity-discovery \
+  --pool <POOL> \
+  --limit 25 \
+  --advance-backfill
+```
+
+Historical signature discovery is never used for `--as-of` capture because
+discovering an old cohort from information visible only today would be
+lookahead. The scan remains bounded by RPC history retention and configured
+page limits, so it improves coverage but is not a complete historical census.
+
+After source coverage is sufficient:
+
 ```bash
 pio wallet-flow-research \
   --pool <POOL> \
