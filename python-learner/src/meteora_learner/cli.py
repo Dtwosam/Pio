@@ -81,6 +81,7 @@ from .phase9_shadow import (
 )
 from .phase9_policy_authorization import (
     Phase9PolicyAuthorizationCriteria,
+    audit_persisted_phase9_policy_authorization,
     evaluate_phase9_policy_authorization,
     persist_phase9_policy_authorization,
 )
@@ -1715,6 +1716,15 @@ def main() -> None:
     )
     phase9_storage_integrity.add_argument(
         "--require-verified",
+        action="store_true",
+    )
+
+    phase9_policy_audit = subparsers.add_parser(
+        "phase9-policy-authorization-audit",
+        help="Audit whether persisted Phase 9 future-policy authorization evidence still matches current deterministic replay",
+    )
+    phase9_policy_audit.add_argument(
+        "--require-current",
         action="store_true",
     )
 
@@ -3993,6 +4003,17 @@ def main() -> None:
         result = evaluate_phase9_storage_integrity(storage)
         print(json.dumps(result.to_record(), indent=2))
         if args.require_verified and not result.verified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-authorization-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = audit_persisted_phase9_policy_authorization(
+            storage,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_current and not result.current:
             raise SystemExit(2)
         return
 
