@@ -211,6 +211,101 @@ def test_wallet_freshness_detects_new_event(tmp_path):
     assert "wallet-flow history advanced" in item.reason
 
 
+def test_operational_freshness_requires_ranked_mint_and_wallet_pools(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    pool_a_id = save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    save_pool(
+        storage,
+        "pool-b",
+        "2026-09-23T10:00:00+00:00",
+    )
+    mint_a_id = save_mint(
+        storage,
+        "pool-a-x",
+        "2026-09-23T10:00:00+00:00",
+    )
+    event_a_id = save_wallet_event(
+        storage,
+        "pool-a",
+        "one",
+        "2026-09-23T10:00:00+00:00",
+    )
+    with storage.connect() as conn:
+        for pool, tvl in (
+            ("pool-b", 2_000.0),
+            ("pool-a", 1_000.0),
+        ):
+            conn.execute(
+                """
+                INSERT INTO pool_snapshots(
+                    observed_at, address, name, tvl,
+                    volume_24h, fees_24h, raw_json
+                ) VALUES (
+                    '2026-09-23T11:30:00+00:00',
+                    ?, ?, ?, 100, 1, '{}'
+                )
+                """,
+                (pool, pool, tvl),
+            )
+
+    storage.save_advanced_edge_evidence(
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T10:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "pool_snapshot_id": pool_a_id,
+            "assessments": [
+                {
+                    "mint_address": "pool-a-x",
+                    "mint_snapshot_id": mint_a_id,
+                }
+            ],
+        },
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "source_event_ids": [event_a_id],
+        },
+    )
+
+    report = evaluate_phase9_source_freshness(
+        storage,
+        as_of="2026-09-23T12:00:00+00:00",
+        required_mint_pools=1,
+        required_wallet_pools=1,
+    )
+    by_family = {
+        item.family: item
+        for item in report.families
+    }
+
+    assert by_family["mint_risk"].current is False
+    assert "pool-b" in by_family["mint_risk"].reason
+    assert "ranked cohort" in by_family["mint_risk"].reason
+    assert by_family["wallet_flow"].current is False
+    assert "pool-b" in by_family["wallet_flow"].reason
+    assert "ranked cohort" in by_family["wallet_flow"].reason
+
+
 def test_static_hedge_freshness_detects_new_price_path_snapshot(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     first = save_pool(storage, "pool-a", "2026-09-23T10:00:00+00:00")
