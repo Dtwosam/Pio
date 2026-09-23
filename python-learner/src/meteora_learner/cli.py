@@ -40,11 +40,13 @@ from .phase_promotion import (
     PHASE6,
     PHASE7,
     PHASE8,
+    PHASE9,
     persist_phase2_promotion,
     persist_phase5_promotion,
     persist_phase6_promotion,
     persist_phase7_promotion,
     persist_phase8_promotion,
+    persist_phase9_promotion,
     phase_promotion_state,
 )
 from .phase3_validation import Phase3PromotionCriteria
@@ -59,6 +61,7 @@ from .phase9_research import (
 )
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
+    evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
     persist_phase9_research_bundle,
 )
@@ -866,7 +869,7 @@ def main() -> None:
 
     subparsers.add_parser(
         "phase-status",
-        help="Print persisted Phase 2, Phase 3, Phase 5, Phase 6, Phase 7 and Phase 8 promotion state",
+        help="Print persisted Phase 2, Phase 3, Phase 5, Phase 6, Phase 7, Phase 8 and Phase 9 promotion state",
     )
 
     phase3_validate = subparsers.add_parser(
@@ -1597,6 +1600,34 @@ def main() -> None:
     )
     phase9_bundle.add_argument("--persist", action="store_true")
     phase9_bundle.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_validate = subparsers.add_parser(
+        "phase9-validate",
+        help="Validate and optionally persist non-actionable Phase 9 research promotion evidence",
+    )
+    phase9_validate.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_validate.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_validate.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_validate.add_argument(
+        "--persist-ready",
+        action="store_true",
+    )
+    phase9_validate.add_argument(
         "--require-ready",
         action="store_true",
     )
@@ -2865,6 +2896,10 @@ def main() -> None:
                 storage,
                 phase_name=PHASE8,
             ).__dict__,
+            "phase9": phase_promotion_state(
+                storage,
+                phase_name=PHASE9,
+            ).__dict__,
         }
         print(json.dumps(output, indent=2))
         return
@@ -3456,6 +3491,30 @@ def main() -> None:
             )
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.research_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_promotion(
+            storage,
+            criteria=Phase9ResearchBundleCriteria(
+                min_mint_risk_pools=args.min_mint_risk_pools,
+                min_wallet_flow_pools=args.min_wallet_flow_pools,
+                min_static_hedge_pools=args.min_static_hedge_pools,
+            ),
+        )
+        output = result.to_record()
+        if args.persist_ready and result.promotion_ready:
+            output["persisted"] = persist_phase9_promotion(
+                storage,
+                report=result,
+            ).__dict__
+        else:
+            output["persisted"] = None
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
         return
 
