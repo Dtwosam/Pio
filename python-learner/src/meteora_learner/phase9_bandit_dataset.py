@@ -455,7 +455,13 @@ def load_phase9_bandit_dataset(
                 "Phase 9 bandit dataset does not rebuild from persisted "
                 "chain history and explicit inputs"
             )
-        if rebuilt.report.to_record() != dataset_raw:
+        rebuilt_report = json.loads(
+            json.dumps(rebuilt.report.to_record(), sort_keys=True)
+        )
+        persisted_report = json.loads(
+            json.dumps(dataset_raw, sort_keys=True)
+        )
+        if rebuilt_report != persisted_report:
             raise ValueError(
                 "Phase 9 bandit dataset report does not reproduce"
             )
