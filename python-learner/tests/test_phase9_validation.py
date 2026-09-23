@@ -46,6 +46,7 @@ def evidence(
     qualified=True,
     research_only=True,
     policy_actionable=False,
+    extra=None,
 ):
     return storage.save_advanced_edge_evidence(
         edge_type=edge_type,
@@ -61,6 +62,7 @@ def evidence(
             "research_qualified": qualified,
             "research_only": research_only,
             "policy_actionable": policy_actionable,
+            **(extra or {}),
         },
     )
 
@@ -85,6 +87,17 @@ def seed_ready(storage):
         storage,
         CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
         "__CONTEXTUAL_BANDIT__",
+        extra={
+            "dataset_lineage": {
+                "cycle_id": "cycle",
+                "champion_model_id": "champion",
+                "dataset_evidence_id": 1,
+                "dataset_version": "ML_ACTION_DATASET_V1:test",
+                "dataset_sha256": "deadbeef",
+                "cutoff": "2026-09-23T12:00:00+00:00",
+                "output_file": "retrain.csv",
+            }
+        },
     )
 
 
