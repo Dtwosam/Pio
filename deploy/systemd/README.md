@@ -138,16 +138,19 @@ sudo systemctl status pio-phase9-research-refresh.timer
 journalctl -u pio-phase9-research-refresh.service
 ```
 
-The refresh timer starts 25 minutes after boot and then every 70 minutes, so a
-normal paired deployment begins roughly ten minutes after the source-capture
-timer's 15-minute boot offset. The service is also ordered after
+The refresh timer starts 40 minutes after boot and then every 70 minutes, so a
+normal paired deployment begins 25 minutes after the source-capture timer's
+15-minute boot offset. That offset is longer than the source service's 20-minute
+timeout. The service is also ordered after
 `pio-phase9-source-capture.service` when both are active in the same systemd
 transaction.
+
+Both source capture and research refresh use the same 30-minute SQLite maintenance lease, so a manual invocation cannot overlap either scheduled maintenance pass. A busy invocation exits cleanly without running its underlying collector/research job, and an expired lease can be recovered.
 
 It runs only `phase9-research-refresh-run`. That command requires verified
 Phase 9 storage and a current Phase 8 promotion, skips replay-verified
 automatic families, persists only changed research evidence and may persist a
-ready research bundle. It does not run Phase 9 promotion, source RPC capture,
+ready research bundle. When a valid checksum-bound explicit research-input artifact already exists, the refresh may also recompute only the static-hedge and/or portfolio-allocation family whose current qualified evidence no longer replay-verifies; it never invents or mutates those assumptions. It does not run Phase 9 promotion, source RPC capture,
 policy authorization, rollout, signing or transaction submission.
 
 Optional flags may be supplied with
