@@ -135,6 +135,8 @@ pio phase9-policy-rollout-audit --require-current
 pio phase9-policy-rollback-simulate --file config/phase9_rollback_simulation.example.json --persist
 pio phase9-policy-rollback-audit --require-current
 pio phase9-policy-prewire-audit --require-ready
+pio phase9-policy-manifest --persist --require-ready
+pio phase9-policy-manifest-audit --require-current
 pio phase9-research-validate --pools <POOL_A,POOL_B,POOL_C> --persist
 pio mint-risk-research --pool <POOL> --persist --require-qualified
 pio wallet-flow-research --pool <POOL> --persist --require-qualified
