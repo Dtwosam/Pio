@@ -124,6 +124,7 @@ pio phase9-promotion-audit --require-current
 pio phase9-operational-audit --require-verified
 pio phase9-source-capture-run --history-min-observation-interval-seconds 3600  # bounded read-only pass
 pio phase9-maintenance-status  # shared source/research lease state
+pio phase9-source-freshness  # replay-valid evidence vs latest persisted source observations
 pio phase9-research-refresh-run  # replay-aware automatic research refresh; no promotion
 pio phase9-chain-capture-plan --rpc-url <RPC_URL> --require-ready
 pio phase9-chain-capture-run --require-target  # uses SOLANA_RPC_URL; read-only inspect + local ingest
