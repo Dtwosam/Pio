@@ -53,7 +53,7 @@ def test_model_registry_enforces_staged_promotion(tmp_path):
     )
     assert record.status == "OFFLINE_CANDIDATE"
 
-    with pytest.raises(ValueError, match="invalid model transition"):
+    with pytest.raises(ValueError, match="qualified paper validation"):
         transition_model(
             storage,
             model_id="model-a",
