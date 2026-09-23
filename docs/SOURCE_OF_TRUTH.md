@@ -307,3 +307,21 @@ The project is successful when it can:
 6. improve the champion model using new data without silently degrading live performance.
 
 Profit is evaluated over statistically meaningful samples, not one exceptional day.
+
+
+## Phase 9 advanced edge boundary
+
+Phase 9 advanced-edge modules are research-only unless and until a separate
+evidence gate explicitly promotes them. Phase 8 promotion alone does not make
+an advanced signal actionable.
+
+The first advanced-edge module estimates a DLMM range half-width from historical
+active-bin movement available at a decision cutoff. It constructs historical
+holding windows entirely before that cutoff, takes an empirical displacement
+quantile for the requested coverage, and clamps it to an explicit configured
+range cap. Future snapshots are excluded when `as_of` is supplied.
+
+Adaptive-range output always carries `research_only=true` and
+`policy_actionable=false`. A `RESEARCH_READY` status means the evidence is
+sufficient to study; it does not authorize entry, rebalance, signing or
+submission.
