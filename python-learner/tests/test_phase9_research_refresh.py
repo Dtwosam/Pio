@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import pytest
+
 import meteora_learner.phase9_research_refresh as refresh_module
 from meteora_learner.phase9_research_refresh import (
     _mint_evaluation_as_of,
@@ -11,6 +13,43 @@ from meteora_learner.phase9_bandit_dataset import (
     Phase9BanditDatasetLineage,
 )
 from meteora_learner.storage import Storage
+
+
+def freshness_report(**overrides):
+    values = {
+        "adaptive_regime": True,
+        "mint_risk": True,
+        "wallet_flow": True,
+        "portfolio_allocation": True,
+        "static_hedge": True,
+        "contextual_bandit": True,
+    }
+    values.update(overrides)
+    families = tuple(
+        SimpleNamespace(
+            family=family,
+            current=current,
+            reason=(
+                "test source current"
+                if current
+                else "test source advanced"
+            ),
+        )
+        for family, current in values.items()
+    )
+    return SimpleNamespace(
+        families=families,
+        by_family=lambda: dict(values),
+    )
+
+
+@pytest.fixture(autouse=True)
+def current_phase9_sources(monkeypatch):
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_source_freshness",
+        lambda storage: freshness_report(),
+    )
 
 
 @dataclass
@@ -755,3 +794,79 @@ def test_research_refresh_derives_bandit_dataset_from_explicit_inputs(
     assert item.persisted_evidence_id == 89
     assert calls == ["dataset", "bandit"]
     assert "explicit input artifact 77" in item.reason
+
+
+def test_research_refresh_recomputes_replay_verified_adaptive_when_source_advances(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: SimpleNamespace(current=True),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "_replay_statuses",
+        lambda *args, **kwargs: {
+            "adaptive_regime": True,
+            "mint_risk": True,
+            "wallet_flow": True,
+            "portfolio_allocation": True,
+            "static_hedge": True,
+            "contextual_bandit": True,
+        },
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_source_freshness",
+        lambda storage: freshness_report(adaptive_regime=False),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "build_phase9_history_plan",
+        lambda storage: SimpleNamespace(
+            plan_ready=True,
+            reasons=(),
+            pools=(
+                SimpleNamespace(pool_address="pool-a"),
+                SimpleNamespace(pool_address="pool-b"),
+                SimpleNamespace(pool_address="pool-c"),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_research",
+        lambda *args, **kwargs: DummyReport("adaptive-fresh"),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "persist_phase9_research",
+        lambda *args, **kwargs: calls.append("adaptive") or 501,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: bundle(
+            ready=False,
+            adaptive=1,
+            mint=2,
+            wallet=2,
+            bandit=1,
+        ),
+    )
+
+    report = run_phase9_research_refresh(storage)
+
+    adaptive = next(
+        item for item in report.items
+        if item.family == "adaptive_regime"
+    )
+    assert adaptive.status == "PERSISTED"
+    assert adaptive.persisted_evidence_id == 501
+    assert calls == ["adaptive"]
+    assert "source freshness: test source advanced" in adaptive.reason
