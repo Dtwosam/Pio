@@ -30,12 +30,15 @@ from .phase_promotion import (
     PHASE2,
     PHASE3,
     PHASE5,
+    PHASE6,
     persist_phase2_promotion,
     persist_phase5_promotion,
+    persist_phase6_promotion,
     phase_promotion_state,
 )
 from .phase3_validation import Phase3PromotionCriteria
 from .phase5_validation import Phase5PromotionCriteria, evaluate_phase5_promotion
+from .phase6_validation import Phase6PromotionCriteria, evaluate_phase6_promotion
 from .phase3_workflow import (
     Phase3ValidationInput,
     validate_phase3_from_chain,
@@ -780,7 +783,7 @@ def main() -> None:
 
     subparsers.add_parser(
         "phase-status",
-        help="Print persisted Phase 2, Phase 3 and Phase 5 promotion state",
+        help="Print persisted Phase 2, Phase 3, Phase 5 and Phase 6 promotion state",
     )
 
     phase3_validate = subparsers.add_parser(
@@ -889,6 +892,38 @@ def main() -> None:
     )
     phase5_validate.add_argument("--persist-ready", action="store_true")
     phase5_validate.add_argument("--require-ready", action="store_true")
+
+    phase6_validate = subparsers.add_parser(
+        "phase6-validate",
+        help="Evaluate persisted pre-live Rust executor evidence for Phase 6",
+    )
+    phase6_validate.add_argument(
+        "--execution-db",
+        required=True,
+        help="Absolute path to the Rust execution-intent SQLite database",
+    )
+    phase6_validate.add_argument(
+        "--min-passed-enter-intents",
+        type=int,
+        default=10,
+    )
+    phase6_validate.add_argument(
+        "--min-distinct-pools",
+        type=int,
+        default=2,
+    )
+    phase6_validate.add_argument(
+        "--min-blocked-intents",
+        type=int,
+        default=2,
+    )
+    phase6_validate.add_argument(
+        "--max-postsimulation-intents",
+        type=int,
+        default=0,
+    )
+    phase6_validate.add_argument("--persist-ready", action="store_true")
+    phase6_validate.add_argument("--require-ready", action="store_true")
 
     ml_train = subparsers.add_parser(
         "ml-train-csv",
@@ -1778,6 +1813,10 @@ def main() -> None:
                 storage,
                 phase_name=PHASE5,
             ).__dict__,
+            "phase6": phase_promotion_state(
+                storage,
+                phase_name=PHASE6,
+            ).__dict__,
         }
         print(json.dumps(output, indent=2))
         return
@@ -1852,6 +1891,34 @@ def main() -> None:
         output = result.to_record()
         if args.persist_ready and result.promotion_ready:
             output["persisted"] = persist_phase5_promotion(
+                storage,
+                report=result,
+            ).__dict__
+        else:
+            output["persisted"] = None
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase6-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase6_promotion(
+            storage,
+            execution_db=args.execution_db,
+            criteria=Phase6PromotionCriteria(
+                min_passed_enter_intents=args.min_passed_enter_intents,
+                min_distinct_pools=args.min_distinct_pools,
+                min_blocked_intents=args.min_blocked_intents,
+                max_postsimulation_intents=(
+                    args.max_postsimulation_intents
+                ),
+            ),
+        )
+        output = result.to_record()
+        if args.persist_ready and result.promotion_ready:
+            output["persisted"] = persist_phase6_promotion(
                 storage,
                 report=result,
             ).__dict__
