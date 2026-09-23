@@ -68,6 +68,8 @@ def test_trending_path_is_detected_without_live_authority(tmp_path):
     assert report.regime == REGIME_TREND_UP
     assert report.recent_directional_efficiency == 1.0
     assert report.policy_actionable is False
+    assert len(report.source_snapshot_ids) == 20
+    assert len(report.source_snapshot_sha256) == 64
 
 
 def test_volatile_chop_is_detected(tmp_path):
