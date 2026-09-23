@@ -74,6 +74,11 @@ from .phase9_validation import (
 from .phase9_replay_audit import evaluate_phase9_replay_audit
 from .phase9_operational_audit import evaluate_phase9_operational_audit
 from .phase9_progress import evaluate_phase9_progress
+from .phase9_shadow import (
+    Phase9ShadowCriteria,
+    evaluate_phase9_shadow,
+    persist_phase9_shadow,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -1705,6 +1710,49 @@ def main() -> None:
     )
     phase9_storage_integrity.add_argument(
         "--require-verified",
+        action="store_true",
+    )
+
+    phase9_shadow = subparsers.add_parser(
+        "phase9-shadow-validate",
+        help="Validate a post-promotion checksum-bound Phase 9 shadow corpus without granting LIVE policy authority",
+    )
+    phase9_shadow.add_argument("--cycle-id", required=True)
+    phase9_shadow.add_argument(
+        "--warmup-decisions-per-context",
+        type=int,
+        default=2,
+    )
+    phase9_shadow.add_argument(
+        "--exploration-bonus-bps",
+        type=float,
+        default=50.0,
+    )
+    phase9_shadow.add_argument("--min-decisions", type=int, default=50)
+    phase9_shadow.add_argument("--min-pools", type=int, default=3)
+    phase9_shadow.add_argument(
+        "--min-selected-arms",
+        type=int,
+        default=2,
+    )
+    phase9_shadow.add_argument(
+        "--min-mean-uplift-vs-baseline-bps",
+        type=float,
+        default=0.0,
+    )
+    phase9_shadow.add_argument(
+        "--max-mean-regret-vs-oracle-bps",
+        type=float,
+        default=300.0,
+    )
+    phase9_shadow.add_argument(
+        "--min-post-promotion-seconds",
+        type=int,
+        default=1,
+    )
+    phase9_shadow.add_argument("--persist", action="store_true")
+    phase9_shadow.add_argument(
+        "--require-ready",
         action="store_true",
     )
 
@@ -3885,6 +3933,45 @@ def main() -> None:
         result = evaluate_phase9_storage_integrity(storage)
         print(json.dumps(result.to_record(), indent=2))
         if args.require_verified and not result.verified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-shadow-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_shadow(
+            storage,
+            cycle_id=args.cycle_id,
+            criteria=Phase9ShadowCriteria(
+                warmup_decisions_per_context=(
+                    args.warmup_decisions_per_context
+                ),
+                exploration_bonus_bps=args.exploration_bonus_bps,
+                min_decisions=args.min_decisions,
+                min_pools=args.min_pools,
+                min_selected_arms=args.min_selected_arms,
+                min_mean_uplift_vs_baseline_bps=(
+                    args.min_mean_uplift_vs_baseline_bps
+                ),
+                max_mean_regret_vs_oracle_bps=(
+                    args.max_mean_regret_vs_oracle_bps
+                ),
+                min_post_promotion_seconds=(
+                    args.min_post_promotion_seconds
+                ),
+            ),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_phase9_shadow(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.shadow_ready:
             raise SystemExit(2)
         return
 
