@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .adaptive_range import AdaptiveRangeCriteria
@@ -14,6 +15,31 @@ from .storage import Storage
 
 
 InspectPool = Callable[[str, int], dict[str, Any]]
+
+
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("history capture timestamps must be timezone-aware")
+    return parsed.astimezone(timezone.utc)
+
+
+def _latest_pool_observed_at(
+    storage: Storage,
+    pool_address: str,
+) -> str | None:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT observed_at
+            FROM chain_pool_snapshots
+            WHERE pool_address = ?
+            ORDER BY julianday(observed_at) DESC, id DESC
+            LIMIT 1
+            """,
+            (pool_address,),
+        ).fetchone()
+    return str(row[0]) if row is not None else None
 
 
 @dataclass(frozen=True)
@@ -101,8 +127,27 @@ def run_phase9_history_capture(
     captured = 0
     failed = 0
 
+    explicit_observed_at = (
+        _parse_time(ingest_observed_at)
+        if ingest_observed_at is not None
+        else None
+    )
+
     for item in attempted_pools:
         try:
+            if explicit_observed_at is not None:
+                latest_text = _latest_pool_observed_at(
+                    storage,
+                    item.pool_address,
+                )
+                if (
+                    latest_text is not None
+                    and explicit_observed_at <= _parse_time(latest_text)
+                ):
+                    raise ValueError(
+                        "history capture observed_at must be newer than "
+                        "the latest persisted pool snapshot"
+                    )
             payload = inspect(item.pool_address, bin_array_radius)
             if str(payload.get("pool_address", "")).strip() != (
                 item.pool_address
