@@ -128,6 +128,31 @@ actions may update the pool/context-local UCB statistics. Current-decision
 oracle rewards are used only after selection for evaluation. Adversarial tests
 lock this no-lookahead property.
 
+## Evidence work queue
+
+Before manually inspecting every research family, build the current evidence
+queue from the persisted database:
+
+```bash
+pio phase9-work-queue
+```
+
+If an RPC endpoint may be embedded in generated authoritative mint-inspection
+commands:
+
+```bash
+pio phase9-work-queue --rpc-url <RPC_URL>
+```
+
+The queue is dependency-aware. For example, a pool missing authoritative mint
+snapshots receives `MINT_SNAPSHOT` tasks first; it does not prematurely emit
+`mint-risk-research`. Hedge, portfolio-allocation and contextual-bandit tasks
+remain explicit about the external artifact or market assumptions still
+required instead of inventing them.
+
+When all component evidence is qualified, the queue advances to persisting or
+refreshing the research bundle, then to the non-actionable Phase 9 promotion.
+
 ## Research-bundle gate
 
 After the individual research families have persisted qualified evidence:
@@ -161,8 +186,11 @@ pio phase9-validate --persist-ready --require-ready
 ```
 
 This writes `PHASE9_PROMOTION_V1` only when Phase 8 is promoted and the
-research bundle is ready. The persistence function rejects reports that are
-policy-actionable or not research-only. `pio phase-status` therefore shows
+research bundle is ready. Promotion additionally requires an immutable
+persisted research-bundle record whose component evidence IDs and criteria
+still match the latest evidence. If newer component research appears, the old
+bundle becomes stale and must be revalidated/re-persisted first. The persistence
+function rejects reports that are policy-actionable or not research-only. `pio phase-status` therefore shows
 Phase 9 with explicit `research_only=true` and
 `policy_actionable=false`.
 
