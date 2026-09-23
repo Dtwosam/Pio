@@ -124,6 +124,11 @@ from .phase9_capture_plan import (
 )
 from .phase9_history_plan import build_phase9_history_plan
 from .phase9_history_capture import run_phase9_history_capture
+from .phase9_mint_capture import (
+    Phase9MintCaptureCriteria,
+    build_phase9_mint_capture_plan,
+    run_phase9_mint_capture,
+)
 from .phase9_chain_capture import run_phase9_chain_capture_batch
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
@@ -2133,6 +2138,64 @@ def main() -> None:
         help="Rust read-only executor binary used in emitted inspect-pool commands",
     )
     phase9_capture_plan.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_mint_plan = subparsers.add_parser(
+        "phase9-mint-capture-plan",
+        help="Plan fresh authoritative read-only mint captures for the highest-depth Phase 9 pools",
+    )
+    phase9_mint_plan.add_argument(
+        "--target-pools",
+        type=int,
+        default=2,
+    )
+    phase9_mint_plan.add_argument(
+        "--max-snapshot-age-seconds",
+        type=int,
+        default=3600,
+    )
+    phase9_mint_plan.add_argument(
+        "--exclude-reward-mints",
+        action="store_true",
+    )
+    phase9_mint_plan.add_argument("--as-of")
+    phase9_mint_plan.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_mint_run = subparsers.add_parser(
+        "phase9-mint-capture-run",
+        help="Capture missing or stale Phase 9 mint snapshots through the read-only Rust inspect-mint-env command",
+    )
+    phase9_mint_run.add_argument(
+        "--target-pools",
+        type=int,
+        default=2,
+    )
+    phase9_mint_run.add_argument(
+        "--max-snapshot-age-seconds",
+        type=int,
+        default=3600,
+    )
+    phase9_mint_run.add_argument(
+        "--exclude-reward-mints",
+        action="store_true",
+    )
+    phase9_mint_run.add_argument("--rust-manifest-path")
+    phase9_mint_run.add_argument("--rust-binary-path")
+    phase9_mint_run.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=120,
+    )
+    phase9_mint_run.add_argument(
+        "--observed-at",
+        help="Optional timezone-aware evaluation/capture timestamp",
+    )
+    phase9_mint_run.add_argument(
         "--require-ready",
         action="store_true",
     )
@@ -4804,6 +4867,51 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.plan_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-mint-capture-plan":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_phase9_mint_capture_plan(
+            storage,
+            criteria=Phase9MintCaptureCriteria(
+                target_pools=args.target_pools,
+                max_snapshot_age_seconds=(
+                    args.max_snapshot_age_seconds
+                ),
+                include_reward_mints=(
+                    not args.exclude_reward_mints
+                ),
+            ),
+            as_of=args.as_of,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.inputs_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-mint-capture-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = run_phase9_mint_capture(
+            storage,
+            criteria=Phase9MintCaptureCriteria(
+                target_pools=args.target_pools,
+                max_snapshot_age_seconds=(
+                    args.max_snapshot_age_seconds
+                ),
+                include_reward_mints=(
+                    not args.exclude_reward_mints
+                ),
+            ),
+            rust_manifest_path=args.rust_manifest_path,
+            rust_binary_path=args.rust_binary_path,
+            timeout_seconds=args.timeout_seconds,
+            observed_at=args.observed_at,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.inputs_ready_after:
             raise SystemExit(2)
         return
 
