@@ -40,6 +40,9 @@ from meteora_learner.phase9_explicit_inputs import (
     parse_phase9_explicit_inputs,
     persist_phase9_explicit_inputs,
 )
+from meteora_learner.phase9_pool_activity_scan_state import (
+    record_phase9_pool_activity_page,
+)
 from meteora_learner.phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
     Phase9ResearchCriteria,
@@ -916,8 +919,70 @@ def test_work_queue_blocks_wallet_flow_until_source_thresholds(
     assert "--pool pool-a" in capture.shell_command
     assert "events 0/20" in capture.reason
     assert "unique users 0/5" in capture.reason
+    assert "historical pool-signature backfill has not started" in (
+        capture.reason
+    )
     assert research.shell_command is None
     assert "blocked until real position-history" in research.reason
+
+
+def test_work_queue_reports_wallet_history_backfill_progress(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    criteria = Phase9ResearchBundleCriteria(
+        min_mint_risk_pools=1,
+        min_wallet_flow_pools=1,
+        min_static_hedge_pools=1,
+    )
+    record_phase9_pool_activity_page(
+        storage,
+        pool_address="pool-a",
+        next_before_signature="cursor-1",
+        has_more=True,
+        signatures_scanned=25,
+        matching_transactions=4,
+        positions_discovered=3,
+    )
+
+    queue = build_phase9_work_queue(
+        storage,
+        criteria=criteria,
+    )
+    capture = next(
+        item for item in queue.items
+        if item.task_type == "WALLET_FLOW_CAPTURE"
+    )
+    assert "backfill is in progress" in capture.reason
+    assert "1 page(s), 25 signature(s), 3 position candidate(s)" in (
+        capture.reason
+    )
+
+    record_phase9_pool_activity_page(
+        storage,
+        pool_address="pool-a",
+        next_before_signature="cursor-end",
+        has_more=False,
+        signatures_scanned=7,
+        matching_transactions=1,
+        positions_discovered=1,
+    )
+    queue = build_phase9_work_queue(
+        storage,
+        criteria=criteria,
+    )
+    capture = next(
+        item for item in queue.items
+        if item.task_type == "WALLET_FLOW_CAPTURE"
+    )
+    assert "backfill is exhausted" in capture.reason
+    assert "2 page(s) and 32 signature(s)" in capture.reason
+    assert "recent live rescans remain available" in capture.reason
 
 
 def test_work_queue_unlocks_wallet_flow_after_real_source_thresholds(
