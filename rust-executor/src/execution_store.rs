@@ -691,6 +691,7 @@ mod tests {
             signatures_all_default: true,
             address_lookup_table_count: 0,
             program_ids: vec!["program".into()],
+            instruction_fingerprints: vec![],
         }
     }
 
@@ -934,6 +935,8 @@ mod tests {
             max_static_accounts: 16,
             allow_address_lookup_tables: false,
             require_unsigned: true,
+            require_instruction_policy: false,
+            instruction_policies: vec![],
         };
         store
             .register_with_transaction_policy(&request, &cfg, &tx_cfg)
