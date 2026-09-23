@@ -339,6 +339,7 @@ Built:
 - explicit manual Phase 9 chain-capture batch that reuses the hardened read-only Rust inspector, isolates per-pool failures, validates returned pool identity and only ingests local snapshots; it never signs or submits transactions
 - exact adaptive/regime history-depth planner derived from evaluator criteria (43 observations per pool under defaults) plus a one-fresh-snapshot-per-deficient-pool read-only capture runner with monotonic timestamp checks
 - freshness-aware authoritative mint capture planner/runner using environment-based Rust `inspect-mint-env`, exact-pool targeting, deduplicated mint requirements, stale-snapshot refresh and fail-closed historical cutoffs
+- RPC-filtered read-only `PositionV2` discovery by pool plus bounded official-position-history collection for wallet-flow source coverage, with latest-lookback event/user counting, diversity-first ordering and explicit current-cohort scope
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
