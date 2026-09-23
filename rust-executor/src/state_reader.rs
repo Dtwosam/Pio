@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use commons::dlmm::accounts::{BinArray, LbPair, PositionV2};
 use commons::{
     derive_bin_array_pda, get_price_from_id, pod_read_unaligned_skip_disc, BinArrayExtension,
-    DynamicPosition, LbPairExtension,
+    DynamicPosition, LbPairExtension, MAX_REWARD_BIN_SPLIT, NUM_REWARDS, SCALE_OFFSET,
 };
 use serde::Serialize;
 
@@ -21,6 +21,7 @@ pub struct BinSnapshot {
     pub liquidity_supply: String,
     pub fee_amount_x_per_token_stored: String,
     pub fee_amount_y_per_token_stored: String,
+    pub reward_per_token_stored: [String; 2],
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +48,11 @@ pub struct PoolChainSnapshot {
     pub deposit_total_fee_rate: String,
     pub protocol_share_bps: u16,
     pub collect_fee_mode: u8,
+    pub supports_limit_order: bool,
+    pub reward_mints: [String; 2],
+    pub reward_rates: [String; 2],
+    pub reward_duration_ends: [u64; 2],
+    pub reward_last_update_times: [u64; 2],
     pub bin_arrays: Vec<BinArraySnapshot>,
 }
 
@@ -59,6 +65,7 @@ pub struct PositionBinSnapshot {
     pub bin_liquidity: String,
     pub bin_fee_x_per_token_stored: String,
     pub bin_fee_y_per_token_stored: String,
+    pub bin_reward_per_token_stored: [String; 2],
     pub position_liquidity: String,
     pub position_x_amount: String,
     pub position_y_amount: String,
@@ -93,6 +100,67 @@ fn decode_lb_pair(data: &[u8]) -> Result<LbPair> {
 
 fn decode_bin_array(data: &[u8]) -> Result<BinArray> {
     pod_read_unaligned_skip_disc::<BinArray>(data)
+}
+
+fn effective_reward_per_token_stored(
+    lb_pair: &LbPair,
+    bin_id: i32,
+    liquidity_supply: u128,
+    fulfilled_order_amount_x: u64,
+    fulfilled_order_amount_y: u64,
+    limit_order_fee_ask_side: u64,
+    limit_order_fee_bid_side: u64,
+    current_timestamp: i64,
+) -> [u128; NUM_REWARDS] {
+    if lb_pair.is_support_limit_order() {
+        return [0u128; NUM_REWARDS];
+    }
+
+    let mut reward_0_bytes = [0u8; 16];
+    reward_0_bytes[0..8].copy_from_slice(&fulfilled_order_amount_x.to_le_bytes());
+    reward_0_bytes[8..16].copy_from_slice(&fulfilled_order_amount_y.to_le_bytes());
+
+    let mut reward_1_bytes = [0u8; 16];
+    reward_1_bytes[0..8].copy_from_slice(&limit_order_fee_ask_side.to_le_bytes());
+    reward_1_bytes[8..16].copy_from_slice(&limit_order_fee_bid_side.to_le_bytes());
+
+    let mut rewards = [
+        u128::from_le_bytes(reward_0_bytes),
+        u128::from_le_bytes(reward_1_bytes),
+    ];
+
+    if bin_id != lb_pair.active_id || liquidity_supply == 0 {
+        return rewards;
+    }
+
+    let now = u64::try_from(current_timestamp).unwrap_or(0);
+    let liquidity_supply_scaled = liquidity_supply >> SCALE_OFFSET as u32;
+    if liquidity_supply_scaled == 0 {
+        return rewards;
+    }
+
+    for (index, reward) in rewards.iter_mut().enumerate() {
+        let reward_info = &lb_pair.reward_infos[index];
+        if reward_info.mint == Pubkey::default() {
+            continue;
+        }
+
+        let current_time = std::cmp::min(now, reward_info.reward_duration_end);
+        let delta = current_time.saturating_sub(reward_info.last_update_time);
+        if delta == 0 {
+            continue;
+        }
+
+        let reward_delta = reward_info
+            .reward_rate
+            .checked_mul(delta.into())
+            .and_then(|value| value.checked_div(MAX_REWARD_BIN_SPLIT as u128))
+            .and_then(|value| value.checked_div(liquidity_supply_scaled))
+            .unwrap_or(0);
+        *reward = reward.saturating_add(reward_delta);
+    }
+
+    rewards
 }
 
 pub async fn inspect_pool(
@@ -178,6 +246,16 @@ pub async fn inspect_pool(
                 } else {
                     bin.price
                 };
+                let rewards = effective_reward_per_token_stored(
+                    &lb_pair,
+                    bin_id,
+                    bin.liquidity_supply,
+                    bin.fulfilled_order_amount_x,
+                    bin.fulfilled_order_amount_y,
+                    bin.limit_order_fee_ask_side,
+                    bin.limit_order_fee_bid_side,
+                    clock.unix_timestamp,
+                );
                 Some(BinSnapshot {
                     bin_id,
                     price: price.to_string(),
@@ -190,6 +268,10 @@ pub async fn inspect_pool(
                     fee_amount_y_per_token_stored: bin
                         .fee_amount_y_per_token_stored
                         .to_string(),
+                    reward_per_token_stored: [
+                        rewards[0].to_string(),
+                        rewards[1].to_string(),
+                    ],
                 })
             })
             .collect();
@@ -217,6 +299,23 @@ pub async fn inspect_pool(
         deposit_total_fee_rate: deposit_total_fee_rate.to_string(),
         protocol_share_bps: lb_pair.parameters.protocol_share,
         collect_fee_mode: lb_pair.parameters.collect_fee_mode,
+        supports_limit_order: lb_pair.is_support_limit_order(),
+        reward_mints: [
+            lb_pair.reward_infos[0].mint.to_string(),
+            lb_pair.reward_infos[1].mint.to_string(),
+        ],
+        reward_rates: [
+            lb_pair.reward_infos[0].reward_rate.to_string(),
+            lb_pair.reward_infos[1].reward_rate.to_string(),
+        ],
+        reward_duration_ends: [
+            lb_pair.reward_infos[0].reward_duration_end,
+            lb_pair.reward_infos[1].reward_duration_end,
+        ],
+        reward_last_update_times: [
+            lb_pair.reward_infos[0].last_update_time,
+            lb_pair.reward_infos[1].last_update_time,
+        ],
         bin_arrays,
     })
 }
@@ -292,18 +391,31 @@ pub async fn inspect_position(
         .bins
         .into_iter()
         .map(|bin| {
-            let (bin_fee_x_per_token_stored, bin_fee_y_per_token_stored) =
-                BinArray::bin_id_to_bin_array_index(bin.bin_id)
-                    .ok()
-                    .and_then(|index| bin_array_map.get(&index))
-                    .and_then(|array| array.get_bin(bin.bin_id).ok())
-                    .map(|raw_bin| {
-                        (
-                            raw_bin.fee_amount_x_per_token_stored,
-                            raw_bin.fee_amount_y_per_token_stored,
-                        )
-                    })
-                    .unwrap_or((0, 0));
+            let (
+                bin_fee_x_per_token_stored,
+                bin_fee_y_per_token_stored,
+                bin_reward_per_token_stored,
+            ) = BinArray::bin_id_to_bin_array_index(bin.bin_id)
+                .ok()
+                .and_then(|index| bin_array_map.get(&index))
+                .and_then(|array| array.get_bin(bin.bin_id).ok())
+                .map(|raw_bin| {
+                    (
+                        raw_bin.fee_amount_x_per_token_stored,
+                        raw_bin.fee_amount_y_per_token_stored,
+                        effective_reward_per_token_stored(
+                            &lb_pair_state,
+                            bin.bin_id,
+                            raw_bin.liquidity_supply,
+                            raw_bin.fulfilled_order_amount_x,
+                            raw_bin.fulfilled_order_amount_y,
+                            raw_bin.limit_order_fee_ask_side,
+                            raw_bin.limit_order_fee_bid_side,
+                            clock.unix_timestamp,
+                        ),
+                    )
+                })
+                .unwrap_or((0, 0, [0u128; NUM_REWARDS]));
 
             PositionBinSnapshot {
             bin_id: bin.bin_id,
@@ -313,6 +425,10 @@ pub async fn inspect_position(
             bin_liquidity: bin.bin_liquidity.to_string(),
             bin_fee_x_per_token_stored: bin_fee_x_per_token_stored.to_string(),
             bin_fee_y_per_token_stored: bin_fee_y_per_token_stored.to_string(),
+            bin_reward_per_token_stored: [
+                bin_reward_per_token_stored[0].to_string(),
+                bin_reward_per_token_stored[1].to_string(),
+            ],
             position_liquidity: bin.position_liquidity.to_string(),
             position_x_amount: bin.position_x_amount.to_string(),
             position_y_amount: bin.position_y_amount.to_string(),
