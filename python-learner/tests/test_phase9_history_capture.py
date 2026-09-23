@@ -313,3 +313,35 @@ def test_history_capture_ready_sampling_still_honors_interval(tmp_path):
         item.status == "SKIPPED_INTERVAL"
         for item in report.items
     )
+
+
+def test_history_capture_samples_ready_and_shallow_explicit_cohort(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_chain_observations(storage, pool, 43)
+    save_chain_observations(storage, "pool-d", 1)
+
+    calls = []
+    report = run_phase9_history_capture(
+        storage,
+        pool_addresses=("pool-a", "pool-b", "pool-c", "pool-d"),
+        inspector=lambda pool, radius: (
+            calls.append(pool) or payload(pool)
+        ),
+        ingest_observed_at="2026-09-23T13:00:42+00:00",
+        min_observation_interval_seconds=3600,
+        continue_sampling_when_ready=True,
+    )
+
+    assert report.history_ready_before is True
+    assert report.history_ready_after is True
+    assert report.pools_attempted == 4
+    assert report.pools_captured == 4
+    assert calls == ["pool-a", "pool-b", "pool-c", "pool-d"]
+    shallow = next(
+        item for item in report.items
+        if item.pool_address == "pool-d"
+    )
+    assert shallow.observations_before == 1
+    assert shallow.observations_after == 2
+    assert shallow.additional_observations_needed_after == 41
