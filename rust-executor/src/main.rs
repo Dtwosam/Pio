@@ -1,3 +1,4 @@
+mod confirmation;
 mod dry_run;
 mod events;
 mod execution_guard;
@@ -27,6 +28,7 @@ fn usage() {
   meteora-executor dry-run-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
   meteora-executor preflight-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
+  meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
   meteora-executor wallet-status
   meteora-executor wallet-authorize-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
@@ -280,6 +282,44 @@ RPC_URL is accepted as a compatibility fallback",
             )?;
             let record = store.load(&decision_id)?;
             println!("{}", serde_json::to_string_pretty(&record)?);
+        }
+        "execution-confirmation" => {
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
+            let decision_id = args
+                .next()
+                .context("DECISION_ID is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "execution-confirmation accepts exactly two arguments"
+                );
+            }
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let store = execution_store::ExecutionIntentStore::open(
+                &execution_db,
+            )?;
+            let report = confirmation::reconcile_confirmation_with(
+                &store,
+                &decision_id,
+                |signature| {
+                    confirmation::observe_confirmation_rpc(
+                        &rpc_url,
+                        signature,
+                    )
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if matches!(
+                report.intent_status,
+                execution_store::ExecutionIntentStatus::Failed
+            ) {
+                std::process::exit(2);
+            }
         }
         "wallet-status" => {
             if args.next().is_some() {
