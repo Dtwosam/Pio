@@ -115,6 +115,7 @@ from .live_position_ledger import apply_live_position_effect
 from .live_position_closure import finalize_live_position_closure
 from .live_position_outcome import build_live_position_outcome
 from .live_position_valuation import value_live_position_outcome
+from .live_learning_label import build_live_learning_label
 from .live_execution_audit import audit_live_execution_ledger
 from .transaction_costs import build_transaction_cost_report
 
@@ -1047,6 +1048,12 @@ def main() -> None:
         default=300,
     )
 
+    live_label_cmd = subparsers.add_parser(
+        "build-live-learning-label",
+        help="Join valued live PnL to the original confirmed model decision",
+    )
+    live_label_cmd.add_argument("--position", required=True)
+
     live_close_cmd = subparsers.add_parser(
         "finalize-live-position-closure",
         help="Mark a liquidity-removed live position closed from confirmed Rust RPC proof",
@@ -1460,6 +1467,15 @@ def main() -> None:
             Storage(settings.database_path),
             position_address=args.position,
             max_age_seconds=args.max_age_seconds,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "build-live-learning-label":
+        settings = Settings.from_env()
+        result = build_live_learning_label(
+            Storage(settings.database_path),
+            position_address=args.position,
         )
         print(json.dumps(result.to_record(), indent=2))
         return
