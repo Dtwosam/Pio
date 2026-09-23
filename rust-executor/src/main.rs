@@ -47,6 +47,8 @@ fn usage() {
   meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
+  meteora-executor discover-pool-positions <RPC_URL> <POOL_ADDRESS> [LIMIT]
+  meteora-executor discover-pool-positions-env <POOL_ADDRESS> [LIMIT]
   meteora-executor inspect-mint <RPC_URL> <MINT_ADDRESS>
   meteora-executor inspect-mint-env <MINT_ADDRESS>
   meteora-executor verify-position-closed <RPC_URL> <POSITION_ADDRESS>
@@ -189,6 +191,55 @@ RPC_URL is accepted as a compatibility fallback",
             let snapshot =
                 state_reader::inspect_position(&rpc_url, &position_address).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "discover-pool-positions" => {
+            let rpc_url = args.next().context("RPC_URL is required")?;
+            let pool_address = args.next().context("POOL_ADDRESS is required")?;
+            let limit: usize = args
+                .next()
+                .as_deref()
+                .unwrap_or("250")
+                .parse()
+                .context("LIMIT must be a positive integer")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "discover-pool-positions accepts at most three arguments"
+                );
+            }
+            let result = state_reader::discover_pool_positions(
+                &rpc_url,
+                &pool_address,
+                limit,
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        "discover-pool-positions-env" => {
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let pool_address = args.next().context("POOL_ADDRESS is required")?;
+            let limit: usize = args
+                .next()
+                .as_deref()
+                .unwrap_or("250")
+                .parse()
+                .context("LIMIT must be a positive integer")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "discover-pool-positions-env accepts at most two arguments"
+                );
+            }
+            let result = state_reader::discover_pool_positions(
+                &rpc_url,
+                &pool_address,
+                limit,
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
         }
         "inspect-mint" => {
             let rpc_url = args.next().context("RPC_URL is required")?;
