@@ -24,6 +24,7 @@ def queue(
     rollback=False,
     prewire=False,
     manifest=False,
+    sources_current=False,
 ):
     return Phase9WorkQueue(
         phase8_promoted=phase8,
@@ -36,6 +37,7 @@ def queue(
         rollback_simulation_current=rollback,
         prewire_ready=prewire,
         prewire_manifest_current=manifest,
+        research_sources_current=sources_current,
         candidate_pools=("pool-a",),
         items=tuple(tasks),
     )
@@ -259,3 +261,59 @@ def test_phase9_progress_exposes_wallet_activity_scan_without_snapshots(
     assert second.backfill_exhausted is False
     assert second.backfill_before_signature == "sig-b"
     assert second.positions_discovered == 3
+
+
+def test_phase9_progress_reports_source_refresh_pending(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    criteria = Phase9ResearchBundleCriteria(
+        min_mint_risk_pools=1,
+        min_wallet_flow_pools=1,
+        min_static_hedge_pools=1,
+    )
+    persist_phase9_work_queue_snapshot(
+        storage,
+        queue=queue(
+            tasks=(
+                task(
+                    "RESEARCH_SOURCE_REFRESH",
+                    "adaptive_regime,wallet_flow",
+                ),
+            ),
+            bundle=True,
+            promotion=True,
+            sources_current=False,
+        ),
+        criteria=criteria,
+        created_at="2026-09-23T22:10:00+00:00",
+    )
+
+    report = evaluate_phase9_progress(storage)
+
+    assert report.status == "SOURCE_REFRESH_PENDING"
+    assert report.research_sources_current is False
+    assert report.latest_task_count == 1
+    assert report.new_tasks == ()
+
+
+def test_phase9_progress_exposes_current_research_sources(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    criteria = Phase9ResearchBundleCriteria(
+        min_mint_risk_pools=1,
+        min_wallet_flow_pools=1,
+        min_static_hedge_pools=1,
+    )
+    persist_phase9_work_queue_snapshot(
+        storage,
+        queue=queue(
+            tasks=(),
+            bundle=True,
+            promotion=True,
+            sources_current=True,
+        ),
+        criteria=criteria,
+        created_at="2026-09-23T22:15:00+00:00",
+    )
+
+    report = evaluate_phase9_progress(storage)
+
+    assert report.research_sources_current is True
