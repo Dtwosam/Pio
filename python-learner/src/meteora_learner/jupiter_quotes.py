@@ -7,7 +7,11 @@ from typing import Any, Callable
 
 import httpx
 
-from .quote_registry import DEFAULT_QUOTE_UNIT, save_token_quote
+from .quote_registry import (
+    DEFAULT_QUOTE_UNIT,
+    required_paper_quote_mints,
+    save_token_quote,
+)
 from .storage import Storage, utc_now_iso
 
 
@@ -135,27 +139,6 @@ class JupiterTokenClient:
         )
 
 
-def _required_token_y_mints(
-    storage: Storage,
-    *,
-    account_id: str,
-) -> tuple[str, ...]:
-    with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT DISTINCT c.token_y_mint
-            FROM paper_positions p
-            JOIN paper_counterfactual_positions c
-              ON c.position_id = p.position_id
-            WHERE p.account_id = ?
-              AND p.status = 'OPEN'
-            ORDER BY c.token_y_mint ASC
-            """,
-            (account_id,),
-        ).fetchall()
-    return tuple(str(row[0]) for row in rows)
-
-
 def refresh_open_paper_jupiter_quotes(
     storage: Storage,
     *,
@@ -164,7 +147,7 @@ def refresh_open_paper_jupiter_quotes(
     fetch_quote: Callable[[str], JupiterTokenUSDQuote] | None = None,
 ) -> JupiterQuoteRefreshReport:
     """
-    Refresh USD-per-atomic token-Y quotes for open chain-bound paper positions.
+    Refresh USD-per-atomic quotes required by open chain-bound PAPER positions.
 
     Pio v1 treats ACCOUNT_QUOTE as USD when this adapter is used. A missing
     Jupiter price fails that mint; no fallback or synthetic price is inserted.
@@ -172,7 +155,7 @@ def refresh_open_paper_jupiter_quotes(
     if not account_id.strip():
         raise ValueError("account_id is required")
     timestamp = observed_at or utc_now_iso()
-    mints = _required_token_y_mints(storage, account_id=account_id)
+    mints = required_paper_quote_mints(storage, account_id=account_id)
     items: list[JupiterQuoteRefreshItem] = []
     refreshed = 0
     failed = 0
