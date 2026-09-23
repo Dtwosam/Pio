@@ -423,3 +423,25 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def add_liquidity_request(
+        self,
+        signature: str,
+        instruction_index: int,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT observed_at, signature, instruction_index,
+                       instruction_type, requested_amount_x, requested_amount_y,
+                       observed_active_id, max_active_bin_slippage
+                FROM chain_add_liquidity_requests
+                WHERE signature = ? AND instruction_index = ?
+                LIMIT 1
+                """,
+                (signature, instruction_index),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
