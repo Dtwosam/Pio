@@ -163,6 +163,12 @@ from .live_position_outcome import build_live_position_outcome
 from .live_position_valuation import value_live_position_outcome
 from .live_learning_label import build_live_learning_label
 from .live_execution_audit import audit_live_execution_ledger
+from .contextual_bandit import (
+    ContextualBanditCriteria,
+    bandit_examples_from_records,
+    evaluate_contextual_bandit,
+    persist_contextual_bandit_research,
+)
 from .continuous_learning import (
     ContinuousLearningCriteria,
     build_continuous_learning_plan,
@@ -1561,6 +1567,44 @@ def main() -> None:
     phase9_research.add_argument("--as-of")
     phase9_research.add_argument("--persist", action="store_true")
     phase9_research.add_argument(
+        "--require-qualified",
+        action="store_true",
+    )
+
+    contextual_bandit = subparsers.add_parser(
+        "contextual-bandit-research",
+        help="Replay a research-only contextual bandit over a fixed ML action CSV",
+    )
+    contextual_bandit.add_argument("--file", required=True)
+    contextual_bandit.add_argument(
+        "--warmup-decisions-per-context",
+        type=int,
+        default=2,
+    )
+    contextual_bandit.add_argument(
+        "--exploration-bonus-bps",
+        type=float,
+        default=50.0,
+    )
+    contextual_bandit.add_argument("--min-decisions", type=int, default=30)
+    contextual_bandit.add_argument("--min-pools", type=int, default=3)
+    contextual_bandit.add_argument(
+        "--min-selected-arms",
+        type=int,
+        default=2,
+    )
+    contextual_bandit.add_argument(
+        "--min-mean-uplift-vs-baseline-bps",
+        type=float,
+        default=0.0,
+    )
+    contextual_bandit.add_argument(
+        "--max-mean-regret-vs-oracle-bps",
+        type=float,
+        default=500.0,
+    )
+    contextual_bandit.add_argument("--persist", action="store_true")
+    contextual_bandit.add_argument(
         "--require-qualified",
         action="store_true",
     )
@@ -3351,6 +3395,46 @@ def main() -> None:
         if args.persist:
             output["persisted_evidence_id"] = (
                 persist_phase9_research(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not result.research_qualified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "contextual-bandit-research":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        frame = pd.read_csv(args.file)
+        examples = bandit_examples_from_records(
+            frame.to_dict("records")
+        )
+        result = evaluate_contextual_bandit(
+            storage,
+            examples=examples,
+            criteria=ContextualBanditCriteria(
+                warmup_decisions_per_context=(
+                    args.warmup_decisions_per_context
+                ),
+                exploration_bonus_bps=args.exploration_bonus_bps,
+                min_decisions=args.min_decisions,
+                min_pools=args.min_pools,
+                min_selected_arms=args.min_selected_arms,
+                min_mean_uplift_vs_baseline_bps=(
+                    args.min_mean_uplift_vs_baseline_bps
+                ),
+                max_mean_regret_vs_oracle_bps=(
+                    args.max_mean_regret_vs_oracle_bps
+                ),
+            ),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_contextual_bandit_research(
                     storage,
                     report=result,
                 )
