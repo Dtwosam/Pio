@@ -25,6 +25,8 @@ pub fn authorize_wallet(
         Some("transaction_guard_not_accepted")
     } else if transaction.required_signatures == 0 {
         Some("transaction_has_no_required_signer")
+    } else if transaction.required_signatures != 1 {
+        Some("transaction_requires_additional_signers")
     } else if !transaction.signatures_all_default {
         Some("transaction_not_unsigned")
     } else if transaction_payer != *wallet_pubkey {
@@ -93,6 +95,21 @@ mod tests {
         assert_eq!(
             report.reason,
             "executor_wallet_is_not_transaction_fee_payer"
+        );
+    }
+
+    #[test]
+    fn additional_required_signer_is_rejected() {
+        let wallet = Pubkey::new_unique();
+        let mut tx = transaction(wallet, true);
+        tx.required_signatures = 2;
+
+        let report = authorize_wallet(&wallet, &tx).unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(
+            report.reason,
+            "transaction_requires_additional_signers"
         );
     }
 
