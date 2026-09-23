@@ -20,7 +20,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 2: standard-SPL simulator implementation complete; real promotion evidence pending
 - Phase 3: deterministic policy + persisted validation/promotion workflow implemented; real promotion evidence pending
 - Phase 4: reproducible no-lookahead ML challenger workflow implemented; not promoted
-- Phase 5: chain-driven, idempotent multi-position paper trader implemented; unattended live orchestration/validation pending
+- Phase 5: unattended chain-driven PAPER scheduler implemented; extended live validation pending
 - Default mode: PAPER
 - Live signing: not implemented
 
@@ -89,6 +89,10 @@ pio paper-chain-run --run-id <RUN> --observed-at <TIME> --file <ITEMS_JSON>
 pio paper-live-latest-run --cycle-id <CYCLE> --file <ITEMS_JSON>
 pio paper-portfolio-run --account paper --cycle-id <CYCLE> \
   --quotes-file <TOKEN_Y_QUOTES_JSON> --max-positions <N>
+pio paper-tick --account paper --tick-id <ID> --refresh-jupiter-quotes
+pio paper-scheduler-run --account paper --interval-seconds 300 --lease-seconds 900 \
+  --refresh-jupiter-quotes
+pio paper-scheduler-status --account paper
 
 # Persisted promotion / ML workflow
 pio phase-status
@@ -140,3 +144,12 @@ These commands are read-only and require no wallet private key.
 ## Safety
 
 20% daily return is an aspirational benchmark only. The bot cannot increase risk just to chase it. A no-trade day is valid.
+
+
+## Unattended PAPER mode
+
+Production-style PAPER scheduling templates live under `deploy/systemd/`. They
+run as an unprivileged `pio` user, use deterministic leased scheduler ticks,
+and can call only the Rust read-only pool inspector. Build the Rust executor
+once with `cargo build --release` and set `PIO_RUST_EXECUTOR_BIN` plus
+`SOLANA_RPC_URL`. No wallet private key is required or accepted by this path.
