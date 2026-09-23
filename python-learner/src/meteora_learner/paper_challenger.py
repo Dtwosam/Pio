@@ -168,10 +168,14 @@ def promote_paper_challenger(
             "roll it back before promoting another model"
         )
 
-    storage.update_model_status(
+    storage.save_model_promotion_evidence(
+        model_id=validation.model_id,
+        evidence_type="PAPER_VALIDATION_V1",
+        qualified=validation.paper_qualified,
+        evidence=validation.to_record(),
+    )
+    storage.promote_model_to_champion(
         validation.model_id,
-        expected_status=PAPER_CHALLENGER,
-        new_status=CHAMPION,
         notes=notes,
     )
     updated = storage.model_registry_entry(validation.model_id)
