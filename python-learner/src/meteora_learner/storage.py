@@ -870,6 +870,31 @@ CREATE TABLE IF NOT EXISTS phase_promotion_evidence (
     evidence_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS phase_promotion_evidence_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phase_name TEXT NOT NULL,
+    promoted_at TEXT NOT NULL,
+    evidence_type TEXT NOT NULL,
+    qualified INTEGER NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase_promotion_history_phase_id
+ON phase_promotion_evidence_history(phase_name, id);
+
+CREATE TRIGGER IF NOT EXISTS phase_promotion_history_no_update
+BEFORE UPDATE ON phase_promotion_evidence_history
+BEGIN
+    SELECT RAISE(ABORT, 'phase_promotion_evidence_history is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase_promotion_history_no_delete
+BEFORE DELETE ON phase_promotion_evidence_history
+BEGIN
+    SELECT RAISE(ABORT, 'phase_promotion_evidence_history is immutable');
+END;
+
+
 CREATE TABLE IF NOT EXISTS model_offline_evidence (
     model_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
@@ -2429,7 +2454,24 @@ class Storage:
             raise ValueError("phase_name is required")
         if not evidence_type.strip():
             raise ValueError("evidence_type is required")
+        promoted_at = utc_now_iso()
+        evidence_json = json.dumps(evidence, separators=(",", ":"))
         with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO phase_promotion_evidence_history(
+                    phase_name, promoted_at, evidence_type,
+                    qualified, evidence_json
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    phase_name,
+                    promoted_at,
+                    evidence_type,
+                    int(bool(qualified)),
+                    evidence_json,
+                ),
+            )
             conn.execute(
                 """
                 INSERT INTO phase_promotion_evidence(
@@ -2444,12 +2486,41 @@ class Storage:
                 """,
                 (
                     phase_name,
-                    utc_now_iso(),
+                    promoted_at,
                     evidence_type,
                     int(bool(qualified)),
-                    json.dumps(evidence, separators=(",", ":")),
+                    evidence_json,
                 ),
             )
+
+    def phase_promotion_history(
+        self,
+        phase_name: str,
+    ) -> list[dict[str, Any]]:
+        if not phase_name.strip():
+            raise ValueError("phase_name is required")
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, phase_name, promoted_at, evidence_type,
+                       qualified, evidence_json
+                FROM phase_promotion_evidence_history
+                WHERE phase_name = ?
+                ORDER BY id ASC
+                """,
+                (phase_name,),
+            ).fetchall()
+        return [
+            {
+                "id": int(row[0]),
+                "phase_name": str(row[1]),
+                "promoted_at": str(row[2]),
+                "evidence_type": str(row[3]),
+                "qualified": bool(row[4]),
+                "evidence": json.loads(str(row[5])),
+            }
+            for row in rows
+        ]
 
     def phase_is_promoted(
         self,
