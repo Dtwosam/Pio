@@ -413,6 +413,32 @@ ON live_execution_receipts(signature);
 CREATE INDEX IF NOT EXISTS idx_live_execution_receipts_pool_slot
 ON live_execution_receipts(pool_address, slot);
 
+CREATE TABLE IF NOT EXISTS live_execution_effects (
+    decision_id TEXT PRIMARY KEY,
+    signature TEXT NOT NULL UNIQUE,
+    observed_at TEXT NOT NULL,
+    action TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    position_address TEXT,
+    token_x_wallet_delta_atomic TEXT NOT NULL,
+    token_y_wallet_delta_atomic TEXT NOT NULL,
+    composition_fee_x_atomic TEXT NOT NULL,
+    composition_fee_y_atomic TEXT NOT NULL,
+    earned_fee_x_atomic TEXT NOT NULL,
+    earned_fee_y_atomic TEXT NOT NULL,
+    reward_one_atomic TEXT NOT NULL,
+    reward_two_atomic TEXT NOT NULL,
+    network_fee_lamports INTEGER,
+    chain_event_count INTEGER NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_execution_effects_position
+ON live_execution_effects(position_address, observed_at);
+
+CREATE INDEX IF NOT EXISTS idx_live_execution_effects_pool
+ON live_execution_effects(pool_address, observed_at);
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
