@@ -2,7 +2,7 @@
 Description=Refresh reproducible Phase 9 research after source capture
 
 [Timer]
-OnBootSec=25min
+OnBootSec=40min
 OnUnitActiveSec=70min
 AccuracySec=2min
 Persistent=true
