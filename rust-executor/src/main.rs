@@ -33,6 +33,7 @@ fn usage() {
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-wallet-authorize <EXECUTION_DB> <DECISION_ID>
+  meteora-executor execution-presign-prepare <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
   meteora-executor build-emergency-exit <REQUEST_JSON_OR_->
   meteora-executor wallet-status
   meteora-executor wallet-authorize-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
@@ -412,6 +413,145 @@ RPC_URL is accepted as a compatibility fallback",
             let output = serde_json::json!({
                 "wallet": wallet_status,
                 "authorization": authorization,
+                "intent": persisted,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        "execution-presign-prepare" => {
+            let request_source = args
+                .next()
+                .context("REQUEST_JSON_OR_- is required")?;
+            let risk_config_path = args
+                .next()
+                .context("RISK_CONFIG_JSON is required")?;
+            let transaction_config_path = args
+                .next()
+                .context("TRANSACTION_GUARD_CONFIG_JSON is required")?;
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "execution-presign-prepare accepts exactly four arguments"
+                );
+            }
+
+            let request_json = if request_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read execution request JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&request_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read execution request JSON: {request_source}"
+                        )
+                    })?
+            };
+            let risk_config_json = std::fs::read_to_string(&risk_config_path)
+                .with_context(|| {
+                    format!(
+                        "failed to read risk config JSON: {risk_config_path}"
+                    )
+                })?;
+            let transaction_config_json =
+                std::fs::read_to_string(&transaction_config_path)
+                    .with_context(|| {
+                        format!(
+                            "failed to read transaction guard config JSON: {transaction_config_path}"
+                        )
+                    })?;
+
+            let request: dry_run::DryRunExecutionRequest =
+                serde_json::from_str(&request_json)
+                    .context("invalid execution request JSON")?;
+            let risk_config: risk::RiskConfig =
+                serde_json::from_str(&risk_config_json)
+                    .context("invalid risk config JSON")?;
+            let transaction_config:
+                transaction_guard::TransactionGuardConfig =
+                serde_json::from_str(&transaction_config_json)
+                    .context("invalid transaction guard config JSON")?;
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let wallet_status = wallet::inspect_executor_wallet_from_env()?;
+            let wallet_pubkey: solana_sdk::pubkey::Pubkey =
+                wallet_status.pubkey.parse()
+                    .context("executor wallet pubkey is invalid")?;
+            let store = execution_store::ExecutionIntentStore::open(
+                &execution_db,
+            )?;
+            let registered = store.register_with_transaction_policy(
+                &request,
+                &risk_config,
+                &transaction_config,
+            )?;
+            if registered.record.status
+                != execution_store::ExecutionIntentStatus::SimulationPassed
+            {
+                anyhow::bail!(
+                    "execution-presign-prepare requires SIMULATION_PASSED intent; current status is {:?}",
+                    registered.record.status
+                );
+            }
+            if registered.record.wallet_authorization.is_none() {
+                anyhow::bail!(
+                    "execution-presign-prepare requires persisted wallet authorization"
+                );
+            }
+
+            let report = presign::evaluate_final_presign_with(
+                &request,
+                &risk_config,
+                &transaction_config,
+                &wallet_pubkey,
+                |encoded| {
+                    blockhash::prepare_unsigned_transaction_with_latest_blockhash(
+                        &rpc_url,
+                        encoded,
+                    )
+                },
+                |encoded| {
+                    simulation::simulate_exact_base64_transaction(
+                        &rpc_url,
+                        encoded,
+                    )
+                },
+            )?;
+            if !report.accepted {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                std::process::exit(2);
+            }
+            let prepared = report
+                .prepared
+                .as_ref()
+                .context("accepted presign report is missing prepared transaction")?;
+            let transaction = report
+                .transaction
+                .as_ref()
+                .context("accepted presign report is missing transaction guard")?;
+            let wallet = report
+                .wallet
+                .as_ref()
+                .context("accepted presign report is missing wallet authorization")?;
+            let simulation = report
+                .simulation
+                .as_ref()
+                .context("accepted presign report is missing simulation")?;
+            let persisted = store.record_final_presign(
+                &request.proposal.decision_id.to_string(),
+                prepared,
+                transaction,
+                wallet,
+                simulation,
+            )?;
+            let output = serde_json::json!({
+                "report": report,
                 "intent": persisted,
             });
             println!("{}", serde_json::to_string_pretty(&output)?);
