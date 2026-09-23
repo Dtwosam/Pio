@@ -234,8 +234,24 @@ Still needed:
 Live signing and transaction sending remain unavailable.
 
 ## Phase 7 — Controlled Live Trading
+Status: controlled-live authorization infrastructure started; public signing/sending remains disabled.
 
-Start with explicit small capital caps.
+Built:
+- read-only Rust controlled-live gate against persisted Python live-position state
+- mandatory Phase 5 promotion dependency
+- explicit pool allowlist for ENTER / REBALANCE
+- hard per-entry quote-capital cap
+- max concurrent non-closed live-position cap
+- daily drawdown gate for ENTER / REBALANCE
+- disabled-by-default live kill switch
+- EXIT remains independently allowed for risk reduction when entry/rebalance are disabled
+- reproducible disabled example configuration
+
+Still needed:
+- bind controlled-live authorization into the internal submission coordinator
+- explicit Phase 6 controlled validation evidence
+- public live execution command only after promotion/validation gates are satisfied
+- first small-capital controlled-live run with full receipt/ledger reconciliation
 
 ## Phase 8 — Continuous Learning
 
