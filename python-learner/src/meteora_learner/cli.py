@@ -73,6 +73,7 @@ from .phase9_validation import (
 )
 from .phase9_replay_audit import evaluate_phase9_replay_audit
 from .phase9_operational_audit import evaluate_phase9_operational_audit
+from .phase9_progress import evaluate_phase9_progress
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -1704,6 +1705,19 @@ def main() -> None:
     )
     phase9_storage_integrity.add_argument(
         "--require-verified",
+        action="store_true",
+    )
+
+    phase9_progress = subparsers.add_parser(
+        "phase9-progress",
+        help="Summarize checksum-verified Phase 9 evidence progress snapshots",
+    )
+    phase9_progress.add_argument(
+        "--require-snapshot",
+        action="store_true",
+    )
+    phase9_progress.add_argument(
+        "--require-integrity",
         action="store_true",
     )
 
@@ -3871,6 +3885,17 @@ def main() -> None:
         result = evaluate_phase9_storage_integrity(storage)
         print(json.dumps(result.to_record(), indent=2))
         if args.require_verified and not result.verified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-progress":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_progress(storage)
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_snapshot and result.snapshot_count == 0:
+            raise SystemExit(2)
+        if args.require_integrity and not result.integrity_verified:
             raise SystemExit(2)
         return
 
