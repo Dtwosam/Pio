@@ -73,25 +73,49 @@ class ResearchStore:
 
         return [dict(row) for row in rows]
 
-    def latest_chain_pool_snapshot(self, address: str) -> dict[str, Any] | None:
+    def latest_chain_pool_snapshot(
+        self,
+        address: str,
+        *,
+        as_of: str | None = None,
+    ) -> dict[str, Any] | None:
         conn = self._connect()
         try:
-            row = conn.execute(
-                """
-                SELECT observed_at, pool_address, active_bin_id, bin_step,
-                       token_x_mint, token_y_mint, token_x_program, token_y_program,
-                       base_fee_rate, variable_fee_rate, total_fee_rate, deposit_total_fee_rate,
-                       protocol_share_bps, collect_fee_mode, supports_limit_order,
-                       reward_mint_0, reward_mint_1, reward_rate_0, reward_rate_1,
-                       reward_duration_end_0, reward_duration_end_1,
-                       reward_last_update_time_0, reward_last_update_time_1
-                FROM chain_pool_snapshots
-                WHERE pool_address = ?
-                ORDER BY observed_at DESC, id DESC
-                LIMIT 1
-                """,
-                (address,),
-            ).fetchone()
+            if as_of is None:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, pool_address, active_bin_id, bin_step,
+                           token_x_mint, token_y_mint, token_x_program, token_y_program,
+                           base_fee_rate, variable_fee_rate, total_fee_rate, deposit_total_fee_rate,
+                           protocol_share_bps, collect_fee_mode, supports_limit_order,
+                           reward_mint_0, reward_mint_1, reward_rate_0, reward_rate_1,
+                           reward_duration_end_0, reward_duration_end_1,
+                           reward_last_update_time_0, reward_last_update_time_1
+                    FROM chain_pool_snapshots
+                    WHERE pool_address = ?
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (address,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, pool_address, active_bin_id, bin_step,
+                           token_x_mint, token_y_mint, token_x_program, token_y_program,
+                           base_fee_rate, variable_fee_rate, total_fee_rate, deposit_total_fee_rate,
+                           protocol_share_bps, collect_fee_mode, supports_limit_order,
+                           reward_mint_0, reward_mint_1, reward_rate_0, reward_rate_1,
+                           reward_duration_end_0, reward_duration_end_1,
+                           reward_last_update_time_0, reward_last_update_time_1
+                    FROM chain_pool_snapshots
+                    WHERE pool_address = ?
+                      AND julianday(observed_at) <= julianday(?)
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (address, as_of),
+                ).fetchone()
         finally:
             conn.close()
         return dict(row) if row is not None else None
@@ -675,11 +699,21 @@ class ResearchStore:
             conn.close()
         return [str(row["position_address"]) for row in rows]
 
-    def latest_pool_snapshots(self) -> list[dict[str, Any]]:
+    def latest_pool_snapshots(
+        self,
+        *,
+        as_of: str | None = None,
+    ) -> list[dict[str, Any]]:
         conn = self._connect()
         try:
+            cutoff_sql = (
+                ""
+                if as_of is None
+                else "WHERE julianday(observed_at) <= julianday(?)"
+            )
+            params = () if as_of is None else (as_of,)
             rows = conn.execute(
-                """
+                f"""
                 SELECT p.observed_at, p.address, p.name, p.tvl, p.volume_24h,
                        p.fees_24h, p.current_price, p.bin_step, p.active_bin_id,
                        p.apr, p.apy, p.token_x_symbol, p.token_y_symbol,
@@ -691,6 +725,7 @@ class ResearchStore:
                 JOIN (
                     SELECT address, MAX(observed_at) AS max_observed_at
                     FROM pool_snapshots
+                    {cutoff_sql}
                     GROUP BY address
                 ) latest
                   ON latest.address = p.address
@@ -702,23 +737,40 @@ class ResearchStore:
                       AND p2.observed_at = p.observed_at
                 )
                 ORDER BY p.address ASC
-                """
+                """,
+                params,
             ).fetchall()
         finally:
             conn.close()
         return [dict(row) for row in rows]
 
-    def chain_observation_count(self, pool_address: str) -> int:
+    def chain_observation_count(
+        self,
+        pool_address: str,
+        *,
+        as_of: str | None = None,
+    ) -> int:
         conn = self._connect()
         try:
-            row = conn.execute(
-                """
-                SELECT COUNT(DISTINCT observed_at) AS observation_count
-                FROM chain_pool_snapshots
-                WHERE pool_address = ?
-                """,
-                (pool_address,),
-            ).fetchone()
+            if as_of is None:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT observed_at) AS observation_count
+                    FROM chain_pool_snapshots
+                    WHERE pool_address = ?
+                    """,
+                    (pool_address,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT observed_at) AS observation_count
+                    FROM chain_pool_snapshots
+                    WHERE pool_address = ?
+                      AND julianday(observed_at) <= julianday(?)
+                    """,
+                    (pool_address, as_of),
+                ).fetchone()
         finally:
             conn.close()
         return int(row["observation_count"]) if row is not None else 0
