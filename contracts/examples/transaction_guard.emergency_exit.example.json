@@ -1,0 +1,22 @@
+{
+  "expected_fee_payer": "REPLACE_WITH_EXECUTOR_PUBKEY",
+  "allowed_program_ids": [
+    "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
+  ],
+  "max_instructions": 1,
+  "max_static_accounts": 24,
+  "allow_address_lookup_tables": false,
+  "require_unsigned": true,
+  "require_instruction_policy": true,
+  "instruction_policies": [
+    {
+      "program_id": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+      "allowed_actions": [
+        "EXIT"
+      ],
+      "allowed_data_prefixes_hex": [
+        "0a333d2370691855"
+      ]
+    }
+  ]
+}
