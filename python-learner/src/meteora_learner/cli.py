@@ -70,6 +70,7 @@ from .paper_portfolio import run_portfolio_live_paper_cycle
 from .paper_entry_workflow import build_and_open_bound_phase3_paper_entry
 from .paper_chain_collection import build_paper_chain_collection_queue
 from .quote_registry import save_token_quote, token_quote_status
+from .paper_supervisor import run_paper_supervisor
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -195,6 +196,32 @@ def main() -> None:
         type=int,
         default=0,
     )
+
+    paper_supervise = subparsers.add_parser(
+        "paper-supervise",
+        help="Run safe paper positions and report stale chain/quote dependencies",
+    )
+    paper_supervise.add_argument("--account", required=True)
+    paper_supervise.add_argument("--cycle-id", required=True)
+    paper_supervise.add_argument("--max-chain-age-seconds", type=int, default=300)
+    paper_supervise.add_argument("--max-quote-age-seconds", type=int, default=300)
+    paper_supervise.add_argument("--array-radius", type=int, default=1)
+    paper_supervise.add_argument("--max-positions", type=int)
+    paper_supervise.add_argument("--retry-failed", action="store_true")
+    paper_supervise.add_argument("--stop-loss-bps", type=int, default=500)
+    paper_supervise.add_argument("--take-profit-bps", type=int)
+    paper_supervise.add_argument("--max-rebalances", type=int, default=3)
+    paper_supervise.add_argument("--max-holding-observations", type=int)
+    paper_supervise.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
+    paper_supervise.add_argument("--min-tvl-usd", type=float, default=50000.0)
+    paper_supervise.add_argument("--min-volume-24h-usd", type=float, default=10000.0)
+    paper_supervise.add_argument("--min-pool-age-hours", type=float, default=24.0)
+    paper_supervise.add_argument("--min-chain-observations", type=int, default=12)
+    paper_supervise.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
 
     paper_quote_ingest = subparsers.add_parser(
         "paper-quote-ingest",
@@ -1491,6 +1518,31 @@ def main() -> None:
             model_id=args.model_id,
         )
         print(json.dumps(record.__dict__, indent=2))
+        return
+
+    if args.command == "paper-supervise":
+        settings = Settings.from_env()
+        result = run_paper_supervisor(
+            Storage(settings.database_path),
+            account_id=args.account,
+            cycle_id=args.cycle_id,
+            chain_max_age_seconds=args.max_chain_age_seconds,
+            quote_max_age_seconds=args.max_quote_age_seconds,
+            array_radius=args.array_radius,
+            max_positions=args.max_positions,
+            safety_config=_pool_safety_config_from_args(args),
+            management_config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+            retry_failed=args.retry_failed,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "paper-quote-ingest":
