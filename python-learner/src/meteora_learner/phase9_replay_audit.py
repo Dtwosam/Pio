@@ -96,16 +96,27 @@ def _family_audit(
             f"required {required_records}"
         )
     else:
-        replay_verified = bool(replay_check(storage))
-        if replay_verified:
-            status = "REPLAY_VERIFIED"
-            reason = "qualified evidence reproduces from immutable sources"
-        else:
-            status = "REPLAY_MISMATCH"
+        try:
+            replay_verified = bool(replay_check(storage))
+        except Exception as exc:
+            replay_verified = False
+            status = "REPLAY_ERROR"
             reason = (
-                "qualified evidence does not deterministically reproduce "
-                "from its persisted source lineage"
+                "replay evaluator raised "
+                f"{type(exc).__name__}: {exc}"
             )
+        else:
+            if replay_verified:
+                status = "REPLAY_VERIFIED"
+                reason = (
+                    "qualified evidence reproduces from immutable sources"
+                )
+            else:
+                status = "REPLAY_MISMATCH"
+                reason = (
+                    "qualified evidence does not deterministically reproduce "
+                    "from its persisted source lineage"
+                )
 
     return Phase9ReplayFamilyAudit(
         family=family,
