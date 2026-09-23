@@ -24,6 +24,12 @@ class Phase9ProgressReport:
     phase8_current: bool
     research_bundle_ready: bool
     promotion_ready: bool
+    phase9_current: bool
+    policy_authorization_current: bool
+    controlled_validation_current: bool
+    rollout_simulation_current: bool
+    rollback_simulation_current: bool
+    prewire_ready: bool
     latest_queue_sha256: str | None
     reasons: tuple[str, ...]
 
@@ -86,6 +92,12 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             phase8_current=False,
             research_bundle_ready=False,
             promotion_ready=False,
+            phase9_current=False,
+            policy_authorization_current=False,
+            controlled_validation_current=False,
+            rollout_simulation_current=False,
+            rollback_simulation_current=False,
+            prewire_ready=False,
             latest_queue_sha256=None,
             reasons=(
                 "no Phase 9 work-queue progress snapshots are persisted",
@@ -140,6 +152,12 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             phase8_current=False,
             research_bundle_ready=False,
             promotion_ready=False,
+            phase9_current=False,
+            policy_authorization_current=False,
+            controlled_validation_current=False,
+            rollout_simulation_current=False,
+            rollback_simulation_current=False,
+            prewire_ready=False,
             latest_queue_sha256=None,
             reasons=tuple(reasons),
         )
@@ -156,9 +174,35 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         latest[4].get("research_bundle_ready")
     )
     promotion_ready = bool(latest[4].get("promotion_ready"))
+    phase9_current = bool(latest[4].get("phase9_current"))
+    policy_authorization_current = bool(
+        latest[4].get("policy_authorization_current")
+    )
+    controlled_validation_current = bool(
+        latest[4].get("controlled_validation_current")
+    )
+    rollout_simulation_current = bool(
+        latest[4].get("rollout_simulation_current")
+    )
+    rollback_simulation_current = bool(
+        latest[4].get("rollback_simulation_current")
+    )
+    prewire_ready = bool(latest[4].get("prewire_ready"))
 
     if not integrity_verified:
         status = "INTEGRITY_FAILED"
+    elif prewire_ready:
+        status = "PREWIRE_READY"
+    elif rollback_simulation_current:
+        status = "ROLLBACK_SIMULATION_CURRENT"
+    elif rollout_simulation_current:
+        status = "ROLLOUT_SIMULATION_CURRENT"
+    elif controlled_validation_current:
+        status = "CONTROLLED_VALIDATION_CURRENT"
+    elif policy_authorization_current:
+        status = "POLICY_AUTHORIZATION_CURRENT"
+    elif phase9_current:
+        status = "PHASE9_CURRENT"
     elif promotion_ready:
         status = "PROMOTION_READY"
     elif research_bundle_ready:
@@ -185,6 +229,12 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         phase8_current=phase8_current,
         research_bundle_ready=research_bundle_ready,
         promotion_ready=promotion_ready,
+        phase9_current=phase9_current,
+        policy_authorization_current=policy_authorization_current,
+        controlled_validation_current=controlled_validation_current,
+        rollout_simulation_current=rollout_simulation_current,
+        rollback_simulation_current=rollback_simulation_current,
+        prewire_ready=prewire_ready,
         latest_queue_sha256=latest[2],
         reasons=tuple(reasons),
     )
