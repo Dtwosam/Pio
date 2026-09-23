@@ -1,6 +1,7 @@
 use crate::controlled_live::ControlledLiveReport;
 use crate::execution_store::{ExecutionIntentStatus, ExecutionIntentStore};
 use crate::phase5_gate::Phase5PromotionGateReport;
+use crate::phase6_readiness::Phase6ReadinessReport;
 use crate::signer::{
     sign_execution_intent, sign_prepared_transaction, SignedExecutionTransaction,
 };
@@ -106,6 +107,7 @@ pub fn submit_execution_intent_with<F>(
     decision_id: &str,
     keypair: &Keypair,
     phase5_gate: &Phase5PromotionGateReport,
+    phase6_readiness: &Phase6ReadinessReport,
     controlled_live: &ControlledLiveReport,
     current_block_height: u64,
     send: F,
@@ -117,6 +119,20 @@ where
         anyhow::bail!(
             "Phase 5 promotion gate rejected live submission: {}",
             phase5_gate.reason
+        );
+    }
+    if !phase6_readiness.accepted {
+        anyhow::bail!(
+            "Phase 6 readiness rejected live submission: {}",
+            phase6_readiness.reason
+        );
+    }
+    if phase6_readiness.phase5.promoted_at != phase5_gate.promoted_at
+        || phase6_readiness.phase5.evidence_type
+            != phase5_gate.evidence_type
+    {
+        anyhow::bail!(
+            "Phase 6 readiness Phase 5 evidence does not match submission gate"
         );
     }
     if !controlled_live.accepted {
@@ -138,6 +154,17 @@ where
         );
     }
     let current_for_authorization = store.load(decision_id)?;
+    let persisted_wallet = current_for_authorization
+        .wallet_authorization
+        .as_ref()
+        .context(
+            "execution intent is missing persisted wallet authorization",
+        )?;
+    if persisted_wallet.wallet_pubkey != phase6_readiness.wallet_pubkey {
+        anyhow::bail!(
+            "Phase 6 readiness wallet does not match persisted execution wallet authorization"
+        );
+    }
     if controlled_live.pool_address != current_for_authorization.pool_address {
         anyhow::bail!(
             "controlled-live authorization pool does not match execution intent"
@@ -212,6 +239,7 @@ pub fn submit_execution_intent_rpc(
     decision_id: &str,
     keypair: &Keypair,
     phase5_gate: &Phase5PromotionGateReport,
+    phase6_readiness: &Phase6ReadinessReport,
     controlled_live: &ControlledLiveReport,
 ) -> Result<SubmissionReport> {
     if rpc_url.trim().is_empty() {
@@ -227,6 +255,7 @@ pub fn submit_execution_intent_rpc(
         decision_id,
         keypair,
         phase5_gate,
+        phase6_readiness,
         controlled_live,
         current_block_height,
         |signed| {
@@ -274,6 +303,26 @@ mod tests {
             evidence_endurance_passing: true,
             evidence_ledger_audit_passing: true,
             evidence_phase3_promoted: true,
+        }
+    }
+
+    fn accepted_phase6_readiness(
+        wallet_pubkey: &str,
+    ) -> Phase6ReadinessReport {
+        Phase6ReadinessReport {
+            accepted: true,
+            reason: "approved".into(),
+            phase5: accepted_phase5_gate(),
+            wallet_pubkey: wallet_pubkey.into(),
+            policy_fee_payer_matches_wallet: true,
+            meteora_program_allowed: true,
+            requires_unsigned: true,
+            requires_pool_binding: true,
+            requires_instruction_policy: true,
+            address_lookup_tables_disabled: true,
+            enter_policy_present: true,
+            rebalance_policy_present: true,
+            exit_policy_present: true,
         }
     }
 
@@ -425,6 +474,9 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -460,6 +512,9 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -490,6 +545,9 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -504,6 +562,9 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -531,6 +592,9 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -559,6 +623,9 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -593,6 +660,9 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -610,6 +680,9 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -646,6 +719,9 @@ mod tests {
             &id,
             &keypair,
             &gate,
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -687,6 +763,9 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
             &live,
             950,
             |_| {
@@ -728,6 +807,47 @@ mod tests {
             )
             .is_err()
         );
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::SimulationPassed
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn phase6_readiness_rejection_blocks_submission() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        let pool = store.load(&id).unwrap().pool_address;
+        let live = accepted_controlled_live(
+            &id,
+            &pool,
+            crate::models::Action::Enter,
+        );
+        let mut readiness = accepted_phase6_readiness(
+            &keypair.pubkey().to_string(),
+        );
+        readiness.accepted = false;
+        readiness.reason = "transaction_policy_fee_payer_does_not_match_executor_wallet".into();
+        let called = Cell::new(false);
+
+        let result = submit_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            &accepted_phase5_gate(),
+            &readiness,
+            &live,
+            950,
+            |_| {
+                called.set(true);
+                Ok("must-not-send".into())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!called.get());
         assert_eq!(
             store.load(&id).unwrap().status,
             ExecutionIntentStatus::SimulationPassed
