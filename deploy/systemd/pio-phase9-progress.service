@@ -1,0 +1,18 @@
+[Unit]
+Description=Pio Phase 9 research evidence progress snapshot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/pio phase9-work-queue --persist-snapshot
+TimeoutStartSec=5min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pio/data
