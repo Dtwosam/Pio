@@ -100,7 +100,6 @@ def assess_live_pool_safety(
         report = screen_pool_universe(
             str(storage.path),
             config=config,
-            as_of=observed_at,
         )
     except ValueError as exc:
         return LivePoolSafety(
