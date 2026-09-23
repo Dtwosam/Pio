@@ -6,6 +6,7 @@ from meteora_learner.phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
 )
 from meteora_learner.phase9_validation import (
+    Phase9ResearchBundleCriteria,
     evaluate_phase9_research_bundle,
     persist_phase9_research_bundle,
 )
