@@ -295,10 +295,11 @@ Still needed:
 
 ## Phase 9 — Advanced Edge
 
-Status: research-only advanced edge in progress; no Phase 9 output has live-policy authority.
+Status: research implementation complete behind a non-actionable evidence boundary; real qualified research-bundle evidence pending.
 
 Built:
 - no-lookahead adaptive range research from persisted DLMM active-bin movement
+- no-lookahead DLMM regime classification integrated into multi-pool adaptive validation
 - empirical holding-window displacement coverage with explicit history/coverage/cap evidence
 - Phase 8 promotion visibility in advanced-edge reports
 - hard `research_only=true` / `policy_actionable=false` boundary for adaptive-range output
@@ -306,11 +307,12 @@ Built:
 - no-lookahead pool mint-risk research covering token-program consistency, initialization, mint/freeze authorities, decimals, reward mints and conservative Token-2022 extension handling
 - descriptive wallet-flow research with minimum-history/user-diversity and concentration filters
 - capped research-only multi-pool portfolio allocation with per-pool concentration and budget-utilization evidence
+- static inventory hedge research with explicit instrument identity, venue, liquidity-share, leverage, funding and trading-cost assumptions
+- offline contextual-bandit replay over fully labeled counterfactual actions, with adversarial no-lookahead tests and fixed-CSV replay workflow
+- persistent Phase 9 research-bundle readiness gate spanning adaptive/regime, mint risk, wallet flow, allocation, hedge and bandit evidence while remaining `policy_actionable=false`
 - fail-closed range-cap and insufficient-history states
 - CLI research workflow with optional readiness exit status
 
 Still needed:
-- regime classification and validation
-- optional hedge research where instrument/liquidity assumptions are explicit
-- contextual-bandit research only after offline counterfactual validation
-- a separate evidence/promotion gate before any Phase 9 signal can influence live policy
+- real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
+- a separate future evidence/promotion design, validation corpus and explicit authorization before any Phase 9 signal can influence LIVE policy
