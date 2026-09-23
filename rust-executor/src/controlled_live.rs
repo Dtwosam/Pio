@@ -1,3 +1,4 @@
+use crate::execution_store::ExecutionIntentStore;
 use crate::models::{Action, TradeProposal};
 use crate::phase5_gate::{
     verify_phase5_promotion_database, Phase5PromotionGateReport,
@@ -218,6 +219,25 @@ pub fn evaluate_controlled_live(
         daily_drawdown_pct: proposal.daily_drawdown_pct,
         max_daily_drawdown_pct: config.max_daily_drawdown_pct,
     })
+}
+
+pub fn evaluate_controlled_live_intent(
+    database_path: &Path,
+    execution_store: &ExecutionIntentStore,
+    decision_id: &str,
+    config: &ControlledLiveConfig,
+) -> Result<ControlledLiveReport> {
+    let request = execution_store.load_request(decision_id)?;
+    if request.proposal.decision_id.to_string() != decision_id {
+        anyhow::bail!(
+            "persisted execution request decision_id does not match lookup key"
+        );
+    }
+    evaluate_controlled_live(
+        database_path,
+        &request.proposal,
+        config,
+    )
 }
 
 #[cfg(test)]
@@ -476,6 +496,51 @@ mod tests {
             "no_tracked_live_position_for_exit"
         );
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn intent_evaluation_uses_persisted_proposal() {
+        use crate::dry_run::DryRunExecutionRequest;
+        use crate::risk::RiskConfig;
+
+        let pio_path = db_path();
+        seed(&pio_path, 0);
+        let execution_path = std::env::temp_dir().join(format!(
+            "pio-controlled-live-exec-{}.db",
+            Uuid::new_v4()
+        ));
+        let store = ExecutionIntentStore::open(&execution_path).unwrap();
+        let pool = Pubkey::new_unique();
+        let mut item = proposal(pool, Action::Enter);
+        item.capital_quote = 75.0;
+        let decision_id = item.decision_id.to_string();
+        let request = DryRunExecutionRequest {
+            proposal: item,
+            transaction_base64: "tx".into(),
+        };
+        let risk = RiskConfig {
+            max_capital_per_position_pct: 10.0,
+            max_total_deployed_pct: 50.0,
+            max_daily_drawdown_pct: 5.0,
+            min_expected_edge_pct: 0.0,
+            max_expected_downside_pct: 10.0,
+            max_data_age_seconds: 60,
+        };
+        store.register(&request, &risk).unwrap();
+
+        let report = evaluate_controlled_live_intent(
+            &pio_path,
+            &store,
+            &decision_id,
+            &config(pool),
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(report.reason, "entry_capital_cap_exceeded");
+
+        let _ = std::fs::remove_file(pio_path);
+        let _ = std::fs::remove_file(execution_path);
     }
 
 }
