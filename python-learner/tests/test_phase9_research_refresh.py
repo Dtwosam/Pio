@@ -638,3 +638,117 @@ def test_research_refresh_replays_only_missing_explicit_family(
     assert static_item.persisted_evidence_id == 101
     assert static_item.research_qualified is True
     assert allocation_item.status == "UNCHANGED"
+
+
+def test_research_refresh_derives_bandit_dataset_from_explicit_inputs(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: SimpleNamespace(current=True),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "_replay_statuses",
+        lambda *args, **kwargs: {
+            "adaptive_regime": True,
+            "mint_risk": True,
+            "wallet_flow": True,
+            "portfolio_allocation": True,
+            "static_hedge": True,
+            "contextual_bandit": False,
+        },
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "_latest_retraining_dataset_cycle",
+        lambda storage: None,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_phase9_explicit_inputs",
+        lambda storage: SimpleNamespace(
+            valid=True,
+            evidence_id=77,
+            reasons=(),
+        ),
+    )
+    explicit = SimpleNamespace(
+        evidence_id=77,
+        inputs=SimpleNamespace(pool_inputs=(1, 2, 3)),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "load_phase9_explicit_inputs",
+        lambda *args, **kwargs: explicit,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "build_phase9_bandit_dataset",
+        lambda *args, **kwargs: (
+            {"dataset": {"dataset_sha256": "a" * 64}},
+            b"csv",
+        ),
+    )
+    dataset_artifact = SimpleNamespace(evidence_id=88)
+    monkeypatch.setattr(
+        refresh_module,
+        "persist_phase9_bandit_dataset",
+        lambda *args, **kwargs: (
+            calls.append("dataset") or dataset_artifact
+        ),
+    )
+    lineage = SimpleNamespace(
+        source_type="PHASE9_BANDIT_DATASET_V1",
+        dataset_evidence_id=88,
+        dataset_artifact_sha256="b" * 64,
+        dataset_version="ML_ACTION_DATASET_V1:test",
+        dataset_sha256="a" * 64,
+        cutoff="2026-09-23T12:00:00+00:00",
+        output_file="/tmp/phase9-bandit.csv",
+        explicit_input_evidence_id=77,
+        explicit_input_artifact_sha256="c" * 64,
+    )
+    bandit_result = SimpleNamespace(
+        lineage=lineage,
+        report=DummyReport("phase9-bandit"),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_contextual_bandit_from_dataset",
+        lambda *args, **kwargs: bandit_result,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "persist_phase9_contextual_bandit_from_dataset",
+        lambda *args, **kwargs: calls.append("bandit") or 89,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: bundle(
+            ready=False,
+            adaptive=1,
+            mint=2,
+            wallet=2,
+            bandit=1,
+        ),
+    )
+
+    report = run_phase9_research_refresh(storage)
+
+    item = next(
+        item for item in report.items
+        if item.family == "contextual_bandit"
+    )
+    assert item.scope == "88"
+    assert item.status == "PERSISTED"
+    assert item.research_qualified is True
+    assert item.persisted_evidence_id == 89
+    assert calls == ["dataset", "bandit"]
+    assert "explicit input artifact 77" in item.reason
