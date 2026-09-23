@@ -577,3 +577,43 @@ and the controlled holdout evidence to remain current at the same time. Its
 output is still `research_only=true`, `simulation_only=true`,
 `policy_actionable=false` and `execution_wired=false`. A ready result is a
 validation milestone only, not permission to submit or alter LIVE positions.
+
+
+## Bounded rollout simulation
+
+The next safety check is still non-executable. Compare a proposed Phase 9
+canary envelope against the current controlled-live envelope:
+
+```bash
+pio phase9-policy-rollout-simulate \
+  --file config/phase9_rollout_simulation.example.json \
+  --persist \
+  --require-ready
+```
+
+The JSON contains `current` and `proposed` objects using the controlled-live
+limit fields. The simulator requires current Phase 9 policy-readiness evidence
+and, by default:
+
+- the proposed pool allowlist must be a subset of the current allowlist;
+- every proposed numeric risk/capital cap must be less than or equal to the
+  current controlled-live cap;
+- the proposed envelope must be strictly narrower in at least one dimension;
+- the proposal must keep `enabled=false`;
+- EXIT must remain available for risk reduction;
+- REBALANCE must remain disabled for the simulation canary.
+
+Persisted `PHASE9_POLICY_ROLLOUT_SIMULATION_V1` evidence is
+`research_only=true`, `simulation_only=true`,
+`policy_actionable=false` and `execution_wired=false`. The example JSON is
+only a shape/example; its numeric values are not production recommendations.
+
+Audit the persisted simulation against current readiness with:
+
+```bash
+pio phase9-policy-rollout-audit --require-current
+```
+
+This stage proves only that a narrower disabled envelope is internally
+consistent with the existing controlled-live limits. It does not modify Rust
+configuration, enable submission, choose trades or authorize capital.
