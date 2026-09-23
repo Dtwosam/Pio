@@ -100,6 +100,13 @@ from .phase9_policy_rollout_simulation import (
     persist_phase9_policy_rollout_simulation,
     audit_persisted_phase9_policy_rollout_simulation,
 )
+from .phase9_policy_rollback_simulation import (
+    Phase9PolicyRollbackCriteria,
+    Phase9PolicyRollbackMetrics,
+    evaluate_phase9_policy_rollback_simulation,
+    persist_phase9_policy_rollback_simulation,
+    audit_persisted_phase9_policy_rollback_simulation,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -1893,6 +1900,29 @@ def main() -> None:
         help="Audit whether persisted disabled Phase 9 rollout simulation still matches current policy readiness",
     )
     phase9_policy_rollout_audit.add_argument(
+        "--require-current",
+        action="store_true",
+    )
+
+    phase9_policy_rollback = subparsers.add_parser(
+        "phase9-policy-rollback-simulate",
+        help="Evaluate explicit Phase 9 canary rollback thresholds without taking any policy or execution action",
+    )
+    phase9_policy_rollback.add_argument(
+        "--file",
+        required=True,
+        help="JSON object containing metrics and criteria objects",
+    )
+    phase9_policy_rollback.add_argument(
+        "--persist",
+        action="store_true",
+    )
+
+    phase9_policy_rollback_audit = subparsers.add_parser(
+        "phase9-policy-rollback-audit",
+        help="Audit whether persisted Phase 9 rollback simulation still matches current rollout evidence",
+    )
+    phase9_policy_rollback_audit.add_argument(
         "--require-current",
         action="store_true",
     )
@@ -4289,6 +4319,52 @@ def main() -> None:
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
         result = audit_persisted_phase9_policy_rollout_simulation(
+            storage,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_current and not result.current:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-rollback-simulate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        with open(args.file, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "phase9-policy-rollback-simulate file must contain an object"
+            )
+        metrics_raw = payload.get("metrics")
+        criteria_raw = payload.get("criteria")
+        if not isinstance(metrics_raw, dict) or not isinstance(
+            criteria_raw,
+            dict,
+        ):
+            raise ValueError(
+                "rollback simulation file requires metrics and criteria objects"
+            )
+        result = evaluate_phase9_policy_rollback_simulation(
+            storage,
+            metrics=Phase9PolicyRollbackMetrics(**metrics_raw),
+            criteria=Phase9PolicyRollbackCriteria(**criteria_raw),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_phase9_policy_rollback_simulation(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        return
+
+    if args.command == "phase9-policy-rollback-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = audit_persisted_phase9_policy_rollback_simulation(
             storage,
         )
         print(json.dumps(result.to_record(), indent=2))
