@@ -108,7 +108,7 @@ pio phase5-validate --account paper --require-ready
 pio phase6-validate --execution-db /absolute/path/to/execution.db --require-ready
 
 # Persisted promotion / ML workflow
-pio phase-status
+pio phase-status  # includes Phase 9 future-policy simulation currentness
 pio phase3-validate --file <POOLS_JSON>
 pio ml-train-csv --file <DATASET_CSV> --model-id <MODEL> \
   --dataset-version <VERSION> --artifact-dir <DIR>
