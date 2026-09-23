@@ -25,6 +25,7 @@ class ChainCandidateOutcome:
 class ChainScanResult:
     pool_address: str
     entry_active_bin_id: int
+    decision_active_bin_id: int
     observation_count: int
     attempted: int
     accepted: int
@@ -55,6 +56,7 @@ def scan_chain_candidates(
     amount_x: int,
     amount_y: int,
     observation_limit: int = 12,
+    observation_times: Sequence[str] | None = None,
     half_widths: Sequence[int] = (0, 1, 2, 5, 10),
     center_offsets: Sequence[int] = (0,),
     strategies: Iterable[StrategyType | str] = (
@@ -78,6 +80,8 @@ def scan_chain_candidates(
         raise ValueError("at least one token amount must be positive")
     if observation_limit < 2:
         raise ValueError("observation_limit must be at least 2")
+    if observation_times is not None and len(observation_times) < 2:
+        raise ValueError("observation_times must contain at least two observations")
     if not half_widths:
         raise ValueError("at least one half width is required")
     if any(width < 0 for width in half_widths):
@@ -88,15 +92,29 @@ def scan_chain_candidates(
         raise ValueError("at least one strategy is required")
 
     store = ResearchStore(database_path)
-    times_desc = store.chain_observation_times(pool_address, limit=observation_limit)
-    if len(times_desc) < 2:
-        raise ValueError("need at least two chain observations for scanning")
+    if observation_times is None:
+        times_desc = store.chain_observation_times(
+            pool_address,
+            limit=observation_limit,
+        )
+        if len(times_desc) < 2:
+            raise ValueError("need at least two chain observations for scanning")
+        selected_times = list(reversed(times_desc))
+    else:
+        selected_times = [str(value) for value in observation_times]
+        if selected_times != sorted(selected_times) or len(set(selected_times)) != len(selected_times):
+            raise ValueError(
+                "observation_times must be unique and strictly ascending"
+            )
 
-    selected_times = list(reversed(times_desc))
     entry_pool = store.chain_pool_snapshot_at(pool_address, selected_times[0])
     if entry_pool is None:
         raise ValueError("entry chain pool snapshot is missing")
+    decision_pool = store.chain_pool_snapshot_at(pool_address, selected_times[-1])
+    if decision_pool is None:
+        raise ValueError("decision chain pool snapshot is missing")
     entry_active = int(entry_pool["active_bin_id"])
+    decision_active = int(decision_pool["active_bin_id"])
 
     outcomes: list[ChainCandidateOutcome] = []
     seen: set[tuple[str, int, int]] = set()
@@ -123,6 +141,7 @@ def scan_chain_candidates(
                         max_bin_id=max_bin_id,
                         strategy=strategy,
                         observation_limit=observation_limit,
+                        observation_times=selected_times,
                         max_share_bps=max_share_bps,
                         favor_x_in_active_bin=favor_x_in_active_bin,
                     )
@@ -166,6 +185,7 @@ def scan_chain_candidates(
     return ChainScanResult(
         pool_address=pool_address,
         entry_active_bin_id=entry_active,
+        decision_active_bin_id=decision_active,
         observation_count=len(selected_times),
         attempted=len(outcomes),
         accepted=accepted,
