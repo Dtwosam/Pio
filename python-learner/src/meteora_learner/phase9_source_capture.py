@@ -24,7 +24,7 @@ from .phase9_wallet_flow_capture import (
     wallet_flow_source_state,
 )
 from .settings import Settings
-from .storage import Storage
+from .storage import Storage, utc_now_iso
 from .wallet_flow import WalletFlowCriteria
 
 
@@ -86,6 +86,7 @@ def run_phase9_source_capture(
     cohort_target_pools: int = 5,
     cohort_max_sampling_pools: int = 8,
     cohort_new_pools_per_run: int = 1,
+    api_ranking_max_age_seconds: int = 10_800,
     bin_array_radius: int = 1,
     mint_max_snapshot_age_seconds: int = 3600,
     history_min_observation_interval_seconds: int = 3600,
@@ -114,6 +115,10 @@ def run_phase9_source_capture(
         )
     if cohort_new_pools_per_run < 1:
         raise ValueError("cohort_new_pools_per_run must be positive")
+    if api_ranking_max_age_seconds < 0:
+        raise ValueError(
+            "api_ranking_max_age_seconds cannot be negative"
+        )
     if bin_array_radius < 0:
         raise ValueError("bin_array_radius cannot be negative")
     if history_min_observation_interval_seconds < 0:
@@ -140,6 +145,7 @@ def run_phase9_source_capture(
             "source capture settings database_path must match storage"
         )
 
+    capture_as_of = utc_now_iso()
     errors: list[str] = []
     api_record = None
     chain_record = None
@@ -164,6 +170,10 @@ def run_phase9_source_capture(
                 min_research_pools=chain_pool_target,
                 target_pools=cohort_target_pools,
                 max_sampling_pools=cohort_max_sampling_pools,
+                max_api_snapshot_age_seconds=(
+                    api_ranking_max_age_seconds
+                ),
+            as_of=capture_as_of,
             ),
         )
         chain = run_phase9_chain_capture_batch(
@@ -172,12 +182,16 @@ def run_phase9_source_capture(
                 target_chain_pools=chain_pool_target,
                 max_candidates=chain_max_candidates,
                 bin_array_radius=bin_array_radius,
+                max_api_snapshot_age_seconds=(
+                    api_ranking_max_age_seconds
+                ),
             ),
             rust_manifest_path=rust_manifest_path,
             rust_binary_path=rust_binary_path,
             timeout_seconds=timeout_seconds,
             preferred_pool_addresses=cohort_before.desired_pools,
             max_preferred_candidates=cohort_new_pools_per_run,
+            api_ranking_as_of=capture_as_of,
         )
         chain_record = chain.to_record()
     except Exception as exc:
@@ -193,6 +207,10 @@ def run_phase9_source_capture(
                 min_research_pools=chain_pool_target,
                 target_pools=cohort_target_pools,
                 max_sampling_pools=cohort_max_sampling_pools,
+                max_api_snapshot_age_seconds=(
+                    api_ranking_max_age_seconds
+                ),
+            as_of=capture_as_of,
             ),
         )
         cohort_record = cohort_after_chain.to_record()
@@ -276,6 +294,7 @@ def run_phase9_source_capture(
             target_pools=cohort_target_pools,
             max_sampling_pools=cohort_max_sampling_pools,
         ),
+    as_of=capture_as_of,
     )
     cohort_record = final_cohort.to_record()
     history_plan = (
