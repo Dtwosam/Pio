@@ -25,6 +25,7 @@ from .position_ingest import ingest_position_snapshot
 from .position_history import collect_position_history
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .pool_safety import PoolSafetyConfig, screen_pool_universe
+from .position_policy import PositionManagementConfig, decide_position_action
 from .reconciliation import reconcile_position
 from .reconciliation_corpus import build_reconciliation_corpus
 from .rebalance_execution import build_rebalance_execution_calibration
@@ -102,6 +103,28 @@ def main() -> None:
         default=5000,
     )
     size_position_cmd.add_argument("--min-position", type=float, default=0.0)
+
+    manage_position = subparsers.add_parser(
+        "manage-position",
+        help="Evaluate deterministic HOLD/REBALANCE/EXIT rules",
+    )
+    manage_position.add_argument("--active-bin", required=True, type=int)
+    manage_position.add_argument("--min-bin", required=True, type=int)
+    manage_position.add_argument("--max-bin", required=True, type=int)
+    manage_position.add_argument("--holding-observations", required=True, type=int)
+    manage_position.add_argument("--rebalances-done", required=True, type=int)
+    manage_position.add_argument("--net-pnl-bps", type=int)
+    manage_position.add_argument("--pool-unsafe", action="store_true")
+    manage_position.add_argument("--emergency-exit", action="store_true")
+    manage_position.add_argument("--stop-loss-bps", type=int, default=500)
+    manage_position.add_argument("--take-profit-bps", type=int)
+    manage_position.add_argument("--max-rebalances", type=int, default=3)
+    manage_position.add_argument("--max-holding-observations", type=int)
+    manage_position.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
 
     ingest = subparsers.add_parser(
         "ingest-chain-snapshot",
@@ -662,6 +685,29 @@ def main() -> None:
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
+        return
+
+    if args.command == "manage-position":
+        result = decide_position_action(
+            active_bin_id=args.active_bin,
+            min_bin_id=args.min_bin,
+            max_bin_id=args.max_bin,
+            holding_observations=args.holding_observations,
+            rebalances_done=args.rebalances_done,
+            pool_safe=not args.pool_unsafe,
+            emergency_exit=args.emergency_exit,
+            net_pnl_bps=args.net_pnl_bps,
+            config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "size-position":
