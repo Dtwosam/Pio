@@ -1,7 +1,54 @@
+import sqlite3
+
+import pytest
+
 from meteora_learner.storage import Storage
 
 
-def test_advanced_edge_evidence_api_is_append_only(tmp_path):
+def test_advanced_edge_evidence_is_database_immutable(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    evidence_id = storage.save_advanced_edge_evidence(
+        edge_type="PHASE9_TEST_V1",
+        pool_address="pool-a",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "version": 1,
+        },
+    )
+
+    with storage.connect() as conn:
+        with pytest.raises(sqlite3.DatabaseError, match="immutable"):
+            conn.execute(
+                """
+                UPDATE advanced_edge_evidence
+                SET qualified = 0
+                WHERE id = ?
+                """,
+                (evidence_id,),
+            )
+
+    with storage.connect() as conn:
+        with pytest.raises(sqlite3.DatabaseError, match="immutable"):
+            conn.execute(
+                "DELETE FROM advanced_edge_evidence WHERE id = ?",
+                (evidence_id,),
+            )
+
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type="PHASE9_TEST_V1",
+        pool_address="pool-a",
+    )
+    assert latest is not None
+    assert latest["id"] == evidence_id
+    assert latest["qualified"] is True
+    assert latest["evidence"]["version"] == 1
+
+
+def test_new_advanced_edge_evidence_supersedes_without_mutation(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     first = storage.save_advanced_edge_evidence(
         edge_type="PHASE9_TEST_V1",
@@ -32,7 +79,6 @@ def test_advanced_edge_evidence_api_is_append_only(tmp_path):
         edge_type="PHASE9_TEST_V1",
         pool_address="pool-a",
     )
-
     assert second > first
     assert latest is not None
     assert latest["id"] == second
@@ -48,7 +94,6 @@ def test_advanced_edge_evidence_api_is_append_only(tmp_path):
             ORDER BY id ASC
             """
         ).fetchall()
-
     assert [int(row[0]) for row in rows] == [first, second]
     assert '"version":1' in str(rows[0][1])
     assert '"version":2' in str(rows[1][1])
