@@ -116,6 +116,13 @@ def test_capture_plan_uses_latest_api_snapshot_per_pool(tmp_path):
     )
     seed_api_pool(
         storage,
+        "pool-a",
+        tvl=5_000.0,
+        volume=5_000.0,
+        observed_at="2026-09-23T08:00:00+00:00",
+    )
+    seed_api_pool(
+        storage,
         "pool-b",
         tvl=100.0,
         volume=100.0,
