@@ -2471,7 +2471,7 @@ def main() -> None:
 
     phase9_research_refresh = subparsers.add_parser(
         "phase9-research-refresh-run",
-        help="Recompute only missing/non-replay-verified automatic Phase 9 research families from persisted sources",
+        help="Recompute missing, non-replay-verified or source-stale Phase 9 research families from persisted sources",
     )
     phase9_research_refresh.add_argument(
         "--min-mint-risk-pools",
