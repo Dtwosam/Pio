@@ -5,7 +5,15 @@ from meteora_learner.pool_safety import PoolSafetyConfig, screen_pool_universe
 from meteora_learner.storage import Storage
 
 
-def save_api_pool(storage, address, *, tvl=100000, volume=20000, blacklisted=False):
+def save_api_pool(
+    storage,
+    address,
+    *,
+    tvl=100000,
+    volume=20000,
+    blacklisted=False,
+    observed_at="2026-09-23T00:00:00+00:00",
+):
     storage.save_pool_snapshot(
         {
             "address": address,
@@ -24,7 +32,7 @@ def save_api_pool(storage, address, *, tvl=100000, volume=20000, blacklisted=Fal
                 datetime(2026, 9, 20, tzinfo=timezone.utc).timestamp()
             ),
         },
-        observed_at="2026-09-23T00:00:00+00:00",
+        observed_at=observed_at,
     )
 
 
@@ -108,9 +116,9 @@ def test_pool_safety_fails_closed_when_chain_support_is_unknown(tmp_path):
 
 def test_pool_safety_rejects_stale_normalized_snapshot(tmp_path):
     storage = Storage(tmp_path / "pio.db")
-    save_pool(
+    save_api_pool(
         storage,
-        address="pool",
+        "pool",
         blacklisted=False,
         observed_at="2026-09-23T09:00:00+00:00",
     )
