@@ -1,6 +1,7 @@
 use crate::controlled_live::ControlledLiveReport;
 use crate::execution_store::{ExecutionIntentStatus, ExecutionIntentStore};
 use crate::phase5_gate::Phase5PromotionGateReport;
+use crate::phase6_gate::Phase6PromotionGateReport;
 use crate::phase6_readiness::Phase6ReadinessReport;
 use crate::signer::{
     sign_execution_intent, sign_prepared_transaction, SignedExecutionTransaction,
@@ -108,6 +109,7 @@ pub fn submit_execution_intent_with<F>(
     keypair: &Keypair,
     phase5_gate: &Phase5PromotionGateReport,
     phase6_readiness: &Phase6ReadinessReport,
+    phase6_gate: &Phase6PromotionGateReport,
     controlled_live: &ControlledLiveReport,
     current_block_height: u64,
     send: F,
@@ -125,6 +127,20 @@ where
         anyhow::bail!(
             "Phase 6 readiness rejected live submission: {}",
             phase6_readiness.reason
+        );
+    }
+    if !phase6_gate.accepted {
+        anyhow::bail!(
+            "Phase 6 promotion gate rejected live submission: {}",
+            phase6_gate.reason
+        );
+    }
+    if phase6_gate.authorized_wallets.len() != 1
+        || phase6_gate.authorized_wallets[0]
+            != phase6_readiness.wallet_pubkey
+    {
+        anyhow::bail!(
+            "Phase 6 promotion evidence wallet does not match Phase 6 readiness wallet"
         );
     }
     if phase6_readiness.phase5.promoted_at != phase5_gate.promoted_at
@@ -240,6 +256,7 @@ pub fn submit_execution_intent_rpc(
     keypair: &Keypair,
     phase5_gate: &Phase5PromotionGateReport,
     phase6_readiness: &Phase6ReadinessReport,
+    phase6_gate: &Phase6PromotionGateReport,
     controlled_live: &ControlledLiveReport,
 ) -> Result<SubmissionReport> {
     if rpc_url.trim().is_empty() {
@@ -256,6 +273,7 @@ pub fn submit_execution_intent_rpc(
         keypair,
         phase5_gate,
         phase6_readiness,
+        phase6_gate,
         controlled_live,
         current_block_height,
         |signed| {
@@ -323,6 +341,27 @@ mod tests {
             enter_policy_present: true,
             rebalance_policy_present: true,
             exit_policy_present: true,
+        }
+    }
+
+    fn accepted_phase6_gate(
+        wallet_pubkey: &str,
+    ) -> Phase6PromotionGateReport {
+        Phase6PromotionGateReport {
+            accepted: true,
+            reason: "approved".into(),
+            phase_name: "PHASE6".into(),
+            evidence_type: Some("PHASE6_PROMOTION_V1".into()),
+            promoted_at: Some("2026-09-23T14:00:00+00:00".into()),
+            qualified: true,
+            evidence_promotion_ready: true,
+            evidence_phase5_promoted: true,
+            passed_enter_intents: 10,
+            distinct_pools: 2,
+            blocked_intents: 2,
+            postsimulation_intents: 0,
+            invalid_passed_intents: 0,
+            authorized_wallets: vec![wallet_pubkey.into()],
         }
     }
 
@@ -488,6 +527,9 @@ mod tests {
             &accepted_phase6_readiness(
                 &keypair.pubkey().to_string(),
             ),
+            &accepted_phase6_gate(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -526,6 +568,9 @@ mod tests {
             &accepted_phase6_readiness(
                 &keypair.pubkey().to_string(),
             ),
+            &accepted_phase6_gate(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -559,6 +604,9 @@ mod tests {
             &accepted_phase6_readiness(
                 &keypair.pubkey().to_string(),
             ),
+            &accepted_phase6_gate(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -574,6 +622,9 @@ mod tests {
             &keypair,
             &accepted_phase5_gate(),
             &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
+            &accepted_phase6_gate(
                 &keypair.pubkey().to_string(),
             ),
             &accepted_controlled_live(
@@ -606,6 +657,9 @@ mod tests {
             &accepted_phase6_readiness(
                 &keypair.pubkey().to_string(),
             ),
+            &accepted_phase6_gate(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -635,6 +689,9 @@ mod tests {
             &keypair,
             &accepted_phase5_gate(),
             &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
+            &accepted_phase6_gate(
                 &keypair.pubkey().to_string(),
             ),
             &accepted_controlled_live(
@@ -674,6 +731,9 @@ mod tests {
             &accepted_phase6_readiness(
                 &keypair.pubkey().to_string(),
             ),
+            &accepted_phase6_gate(
+                &keypair.pubkey().to_string(),
+            ),
             &accepted_controlled_live(
                 &id,
                 &store.load(&id).unwrap().pool_address,
@@ -692,6 +752,9 @@ mod tests {
             &keypair,
             &accepted_phase5_gate(),
             &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
+            &accepted_phase6_gate(
                 &keypair.pubkey().to_string(),
             ),
             &accepted_controlled_live(
@@ -731,6 +794,9 @@ mod tests {
             &keypair,
             &gate,
             &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
+            &accepted_phase6_gate(
                 &keypair.pubkey().to_string(),
             ),
             &accepted_controlled_live(
@@ -777,6 +843,9 @@ mod tests {
             &accepted_phase6_readiness(
                 &keypair.pubkey().to_string(),
             ),
+            &accepted_phase6_gate(
+                &keypair.pubkey().to_string(),
+            ),
             &live,
             950,
             |_| {
@@ -813,6 +882,9 @@ mod tests {
                 &keypair,
                 &accepted_phase5_gate(),
                 &accepted_phase6_readiness(
+                    &keypair.pubkey().to_string(),
+                ),
+                &accepted_phase6_gate(
                     &keypair.pubkey().to_string(),
                 ),
                 &live,
@@ -852,6 +924,53 @@ mod tests {
             &keypair,
             &accepted_phase5_gate(),
             &readiness,
+            &accepted_phase6_gate(
+                &keypair.pubkey().to_string(),
+            ),
+            &live,
+            950,
+            |_| {
+                called.set(true);
+                Ok("must-not-send".into())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!called.get());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::SimulationPassed
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn phase6_promotion_rejection_blocks_before_signing_or_send() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        let pool = store.load(&id).unwrap().pool_address;
+        let live = accepted_controlled_live(
+            &id,
+            &pool,
+            crate::models::Action::Enter,
+        );
+        let mut phase6 = accepted_phase6_gate(
+            &keypair.pubkey().to_string(),
+        );
+        phase6.accepted = false;
+        phase6.reason = "phase6_promotion_evidence_missing".into();
+        let called = Cell::new(false);
+
+        let result = submit_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            &accepted_phase5_gate(),
+            &accepted_phase6_readiness(
+                &keypair.pubkey().to_string(),
+            ),
+            &phase6,
             &live,
             950,
             |_| {
