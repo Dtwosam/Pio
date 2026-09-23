@@ -48,7 +48,7 @@ def current_phase9_sources(monkeypatch):
     monkeypatch.setattr(
         refresh_module,
         "evaluate_phase9_source_freshness",
-        lambda storage: freshness_report(),
+        lambda *args, **kwargs: freshness_report(),
     )
 
 
@@ -57,7 +57,7 @@ def ready_phase9_pool_cohort(monkeypatch):
     monkeypatch.setattr(
         refresh_module,
         "evaluate_phase9_pool_cohort",
-        lambda storage: SimpleNamespace(
+        lambda *args, **kwargs: SimpleNamespace(
             research_ready=True,
             research_pools=("pool-a", "pool-b", "pool-c"),
             reasons=(),
@@ -836,7 +836,7 @@ def test_research_refresh_recomputes_replay_verified_adaptive_when_source_advanc
     monkeypatch.setattr(
         refresh_module,
         "evaluate_phase9_source_freshness",
-        lambda storage: freshness_report(adaptive_regime=False),
+        lambda *args, **kwargs: freshness_report(adaptive_regime=False),
     )
     monkeypatch.setattr(
         refresh_module,
@@ -912,7 +912,7 @@ def test_research_refresh_uses_ranked_history_ready_pool_cohort(
     monkeypatch.setattr(
         refresh_module,
         "evaluate_phase9_pool_cohort",
-        lambda storage: SimpleNamespace(
+        lambda *args, **kwargs: SimpleNamespace(
             research_ready=True,
             research_pools=(
                 "pool-a",
