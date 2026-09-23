@@ -6,8 +6,10 @@ from typing import Any
 from .reconciliation import (
     PositionAmountReconciliation,
     PositionFeeReconciliation,
-    reconcile_position_fee_interval,
+    PositionRewardReconciliation,
     reconcile_position_amounts,
+    reconcile_position_fee_interval,
+    reconcile_position_reward_interval,
 )
 from .research_store import ResearchStore
 
@@ -19,6 +21,8 @@ class PositionCorpusEntry:
     amount_error: str | None
     fee_interval: PositionFeeReconciliation | None
     fee_interval_error: str | None
+    reward_interval: PositionRewardReconciliation | None
+    reward_interval_error: str | None
 
 
 @dataclass(frozen=True)
@@ -38,8 +42,17 @@ class ReconciliationCorpusReport:
     fee_mismatched_bins: int
     fee_total_abs_error_x: int
     fee_total_abs_error_y: int
+    reward_intervals_seen: int
+    reward_intervals_eligible: int
+    reward_intervals_exact: int
+    reward_bins_checked: int
+    reward_bins_with_checkpoint_growth: int
+    reward_mismatched_bins: int
+    reward_total_abs_error_one: int
+    reward_total_abs_error_two: int
     amount_exact_rate: float | None
     fee_exact_rate: float | None
+    reward_exact_rate: float | None
     strict_math_gate_passed: bool
     entries: tuple[PositionCorpusEntry, ...]
 
@@ -55,13 +68,13 @@ def build_reconciliation_corpus(
     """
     Aggregate exact DynamicPosition reconciliation across stored positions.
 
-    The strict gate is intentionally binary for deterministic math:
-    - every eligible amount-state bin must match exactly;
-    - every eligible unchanged-position fee interval must match exactly;
-    - at least one amount-state position and one fee interval must be eligible.
+    Deterministic math is fail-closed:
+    - amount-state bins must match exactly;
+    - eligible unchanged-position fee intervals must match exactly;
+    - eligible reward intervals must match exact effective reward checkpoints;
+    - at least one reward bin must show real checkpoint growth.
 
-    Ineligible fee intervals are preserved with their reason rather than treated
-    as passes or silently removed.
+    Ineligible intervals remain visible with their rejection reason.
     """
     store = ResearchStore(database_path)
     addresses = store.position_addresses(limit=position_limit)
@@ -86,6 +99,15 @@ def build_reconciliation_corpus(
     fee_total_abs_error_x = 0
     fee_total_abs_error_y = 0
 
+    reward_intervals_seen = 0
+    reward_intervals_eligible = 0
+    reward_intervals_exact = 0
+    reward_bins_checked = 0
+    reward_bins_with_checkpoint_growth = 0
+    reward_mismatched_bins = 0
+    reward_total_abs_error_one = 0
+    reward_total_abs_error_two = 0
+
     for position_address in addresses:
         amount_state = None
         amount_error = None
@@ -105,7 +127,9 @@ def build_reconciliation_corpus(
             amount_total_abs_error_y += amount_state.total_abs_error_y
 
         latest_fee_interval = None
+        latest_reward_interval = None
         fee_errors: list[str] = []
+        reward_errors: list[str] = []
         observation_times = store.position_observation_times(
             position_address,
             limit=None,
@@ -126,21 +150,43 @@ def build_reconciliation_corpus(
                         end_observed_at=end_time,
                     )
                 except ValueError as exc:
-                    fee_errors.append(
-                        f"{start_time} -> {end_time}: {exc}"
-                    )
-                    continue
+                    fee_errors.append(f"{start_time} -> {end_time}: {exc}")
+                else:
+                    latest_fee_interval = fee_interval
+                    fee_intervals_eligible += 1
+                    fee_intervals_exact += int(fee_interval.exact_match)
+                    fee_bins_checked += fee_interval.bins_checked
+                    fee_mismatched_bins += fee_interval.mismatched_bins
+                    fee_total_abs_error_x += fee_interval.total_abs_error_x
+                    fee_total_abs_error_y += fee_interval.total_abs_error_y
 
-                latest_fee_interval = fee_interval
-                fee_intervals_eligible += 1
-                fee_intervals_exact += int(fee_interval.exact_match)
-                fee_bins_checked += fee_interval.bins_checked
-                fee_mismatched_bins += fee_interval.mismatched_bins
-                fee_total_abs_error_x += fee_interval.total_abs_error_x
-                fee_total_abs_error_y += fee_interval.total_abs_error_y
+                reward_intervals_seen += 1
+                try:
+                    reward_interval = reconcile_position_reward_interval(
+                        database_path,
+                        position_address=position_address,
+                        start_observed_at=start_time,
+                        end_observed_at=end_time,
+                    )
+                except ValueError as exc:
+                    reward_errors.append(f"{start_time} -> {end_time}: {exc}")
+                else:
+                    latest_reward_interval = reward_interval
+                    reward_intervals_eligible += 1
+                    reward_intervals_exact += int(reward_interval.exact_match)
+                    reward_bins_checked += reward_interval.bins_checked
+                    reward_bins_with_checkpoint_growth += (
+                        reward_interval.bins_with_checkpoint_growth
+                    )
+                    reward_mismatched_bins += reward_interval.mismatched_bins
+                    reward_total_abs_error_one += reward_interval.total_abs_error_one
+                    reward_total_abs_error_two += reward_interval.total_abs_error_two
         else:
             fee_errors.append(
                 "need at least two position observations for fee reconciliation"
+            )
+            reward_errors.append(
+                "need at least two position observations for reward reconciliation"
             )
 
         entries.append(
@@ -150,6 +196,10 @@ def build_reconciliation_corpus(
                 amount_error=amount_error,
                 fee_interval=latest_fee_interval,
                 fee_interval_error="; ".join(fee_errors) if fee_errors else None,
+                reward_interval=latest_reward_interval,
+                reward_interval_error=(
+                    "; ".join(reward_errors) if reward_errors else None
+                ),
             )
         )
 
@@ -163,13 +213,22 @@ def build_reconciliation_corpus(
         if fee_intervals_eligible
         else None
     )
+    reward_exact_rate = (
+        reward_intervals_exact / reward_intervals_eligible
+        if reward_intervals_eligible
+        else None
+    )
     strict_gate = (
         amount_positions_eligible > 0
         and fee_intervals_eligible > 0
+        and reward_intervals_eligible > 0
+        and reward_bins_with_checkpoint_growth > 0
         and amount_positions_exact == amount_positions_eligible
         and fee_intervals_exact == fee_intervals_eligible
+        and reward_intervals_exact == reward_intervals_eligible
         and amount_mismatched_bins == 0
         and fee_mismatched_bins == 0
+        and reward_mismatched_bins == 0
     )
 
     return ReconciliationCorpusReport(
@@ -188,8 +247,17 @@ def build_reconciliation_corpus(
         fee_mismatched_bins=fee_mismatched_bins,
         fee_total_abs_error_x=fee_total_abs_error_x,
         fee_total_abs_error_y=fee_total_abs_error_y,
+        reward_intervals_seen=reward_intervals_seen,
+        reward_intervals_eligible=reward_intervals_eligible,
+        reward_intervals_exact=reward_intervals_exact,
+        reward_bins_checked=reward_bins_checked,
+        reward_bins_with_checkpoint_growth=reward_bins_with_checkpoint_growth,
+        reward_mismatched_bins=reward_mismatched_bins,
+        reward_total_abs_error_one=reward_total_abs_error_one,
+        reward_total_abs_error_two=reward_total_abs_error_two,
         amount_exact_rate=amount_exact_rate,
         fee_exact_rate=fee_exact_rate,
+        reward_exact_rate=reward_exact_rate,
         strict_math_gate_passed=strict_gate,
         entries=tuple(entries),
     )
