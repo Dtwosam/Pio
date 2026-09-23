@@ -11,6 +11,7 @@ mod execution_store;
 mod journaled_dry_run;
 mod models;
 mod phase5_gate;
+mod phase6_readiness;
 mod preflight;
 mod prestate_verifier;
 mod position_closure;
@@ -49,6 +50,7 @@ fn usage() {
   meteora-executor presign-preflight <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
   meteora-executor phase5-promotion-gate <PIO_DATABASE>
+  meteora-executor phase6-readiness <PIO_DATABASE> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-decision-context <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-recovery <EXECUTION_DB> <DECISION_ID> [EXPIRY_GRACE_BLOCKS]
@@ -429,6 +431,50 @@ RPC_URL is accepted as a compatibility fallback",
                     &decision_id,
                 )?;
             println!("{}", serde_json::to_string_pretty(&context)?);
+        }
+        "phase6-readiness" => {
+            let database_path = args
+                .next()
+                .context("PIO_DATABASE is required")?;
+            let config_path = args
+                .next()
+                .context("TRANSACTION_GUARD_CONFIG_JSON is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "phase6-readiness accepts exactly two arguments"
+                );
+            }
+
+            let phase5 =
+                phase5_gate::verify_phase5_promotion_database(
+                    std::path::Path::new(&database_path),
+                )?;
+            let config_json = std::fs::read_to_string(&config_path)
+                .with_context(|| {
+                    format!(
+                        "failed to read transaction guard config JSON: {config_path}"
+                    )
+                })?;
+            let config: transaction_guard::TransactionGuardConfig =
+                serde_json::from_str(&config_json)
+                    .context("invalid transaction guard config JSON")?;
+            let wallet = wallet::inspect_executor_wallet_from_env()?;
+            let wallet_pubkey: solana_sdk::pubkey::Pubkey =
+                wallet.pubkey.parse()
+                    .context("executor wallet pubkey is invalid")?;
+            let report = phase6_readiness::evaluate_phase6_readiness(
+                phase5,
+                &wallet_pubkey,
+                &config,
+            )?;
+            let output = serde_json::json!({
+                "wallet": wallet,
+                "readiness": report,
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            if !report.accepted {
+                std::process::exit(2);
+            }
         }
         "phase5-promotion-gate" => {
             let database_path = args
