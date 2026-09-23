@@ -120,6 +120,18 @@ pio rebalance-execution --position <POSITION>
 pio transaction-costs --position <POSITION>
 pio composition-prestate --position <POSITION>
 pio reconcile-composition --position <POSITION>
+
+# Reconciled controlled-live evidence (still no public sign/send command)
+pio ingest-execution-receipt --file <RUST_RECEIPT_JSON>
+pio apply-live-execution-effect --decision <DECISION_ID>
+pio apply-live-position-effect --decision <DECISION_ID>
+pio finalize-live-position-closure --decision <SETTLEMENT_DECISION_ID> \
+  --file <CLOSE_PROOF_JSON>
+pio build-live-position-outcome --position <POSITION>
+pio value-live-position-outcome --position <POSITION> --max-age-seconds 300
+pio ingest-execution-decision-context --file <DECISION_CONTEXT_JSON>
+pio build-live-learning-label --position <POSITION>
+pio live-execution-ledger-audit --require-clean
 ```
 
 The work queue emits concrete read-only Rust commands when an existing sample can be completed. If historical prestate cannot be proven, it says so instead of reconstructing it approximately.
@@ -133,9 +145,11 @@ ML v1 is research-only: it learns from all replay-valid candidate actions at eac
 Phase 6 public commands still stop before signing/sending. The Rust executor can enforce
 risk, transaction/account/instruction policy, simulation, isolated-wallet
 authorization, durable restart state, build chain-resolved unsigned standard-SPL
-entry/rebalance/emergency-exit transactions, deterministically sign exact persisted
-presign evidence internally, coordinate same-signature submission retries, and
-reconcile confirmation/receipts. Public sign/send exposure remains disabled.
+entry/rebalance/emergency-exit/settlement transactions, deterministically sign exact
+persisted presign evidence internally, coordinate same-signature submission retries,
+and reconcile confirmation/receipts. Python can turn fully reconciled closed live
+positions into no-lookahead valued PnL and immutable model-attributed learning labels.
+Public sign/send exposure remains disabled.
 
 See `docs/PHASE6_EXECUTION_RUNBOOK.md`.
 
