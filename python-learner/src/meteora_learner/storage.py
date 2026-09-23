@@ -446,6 +446,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_model_registry_one_champion
 ON model_registry(status)
 WHERE status = 'CHAMPION';
 
+CREATE TABLE IF NOT EXISTS model_offline_evidence (
+    model_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    evidence_type TEXT NOT NULL,
+    qualified INTEGER NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS model_promotion_evidence (
     model_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
@@ -559,8 +567,8 @@ CHAIN_POOL_EXTRA_COLUMNS = {
 }
 
 MODEL_STATUS_TRANSITIONS = {
-    "OFFLINE_CANDIDATE": {"OFFLINE_QUALIFIED", "REJECTED"},
-    "OFFLINE_QUALIFIED": {"PAPER_CHALLENGER", "REJECTED"},
+    "OFFLINE_CANDIDATE": {"REJECTED"},
+    "OFFLINE_QUALIFIED": {"REJECTED"},
     "PAPER_CHALLENGER": {"REJECTED"},
     "CHAMPION": {"ROLLED_BACK"},
     "REJECTED": set(),
@@ -1764,6 +1772,101 @@ class Storage:
             if cursor.rowcount != 1:
                 raise ValueError(
                     f"model {model_id} is not in expected status {expected_status}"
+                )
+
+    def save_model_offline_evidence(
+        self,
+        *,
+        model_id: str,
+        evidence_type: str,
+        qualified: bool,
+        evidence: dict[str, Any],
+    ) -> None:
+        if not model_id.strip():
+            raise ValueError("model_id is required")
+        if not evidence_type.strip():
+            raise ValueError("evidence_type is required")
+        with self.connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM model_registry WHERE model_id = ?",
+                (model_id,),
+            ).fetchone() is None:
+                raise ValueError(f"unknown model_id: {model_id}")
+            conn.execute(
+                """
+                INSERT INTO model_offline_evidence(
+                    model_id, created_at, evidence_type, qualified, evidence_json
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(model_id) DO UPDATE SET
+                    created_at=excluded.created_at,
+                    evidence_type=excluded.evidence_type,
+                    qualified=excluded.qualified,
+                    evidence_json=excluded.evidence_json
+                """,
+                (
+                    model_id,
+                    utc_now_iso(),
+                    evidence_type,
+                    int(bool(qualified)),
+                    json.dumps(evidence, separators=(",", ":")),
+                ),
+            )
+
+    def qualify_model_offline(
+        self,
+        model_id: str,
+        *,
+        notes: str | None = None,
+    ) -> None:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT evidence_type, qualified
+                FROM model_offline_evidence
+                WHERE model_id = ?
+                LIMIT 1
+                """,
+                (model_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("offline challenger evidence is missing")
+            if str(row[0]) != "OFFLINE_CHALLENGER_V1" or not bool(row[1]):
+                raise ValueError("offline challenger evidence is not qualified")
+            cursor = conn.execute(
+                """
+                UPDATE model_registry
+                SET status = 'OFFLINE_QUALIFIED', updated_at = ?,
+                    notes = COALESCE(?, notes)
+                WHERE model_id = ? AND status = 'OFFLINE_CANDIDATE'
+                """,
+                (now, notes, model_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    f"model {model_id} is not in OFFLINE_CANDIDATE status"
+                )
+
+    def start_model_paper_challenger(
+        self,
+        model_id: str,
+        *,
+        notes: str | None = None,
+    ) -> None:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE model_registry
+                SET status = 'PAPER_CHALLENGER', updated_at = ?,
+                    notes = COALESCE(?, notes)
+                WHERE model_id = ? AND status = 'OFFLINE_QUALIFIED'
+                """,
+                (now, notes, model_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    f"model {model_id} is not in OFFLINE_QUALIFIED status"
                 )
 
     def save_model_promotion_evidence(
