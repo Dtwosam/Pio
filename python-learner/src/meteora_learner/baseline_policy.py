@@ -31,6 +31,7 @@ class ReplayEconomicMetrics:
     exit_price_q64: int
     initial_x: int
     initial_y: int
+    initial_value_y_atomic: int
     hold_value_y_atomic: int
     lp_inventory_value_y_atomic: int
     fee_value_y_atomic: int
@@ -39,6 +40,9 @@ class ReplayEconomicMetrics:
     adjusted_lp_value_y_atomic: int | None
     excess_vs_hold_y_atomic: int | None
     excess_vs_hold_bps: int | None
+    net_return_bps: int | None
+    hold_return_bps: int | None
+    excess_vs_hold_initial_bps: int | None
     fee_minus_entry_cost_y_atomic: int | None
     has_unvalued_rewards: bool
 
@@ -105,6 +109,11 @@ def replay_economics(
 
     initial_x = replay.deposited_x + replay.idle_x
     initial_y = replay.deposited_y + replay.idle_y
+    initial_value = q64_value_in_y_atomic(
+        amount_x=initial_x,
+        amount_y=initial_y,
+        price_q64=entry_price_q64,
+    )
     hold_value = q64_value_in_y_atomic(
         amount_x=initial_x,
         amount_y=initial_y,
@@ -132,6 +141,13 @@ def replay_economics(
     excess: int | None = None
     excess_bps: int | None = None
     fee_minus_cost: int | None = None
+    net_return_bps: int | None = None
+    hold_return_bps = (
+        (hold_value - initial_value) * 10_000 // initial_value
+        if initial_value > 0
+        else None
+    )
+    excess_vs_hold_initial_bps: int | None = None
     if network_cost_y_atomic is not None:
         adjusted_value = (
             lp_inventory_value
@@ -146,12 +162,18 @@ def replay_economics(
             else None
         )
         fee_minus_cost = fee_value - composition_cost - network_cost_y_atomic
+        if initial_value > 0:
+            net_return_bps = (
+                (adjusted_value - initial_value) * 10_000 // initial_value
+            )
+            excess_vs_hold_initial_bps = excess * 10_000 // initial_value
 
     return ReplayEconomicMetrics(
         entry_price_q64=entry_price_q64,
         exit_price_q64=exit_price_q64,
         initial_x=initial_x,
         initial_y=initial_y,
+        initial_value_y_atomic=initial_value,
         hold_value_y_atomic=hold_value,
         lp_inventory_value_y_atomic=lp_inventory_value,
         fee_value_y_atomic=fee_value,
@@ -160,6 +182,9 @@ def replay_economics(
         adjusted_lp_value_y_atomic=adjusted_value,
         excess_vs_hold_y_atomic=excess,
         excess_vs_hold_bps=excess_bps,
+        net_return_bps=net_return_bps,
+        hold_return_bps=hold_return_bps,
+        excess_vs_hold_initial_bps=excess_vs_hold_initial_bps,
         fee_minus_entry_cost_y_atomic=fee_minus_cost,
         has_unvalued_rewards=has_unvalued_rewards,
     )
