@@ -117,6 +117,7 @@ pio ml-start-paper --model-id <MODEL>
 pio ml-model-status --model-id <MODEL>
 
 # Phase 9 research-only evidence
+pio phase9-work-queue --rpc-url <RPC_URL>
 pio phase9-research-validate --pools <POOL_A,POOL_B,POOL_C> --persist
 pio mint-risk-research --pool <POOL> --persist --require-qualified
 pio wallet-flow-research --pool <POOL> --persist --require-qualified
@@ -125,6 +126,7 @@ pio static-hedge-research --pool <POOL> --amount-x <ATOMIC_X> --amount-y <ATOMIC
   --hedge-available-liquidity-y-atomic <LIQUIDITY> --persist
 pio contextual-bandit-research --file <ML_ACTION_DATASET_CSV> --persist
 pio phase9-research-bundle --persist --require-ready
+pio phase9-validate --persist-ready --require-ready
 ```
 
 Real execution/calibration commands:
