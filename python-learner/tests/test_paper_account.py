@@ -165,16 +165,14 @@ def test_ml_paper_entry_requires_matching_registry_stage(tmp_path):
             capital_quote=100,
         )
 
-    storage.update_model_status(
-        "model",
-        expected_status="OFFLINE_CANDIDATE",
-        new_status="OFFLINE_QUALIFIED",
+    storage.save_model_offline_evidence(
+        model_id="model",
+        evidence_type="OFFLINE_CHALLENGER_V1",
+        qualified=True,
+        evidence={"test": True},
     )
-    storage.update_model_status(
-        "model",
-        expected_status="OFFLINE_QUALIFIED",
-        new_status="PAPER_CHALLENGER",
-    )
+    storage.qualify_model_offline("model")
+    storage.start_model_paper_challenger("model")
     position = open_paper_position(
         storage,
         event_key="enter-ml",
