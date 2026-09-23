@@ -347,6 +347,8 @@ mod tests {
             pool_allowed: true,
             capital_quote: 10.0,
             max_capital_quote_per_entry: 50.0,
+            daily_submitted_entry_capital_quote: 0.0,
+            max_daily_entry_capital_quote: 100.0,
             daily_drawdown_pct: 0.5,
             max_daily_drawdown_pct: 2.0,
         }
