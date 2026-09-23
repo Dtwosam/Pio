@@ -15,6 +15,7 @@ mod presign;
 mod risk;
 mod simulation;
 mod signer;
+mod submission;
 mod state_reader;
 mod transaction_events;
 mod transaction_guard;
