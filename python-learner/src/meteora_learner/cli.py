@@ -9,6 +9,11 @@ from .chain_ingest import ingest_chain_snapshot
 from .chain_replay import replay_small_lp_history
 from .chain_scan import scan_chain_candidates
 from .composition_labels import build_composition_fee_labels
+from .composition_prestate import (
+    build_composition_prestate_candidates,
+    ingest_prestate_verification,
+)
+from .composition_reconciliation import build_composition_fee_reconciliation
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
@@ -99,6 +104,26 @@ def main() -> None:
         required=True,
         help="Meteora position address",
     )
+
+    composition_prestate = subparsers.add_parser(
+        "composition-prestate",
+        help="Find slot-bounded pre-add snapshots eligible for exact verification",
+    )
+    composition_prestate.add_argument("--position", required=True)
+
+    ingest_prestate = subparsers.add_parser(
+        "ingest-prestate-verification",
+        help="Ingest JSON emitted by Rust verify-prestate",
+    )
+    ingest_prestate.add_argument("--snapshot-observed-at", required=True)
+    ingest_prestate.add_argument("--pool", required=True)
+    ingest_prestate.add_argument("--file", default="-")
+
+    composition_reconcile = subparsers.add_parser(
+        "reconcile-composition",
+        help="Compare exact verified prestate composition math with chain events",
+    )
+    composition_reconcile.add_argument("--position", required=True)
 
     composition_labels = subparsers.add_parser(
         "composition-labels",
@@ -352,6 +377,40 @@ def main() -> None:
     if args.command == "transaction-costs":
         settings = Settings.from_env()
         result = build_transaction_cost_report(
+            str(settings.database_path),
+            position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "composition-prestate":
+        settings = Settings.from_env()
+        result = build_composition_prestate_candidates(
+            str(settings.database_path),
+            position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "ingest-prestate-verification":
+        settings = Settings.from_env()
+        if args.file == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with open(args.file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        result = ingest_prestate_verification(
+            Storage(settings.database_path),
+            payload,
+            snapshot_observed_at=args.snapshot_observed_at,
+            pool_address=args.pool,
+        )
+        print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "reconcile-composition":
+        settings = Settings.from_env()
+        result = build_composition_fee_reconciliation(
             str(settings.database_path),
             position_address=args.position,
         )
