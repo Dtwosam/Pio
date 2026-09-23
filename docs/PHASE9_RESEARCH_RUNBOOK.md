@@ -74,15 +74,33 @@ top-wallet concentration are required before evidence qualifies.
 
 ### Portfolio allocation research
 
-Build a fixed candidate JSON corpus and evaluate capped quote allocation:
+The preferred qualification path first persists the exact multi-pool candidate
+artifact and its account-state/replay assumptions:
 
 ```bash
+pio multi-pool-research \
+  --file <POOL_INPUTS_JSON> \
+  --equity <EQUITY> \
+  --cash <CASH> \
+  --deployed <DEPLOYED> \
+  --drawdown-bps <BPS> \
+  --persist-phase9-candidates \
+  > phase9-multi-pool.json
+
 pio portfolio-allocation-research \
-  --file <CANDIDATES_JSON> \
+  --file phase9-multi-pool.json \
   --budget-quote <QUOTE> \
   --persist \
   --require-qualified
 ```
+
+The candidate artifact is stored immutably with a SHA-256 over its source
+inputs, account assumptions and ranked comparison. Allocation evidence carries
+that evidence ID/hash. Phase 9 bundle readiness requires the reference to
+resolve back to the immutable research-only candidate artifact.
+
+Free-form candidate JSON remains useful for exploratory allocation runs, but
+provenance-free allocation evidence cannot satisfy Phase 9 promotion readiness.
 
 Allocation remains research-only and is bounded by position count,
 per-pool concentration, candidate quality and minimum budget utilization.
