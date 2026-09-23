@@ -210,6 +210,7 @@ mod tests {
             reason: "approved".into(),
             fee_payer: "payer".into(),
             pool_account_present: true,
+            required_accounts_present: true,
             instruction_count: 1,
             static_account_count: 3,
             required_signatures: 1,
