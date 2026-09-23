@@ -74,7 +74,7 @@ def test_equal_risk_water_fill_respects_concentration_cap(tmp_path):
     promote_phase8(storage)
     report = research_portfolio_allocation(
         storage,
-        comparison(
+        comparison=comparison(
             candidate(1, "pool-a"),
             candidate(2, "pool-b"),
             candidate(3, "pool-c"),
@@ -105,7 +105,7 @@ def test_concentration_caps_can_leave_budget_unallocated(tmp_path):
     promote_phase8(storage)
     report = research_portfolio_allocation(
         storage,
-        comparison(
+        comparison=comparison(
             candidate(1, "pool-a"),
             candidate(2, "pool-b"),
         ),
@@ -133,7 +133,7 @@ def test_phase8_dependency_blocks_portfolio_research_qualification(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     report = research_portfolio_allocation(
         storage,
-        comparison(
+        comparison=comparison(
             candidate(1, "pool-a"),
             candidate(2, "pool-b"),
             candidate(3, "pool-c"),
@@ -153,7 +153,7 @@ def test_ineligible_candidates_do_not_receive_allocation(tmp_path):
     promote_phase8(storage)
     report = research_portfolio_allocation(
         storage,
-        comparison(
+        comparison=comparison(
             candidate(1, "pool-a", excess=-10),
             candidate(2, "pool-b", survival=0.50),
             candidate(3, "pool-c"),
@@ -174,7 +174,7 @@ def test_portfolio_allocation_evidence_round_trip(tmp_path):
     promote_phase8(storage)
     report = research_portfolio_allocation(
         storage,
-        comparison(
+        comparison=comparison(
             candidate(1, "pool-a"),
             candidate(2, "pool-b"),
             candidate(3, "pool-c"),
