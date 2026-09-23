@@ -130,6 +130,7 @@ pio phase9-chain-capture-run --require-target  # uses SOLANA_RPC_URL; read-only 
 pio phase9-mint-capture-plan --target-pools 2 --require-ready
 pio phase9-mint-capture-run --target-pools 2 --require-ready  # uses inspect-mint-env
 pio phase9-position-discovery --pool <POOL> --limit 250
+pio phase9-pool-activity-discovery --pool <POOL> --limit 25 --advance-backfill  # read-only historical signature page
 pio phase9-wallet-flow-capture-run --pool <POOL> --require-ready
 pio phase9-research-input-template --pools <POOL_A,POOL_B,POOL_C> > phase9-research-inputs.json
 pio phase9-research-inputs-ingest --file phase9-research-inputs.json
