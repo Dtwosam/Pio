@@ -8,6 +8,28 @@ from meteora_learner.settings import Settings
 from meteora_learner.storage import Storage
 
 
+@pytest.fixture(autouse=True)
+def neutral_ranked_pool_cohort(monkeypatch):
+    report = SimpleNamespace(
+        desired_pools=(),
+        sampling_pools=(),
+        research_pools=(),
+        research_ready=False,
+        to_record=lambda: {
+            "research_only": True,
+            "desired_pools": [],
+            "sampling_pools": [],
+            "research_pools": [],
+            "research_ready": False,
+        },
+    )
+    monkeypatch.setattr(
+        source_module,
+        "evaluate_phase9_pool_cohort",
+        lambda *args, **kwargs: report,
+    )
+
+
 class DummyRecord:
     def __init__(self, **values):
         self.values = values
@@ -469,3 +491,120 @@ def test_source_capture_requires_matching_database_path(tmp_path):
             settings=settings,
             refresh_api=False,
         )
+
+
+def test_source_capture_forwards_ranked_cohort_to_chain_and_history(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    settings = Settings(database_path=storage.path)
+    seen = {"cohort_calls": 0}
+
+    reports = (
+        SimpleNamespace(
+            desired_pools=(
+                "pool-a", "pool-b", "pool-c", "pool-d", "pool-e"
+            ),
+            sampling_pools=("pool-a", "pool-b", "pool-c"),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "before"},
+        ),
+        SimpleNamespace(
+            desired_pools=(
+                "pool-a", "pool-b", "pool-c", "pool-d", "pool-e"
+            ),
+            sampling_pools=(
+                "pool-a", "pool-b", "pool-c", "pool-d"
+            ),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "after-chain"},
+        ),
+        SimpleNamespace(
+            desired_pools=(
+                "pool-a", "pool-b", "pool-c", "pool-d", "pool-e"
+            ),
+            sampling_pools=(
+                "pool-a", "pool-b", "pool-c", "pool-d"
+            ),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "final"},
+        ),
+    )
+
+    def cohort(*args, **kwargs):
+        index = min(seen["cohort_calls"], len(reports) - 1)
+        seen["cohort_calls"] += 1
+        return reports[index]
+
+    monkeypatch.setattr(
+        source_module,
+        "evaluate_phase9_pool_cohort",
+        cohort,
+    )
+    monkeypatch.setattr(
+        source_module,
+        "collect_once",
+        lambda settings: SimpleNamespace(run_id="api"),
+    )
+
+    def chain(*args, **kwargs):
+        seen["preferred"] = kwargs["preferred_pool_addresses"]
+        seen["new_limit"] = kwargs["max_preferred_candidates"]
+        return DummyRecord(target_met=True)
+
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_chain_capture_batch",
+        chain,
+    )
+
+    def history(*args, **kwargs):
+        seen["sampling"] = kwargs["pool_addresses"]
+        seen["continue"] = kwargs["continue_sampling_when_ready"]
+        return DummyRecord(history_ready_after=True)
+
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_history_capture",
+        history,
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_mint_capture",
+        lambda *args, **kwargs: DummyRecord(inputs_ready_after=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "_top_chain_pools",
+        lambda storage, limit: (),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_history_plan",
+        lambda *args, **kwargs: SimpleNamespace(plan_ready=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_mint_capture_plan",
+        lambda *args, **kwargs: SimpleNamespace(inputs_ready=True),
+    )
+
+    report = run_phase9_source_capture(
+        storage,
+        settings=settings,
+        cohort_new_pools_per_run=1,
+    )
+
+    assert seen["preferred"] == (
+        "pool-a", "pool-b", "pool-c", "pool-d", "pool-e"
+    )
+    assert seen["new_limit"] == 1
+    assert seen["sampling"] == (
+        "pool-a", "pool-b", "pool-c", "pool-d"
+    )
+    assert seen["continue"] is True
+    assert report.pool_cohort == {"stage": "final"}
