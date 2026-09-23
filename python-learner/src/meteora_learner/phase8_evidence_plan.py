@@ -220,7 +220,7 @@ def build_phase8_evidence_plan(
                     _item(
                         25,
                         "RETRAIN_OFFLINE_VALIDATION_READY",
-                        challenger or cycle_scope,
+                        cycle_scope,
                         (
                             "cycle challenger and checksum-verified dataset "
                             "are ready for walk-forward plus held-out offline "
