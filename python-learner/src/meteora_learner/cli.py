@@ -99,6 +99,8 @@ from .multi_pool_research import PoolResearchInput, build_multi_pool_research
 from .ml_challenger import MLChallengerCriteria
 from .ml_inference import MLInferenceConfig
 from .ml_registry import model_record, start_paper_challenger
+from .ml_retraining_dataset import MLRetrainPoolSpec
+from .retraining_workflow import start_retraining_cycle_with_dataset
 from .ml_workflow import (
     evaluate_registered_offline_challenger,
     qualify_registered_offline_challenger,
@@ -1047,6 +1049,69 @@ def main() -> None:
     ml_retrain_plan.add_argument("--as-of")
     ml_retrain_plan.add_argument("--persist", action="store_true")
     ml_retrain_plan.add_argument("--require-due", action="store_true")
+
+    ml_retrain_build = subparsers.add_parser(
+        "ml-retrain-build",
+        help="Build a cutoff-bound multi-pool dataset and start its retraining cycle",
+    )
+    ml_retrain_build.add_argument(
+        "--file",
+        required=True,
+        help="JSON array of pool_address, amount_x, amount_y, network_cost_y_atomic",
+    )
+    ml_retrain_build.add_argument("--output", required=True)
+    ml_retrain_build.add_argument("--cycle-id")
+    ml_retrain_build.add_argument("--as-of")
+    ml_retrain_build.add_argument(
+        "--lookback-observations",
+        type=int,
+        default=12,
+    )
+    ml_retrain_build.add_argument(
+        "--forward-observations",
+        type=int,
+        default=2,
+    )
+    ml_retrain_build.add_argument("--step-observations", type=int)
+    ml_retrain_build.add_argument(
+        "--half-widths",
+        type=_parse_int_csv,
+        default=(0, 1, 2, 5, 10),
+    )
+    ml_retrain_build.add_argument(
+        "--center-offsets",
+        type=_parse_int_csv,
+        default=(0,),
+    )
+    ml_retrain_build.add_argument(
+        "--max-share-bps",
+        type=int,
+        default=500,
+    )
+    ml_retrain_build.add_argument(
+        "--favor-x-active",
+        action="store_true",
+    )
+    ml_retrain_build.add_argument(
+        "--min-new-chain-observations",
+        type=int,
+        default=500,
+    )
+    ml_retrain_build.add_argument(
+        "--min-new-chain-pools",
+        type=int,
+        default=3,
+    )
+    ml_retrain_build.add_argument(
+        "--min-new-live-labels",
+        type=int,
+        default=5,
+    )
+    ml_retrain_build.add_argument(
+        "--max-champion-age-days",
+        type=float,
+        default=14.0,
+    )
 
     ml_retrain_start = subparsers.add_parser(
         "ml-retrain-start",
@@ -2288,6 +2353,50 @@ def main() -> None:
         print(json.dumps(output, indent=2))
         if args.require_due and not result.retrain_due:
             raise SystemExit(2)
+        return
+
+    if args.command == "ml-retrain-build":
+        settings = Settings.from_env()
+        with open(args.file, "r", encoding="utf-8") as handle:
+            raw_pools = json.load(handle)
+        if not isinstance(raw_pools, list):
+            raise ValueError(
+                "ml-retrain-build file must contain a JSON array"
+            )
+        pools = tuple(
+            MLRetrainPoolSpec(
+                pool_address=str(item["pool_address"]),
+                amount_x=int(item["amount_x"]),
+                amount_y=int(item["amount_y"]),
+                network_cost_y_atomic=int(
+                    item["network_cost_y_atomic"]
+                ),
+            )
+            for item in raw_pools
+        )
+        result = start_retraining_cycle_with_dataset(
+            Storage(settings.database_path),
+            pools=pools,
+            output_file=args.output,
+            cycle_id=args.cycle_id,
+            as_of=args.as_of,
+            criteria=ContinuousLearningCriteria(
+                min_new_chain_observations=(
+                    args.min_new_chain_observations
+                ),
+                min_new_chain_pools=args.min_new_chain_pools,
+                min_new_live_labels=args.min_new_live_labels,
+                max_champion_age_days=args.max_champion_age_days,
+            ),
+            lookback_observations=args.lookback_observations,
+            forward_observations=args.forward_observations,
+            step_observations=args.step_observations,
+            half_widths=args.half_widths,
+            center_offsets=args.center_offsets,
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "ml-retrain-start":
