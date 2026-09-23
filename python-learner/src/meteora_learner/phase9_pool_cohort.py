@@ -198,6 +198,43 @@ def _required_observations() -> int:
     return max(adaptive, DLMMRegimeCriteria().min_observations)
 
 
+def select_phase9_cohort_source_pools(
+    storage: Storage,
+    *,
+    cohort: Phase9PoolCohortReport,
+    limit: int,
+) -> tuple[str, ...]:
+    if limit < 1:
+        return ()
+
+    selected: list[str] = []
+    for pool in cohort.sampling_pools:
+        value = str(pool).strip()
+        if value and value not in selected:
+            selected.append(value)
+        if len(selected) >= limit:
+            return tuple(selected)
+
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT pool_address, COUNT(*) AS observations
+            FROM chain_pool_snapshots
+            WHERE pool_address IS NOT NULL
+              AND TRIM(pool_address) != ''
+            GROUP BY pool_address
+            ORDER BY observations DESC, pool_address ASC
+            """
+        ).fetchall()
+    for row in rows:
+        pool = str(row[0])
+        if pool not in selected:
+            selected.append(pool)
+        if len(selected) >= limit:
+            break
+    return tuple(selected)
+
+
 def evaluate_phase9_pool_cohort(
     storage: Storage,
     *,
