@@ -7,6 +7,7 @@ import sys
 from .chain_ingest import ingest_chain_snapshot
 from .chain_replay import replay_small_lp_history
 from .chain_scan import scan_chain_candidates
+from .composition_labels import build_composition_fee_labels
 from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
@@ -18,6 +19,7 @@ from .research import inventory_backtest_from_store
 from .settings import Settings
 from .storage import Storage
 from .strategy import StrategyType
+from .transaction_event_ingest import ingest_transaction_events
 
 
 def _parse_int_csv(value: str) -> tuple[int, ...]:
@@ -63,6 +65,26 @@ def main() -> None:
         "--file",
         default="-",
         help="JSON file path, or - for stdin",
+    )
+
+    ingest_tx_events = subparsers.add_parser(
+        "ingest-transaction-events",
+        help="Ingest JSON emitted by Rust inspect-transaction-events",
+    )
+    ingest_tx_events.add_argument(
+        "--file",
+        default="-",
+        help="JSON file path, or - for stdin",
+    )
+
+    composition_labels = subparsers.add_parser(
+        "composition-labels",
+        help="Join position add history to decoded on-chain composition-fee events",
+    )
+    composition_labels.add_argument(
+        "--position",
+        required=True,
+        help="Meteora position address",
     )
 
     collect_history = subparsers.add_parser(
@@ -259,6 +281,29 @@ def main() -> None:
                 payload = json.load(handle)
         result = ingest_chain_snapshot(Storage(settings.database_path), payload)
         print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "ingest-transaction-events":
+        settings = Settings.from_env()
+        if args.file == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with open(args.file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        result = ingest_transaction_events(
+            Storage(settings.database_path),
+            payload,
+        )
+        print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "composition-labels":
+        settings = Settings.from_env()
+        result = build_composition_fee_labels(
+            str(settings.database_path),
+            position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "collect-position-history":
