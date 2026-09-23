@@ -29,6 +29,16 @@ def cycle(**overrides):
     return SimpleNamespace(**base)
 
 
+def seed_model(storage, model_id="champion-1"):
+    storage.register_model(
+        model_id=model_id,
+        model_family="ML_V1_HIST_GRADIENT_BOOSTING",
+        feature_version="ML_ACTION_FEATURES_V1",
+        dataset_version="dataset-v1",
+        metrics={},
+    )
+
+
 def dataset_file(tmp_path):
     path = (tmp_path / "dataset.csv").resolve()
     raw = (
@@ -43,6 +53,7 @@ def dataset_file(tmp_path):
 
 def test_cycle_dataset_lineage_verifies_file_bytes(monkeypatch, tmp_path):
     storage = Storage(tmp_path / "pio.db")
+    seed_model(storage)
     path, digest, version = dataset_file(tmp_path)
     selected_cycle = cycle(target_dataset_version=version)
     monkeypatch.setattr(
