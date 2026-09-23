@@ -62,6 +62,8 @@ class PaperChainValuation:
     reward_one_atomic: int
     reward_two_atomic: int
     max_observed_share_bps: int
+    token_y_quote_per_atomic: float
+    quote_fidelity: str
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -380,6 +382,12 @@ def _valuation_from_row(row: Any) -> PaperChainValuation:
         max_observed_share_bps=int(
             json.loads(str(row["valuation_json"]))["max_observed_share_bps"]
         ),
+        token_y_quote_per_atomic=float(
+            json.loads(str(row["valuation_json"]))["token_y_quote_per_atomic"]
+        ),
+        quote_fidelity=str(
+            json.loads(str(row["valuation_json"]))["quote_fidelity"]
+        ),
     )
 
 
@@ -388,6 +396,7 @@ def prepare_paper_chain_valuation(
     *,
     position_id: str,
     observed_at: str,
+    token_y_quote_per_atomic: float | None = None,
 ) -> PaperChainValuation:
     if not observed_at.strip():
         raise ValueError("observed_at is required")
@@ -398,6 +407,16 @@ def prepare_paper_chain_valuation(
         raise ValueError(
             "paper v1 chain valuation fails closed after a rebalance"
         )
+
+    base = _counterfactual_row(storage, position_id=position_id)
+    if token_y_quote_per_atomic is None:
+        quote_rate = _d(base["capital_quote"]) / _d(base["entry_value_y_atomic"])
+        quote_fidelity = "ENTRY_IMPLIED_TOKEN_Y_QUOTE_V1"
+    else:
+        quote_rate = _d(token_y_quote_per_atomic)
+        if quote_rate <= 0:
+            raise ValueError("token_y_quote_per_atomic must be positive")
+        quote_fidelity = "EXPLICIT_TOKEN_Y_QUOTE_V1"
 
     with storage.connect() as conn:
         conn.row_factory = __import__("sqlite3").Row
@@ -410,9 +429,13 @@ def prepare_paper_chain_valuation(
             (position_id, observed_at),
         ).fetchone()
     if existing is not None:
+        existing_meta = json.loads(str(existing["valuation_json"]))
+        if _d(existing_meta["token_y_quote_per_atomic"]) != quote_rate:
+            raise ValueError(
+                "prepared paper valuation uses a different token-Y quote rate"
+            )
         return _valuation_from_row(existing)
 
-    base = _counterfactual_row(storage, position_id=position_id)
     previous_at, previous = _previous_state(
         storage,
         position_id=position_id,
@@ -557,10 +580,9 @@ def prepare_paper_chain_valuation(
         price_q64=price_q64,
     )
 
-    scale = _d(base["capital_quote"]) / _d(base["entry_value_y_atomic"])
-    mark_quote = _d(mark_y_atomic) * scale
-    fee_quote = _d(fee_y_atomic) * scale
-    reward_quote = _d(reward_y_atomic) * scale
+    mark_quote = _d(mark_y_atomic) * quote_rate
+    fee_quote = _d(fee_y_atomic) * quote_rate
+    reward_quote = _d(reward_y_atomic) * quote_rate
 
     next_state = {
         "bins": next_bins,
@@ -572,6 +594,8 @@ def prepare_paper_chain_valuation(
         "mark_y_atomic": mark_y_atomic,
         "fee_value_y_atomic": fee_y_atomic,
         "reward_value_y_atomic": reward_y_atomic,
+        "token_y_quote_per_atomic": str(quote_rate),
+        "quote_fidelity": quote_fidelity,
     }
     prefix = f"paper-chain:{position_id}:{observed_at}"
     with storage.connect() as conn:
@@ -634,6 +658,7 @@ def apply_paper_chain_valuation(
     position_id: str,
     observed_at: str,
     holding_observations: int,
+    token_y_quote_per_atomic: float | None = None,
     pool_safe: bool = True,
     emergency_exit: bool = False,
     estimated_exit_cost_quote: float = 0.0,
@@ -643,6 +668,7 @@ def apply_paper_chain_valuation(
         storage,
         position_id=position_id,
         observed_at=observed_at,
+        token_y_quote_per_atomic=token_y_quote_per_atomic,
     )
     prefix = f"paper-chain:{position_id}:{observed_at}"
 
