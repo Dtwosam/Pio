@@ -368,3 +368,32 @@ and replay mismatches fail the command when `--require-verified` is used.
 
 This audit is diagnostic and non-actionable. It does not grant LIVE policy
 authority.
+
+
+## Operational audit
+
+For one fail-able read-only check across the full persisted Phase 9 trust
+boundary, run:
+
+```bash
+pio phase9-operational-audit --require-verified
+```
+
+This command requires all three conditions at the same time:
+
+- immutable Phase 9 storage triggers are present and valid;
+- every required research family deterministically replays from its persisted
+  source lineage;
+- the persisted `PHASE9_PROMOTION_V1` row is still current versus the latest
+  checksum-valid research bundle and immutable promotion history.
+
+The report always carries `research_only=true` and
+`policy_actionable=false`. Passing this audit does not authorize any LIVE
+policy change; it only proves that the persisted Phase 9 research milestone is
+still internally trustworthy.
+
+For promotion currentness alone:
+
+```bash
+pio phase9-promotion-audit --require-current
+```
