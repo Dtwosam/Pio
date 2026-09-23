@@ -833,3 +833,23 @@ def test_work_queue_repairs_invalid_static_hedge_lineage(tmp_path):
     )
     assert task.shell_command is None
     assert "original explicit instrument" in task.reason
+
+
+
+def test_work_queue_surfaces_storage_integrity_first(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    with storage.connect() as conn:
+        conn.execute(
+            "DROP TRIGGER advanced_edge_evidence_no_update"
+        )
+
+    queue = build_phase9_work_queue(storage)
+
+    assert queue.research_bundle_ready is False
+    assert queue.items
+    first = queue.items[0]
+    assert first.task_type == "STORAGE_INTEGRITY"
+    assert first.scope == "PHASE9_STORAGE"
+    assert first.shell_command == (
+        "pio phase9-storage-integrity --require-verified"
+    )
