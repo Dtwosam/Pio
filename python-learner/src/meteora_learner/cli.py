@@ -153,6 +153,7 @@ from .phase9_operation_lease import (
     release_phase9_operation_lease,
 )
 from .phase9_evidence_status import evaluate_phase9_evidence_status
+from .phase9_evidence_plan import build_phase9_evidence_plan
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
@@ -2509,6 +2510,39 @@ def main() -> None:
         action="store_true",
     )
     phase9_evidence_status.add_argument(
+        "--require-bundle-ready",
+        action="store_true",
+    )
+
+    phase9_evidence_plan = subparsers.add_parser(
+        "phase9-evidence-plan",
+        help="Rank current Phase 9 evidence debt and emit one deterministic next safe action",
+    )
+    phase9_evidence_plan.add_argument(
+        "--as-of",
+        help="Optional timezone-aware evaluation cutoff; defaults to current time",
+    )
+    phase9_evidence_plan.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_evidence_plan.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_evidence_plan.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_evidence_plan.add_argument(
+        "--history-interval-seconds",
+        type=int,
+        default=3600,
+    )
+    phase9_evidence_plan.add_argument(
         "--require-bundle-ready",
         action="store_true",
     )
@@ -5538,6 +5572,24 @@ def main() -> None:
             and result.research_sources_current
         ):
             raise SystemExit(2)
+        if args.require_bundle_ready and not result.research_bundle_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-evidence-plan":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_phase9_evidence_plan(
+            storage,
+            criteria=Phase9ResearchBundleCriteria(
+                min_mint_risk_pools=args.min_mint_risk_pools,
+                min_wallet_flow_pools=args.min_wallet_flow_pools,
+                min_static_hedge_pools=args.min_static_hedge_pools,
+            ),
+            history_interval_seconds=args.history_interval_seconds,
+            as_of=args.as_of or utc_now_iso(),
+        )
+        print(json.dumps(result.to_record(), indent=2))
         if args.require_bundle_ready and not result.research_bundle_ready:
             raise SystemExit(2)
         return
