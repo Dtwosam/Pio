@@ -346,11 +346,19 @@ RPC_URL is accepted as a compatibility fallback",
                         )
                     })?
             };
-            let request: emergency_exit::EmergencyExitRequest =
+            let request: emergency_exit::ChainResolvedEmergencyExitRequest =
                 serde_json::from_str(&request_json)
                     .context("invalid emergency exit request JSON")?;
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
             let report =
-                emergency_exit::build_standard_spl_emergency_exit(&request)?;
+                emergency_exit::build_standard_spl_emergency_exit_from_chain(
+                    &rpc_url,
+                    &request,
+                )?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         "wallet-status" => {
