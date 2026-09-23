@@ -6,7 +6,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
+from .phase8_validation import audit_persisted_phase8_promotion
 from .storage import Storage
 
 
@@ -125,10 +125,8 @@ def research_wallet_flow(
     if not pool_address.strip():
         raise ValueError("pool_address is required")
 
-    phase8_promoted = storage.phase_is_promoted(
-        PHASE8,
-        evidence_type=PHASE8_EVIDENCE_TYPE,
-    )
+    phase8_audit = audit_persisted_phase8_promotion(storage)
+    phase8_promoted = phase8_audit.current
 
     with storage.connect() as conn:
         if as_of is None:
@@ -281,6 +279,14 @@ def research_wallet_flow(
         ),
     )
     reasons.extend(message for passed, message in checks if not passed)
+    if not phase8_promoted:
+        reasons.append(
+            "Phase 8 promotion must still be current before wallet-flow research can qualify"
+        )
+        reasons.extend(
+            f"Phase 8 currentness: {reason}"
+            for reason in phase8_audit.reasons
+        )
 
     research_qualified = not reasons and phase8_promoted
     if len(rows) < criteria.min_events or unique_users < criteria.min_unique_users:
