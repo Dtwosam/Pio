@@ -3,6 +3,7 @@ from dataclasses import replace
 import meteora_learner.phase9_policy_authorization as gate_module
 from meteora_learner.phase9_policy_authorization import (
     Phase9PolicyAuthorizationCriteria,
+    audit_persisted_phase9_policy_authorization,
     evaluate_phase9_policy_authorization,
     persist_phase9_policy_authorization,
 )
@@ -265,3 +266,98 @@ def test_authorization_evidence_cannot_be_execution_wired(
         assert "must not be wired to execution" in str(exc)
     else:
         raise AssertionError("expected execution-wired evidence refusal")
+
+
+def test_authorization_audit_is_current_when_replay_matches(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = shadow_report(
+        "cycle-a",
+        dataset_sha="a" * 64,
+        cutoff="2026-09-23T13:00:00+00:00",
+    )
+    reports = {"cycle-a": report}
+    patch_phase9(monkeypatch, reports)
+    persist_phase9_shadow(storage, report=report)
+    gate = evaluate_phase9_policy_authorization(
+        storage,
+        criteria=Phase9PolicyAuthorizationCriteria(
+            min_shadow_runs=1,
+            min_distinct_dataset_hashes=1,
+            min_distinct_cutoffs=1,
+            min_decisions_per_run=50,
+            min_pools_per_run=3,
+            min_selected_arms_per_run=2,
+            min_total_decisions=50,
+        ),
+    )
+    persist_phase9_policy_authorization(
+        storage,
+        report=gate,
+    )
+
+    monkeypatch.setattr(
+        gate_module,
+        "evaluate_phase9_policy_authorization",
+        lambda storage, criteria: gate,
+    )
+    audit = audit_persisted_phase9_policy_authorization(storage)
+
+    assert audit.current is True
+    assert audit.current_authorization_ready is True
+    assert audit.persisted_matches_current is True
+    assert audit.reasons == ()
+
+
+def test_authorization_audit_revokes_stale_ready_evidence(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = shadow_report(
+        "cycle-a",
+        dataset_sha="a" * 64,
+        cutoff="2026-09-23T13:00:00+00:00",
+    )
+    reports = {"cycle-a": report}
+    patch_phase9(monkeypatch, reports)
+    persist_phase9_shadow(storage, report=report)
+    gate = evaluate_phase9_policy_authorization(
+        storage,
+        criteria=Phase9PolicyAuthorizationCriteria(
+            min_shadow_runs=1,
+            min_distinct_dataset_hashes=1,
+            min_distinct_cutoffs=1,
+            min_decisions_per_run=50,
+            min_pools_per_run=3,
+            min_selected_arms_per_run=2,
+            min_total_decisions=50,
+        ),
+    )
+    persist_phase9_policy_authorization(
+        storage,
+        report=gate,
+    )
+
+    stale = replace(
+        gate,
+        authorization_ready=False,
+        total_decisions=0,
+        reasons=("shadow corpus no longer passes",),
+    )
+    monkeypatch.setattr(
+        gate_module,
+        "evaluate_phase9_policy_authorization",
+        lambda storage, criteria: stale,
+    )
+    audit = audit_persisted_phase9_policy_authorization(storage)
+
+    assert audit.current is False
+    assert audit.current_authorization_ready is False
+    assert audit.persisted_matches_current is False
+    assert any(
+        "no longer passes" in reason
+        for reason in audit.reasons
+    )
