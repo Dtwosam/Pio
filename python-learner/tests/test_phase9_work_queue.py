@@ -20,7 +20,10 @@ from meteora_learner.portfolio_allocation import (
 )
 from meteora_learner.static_hedge import STATIC_HEDGE_EVIDENCE_TYPE
 from meteora_learner.storage import Storage
-from meteora_learner.wallet_flow import WALLET_FLOW_EVIDENCE_TYPE
+from meteora_learner.wallet_flow import (
+    WALLET_FLOW_EVIDENCE_TYPE,
+    wallet_flow_source_sha256,
+)
 
 
 def save_pool(storage, pool, observed_at):
@@ -172,6 +175,62 @@ def evidence(storage, edge_type, pool, *, extra=None):
     )
 
 
+def seed_wallet_flow_lineage(storage, pool):
+    created_at = "2026-09-23T12:00:00+00:00"
+    signature = f"sig-{pool}"
+    position = f"position-{pool}"
+    user = f"user-{pool}"
+    with storage.connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO position_event_history(
+                observed_at, position_address, signature, ix_index,
+                event_type, block_time, slot, pool_address,
+                user_address, token_x, token_y,
+                amount_x, amount_y, amount_x_usd, amount_y_usd,
+                total_usd, created_at, raw_json
+            ) VALUES (
+                ?, ?, ?, 0, 'ADD_LIQUIDITY', 1, 1, ?,
+                ?, 'X', 'Y', '1', '1', '50', '50',
+                '100', ?, '{}'
+            )
+            """,
+            (
+                created_at,
+                position,
+                signature,
+                pool,
+                user,
+                created_at,
+            ),
+        )
+        event_id = int(cursor.lastrowid)
+
+    source_records = [
+        {
+            "id": event_id,
+            "created_at": created_at,
+            "user_address": user,
+            "event_type": "ADD_LIQUIDITY",
+            "total_usd": "100",
+            "signature": signature,
+            "ix_index": 0,
+            "position_address": position,
+        }
+    ]
+    evidence(
+        storage,
+        WALLET_FLOW_EVIDENCE_TYPE,
+        pool,
+        extra={
+            "source_event_ids": [event_id],
+            "source_event_sha256": wallet_flow_source_sha256(
+                source_records
+            ),
+        },
+    )
+
+
 def seed_mint_risk_lineage(storage, pool):
     observed_at = "2026-09-23T12:00:00+00:00"
     token_program = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
@@ -259,7 +318,7 @@ def seed_ready(storage):
     )
     for pool in ("pool-a", "pool-b"):
         seed_mint_risk_lineage(storage, pool)
-        evidence(storage, WALLET_FLOW_EVIDENCE_TYPE, pool)
+        seed_wallet_flow_lineage(storage, pool)
     evidence(
         storage,
         PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
