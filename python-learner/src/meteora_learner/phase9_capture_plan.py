@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 import shlex
 from typing import Any, Sequence
 
@@ -12,6 +13,7 @@ class Phase9ChainCaptureCriteria:
     target_chain_pools: int = 3
     max_candidates: int = 8
     bin_array_radius: int = 1
+    max_api_snapshot_age_seconds: int = 10_800
 
     def validate(self) -> None:
         if self.target_chain_pools < 1:
@@ -20,6 +22,10 @@ class Phase9ChainCaptureCriteria:
             raise ValueError("max_candidates must be positive")
         if self.bin_array_radius < 0:
             raise ValueError("bin_array_radius cannot be negative")
+        if self.max_api_snapshot_age_seconds < 0:
+            raise ValueError(
+                "max_api_snapshot_age_seconds cannot be negative"
+            )
 
 
 @dataclass(frozen=True)
@@ -47,6 +53,8 @@ class Phase9ChainCapturePlan:
     additional_chain_pools_needed: int
     capture_required: bool
     api_pool_count: int
+    stale_api_pool_count: int
+    api_ranking_as_of: str | None
     candidates_available: int
     preferred_pool_count: int
     preferred_missing_chain_pools: tuple[str, ...]
@@ -63,9 +71,19 @@ def _q(value: object) -> str:
     return shlex.quote(str(value))
 
 
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("Phase 9 capture-plan timestamps require timezone")
+    return parsed.astimezone(timezone.utc)
+
+
 def _latest_api_pools(
     storage: Storage,
-) -> tuple[dict[str, Any], ...]:
+    *,
+    as_of: str | None,
+    max_age_seconds: int,
+) -> tuple[tuple[dict[str, Any], ...], int]:
     with storage.connect() as conn:
         rows = conn.execute(
             """
@@ -94,7 +112,7 @@ def _latest_api_pools(
             """
         ).fetchall()
 
-    return tuple(
+    latest = tuple(
         {
             "pool_address": str(row[0]),
             "observed_at": str(row[1]),
@@ -108,6 +126,17 @@ def _latest_api_pools(
         }
         for row in rows
     )
+    if as_of is None:
+        return latest, 0
+
+    now = _parse_time(as_of)
+    cutoff = now - timedelta(seconds=max_age_seconds)
+    fresh = tuple(
+        item
+        for item in latest
+        if cutoff <= _parse_time(str(item["observed_at"])) <= now
+    )
+    return fresh, len(latest) - len(fresh)
 
 
 def _chain_pool_addresses(storage: Storage) -> set[str]:
@@ -131,6 +160,7 @@ def build_phase9_chain_capture_plan(
     executor_bin: str = "meteora-executor",
     preferred_pool_addresses: Sequence[str] | None = None,
     max_preferred_candidates: int | None = None,
+    as_of: str | None = None,
 ) -> Phase9ChainCapturePlan:
     criteria.validate()
     if not executor_bin.strip():
@@ -144,7 +174,11 @@ def build_phase9_chain_capture_plan(
             "max_preferred_candidates must be positive when provided"
         )
 
-    api_pools = _latest_api_pools(storage)
+    api_pools, stale_api_pools = _latest_api_pools(
+        storage,
+        as_of=as_of,
+        max_age_seconds=criteria.max_api_snapshot_age_seconds,
+    )
     chain_pools = _chain_pool_addresses(storage)
     needed = max(
         0,
@@ -251,10 +285,15 @@ def build_phase9_chain_capture_plan(
             "minimum chain-pool count is satisfied but ranked cohort "
             "onboarding is still required"
         )
+    if stale_api_pools:
+        reasons.append(
+            f"{stale_api_pools} stale API pool snapshot(s) were excluded "
+            "from chain onboarding"
+        )
     if not api_pools and (needed > 0 or preferred_missing):
         reasons.append(
-            "no discovered API pool snapshots are available; run collect-once "
-            "before building a chain capture plan"
+            "no fresh discovered API pool snapshots are available; run "
+            "collect-once before building a chain capture plan"
         )
     if len(candidates) < needed:
         reasons.append(
@@ -283,6 +322,8 @@ def build_phase9_chain_capture_plan(
         additional_chain_pools_needed=needed,
         capture_required=capture_required,
         api_pool_count=len(api_pools),
+        stale_api_pool_count=stale_api_pools,
+        api_ranking_as_of=as_of,
         candidates_available=len(available),
         preferred_pool_count=len(preferred),
         preferred_missing_chain_pools=preferred_missing,
