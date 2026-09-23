@@ -564,3 +564,16 @@ A change to authorization currentness, holdout lineage or deterministic replay
 makes the controlled evidence stale without rewriting its historical row.
 Passing this stage still does not permit LIVE policy use; any future executor
 wiring needs a separately documented, bounded and reversible design.
+
+
+For one fail-able check across both future-policy evidence layers:
+
+```bash
+pio phase9-policy-readiness-audit --require-ready
+```
+
+This command requires the persisted authorization evidence to remain current
+and the controlled holdout evidence to remain current at the same time. Its
+output is still `research_only=true`, `simulation_only=true`,
+`policy_actionable=false` and `execution_wired=false`. A ready result is a
+validation milestone only, not permission to submit or alter LIVE positions.
