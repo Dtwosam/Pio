@@ -16,6 +16,7 @@ pub struct ControlledLiveConfig {
     pub enabled: bool,
     pub allowed_pool_addresses: Vec<String>,
     pub max_open_positions: usize,
+    pub max_rebalances_per_position: usize,
     pub max_capital_quote_per_entry: f64,
     pub max_daily_entry_capital_quote: f64,
     pub max_daily_realized_loss_quote: f64,
@@ -37,7 +38,9 @@ pub struct ControlledLiveReport {
     pub unresolved_entry_intents: usize,
     pub effective_open_positions: usize,
     pub matching_pool_positions: usize,
+    pub matching_pool_rebalances: usize,
     pub max_open_positions: usize,
+    pub max_rebalances_per_position: usize,
     pub pool_allowed: bool,
     pub capital_quote: f64,
     pub max_capital_quote_per_entry: f64,
@@ -53,6 +56,9 @@ pub struct ControlledLiveReport {
 fn validate_config(config: &ControlledLiveConfig) -> Result<BTreeSet<Pubkey>> {
     if config.max_open_positions == 0 {
         anyhow::bail!("max_open_positions must be positive");
+    }
+    if config.max_rebalances_per_position == 0 {
+        anyhow::bail!("max_rebalances_per_position must be positive");
     }
     if !config.max_capital_quote_per_entry.is_finite()
         || config.max_capital_quote_per_entry <= 0.0
@@ -174,7 +180,7 @@ fn daily_realized_loss_state(
 fn live_position_counts(
     database_path: &Path,
     pool_address: &str,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, usize)> {
     let conn = Connection::open_with_flags(
         database_path,
         OpenFlags::SQLITE_OPEN_READ_ONLY
@@ -198,23 +204,25 @@ fn live_position_counts(
             |row| row.get(0),
         )
         .context("live_positions table is unavailable")?;
-    let matching: i64 = conn
+    let (matching, matching_rebalances): (i64, i64) = conn
         .query_row(
             r#"
-            SELECT COUNT(*)
+            SELECT COUNT(*), COALESCE(MAX(rebalances), 0)
             FROM live_positions
             WHERE pool_address = ?1
               AND status IN ('OPEN', 'LIQUIDITY_REMOVED')
             "#,
             [pool_address],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .context("failed to count live positions for proposal pool")?;
+        .context("failed to inspect live positions for proposal pool")?;
 
     Ok((
         usize::try_from(total).context("invalid live position count")?,
         usize::try_from(matching)
             .context("invalid matching live position count")?,
+        usize::try_from(matching_rebalances)
+            .context("invalid matching live position rebalance count")?,
     ))
 }
 
@@ -245,8 +253,11 @@ fn evaluate_controlled_live_at(
     let proposal_pool = Pubkey::from_str(proposal.pool_address.trim())
         .context("proposal pool_address is not a valid Solana pubkey")?;
     let pool_allowed = allowed_pools.contains(&proposal_pool);
-    let (open_positions, matching_pool_positions) =
-        live_position_counts(database_path, &proposal.pool_address)?;
+    let (
+        open_positions,
+        matching_pool_positions,
+        matching_pool_rebalances,
+    ) = live_position_counts(database_path, &proposal.pool_address)?;
     let (daily_realized_loss_quote, unvalued_closed_positions_today) =
         if matches!(proposal.action, Action::Enter | Action::Rebalance) {
             daily_realized_loss_state(database_path, as_of)?
@@ -293,6 +304,12 @@ fn evaluate_controlled_live_at(
             Action::Rebalance => {
                 if matching_pool_positions == 0 {
                     "no_tracked_live_position_for_rebalance"
+                } else if matching_pool_positions > 1 {
+                    "ambiguous_tracked_live_positions_for_rebalance"
+                } else if matching_pool_rebalances
+                    >= config.max_rebalances_per_position
+                {
+                    "max_rebalances_per_position_reached"
                 } else if !config.enabled {
                     "controlled_live_disabled"
                 } else if !config.allow_rebalance {
@@ -317,6 +334,8 @@ fn evaluate_controlled_live_at(
             Action::Exit => {
                 if matching_pool_positions == 0 {
                     "no_tracked_live_position_for_exit"
+                } else if matching_pool_positions > 1 {
+                    "ambiguous_tracked_live_positions_for_exit"
                 } else if !config.allow_exit {
                     "controlled_live_exit_disabled"
                 } else {
@@ -342,7 +361,10 @@ fn evaluate_controlled_live_at(
         unresolved_entry_intents: 0,
         effective_open_positions: open_positions,
         matching_pool_positions,
+        matching_pool_rebalances,
         max_open_positions: config.max_open_positions,
+        max_rebalances_per_position:
+            config.max_rebalances_per_position,
         pool_allowed,
         capital_quote: proposal.capital_quote,
         max_capital_quote_per_entry:
@@ -475,7 +497,8 @@ mod tests {
                 position_address TEXT PRIMARY KEY,
                 pool_address TEXT NOT NULL,
                 status TEXT NOT NULL,
-                opened_decision_id TEXT
+                opened_decision_id TEXT,
+                rebalances INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE live_position_outcomes (
                 position_address TEXT PRIMARY KEY,
@@ -523,12 +546,21 @@ mod tests {
     }
 
     fn add_live_position(path: &Path, pool: Pubkey) {
+        add_live_position_with_rebalances(path, pool, 0);
+    }
+
+    fn add_live_position_with_rebalances(
+        path: &Path,
+        pool: Pubkey,
+        rebalances: usize,
+    ) {
         let conn = Connection::open(path).unwrap();
         conn.execute(
-            "INSERT INTO live_positions(position_address, pool_address, status) VALUES (?1, ?2, 'OPEN')",
-            [
+            "INSERT INTO live_positions(position_address, pool_address, status, rebalances) VALUES (?1, ?2, 'OPEN', ?3)",
+            params![
                 format!("tracked-{}", Uuid::new_v4()),
                 pool.to_string(),
+                i64::try_from(rebalances).unwrap(),
             ],
         )
         .unwrap();
@@ -580,6 +612,7 @@ mod tests {
             enabled: true,
             allowed_pool_addresses: vec![pool.to_string()],
             max_open_positions: 1,
+            max_rebalances_per_position: 3,
             max_capital_quote_per_entry: 50.0,
             max_daily_entry_capital_quote: 100.0,
             max_daily_realized_loss_quote: 20.0,
@@ -1132,6 +1165,56 @@ mod tests {
             "daily_realized_loss_evidence_incomplete"
         );
         assert_eq!(report.unvalued_closed_positions_today, 1);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn rebalance_requires_unambiguous_position_and_respects_cap() {
+        let path = db_path();
+        seed(&path, 0);
+        let pool = Pubkey::new_unique();
+        add_live_position_with_rebalances(&path, pool, 3);
+
+        let capped = evaluate_controlled_live(
+            &path,
+            &proposal(pool, Action::Rebalance),
+            &config(pool),
+        )
+        .unwrap();
+
+        assert!(!capped.accepted);
+        assert_eq!(
+            capped.reason,
+            "max_rebalances_per_position_reached"
+        );
+        assert_eq!(capped.matching_pool_rebalances, 3);
+
+        add_live_position(&path, pool);
+        let ambiguous = evaluate_controlled_live(
+            &path,
+            &proposal(pool, Action::Rebalance),
+            &config(pool),
+        )
+        .unwrap();
+
+        assert!(!ambiguous.accepted);
+        assert_eq!(
+            ambiguous.reason,
+            "ambiguous_tracked_live_positions_for_rebalance"
+        );
+
+        let exit = evaluate_controlled_live(
+            &path,
+            &proposal(pool, Action::Exit),
+            &config(pool),
+        )
+        .unwrap();
+        assert!(!exit.accepted);
+        assert_eq!(
+            exit.reason,
+            "ambiguous_tracked_live_positions_for_exit"
+        );
 
         let _ = std::fs::remove_file(path);
     }
