@@ -2410,6 +2410,10 @@ def main() -> None:
         help="Optional Solana RPC URL used in emitted read-only mint inspection commands",
     )
     phase9_work_queue.add_argument(
+        "--as-of",
+        help="Optional historical cutoff for reproducible evidence planning; missing/stale authoritative state cannot be backfilled after this cutoff",
+    )
+    phase9_work_queue.add_argument(
         "--persist-snapshot",
         action="store_true",
         help="Persist a sanitized append-only progress snapshot without shell commands or RPC URLs",
@@ -5045,6 +5049,7 @@ def main() -> None:
             storage,
             criteria=criteria,
             rpc_url=args.rpc_url,
+            as_of=args.as_of,
         )
         output = result.to_record()
         output["persisted_snapshot"] = None
