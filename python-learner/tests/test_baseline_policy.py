@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from meteora_learner.baseline_policy import (
     BaselinePolicyConfig,
     q64_value_in_y_atomic,
+    replay_economics,
     select_deterministic_baseline,
 )
 from meteora_learner.chain_replay import SmallLPReplayResult
@@ -241,3 +242,19 @@ def test_baseline_requires_network_cost_valuation(tmp_path):
 
     assert result.candidates_eligible == 0
     assert "network cost has no token-Y valuation" in result.assessments[0].rejection_reasons
+
+
+
+def test_replay_economics_exposes_entry_normalized_returns():
+    item = candidate(fee_y=10, half_width=1)
+    economics = replay_economics(
+        item,
+        entry_price_q64=Q64,
+        exit_price_q64=Q64,
+        network_cost_y_atomic=0,
+    )
+
+    assert economics.initial_value_y_atomic == 100
+    assert economics.hold_return_bps == 0
+    assert economics.net_return_bps == 1000
+    assert economics.excess_vs_hold_initial_bps == 1000
