@@ -356,6 +356,39 @@ ON chain_transaction_events(signature, parent_ix_index);
 CREATE INDEX IF NOT EXISTS idx_chain_tx_event_position
 ON chain_transaction_events(position_address, signature);
 
+CREATE TABLE IF NOT EXISTS model_registry (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    model_family TEXT NOT NULL,
+    feature_version TEXT NOT NULL,
+    dataset_version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(
+        status IN (
+            'OFFLINE_CANDIDATE',
+            'OFFLINE_QUALIFIED',
+            'PAPER_CHALLENGER',
+            'CHAMPION',
+            'REJECTED',
+            'ROLLED_BACK'
+        )
+    ),
+    artifact_uri TEXT,
+    train_start TEXT,
+    train_end TEXT,
+    validation_start TEXT,
+    validation_end TEXT,
+    train_rows INTEGER,
+    validation_rows INTEGER,
+    metrics_json TEXT NOT NULL,
+    notes TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_model_registry_one_champion
+ON model_registry(status)
+WHERE status = 'CHAMPION';
+
 CREATE TABLE IF NOT EXISTS data_quality_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checked_at TEXT NOT NULL,
@@ -1535,6 +1568,124 @@ class Storage:
                 ),
             )
         return 1
+
+    def register_model(
+        self,
+        *,
+        model_id: str,
+        model_family: str,
+        feature_version: str,
+        dataset_version: str,
+        metrics: dict[str, Any],
+        artifact_uri: str | None = None,
+        train_start: str | None = None,
+        train_end: str | None = None,
+        validation_start: str | None = None,
+        validation_end: str | None = None,
+        train_rows: int | None = None,
+        validation_rows: int | None = None,
+        notes: str | None = None,
+    ) -> None:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO model_registry(
+                    model_id, created_at, updated_at, model_family,
+                    feature_version, dataset_version, status, artifact_uri,
+                    train_start, train_end, validation_start, validation_end,
+                    train_rows, validation_rows, metrics_json, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, 'OFFLINE_CANDIDATE', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    model_id,
+                    now,
+                    now,
+                    model_family,
+                    feature_version,
+                    dataset_version,
+                    artifact_uri,
+                    train_start,
+                    train_end,
+                    validation_start,
+                    validation_end,
+                    train_rows,
+                    validation_rows,
+                    json.dumps(metrics, separators=(",", ":")),
+                    notes,
+                ),
+            )
+
+    def model_registry_entry(self, model_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT model_id, created_at, updated_at, model_family,
+                       feature_version, dataset_version, status, artifact_uri,
+                       train_start, train_end, validation_start, validation_end,
+                       train_rows, validation_rows, metrics_json, notes
+                FROM model_registry
+                WHERE model_id = ?
+                LIMIT 1
+                """,
+                (model_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        columns = (
+            "model_id", "created_at", "updated_at", "model_family",
+            "feature_version", "dataset_version", "status", "artifact_uri",
+            "train_start", "train_end", "validation_start", "validation_end",
+            "train_rows", "validation_rows", "metrics_json", "notes",
+        )
+        return dict(zip(columns, row))
+
+    def current_model_champion(self) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT model_id, created_at, updated_at, model_family,
+                       feature_version, dataset_version, status, artifact_uri,
+                       train_start, train_end, validation_start, validation_end,
+                       train_rows, validation_rows, metrics_json, notes
+                FROM model_registry
+                WHERE status = 'CHAMPION'
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        columns = (
+            "model_id", "created_at", "updated_at", "model_family",
+            "feature_version", "dataset_version", "status", "artifact_uri",
+            "train_start", "train_end", "validation_start", "validation_end",
+            "train_rows", "validation_rows", "metrics_json", "notes",
+        )
+        return dict(zip(columns, row))
+
+    def update_model_status(
+        self,
+        model_id: str,
+        *,
+        expected_status: str,
+        new_status: str,
+        notes: str | None = None,
+    ) -> None:
+        now = utc_now_iso()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE model_registry
+                SET status = ?, updated_at = ?,
+                    notes = COALESCE(?, notes)
+                WHERE model_id = ? AND status = ?
+                """,
+                (new_status, now, notes, model_id, expected_status),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    f"model {model_id} is not in expected status {expected_status}"
+                )
 
     def save_quality_checks(
         self,
