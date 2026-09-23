@@ -13,7 +13,11 @@ from .chain_snapshot_lineage import (
     chain_snapshot_source_record,
     chain_snapshot_source_sha256,
 )
-from .contextual_bandit import CONTEXTUAL_BANDIT_EVIDENCE_TYPE
+from .contextual_bandit import (
+    CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+    ContextualBanditCriteria,
+)
+from .contextual_bandit_cycle import evaluate_cycle_contextual_bandit
 from .market_regime import DLMMRegimeCriteria
 from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .mint_snapshot_lineage import (
@@ -831,11 +835,32 @@ def _bandit_lineage_valid(storage: Storage) -> bool:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     expected_sha = str(lineage["dataset_sha256"])
     expected_version = str(lineage["dataset_version"])
-    return (
+    if not (
         digest == expected_sha
         and expected_version
         == f"ML_ACTION_DATASET_V1:{digest[:16]}"
+    ):
+        return False
+
+    criteria_raw = row["evidence"].get("criteria")
+    if not isinstance(criteria_raw, dict):
+        return False
+    try:
+        criteria = ContextualBanditCriteria(**criteria_raw)
+        replay = evaluate_cycle_contextual_bandit(
+            storage,
+            cycle_id=str(lineage["cycle_id"]),
+            criteria=criteria,
+        )
+    except (TypeError, ValueError):
+        return False
+
+    replay_evidence = replay.report.to_record()
+    replay_evidence["dataset_lineage"] = asdict(replay.lineage)
+    replay_record = json.loads(
+        json.dumps(replay_evidence, sort_keys=True)
     )
+    return replay_record == row["evidence"]
 
 
 def evaluate_phase9_research_bundle(
