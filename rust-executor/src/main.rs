@@ -543,6 +543,7 @@ RPC_URL is accepted as a compatibility fallback",
                 &decision_id,
                 &keypair,
                 &phase5,
+                &readiness,
                 &live,
             )?;
             println!("{}", serde_json::to_string_pretty(&report)?);
