@@ -266,6 +266,140 @@ impl ExecutionIntentStore {
         self.load(decision_id)
     }
 
+    fn transition(
+        &self,
+        decision_id: &str,
+        allowed_from: &[ExecutionIntentStatus],
+        next: ExecutionIntentStatus,
+        signature: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<ExecutionIntentRecord> {
+        let current = self.load(decision_id)?;
+
+        if current.status == next {
+            if let Some(expected_signature) = signature {
+                if current.signature.as_deref() != Some(expected_signature) {
+                    anyhow::bail!(
+                        "execution intent {decision_id} already has status {:?} with a different signature",
+                        next
+                    );
+                }
+            }
+            if let Some(expected_error) = error {
+                if current.error.as_deref() != Some(expected_error) {
+                    anyhow::bail!(
+                        "execution intent {decision_id} already has status {:?} with a different error",
+                        next
+                    );
+                }
+            }
+            return Ok(current);
+        }
+
+        if !allowed_from.contains(&current.status) {
+            anyhow::bail!(
+                "invalid execution intent transition for {decision_id}: {:?} -> {:?}",
+                current.status,
+                next
+            );
+        }
+
+        let now = now_unix()?;
+        let conn = self.connection()?;
+        let changed = conn.execute(
+            r#"
+            UPDATE execution_intents
+            SET status = ?,
+                signature = COALESCE(?, signature),
+                error = ?,
+                updated_at_unix = ?
+            WHERE decision_id = ? AND status = ?
+            "#,
+            params![
+                next.as_str(),
+                signature,
+                error,
+                now,
+                decision_id,
+                current.status.as_str(),
+            ],
+        )?;
+        if changed != 1 {
+            anyhow::bail!(
+                "execution intent {decision_id} changed concurrently while transitioning"
+            );
+        }
+        self.load(decision_id)
+    }
+
+    pub fn begin_signing(&self, decision_id: &str) -> Result<ExecutionIntentRecord> {
+        self.transition(
+            decision_id,
+            &[ExecutionIntentStatus::SimulationPassed],
+            ExecutionIntentStatus::Signing,
+            None,
+            None,
+        )
+    }
+
+    pub fn record_sent(
+        &self,
+        decision_id: &str,
+        signature: &str,
+    ) -> Result<ExecutionIntentRecord> {
+        let signature = signature.trim();
+        if signature.is_empty() {
+            anyhow::bail!("transaction signature is required");
+        }
+        self.transition(
+            decision_id,
+            &[ExecutionIntentStatus::Signing],
+            ExecutionIntentStatus::Sent,
+            Some(signature),
+            None,
+        )
+    }
+
+    pub fn record_confirmed(
+        &self,
+        decision_id: &str,
+        signature: &str,
+    ) -> Result<ExecutionIntentRecord> {
+        let signature = signature.trim();
+        if signature.is_empty() {
+            anyhow::bail!("transaction signature is required");
+        }
+        self.transition(
+            decision_id,
+            &[ExecutionIntentStatus::Sent],
+            ExecutionIntentStatus::Confirmed,
+            Some(signature),
+            None,
+        )
+    }
+
+    pub fn record_failure(
+        &self,
+        decision_id: &str,
+        error: &str,
+    ) -> Result<ExecutionIntentRecord> {
+        let error = error.trim();
+        if error.is_empty() {
+            anyhow::bail!("execution failure reason is required");
+        }
+        self.transition(
+            decision_id,
+            &[
+                ExecutionIntentStatus::SimulationPassed,
+                ExecutionIntentStatus::Signing,
+                ExecutionIntentStatus::Sent,
+            ],
+            ExecutionIntentStatus::Failed,
+            None,
+            Some(error),
+        )
+    }
+
     pub fn load(&self, decision_id: &str) -> Result<ExecutionIntentRecord> {
         let conn = self.connection()?;
         let mut stmt = conn.prepare(
@@ -446,4 +580,73 @@ mod tests {
         assert!(after_simulation.simulation.unwrap().succeeded);
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    fn signing_send_and_confirmation_transitions_are_guarded() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+        let cfg = config();
+
+        store.register(&request, &cfg).unwrap();
+        assert!(store.begin_signing(&id).is_err());
+
+        store
+            .record_risk(&id, &risk(true, request.proposal.decision_id))
+            .unwrap();
+        store.record_simulation(&id, &simulation(true)).unwrap();
+
+        assert_eq!(
+            store.begin_signing(&id).unwrap().status,
+            ExecutionIntentStatus::Signing
+        );
+        assert_eq!(
+            store.begin_signing(&id).unwrap().status,
+            ExecutionIntentStatus::Signing
+        );
+
+        let sent = store.record_sent(&id, "signature-1").unwrap();
+        assert_eq!(sent.status, ExecutionIntentStatus::Sent);
+        assert_eq!(sent.signature.as_deref(), Some("signature-1"));
+
+        assert!(store.record_sent(&id, "signature-2").is_err());
+
+        let confirmed = store.record_confirmed(&id, "signature-1").unwrap();
+        assert_eq!(confirmed.status, ExecutionIntentStatus::Confirmed);
+        assert_eq!(confirmed.signature.as_deref(), Some("signature-1"));
+
+        let repeated = store.record_confirmed(&id, "signature-1").unwrap();
+        assert_eq!(repeated.status, ExecutionIntentStatus::Confirmed);
+        assert!(store.record_failure(&id, "too late").is_err());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn execution_failure_is_terminal_and_idempotent() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+        let cfg = config();
+
+        store.register(&request, &cfg).unwrap();
+        store
+            .record_risk(&id, &risk(true, request.proposal.decision_id))
+            .unwrap();
+        store.record_simulation(&id, &simulation(true)).unwrap();
+        store.begin_signing(&id).unwrap();
+
+        let failed = store.record_failure(&id, "signer unavailable").unwrap();
+        assert_eq!(failed.status, ExecutionIntentStatus::Failed);
+        assert_eq!(failed.error.as_deref(), Some("signer unavailable"));
+
+        let repeated = store.record_failure(&id, "signer unavailable").unwrap();
+        assert_eq!(repeated.status, ExecutionIntentStatus::Failed);
+        assert!(store.record_failure(&id, "different failure").is_err());
+
+        let _ = std::fs::remove_file(path);
+    }
+
 }
