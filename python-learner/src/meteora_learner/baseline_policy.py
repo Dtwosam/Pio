@@ -208,7 +208,7 @@ def select_deterministic_baseline(
     database_path: str,
     *,
     scan: ChainScanResult,
-    phase2_gate: Phase2PromotionGate,
+    phase2_gate: Phase2PromotionGate | None,
     config: BaselinePolicyConfig = BaselinePolicyConfig(),
 ) -> BaselineSelection:
     """
@@ -323,14 +323,20 @@ def select_deterministic_baseline(
             min_bin_id=center - research_choice.half_width,
             max_bin_id=center + research_choice.half_width,
         )
-    actionable_proposal = (
-        research_proposal if phase2_gate.promotion_ready else None
+    phase2_ready = bool(
+        phase2_gate is not None and phase2_gate.promotion_ready
     )
+    phase2_blockers = (
+        tuple(phase2_gate.reasons)
+        if phase2_gate is not None
+        else ("Phase 2 promotion gate was not supplied",)
+    )
+    actionable_proposal = research_proposal if phase2_ready else None
 
     return BaselineSelection(
         pool_address=scan.pool_address,
-        phase2_ready=phase2_gate.promotion_ready,
-        phase2_blockers=tuple(phase2_gate.reasons),
+        phase2_ready=phase2_ready,
+        phase2_blockers=phase2_blockers,
         candidates_evaluated=len(assessments),
         candidates_eligible=len(eligible),
         research_choice=research_choice,
