@@ -928,3 +928,31 @@ def test_work_queue_surfaces_storage_integrity_first(tmp_path):
     assert first.shell_command == (
         "pio phase9-storage-integrity --require-verified"
     )
+
+
+def test_work_queue_surfaces_stale_phase8_currentness(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE model_registry
+            SET status = 'ROLLED_BACK'
+            WHERE model_id = 'champion'
+            """
+        )
+
+    queue = build_phase9_work_queue(storage)
+
+    currentness = [
+        item for item in queue.items
+        if item.task_type == "PHASE8_CURRENTNESS_REQUIRED"
+    ]
+    assert len(currentness) == 1
+    assert queue.phase8_promoted is False
+    assert "phase8-promotion-audit" in currentness[0].shell_command
+    assert not any(
+        item.task_type == "PHASE8_PROMOTION_REQUIRED"
+        for item in queue.items
+    )
