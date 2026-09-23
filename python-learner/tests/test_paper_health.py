@@ -211,6 +211,30 @@ def test_health_is_unhealthy_on_missed_ticks_and_failure_streak(tmp_path):
 def test_health_prometheus_rendering_exposes_core_gauges(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO paper_scheduler_events(
+                account_id, event_time, event_type, tick_id,
+                owner_id, status
+            ) VALUES (
+                'paper', '2026-09-23T09:00:00+00:00',
+                'LEASE_RECOVERED', 'tick', 'worker', 'RUNNING'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO paper_scheduler_events(
+                account_id, event_time, event_type, tick_id,
+                owner_id, status
+            ) VALUES (
+                'paper', '2026-09-23T09:05:00+00:00',
+                'LEASE_BUSY', 'tick-2', 'worker-2', 'BUSY'
+            )
+            """
+        )
+
     report = build_paper_health(
         storage,
         account_id="paper",
@@ -223,3 +247,11 @@ def test_health_prometheus_rendering_exposes_core_gauges(tmp_path):
     assert 'pio_paper_open_positions{account="paper"} 0' in text
     assert 'pio_paper_scheduler_consecutive_failures{account="paper"} 0' in text
     assert 'pio_paper_chain_pools_needing_refresh{account="paper"} 0' in text
+    assert (
+        'pio_paper_scheduler_lease_recoveries_total'
+        '{account="paper"} 1'
+    ) in text
+    assert (
+        'pio_paper_scheduler_lease_busy_total'
+        '{account="paper"} 1'
+    ) in text
