@@ -16,6 +16,7 @@ from meteora_learner.paper_chain_valuation import (
     prepare_paper_chain_valuation,
 )
 from meteora_learner.position_policy import PositionManagementConfig
+from meteora_learner.quote_registry import save_token_quote
 from meteora_learner.storage import Storage
 
 
@@ -208,7 +209,7 @@ def test_chain_valuation_fails_closed_on_unvalued_reward(tmp_path):
         plan=plan(),
     )
 
-    with pytest.raises(ValueError, match="no token-Y valuation"):
+    with pytest.raises(ValueError, match="no fresh account quote"):
         prepare_paper_chain_valuation(
             storage,
             position_id="pos",
@@ -274,3 +275,88 @@ def test_chain_valuation_continues_after_rebalance_reset(tmp_path):
             """
         ).fetchone()[0]
     assert '"rebalance_reset":true' in reset
+
+
+def test_chain_valuation_values_external_reward_with_fresh_quote(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_chain(
+        storage,
+        "2026-09-23T09:00:00+00:00",
+        reward_mint="other",
+    )
+    save_chain(
+        storage,
+        "2026-09-23T09:05:00+00:00",
+        reward_checkpoint=Q64,
+        reward_mint="other",
+    )
+    seed_position(storage)
+    initialize_paper_counterfactual(
+        storage,
+        position_id="pos",
+        plan=plan(),
+    )
+    save_token_quote(
+        storage,
+        token_mint="other",
+        quote_per_atomic=2.0,
+        source="TEST",
+        observed_at="2026-09-23T09:05:00+00:00",
+    )
+
+    valuation = prepare_paper_chain_valuation(
+        storage,
+        position_id="pos",
+        observed_at="2026-09-23T09:05:00+00:00",
+        token_y_quote_per_atomic=1.0,
+    )
+
+    assert valuation.reward_one_atomic > 0
+    assert valuation.reward_delta_quote > 0
+    with storage.connect() as conn:
+        raw = conn.execute(
+            """
+            SELECT valuation_json
+            FROM paper_chain_valuations
+            WHERE position_id = 'pos'
+              AND observed_at = '2026-09-23T09:05:00+00:00'
+            """
+        ).fetchone()[0]
+    assert "PERSISTED_ACCOUNT_QUOTE_V1:TEST" in raw
+
+
+def test_chain_valuation_rejects_stale_external_reward_quote(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_chain(
+        storage,
+        "2026-09-23T09:00:00+00:00",
+        reward_mint="other",
+    )
+    save_chain(
+        storage,
+        "2026-09-23T09:05:00+00:00",
+        reward_checkpoint=Q64,
+        reward_mint="other",
+    )
+    seed_position(storage)
+    initialize_paper_counterfactual(
+        storage,
+        position_id="pos",
+        plan=plan(),
+    )
+    save_token_quote(
+        storage,
+        token_mint="other",
+        quote_per_atomic=2.0,
+        source="TEST",
+        observed_at="2026-09-23T09:00:00+00:00",
+    )
+
+    with pytest.raises(ValueError, match="no fresh account quote"):
+        prepare_paper_chain_valuation(
+            storage,
+            position_id="pos",
+            observed_at="2026-09-23T09:05:00+00:00",
+            token_y_quote_per_atomic=1.0,
+            reward_quote_max_age_seconds=60,
+        )
