@@ -128,6 +128,11 @@ from .continuous_learning import (
     build_continuous_learning_plan,
     persist_continuous_learning_plan,
 )
+from .continuous_promotion import (
+    ContinuousChampionCriteria,
+    evaluate_continuous_champion,
+    promote_continuous_challenger,
+)
 from .retraining_cycle import (
     active_retraining_cycle,
     attach_retraining_challenger,
@@ -1081,6 +1086,53 @@ def main() -> None:
     )
     ml_retrain_attach.add_argument("--cycle-id", required=True)
     ml_retrain_attach.add_argument("--model-id", required=True)
+
+    ml_continuous_validate = subparsers.add_parser(
+        "ml-continuous-validate",
+        help="Validate and optionally rotate a retrained challenger over the incumbent champion",
+    )
+    ml_continuous_validate.add_argument("--cycle-id", required=True)
+    ml_continuous_validate.add_argument("--account", required=True)
+    ml_continuous_validate.add_argument(
+        "--min-challenger-closed-trades",
+        type=int,
+        default=20,
+    )
+    ml_continuous_validate.add_argument(
+        "--min-incumbent-closed-trades",
+        type=int,
+        default=20,
+    )
+    ml_continuous_validate.add_argument(
+        "--min-challenger-return-bps",
+        type=int,
+        default=0,
+    )
+    ml_continuous_validate.add_argument(
+        "--min-challenger-win-rate",
+        type=float,
+        default=0.50,
+    )
+    ml_continuous_validate.add_argument(
+        "--max-challenger-drawdown-bps",
+        type=int,
+        default=1500,
+    )
+    ml_continuous_validate.add_argument(
+        "--max-single-trade-loss-bps",
+        type=int,
+        default=1000,
+    )
+    ml_continuous_validate.add_argument(
+        "--min-uplift-vs-incumbent-bps",
+        type=int,
+        default=0,
+    )
+    ml_continuous_validate.add_argument("--promote", action="store_true")
+    ml_continuous_validate.add_argument(
+        "--require-qualified",
+        action="store_true",
+    )
 
     ml_live_monitor = subparsers.add_parser(
         "ml-live-monitor",
@@ -2269,6 +2321,49 @@ def main() -> None:
             model_id=args.model_id,
         )
         print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "ml-continuous-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_continuous_champion(
+            storage,
+            cycle_id=args.cycle_id,
+            account_id=args.account,
+            criteria=ContinuousChampionCriteria(
+                min_challenger_closed_trades=(
+                    args.min_challenger_closed_trades
+                ),
+                min_incumbent_closed_trades=(
+                    args.min_incumbent_closed_trades
+                ),
+                min_challenger_return_bps=(
+                    args.min_challenger_return_bps
+                ),
+                min_challenger_win_rate=(
+                    args.min_challenger_win_rate
+                ),
+                max_challenger_drawdown_bps=(
+                    args.max_challenger_drawdown_bps
+                ),
+                max_single_trade_loss_bps=(
+                    args.max_single_trade_loss_bps
+                ),
+                min_return_uplift_vs_incumbent_bps=(
+                    args.min_uplift_vs_incumbent_bps
+                ),
+            ),
+        )
+        output = result.to_record()
+        output["promotion"] = None
+        if args.promote:
+            output["promotion"] = promote_continuous_challenger(
+                storage,
+                validation=result,
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not result.qualified:
+            raise SystemExit(2)
         return
 
     if args.command == "ml-live-monitor":
