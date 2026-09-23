@@ -823,6 +823,51 @@ historical plan. If authoritative mint state was missing or stale at that
 historical cutoff, the queue refuses to propose a later capture as a backfill;
 future state cannot prove past state.
 
+### Wallet-flow source acquisition
+
+Wallet-flow qualification depends on immutable `position_event_history` rows.
+The default research window is the latest 500 events for a pool, with at least
+20 events and 5 distinct users required before concentration checks can even
+qualify.
+
+Discover the pool's **current on-chain PositionV2 cohort** through the read-only
+Rust scanner:
+
+```bash
+SOLANA_RPC_URL=<RPC_URL> \
+pio phase9-position-discovery --pool <POOL> --limit 250
+```
+
+The Rust command filters Meteora program accounts at the RPC layer by the
+`PositionV2` discriminator and the decoded `lb_pair` field, then verifies
+every returned account belongs to the requested pool. It exposes only public
+position/owner metadata and has no wallet, signing or submission path.
+
+Collect official Meteora lifecycle history for that bounded cohort with:
+
+```bash
+SOLANA_RPC_URL=<RPC_URL> \
+pio phase9-wallet-flow-capture-run --pool <POOL> --require-ready
+```
+
+The collector prioritizes owners and positions not already represented in the
+active research window, persists only normalized real lifecycle events through
+the existing idempotent event store, isolates per-position API failures, and
+stops once the event/user source threshold is satisfied. Source readiness is
+computed from the same latest-`lookback_events` window used by
+`wallet-flow-research`, not lifetime totals.
+
+This is intentionally labeled
+`CURRENT_ONCHAIN_POSITION_COHORT`. Current PositionV2 accounts do not prove a
+complete historical census of every closed position that ever existed in the
+pool. If the bounded cohort cannot reach source thresholds, the command reports
+that limitation rather than synthesizing users/events.
+
+Meeting source counts is only an input gate. It does **not** qualify wallet
+flow. `wallet-flow-research` still applies the configured user-concentration
+check, Phase 8 currentness, immutable source lineage and deterministic replay
+requirements before evidence can enter the Phase 9 bundle.
+
 ### Exact adaptive/regime history depth
 
 Distinct pool coverage is only the first requirement. Phase 9 adaptive
