@@ -44,8 +44,13 @@ class BaselineWalkForwardReport:
     forward_valid_steps: int
     economically_complete_steps: int
     positive_excess_steps: int
+    negative_excess_steps: int
+    zero_excess_steps: int
+    positive_excess_rate: float | None
     total_excess_vs_hold_y_atomic: int | None
     mean_excess_vs_hold_bps: float | None
+    worst_excess_vs_hold_bps: int | None
+    best_excess_vs_hold_bps: int | None
     phase2_ready: bool
     research_only: bool
     steps_detail: tuple[WalkForwardStep, ...]
@@ -300,8 +305,17 @@ def walk_forward_baseline(
         forward_valid_steps=sum(item.forward_status == "VALID" for item in steps),
         economically_complete_steps=len(complete),
         positive_excess_steps=sum(value > 0 for value in excess),
+        negative_excess_steps=sum(value < 0 for value in excess),
+        zero_excess_steps=sum(value == 0 for value in excess),
+        positive_excess_rate=(
+            sum(value > 0 for value in excess) / len(excess)
+            if excess
+            else None
+        ),
         total_excess_vs_hold_y_atomic=sum(excess) if excess else None,
         mean_excess_vs_hold_bps=float(mean(bps)) if bps else None,
+        worst_excess_vs_hold_bps=min(bps) if bps else None,
+        best_excess_vs_hold_bps=max(bps) if bps else None,
         phase2_ready=phase2_ready,
         research_only=not phase2_ready,
         steps_detail=tuple(steps),
