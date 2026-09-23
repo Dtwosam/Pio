@@ -179,6 +179,110 @@ def test_phase8_plan_unlocks_dataset_build_from_valid_inputs(
     assert "model training" in plan.next_action.reason
 
 
+def test_phase8_plan_unlocks_verified_offline_training(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase8_evidence_status",
+        lambda *args, **kwargs: status(
+            retrain_status="CHALLENGER_IN_PROGRESS",
+            active_cycle_id="cycle-1",
+            active_cycle_status="PLANNED",
+            active_cycle_challenger_model_id=None,
+            active_cycle_challenger_status=None,
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "phase8_cycle_dataset_lineage",
+        lambda *args, **kwargs: SimpleNamespace(
+            dataset_sha256="a" * 64
+        ),
+    )
+
+    plan = build_phase8_evidence_plan(storage)
+
+    assert plan.next_action is not None
+    assert plan.next_action.debt_type == "RETRAIN_OFFLINE_TRAIN_READY"
+    assert plan.next_action.operator_required is False
+    assert plan.next_action.shell_command == (
+        "pio phase8-retrain-train-run --cycle-id cycle-1"
+    )
+
+
+def test_phase8_plan_unlocks_verified_offline_validation(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase8_evidence_status",
+        lambda *args, **kwargs: status(
+            retrain_status="CHALLENGER_IN_PROGRESS",
+            active_challenger_model_ids=("challenger-1",),
+            active_cycle_id="cycle-1",
+            active_cycle_status="CHALLENGER_REGISTERED",
+            active_cycle_challenger_model_id="challenger-1",
+            active_cycle_challenger_status="OFFLINE_CANDIDATE",
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "phase8_cycle_dataset_lineage",
+        lambda *args, **kwargs: SimpleNamespace(
+            dataset_sha256="a" * 64
+        ),
+    )
+
+    plan = build_phase8_evidence_plan(storage)
+
+    assert plan.next_action is not None
+    assert plan.next_action.debt_type == (
+        "RETRAIN_OFFLINE_VALIDATION_READY"
+    )
+    assert plan.next_action.operator_required is False
+    assert plan.next_action.shell_command == (
+        "pio phase8-retrain-offline-validate-run "
+        "--cycle-id cycle-1 --require-qualified"
+    )
+
+
+def test_phase8_plan_fails_closed_on_tampered_cycle_dataset(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase8_evidence_status",
+        lambda *args, **kwargs: status(
+            retrain_status="CHALLENGER_IN_PROGRESS",
+            active_cycle_id="cycle-1",
+            active_cycle_status="PLANNED",
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "phase8_cycle_dataset_lineage",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("dataset file checksum mismatch")
+        ),
+    )
+
+    plan = build_phase8_evidence_plan(storage)
+
+    assert plan.next_action is not None
+    assert plan.next_action.debt_type == (
+        "RETRAIN_TRAINING_INPUTS_REQUIRED"
+    )
+    assert plan.next_action.shell_command is None
+    assert "checksum mismatch" in plan.next_action.reason
+
+
 def test_phase8_plan_maps_offline_qualified_cycle_to_paper_start(
     monkeypatch,
     tmp_path,
