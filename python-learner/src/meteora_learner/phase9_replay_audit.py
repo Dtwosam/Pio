@@ -6,6 +6,7 @@ from typing import Any
 from .contextual_bandit import CONTEXTUAL_BANDIT_EVIDENCE_TYPE
 from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .phase9_research import PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE
+from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
     _adaptive_snapshot_lineage_valid,
@@ -45,6 +46,7 @@ class Phase9ReplayFamilyAudit:
 class Phase9ReplayAuditReport:
     research_only: bool
     policy_actionable: bool
+    storage_integrity_verified: bool
     verified: bool
     families: tuple[Phase9ReplayFamilyAudit, ...]
     reasons: tuple[str, ...]
@@ -186,16 +188,29 @@ def evaluate_phase9_replay_audit(
     required = tuple(
         item for item in families if item.required_records > 0
     )
-    verified = all(item.replay_verified for item in required)
+    storage_integrity = evaluate_phase9_storage_integrity(storage)
+    verified = (
+        storage_integrity.verified
+        and all(item.replay_verified for item in required)
+    )
     reasons = tuple(
-        f"{item.family}: {item.reason}"
-        for item in required
-        if not item.replay_verified
+        [
+            *(
+                f"storage integrity: {reason}"
+                for reason in storage_integrity.reasons
+            ),
+            *(
+                f"{item.family}: {item.reason}"
+                for item in required
+                if not item.replay_verified
+            ),
+        ]
     )
 
     return Phase9ReplayAuditReport(
         research_only=True,
         policy_actionable=False,
+        storage_integrity_verified=storage_integrity.verified,
         verified=verified,
         families=families,
         reasons=reasons,
