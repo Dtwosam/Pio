@@ -1056,7 +1056,7 @@ def test_forged_wallet_flow_lineage_blocks_bundle(tmp_path):
 
     assert report.research_ready is False
     assert any(
-        "immutable source event IDs and SHA-256" in reason
+        "position-event IDs with matching source hash" in reason
         for reason in report.reasons
     )
 
