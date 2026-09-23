@@ -49,6 +49,7 @@ def inspect_pool_with_rust(
     array_radius: int,
     *,
     rust_manifest_path: str | Path | None = None,
+    rust_binary_path: str | Path | None = None,
     timeout_seconds: int = 120,
 ) -> dict[str, Any]:
     if not pool_address.strip():
@@ -64,12 +65,26 @@ def inspect_pool_with_rust(
             "(RPC_URL is accepted as a compatibility fallback)"
         )
 
-    manifest = Path(rust_manifest_path or default_rust_manifest_path())
-    if not manifest.exists():
-        raise ValueError(f"Rust manifest not found: {manifest}")
-
-    process = subprocess.run(
-        [
+    configured_binary = (
+        rust_binary_path
+        if rust_binary_path is not None
+        else os.getenv("PIO_RUST_EXECUTOR_BIN")
+    )
+    if configured_binary:
+        binary = Path(configured_binary)
+        if not binary.exists():
+            raise ValueError(f"Rust executor binary not found: {binary}")
+        command = [
+            str(binary),
+            "inspect-pool-env",
+            pool_address,
+            str(array_radius),
+        ]
+    else:
+        manifest = Path(rust_manifest_path or default_rust_manifest_path())
+        if not manifest.exists():
+            raise ValueError(f"Rust manifest not found: {manifest}")
+        command = [
             "cargo",
             "run",
             "--quiet",
@@ -79,7 +94,10 @@ def inspect_pool_with_rust(
             "inspect-pool-env",
             pool_address,
             str(array_radius),
-        ],
+        ]
+
+    process = subprocess.run(
+        command,
         check=False,
         capture_output=True,
         text=True,
@@ -110,6 +128,7 @@ def refresh_paper_chain_state(
     as_of: str | None = None,
     inspector: InspectPool | None = None,
     rust_manifest_path: str | Path | None = None,
+    rust_binary_path: str | Path | None = None,
     timeout_seconds: int = 120,
     ingest_observed_at: str | None = None,
 ) -> PaperChainRefreshReport:
@@ -133,6 +152,7 @@ def refresh_paper_chain_state(
                 pool,
                 radius,
                 rust_manifest_path=rust_manifest_path,
+                rust_binary_path=rust_binary_path,
                 timeout_seconds=timeout_seconds,
             )
     else:
