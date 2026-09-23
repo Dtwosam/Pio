@@ -79,6 +79,11 @@ from .phase9_shadow import (
     evaluate_phase9_shadow,
     persist_phase9_shadow,
 )
+from .phase9_policy_authorization import (
+    Phase9PolicyAuthorizationCriteria,
+    evaluate_phase9_policy_authorization,
+    persist_phase9_policy_authorization,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -1710,6 +1715,61 @@ def main() -> None:
     )
     phase9_storage_integrity.add_argument(
         "--require-verified",
+        action="store_true",
+    )
+
+    phase9_policy_gate = subparsers.add_parser(
+        "phase9-policy-authorization-gate",
+        help="Evaluate replay-verified post-promotion shadow evidence for a future LIVE-policy authorization boundary without wiring it to execution",
+    )
+    phase9_policy_gate.add_argument(
+        "--min-shadow-runs",
+        type=int,
+        default=3,
+    )
+    phase9_policy_gate.add_argument(
+        "--min-distinct-dataset-hashes",
+        type=int,
+        default=3,
+    )
+    phase9_policy_gate.add_argument(
+        "--min-distinct-cutoffs",
+        type=int,
+        default=3,
+    )
+    phase9_policy_gate.add_argument(
+        "--min-decisions-per-run",
+        type=int,
+        default=50,
+    )
+    phase9_policy_gate.add_argument(
+        "--min-pools-per-run",
+        type=int,
+        default=3,
+    )
+    phase9_policy_gate.add_argument(
+        "--min-selected-arms-per-run",
+        type=int,
+        default=2,
+    )
+    phase9_policy_gate.add_argument(
+        "--min-total-decisions",
+        type=int,
+        default=150,
+    )
+    phase9_policy_gate.add_argument(
+        "--min-mean-uplift-vs-baseline-bps",
+        type=float,
+        default=0.0,
+    )
+    phase9_policy_gate.add_argument(
+        "--max-mean-regret-vs-oracle-bps",
+        type=float,
+        default=300.0,
+    )
+    phase9_policy_gate.add_argument("--persist", action="store_true")
+    phase9_policy_gate.add_argument(
+        "--require-ready",
         action="store_true",
     )
 
@@ -3933,6 +3993,45 @@ def main() -> None:
         result = evaluate_phase9_storage_integrity(storage)
         print(json.dumps(result.to_record(), indent=2))
         if args.require_verified and not result.verified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-authorization-gate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_policy_authorization(
+            storage,
+            criteria=Phase9PolicyAuthorizationCriteria(
+                min_shadow_runs=args.min_shadow_runs,
+                min_distinct_dataset_hashes=(
+                    args.min_distinct_dataset_hashes
+                ),
+                min_distinct_cutoffs=args.min_distinct_cutoffs,
+                min_decisions_per_run=args.min_decisions_per_run,
+                min_pools_per_run=args.min_pools_per_run,
+                min_selected_arms_per_run=(
+                    args.min_selected_arms_per_run
+                ),
+                min_total_decisions=args.min_total_decisions,
+                min_mean_uplift_vs_baseline_bps=(
+                    args.min_mean_uplift_vs_baseline_bps
+                ),
+                max_mean_regret_vs_oracle_bps=(
+                    args.max_mean_regret_vs_oracle_bps
+                ),
+            ),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_phase9_policy_authorization(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.authorization_ready:
             raise SystemExit(2)
         return
 
