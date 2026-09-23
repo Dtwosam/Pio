@@ -437,11 +437,7 @@ def test_phase9_promotion_rejects_stale_persisted_bundle(tmp_path):
         report=bundle,
     )
 
-    evidence(
-        storage,
-        MINT_RISK_EVIDENCE_TYPE,
-        "pool-c",
-    )
+    seed_mint_risk_lineage(storage, "pool-c")
 
     report = evaluate_phase9_promotion(storage)
 
