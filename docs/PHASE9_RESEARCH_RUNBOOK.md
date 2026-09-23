@@ -220,6 +220,25 @@ actions may update the pool/context-local UCB statistics. Current-decision
 oracle rewards are used only after selection for evaluation. Adversarial tests
 lock this no-lookahead property.
 
+## Ongoing chain-history sampling
+
+The 43-observation default history requirement is a qualification floor, not a
+collection ceiling. The unattended `phase9-source-capture-run` path continues
+sampling the established Phase 9 pool cohort after that floor is reached,
+subject to the same per-pool minimum observation interval. This gives adaptive,
+regime, portfolio and derived-bandit research new market regimes to evaluate
+instead of freezing their chain corpus at first qualification.
+
+A direct `phase9-chain-history-run` remains deficit-only by default. To request
+the same post-threshold behavior manually:
+
+```bash
+pio phase9-chain-history-run --continue-sampling-when-ready
+```
+
+This remains read-only chain inspection plus local append-only ingestion. It
+does not authorize or execute a trade.
+
 ## Source freshness
 
 Deterministic replay answers a different question from source freshness. A
