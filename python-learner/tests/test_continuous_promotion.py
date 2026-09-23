@@ -11,6 +11,7 @@ from meteora_learner.paper_account import (
 )
 from meteora_learner.phase_promotion import PHASE7, PHASE7_EVIDENCE_TYPE
 from meteora_learner.storage import Storage
+from meteora_learner.retraining_workflow import WALK_FORWARD_EVIDENCE_TYPE
 
 
 def seed_models_and_cycle(storage):
@@ -69,6 +70,20 @@ def seed_models_and_cycle(storage):
         )
 
 
+def seed_walk_forward_evidence(storage):
+    storage.save_model_live_evidence(
+        model_id="challenger",
+        evidence_type=WALK_FORWARD_EVIDENCE_TYPE,
+        status="QUALIFIED",
+        evidence={
+            "cycle_id": "cycle",
+            "model_id": "challenger",
+            "dataset_version": "dataset-v2",
+            "report": {"walk_forward_qualified": True},
+        },
+    )
+
+
 def add_trade(
     storage,
     *,
@@ -116,6 +131,7 @@ def criteria():
 def test_continuous_challenger_rotates_champion_atomically(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_models_and_cycle(storage)
+    seed_walk_forward_evidence(storage)
     create_paper_account(
         storage,
         account_id="paper",
@@ -178,6 +194,7 @@ def test_continuous_challenger_rotates_champion_atomically(tmp_path):
 def test_continuous_challenger_must_beat_incumbent(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_models_and_cycle(storage)
+    seed_walk_forward_evidence(storage)
     create_paper_account(
         storage,
         account_id="paper",
@@ -215,6 +232,7 @@ def test_continuous_challenger_must_beat_incumbent(tmp_path):
 def test_champion_change_invalidates_previous_rotation_validation(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_models_and_cycle(storage)
+    seed_walk_forward_evidence(storage)
     create_paper_account(
         storage,
         account_id="paper",
@@ -277,4 +295,45 @@ def test_champion_change_invalidates_previous_rotation_validation(tmp_path):
 
     assert storage.model_registry_entry("challenger")["status"] == (
         "PAPER_CHALLENGER"
+    )
+
+
+
+def test_continuous_promotion_requires_walk_forward_evidence(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_models_and_cycle(storage)
+    create_paper_account(
+        storage,
+        account_id="paper",
+        starting_cash_quote=1000,
+    )
+    add_trade(
+        storage,
+        position_id="incumbent-trade",
+        policy_source="ML_CHAMPION",
+        model_id="incumbent",
+        final_mark=101,
+        minute=0,
+    )
+    add_trade(
+        storage,
+        position_id="challenger-trade",
+        policy_source="ML_CHALLENGER",
+        model_id="challenger",
+        final_mark=102,
+        minute=1,
+    )
+
+    validation = evaluate_continuous_champion(
+        storage,
+        cycle_id="cycle",
+        account_id="paper",
+        criteria=criteria(),
+    )
+
+    assert validation.qualified is False
+    assert validation.walk_forward_qualified is False
+    assert any(
+        "walk-forward" in reason
+        for reason in validation.reasons
     )
