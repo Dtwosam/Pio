@@ -311,6 +311,8 @@ Profit is evaluated over statistically meaningful samples, not one exceptional d
 
 ## Phase 9 advanced edge boundary
 
+Phase 9 research qualification requires the persisted Phase 8 promotion to remain current: the current champion must still satisfy the stored Phase 8 criteria and retain the same continuous-promotion lineage. A historical Phase 8 row alone is insufficient after champion rollback, lineage change, or live-health degradation.
+
 Phase 9 advanced-edge modules are research-only. Persisted
 `PHASE9_PROMOTION_V1` is a non-actionable research-validation milestone and
 must itself preserve `research_only=true` and `policy_actionable=false`.
