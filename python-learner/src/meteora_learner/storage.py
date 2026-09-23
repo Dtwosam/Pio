@@ -261,6 +261,19 @@ CREATE TABLE IF NOT EXISTS chain_transaction_events (
     token_y_fee_amount TEXT,
     protocol_token_x_fee_amount TEXT,
     protocol_token_y_fee_amount TEXT,
+    owner_address TEXT,
+    x_withdrawn_amount TEXT,
+    x_added_amount TEXT,
+    y_withdrawn_amount TEXT,
+    y_added_amount TEXT,
+    x_fee_amount TEXT,
+    y_fee_amount TEXT,
+    old_min_id INTEGER,
+    old_max_id INTEGER,
+    new_min_id INTEGER,
+    new_max_id INTEGER,
+    reward_one TEXT,
+    reward_two TEXT,
     raw_json TEXT NOT NULL,
     UNIQUE(signature, event_index)
 );
@@ -321,6 +334,22 @@ POSITION_BIN_EXTRA_COLUMNS = {
     "bin_reward_per_token_stored_0": "TEXT NOT NULL DEFAULT '0'",
     "bin_reward_per_token_stored_1": "TEXT NOT NULL DEFAULT '0'",
     "reward_checkpoint_available": "INTEGER NOT NULL DEFAULT 0",
+}
+
+CHAIN_TX_EVENT_EXTRA_COLUMNS = {
+    "owner_address": "TEXT",
+    "x_withdrawn_amount": "TEXT",
+    "x_added_amount": "TEXT",
+    "y_withdrawn_amount": "TEXT",
+    "y_added_amount": "TEXT",
+    "x_fee_amount": "TEXT",
+    "y_fee_amount": "TEXT",
+    "old_min_id": "INTEGER",
+    "old_max_id": "INTEGER",
+    "new_min_id": "INTEGER",
+    "new_max_id": "INTEGER",
+    "reward_one": "TEXT",
+    "reward_two": "TEXT",
 }
 
 CHAIN_POSITION_EXTRA_COLUMNS = {
@@ -446,6 +475,7 @@ class Storage:
             _ensure_columns(conn, "chain_pool_snapshots", CHAIN_POOL_EXTRA_COLUMNS)
             _ensure_columns(conn, "position_bin_snapshots", POSITION_BIN_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_position_snapshots", CHAIN_POSITION_EXTRA_COLUMNS)
+            _ensure_columns(conn, "chain_transaction_events", CHAIN_TX_EVENT_EXTRA_COLUMNS)
 
     def save_raw(
         self,
@@ -981,6 +1011,19 @@ class Storage:
                 "token_y_fee_amount": None,
                 "protocol_token_x_fee_amount": None,
                 "protocol_token_y_fee_amount": None,
+                "owner_address": None,
+                "x_withdrawn_amount": None,
+                "x_added_amount": None,
+                "y_withdrawn_amount": None,
+                "y_added_amount": None,
+                "x_fee_amount": None,
+                "y_fee_amount": None,
+                "old_min_id": None,
+                "old_max_id": None,
+                "new_min_id": None,
+                "new_max_id": None,
+                "reward_one": None,
+                "reward_two": None,
             }
 
             if event_type == "AddLiquidity":
@@ -1007,6 +1050,37 @@ class Storage:
                         ),
                     }
                 )
+            elif event_type == "RemoveLiquidity":
+                common.update(
+                    {
+                        "lb_pair": payload.get("lb_pair"),
+                        "position_address": payload.get("position"),
+                        "active_bin_id": int(payload["active_bin_id"]),
+                        "amount_x": str(payload["amount_x"]),
+                        "amount_y": str(payload["amount_y"]),
+                    }
+                )
+            elif event_type == "Rebalancing":
+                common.update(
+                    {
+                        "lb_pair": payload.get("lb_pair"),
+                        "position_address": payload.get("position"),
+                        "owner_address": payload.get("owner"),
+                        "active_bin_id": int(payload["active_bin_id"]),
+                        "x_withdrawn_amount": str(payload["x_withdrawn_amount"]),
+                        "x_added_amount": str(payload["x_added_amount"]),
+                        "y_withdrawn_amount": str(payload["y_withdrawn_amount"]),
+                        "y_added_amount": str(payload["y_added_amount"]),
+                        "x_fee_amount": str(payload["x_fee_amount"]),
+                        "y_fee_amount": str(payload["y_fee_amount"]),
+                        "old_min_id": int(payload["old_min_id"]),
+                        "old_max_id": int(payload["old_max_id"]),
+                        "new_min_id": int(payload["new_min_id"]),
+                        "new_max_id": int(payload["new_max_id"]),
+                        "reward_one": str(payload["reward_one"]),
+                        "reward_two": str(payload["reward_two"]),
+                    }
+                )
             else:
                 raise ValueError(f"unsupported decoded event type: {event_type}")
 
@@ -1030,6 +1104,19 @@ class Storage:
                     common["token_y_fee_amount"],
                     common["protocol_token_x_fee_amount"],
                     common["protocol_token_y_fee_amount"],
+                    common["owner_address"],
+                    common["x_withdrawn_amount"],
+                    common["x_added_amount"],
+                    common["y_withdrawn_amount"],
+                    common["y_added_amount"],
+                    common["x_fee_amount"],
+                    common["y_fee_amount"],
+                    common["old_min_id"],
+                    common["old_max_id"],
+                    common["new_min_id"],
+                    common["new_max_id"],
+                    common["reward_one"],
+                    common["reward_two"],
                     json.dumps(item, separators=(",", ":")),
                 )
             )
@@ -1115,8 +1202,11 @@ class Storage:
                     position_address, active_bin_id, bin_id, amount_x, amount_y,
                     token_x_fee_amount, token_y_fee_amount,
                     protocol_token_x_fee_amount, protocol_token_y_fee_amount,
-                    raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    owner_address, x_withdrawn_amount, x_added_amount,
+                    y_withdrawn_amount, y_added_amount, x_fee_amount, y_fee_amount,
+                    old_min_id, old_max_id, new_min_id, new_max_id,
+                    reward_one, reward_two, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(signature, event_index) DO UPDATE SET
                     observed_at=excluded.observed_at,
                     parent_ix_index=excluded.parent_ix_index,
@@ -1134,6 +1224,19 @@ class Storage:
                     token_y_fee_amount=excluded.token_y_fee_amount,
                     protocol_token_x_fee_amount=excluded.protocol_token_x_fee_amount,
                     protocol_token_y_fee_amount=excluded.protocol_token_y_fee_amount,
+                    owner_address=excluded.owner_address,
+                    x_withdrawn_amount=excluded.x_withdrawn_amount,
+                    x_added_amount=excluded.x_added_amount,
+                    y_withdrawn_amount=excluded.y_withdrawn_amount,
+                    y_added_amount=excluded.y_added_amount,
+                    x_fee_amount=excluded.x_fee_amount,
+                    y_fee_amount=excluded.y_fee_amount,
+                    old_min_id=excluded.old_min_id,
+                    old_max_id=excluded.old_max_id,
+                    new_min_id=excluded.new_min_id,
+                    new_max_id=excluded.new_max_id,
+                    reward_one=excluded.reward_one,
+                    reward_two=excluded.reward_two,
                     raw_json=excluded.raw_json
                 """,
                 rows,
