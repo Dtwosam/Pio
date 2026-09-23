@@ -30,6 +30,7 @@ class Phase9ProgressReport:
     rollout_simulation_current: bool
     rollback_simulation_current: bool
     prewire_ready: bool
+    prewire_manifest_current: bool
     latest_queue_sha256: str | None
     reasons: tuple[str, ...]
 
@@ -98,6 +99,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             rollout_simulation_current=False,
             rollback_simulation_current=False,
             prewire_ready=False,
+            prewire_manifest_current=False,
             latest_queue_sha256=None,
             reasons=(
                 "no Phase 9 work-queue progress snapshots are persisted",
@@ -158,6 +160,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             rollout_simulation_current=False,
             rollback_simulation_current=False,
             prewire_ready=False,
+            prewire_manifest_current=False,
             latest_queue_sha256=None,
             reasons=tuple(reasons),
         )
@@ -188,9 +191,14 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         latest[4].get("rollback_simulation_current")
     )
     prewire_ready = bool(latest[4].get("prewire_ready"))
+    prewire_manifest_current = bool(
+        latest[4].get("prewire_manifest_current")
+    )
 
     if not integrity_verified:
         status = "INTEGRITY_FAILED"
+    elif prewire_manifest_current:
+        status = "PREWIRE_MANIFEST_CURRENT"
     elif prewire_ready:
         status = "PREWIRE_READY"
     elif rollback_simulation_current:
@@ -235,6 +243,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         rollout_simulation_current=rollout_simulation_current,
         rollback_simulation_current=rollback_simulation_current,
         prewire_ready=prewire_ready,
+        prewire_manifest_current=prewire_manifest_current,
         latest_queue_sha256=latest[2],
         reasons=tuple(reasons),
     )
