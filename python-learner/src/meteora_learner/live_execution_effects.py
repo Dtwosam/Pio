@@ -315,12 +315,8 @@ def derive_live_execution_effect(
             wallet_y += _int(amount_y)
             action_events += 1
         elif action == "EXIT" and event_type == "ClaimFee2":
-            claimed_x = _int(x_fee)
-            claimed_y = _int(y_fee)
-            wallet_x += claimed_x
-            wallet_y += claimed_y
-            earned_fee_x += claimed_x
-            earned_fee_y += claimed_y
+            earned_fee_x += _int(x_fee)
+            earned_fee_y += _int(y_fee)
             action_events += 1
         elif action == "EXIT" and event_type == "ClaimReward2":
             reward_one += _int(reward_1)
