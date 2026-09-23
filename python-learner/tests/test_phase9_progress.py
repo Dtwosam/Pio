@@ -20,6 +20,7 @@ def queue(
     rollout=False,
     rollback=False,
     prewire=False,
+    manifest=False,
 ):
     return Phase9WorkQueue(
         phase8_promoted=phase8,
@@ -31,6 +32,7 @@ def queue(
         rollout_simulation_current=rollout,
         rollback_simulation_current=rollback,
         prewire_ready=prewire,
+        prewire_manifest_current=manifest,
         candidate_pools=("pool-a",),
         items=tuple(tasks),
     )
@@ -183,3 +185,35 @@ def test_phase9_progress_advances_through_policy_evidence_states(tmp_path):
     assert report.status == "PREWIRE_READY"
     assert report.rollback_simulation_current is True
     assert report.prewire_ready is True
+
+
+def test_phase9_progress_reports_current_prewire_manifest(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    criteria = Phase9ResearchBundleCriteria(
+        min_mint_risk_pools=1,
+        min_wallet_flow_pools=1,
+        min_static_hedge_pools=1,
+    )
+    persist_phase9_work_queue_snapshot(
+        storage,
+        queue=queue(
+            tasks=(),
+            bundle=True,
+            promotion=True,
+            phase9_current=True,
+            authorization=True,
+            controlled=True,
+            rollout=True,
+            rollback=True,
+            prewire=True,
+            manifest=True,
+        ),
+        criteria=criteria,
+        created_at="2026-09-23T22:00:00+00:00",
+    )
+
+    report = evaluate_phase9_progress(storage)
+
+    assert report.status == "PREWIRE_MANIFEST_CURRENT"
+    assert report.prewire_ready is True
+    assert report.prewire_manifest_current is True
