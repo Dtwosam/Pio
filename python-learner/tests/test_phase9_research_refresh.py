@@ -148,7 +148,7 @@ def test_research_refresh_stops_when_storage_integrity_is_invalid(
     monkeypatch.setattr(
         refresh_module,
         "evaluate_phase9_research_bundle",
-        lambda *args, **kwargs: bundle(ready=False),
+        lambda *args, **kwargs: calls.append("bundle"),
     )
 
     report = run_phase9_research_refresh(storage)
@@ -160,6 +160,9 @@ def test_research_refresh_stops_when_storage_integrity_is_invalid(
     assert report.items[0].family == "storage_integrity"
     assert report.items[0].status == "BLOCKED"
     assert "immutable trigger missing" in report.items[0].reason
+    assert report.bundle_reasons == (
+        "storage integrity: immutable trigger missing",
+    )
 
 
 def test_research_refresh_stops_when_phase8_is_not_current(
