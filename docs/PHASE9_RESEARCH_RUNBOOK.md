@@ -211,6 +211,26 @@ The work queue emits lineage-repair tasks when reproducible source evidence
 exists. It does not invent missing hedge assumptions or authoritative chain
 inputs.
 
+## Append-only evidence storage
+
+Phase 9 replay depends on historical evidence being stable after capture.
+
+SQLite enforces immutability for the authoritative source tables used by Phase
+9 replay: chain-pool snapshots, token-mint snapshots, bin-liquidity snapshots
+and position-event history. It also enforces immutability for
+`advanced_edge_evidence`. Re-running research creates a new evidence row; it
+never edits the prior one.
+
+Phase promotion keeps a current per-phase pointer for operational status, while
+every write is also appended to immutable
+`phase_promotion_evidence_history`. This makes stale/current promotion
+transitions auditable without sacrificing the ability to refresh the current
+promotion after a new verified bundle.
+
+Contextual-bandit qualification also refuses retraining dataset paths that are
+relative, symlinked or missing. The exact regular-file bytes must continue to
+match the persisted SHA-256 and dataset version.
+
 ## Deterministic replay requirements
 
 Immutable source IDs and hashes are necessary but not sufficient. A qualified
