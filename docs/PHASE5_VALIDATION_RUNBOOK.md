@@ -124,3 +124,52 @@ Before Phase 5 can be called complete, retain a real run corpus showing:
 - paper PnL/accounting remains internally reconciled over the validation window.
 
 External reward-token valuation is supported through fresh persisted ACCOUNT_QUOTE observations (including the optional Jupiter refresh path). Missing or stale reward quotes fail closed and block scheduling/valuation.
+
+
+## Promotion gate
+
+The routine `paper-endurance-report` defaults are useful for operational
+checks. Persisted Phase 5 promotion is intentionally stricter.
+
+Default `phase5-validate` promotion requirements are:
+
+- persisted Phase 3 promotion;
+- at least 72 hours of observed PAPER runtime;
+- at least 500 terminal scheduler ticks;
+- at least 99% non-failure terminal ticks;
+- no more than 5% dependency-blocked terminal ticks;
+- maximum failure streak of 1;
+- zero stale RUNNING ticks;
+- at least 100 applied chain valuations;
+- at least 3 distinct valued positions;
+- at least 3 closed paper positions;
+- at least 2 distinct valued pools;
+- a passing decimal-exact PAPER event-ledger audit.
+
+Evaluate without persisting:
+
+```bash
+pio phase5-validate --account paper
+```
+
+Fail unless ready:
+
+```bash
+pio phase5-validate --account paper --require-ready
+```
+
+Persist qualified evidence only when every gate passes:
+
+```bash
+pio phase5-validate --account paper --persist-ready --require-ready
+```
+
+Persisted status can then be inspected with:
+
+```bash
+pio phase-status
+```
+
+The thresholds are configurable for research, but reducing them does not create
+missing real evidence. A persisted Phase 5 promotion record is only as strong
+as the criteria stored with that evidence.
