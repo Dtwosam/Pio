@@ -550,6 +550,15 @@ CHAIN_POOL_EXTRA_COLUMNS = {
     "reward_last_update_time_1": "INTEGER",
 }
 
+MODEL_STATUS_TRANSITIONS = {
+    "OFFLINE_CANDIDATE": {"OFFLINE_QUALIFIED", "REJECTED"},
+    "OFFLINE_QUALIFIED": {"PAPER_CHALLENGER", "REJECTED"},
+    "PAPER_CHALLENGER": {"CHAMPION", "REJECTED"},
+    "CHAMPION": {"ROLLED_BACK"},
+    "REJECTED": set(),
+    "ROLLED_BACK": set(),
+}
+
 POOL_SNAPSHOT_EXTRA_COLUMNS = {
     "current_price": "REAL",
     "bin_step": "INTEGER",
@@ -1728,6 +1737,11 @@ class Storage:
         new_status: str,
         notes: str | None = None,
     ) -> None:
+        allowed = MODEL_STATUS_TRANSITIONS.get(expected_status)
+        if allowed is None or new_status not in allowed:
+            raise ValueError(
+                f"invalid model transition: {expected_status} -> {new_status}"
+            )
         now = utc_now_iso()
         with self.connect() as conn:
             cursor = conn.execute(
