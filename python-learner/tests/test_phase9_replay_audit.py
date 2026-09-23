@@ -136,3 +136,22 @@ def test_replay_audit_isolates_family_exception(tmp_path, monkeypatch):
     assert "RuntimeError" in wallet.reason
     assert "corrupt replay artifact" in wallet.reason
     assert report.verified is False
+
+
+
+def test_replay_audit_requires_storage_integrity(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    with storage.connect() as conn:
+        conn.execute(
+            "DROP TRIGGER advanced_edge_evidence_no_update"
+        )
+
+    report = evaluate_phase9_replay_audit(storage)
+
+    assert report.storage_integrity_verified is False
+    assert report.verified is False
+    assert any(
+        "storage integrity:" in reason
+        and "advanced_edge_evidence_no_update" in reason
+        for reason in report.reasons
+    )
