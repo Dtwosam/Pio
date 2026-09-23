@@ -107,6 +107,9 @@ from .phase9_policy_rollback_simulation import (
     persist_phase9_policy_rollback_simulation,
     audit_persisted_phase9_policy_rollback_simulation,
 )
+from .phase9_policy_prewire import (
+    evaluate_phase9_policy_prewire_audit,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -1924,6 +1927,15 @@ def main() -> None:
     )
     phase9_policy_rollback_audit.add_argument(
         "--require-current",
+        action="store_true",
+    )
+
+    phase9_policy_prewire = subparsers.add_parser(
+        "phase9-policy-prewire-audit",
+        help="Require all Phase 9 future-policy simulation evidence to be current and rollback-clear without enabling execution",
+    )
+    phase9_policy_prewire.add_argument(
+        "--require-ready",
         action="store_true",
     )
 
@@ -4369,6 +4381,15 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_current and not result.current:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-prewire-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_policy_prewire_audit(storage)
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.ready:
             raise SystemExit(2)
         return
 
