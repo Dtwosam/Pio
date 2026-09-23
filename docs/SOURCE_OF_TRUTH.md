@@ -490,4 +490,12 @@ does not grant LIVE policy authority. A consolidated policy-readiness audit may 
 
 Meteora API TVL/volume snapshots are discovery and ranking context only. The ranked sampling cohort is also the default source pool set for adaptive/regime, mint-risk and wallet-flow acquisition/research. A previously qualified mint or wallet report on a different pool does not make the currently ranked source cohort current; operational freshness must surface the missing ranked-pool evidence and route refresh to those pools. When the ranked cohort cannot provide enough chain-observed pools, chain-depth leaders may fill only the missing slots so evidence collection can continue without inventing pool state. They must not steer new Phase 9 chain onboarding or ranked-cohort replacement indefinitely. Live cohort/capture decisions use a bounded API-ranking age (three hours by default); stale ranking rows are excluded, while already persisted chain observations may remain available as an explicitly unranked depth fallback. Historical `as_of` evaluation must first exclude API rows after the cutoff before selecting each pool's latest ranking snapshot.
 
+Phase 9 quantitative evidence planning is advisory and deterministic. The
+`phase9-evidence-plan` view may rank evidence debt and emit only existing
+research/read-only commands. It must not execute shell commands itself, fill
+explicit economic assumptions, persist promotion/authorization evidence, alter
+rollout/rollback state, or grant LIVE execution authority. Non-actionable
+dependencies such as stale Phase 8 currentness remain visible even when a
+different safe evidence-acquisition step is the next executable action.
+
 Phase 9 unattended source capture and research refresh share one mutable SQLite maintenance lease. Overlapping invocations must return busy without running the underlying job; expired leases may be recovered. The lease is operational state, not research evidence, and is intentionally outside append-only evidence immutability checks.
