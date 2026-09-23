@@ -7,11 +7,14 @@ from pathlib import Path
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .adaptive_range import AdaptiveRangeCriteria
+from .adaptive_range_validation import AdaptiveRangeValidationCriteria
 from .chain_snapshot_lineage import (
     chain_snapshot_source_record,
     chain_snapshot_source_sha256,
 )
 from .contextual_bandit import CONTEXTUAL_BANDIT_EVIDENCE_TYPE
+from .market_regime import DLMMRegimeCriteria
 from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .mint_snapshot_lineage import (
     MINT_SOURCE_COLUMNS,
@@ -20,7 +23,11 @@ from .mint_snapshot_lineage import (
     mint_risk_pool_source_record,
     mint_risk_source_sha256,
 )
-from .phase9_research import PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE
+from .phase9_research import (
+    PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+    Phase9ResearchCriteria,
+    evaluate_phase9_research,
+)
 from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
@@ -260,6 +267,41 @@ def _adaptive_snapshot_lineage_valid(
                         != expected_sha
                     ):
                         return False
+
+            evidence = row["evidence"]
+            try:
+                research_criteria = Phase9ResearchCriteria(
+                    **evidence["criteria"]
+                )
+                adaptive_criteria = AdaptiveRangeCriteria(
+                    **evidence["adaptive_criteria"]
+                )
+                validation_criteria = AdaptiveRangeValidationCriteria(
+                    **evidence["adaptive_validation_criteria"]
+                )
+                regime_criteria = DLMMRegimeCriteria(
+                    **evidence["regime_criteria"]
+                )
+            except (KeyError, TypeError, ValueError):
+                return False
+
+            replay = evaluate_phase9_research(
+                storage,
+                pool_addresses=[
+                    str(item["pool_address"])
+                    for item in pools
+                ],
+                criteria=research_criteria,
+                adaptive_criteria=adaptive_criteria,
+                adaptive_validation_criteria=validation_criteria,
+                regime_criteria=regime_criteria,
+                as_of=evidence.get("as_of"),
+            )
+            replay_record = json.loads(
+                json.dumps(replay.to_record(), sort_keys=True)
+            )
+            if replay_record != evidence:
+                return False
     return True
 
 
