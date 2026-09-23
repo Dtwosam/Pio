@@ -309,3 +309,52 @@ def test_health_flags_scheduler_owner_without_lease_deadline(tmp_path):
         "without a lease deadline" in reason
         for reason in report.reasons
     )
+
+
+def test_health_degrades_on_missing_external_reward_quote(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_open(storage)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE paper_counterfactual_positions
+            SET reward_mint_0 = 'reward'
+            WHERE position_id = 'pos'
+            """
+        )
+    storage.save_chain_pool_snapshot(
+        chain_payload(),
+        observed_at="2026-09-23T09:59:00+00:00",
+    )
+    save_token_quote(
+        storage,
+        token_mint="y",
+        quote_per_atomic=1.0,
+        source="TEST",
+        observed_at="2026-09-23T09:59:00+00:00",
+    )
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO paper_ticks(
+                tick_id, account_id, started_at, finished_at, status
+            ) VALUES (
+                'tick', 'paper', '2026-09-23T09:59:00+00:00',
+                '2026-09-23T09:59:10+00:00', 'WAITING_QUOTES'
+            )
+            """
+        )
+
+    report = build_paper_health(
+        storage,
+        account_id="paper",
+        as_of=NOW,
+    )
+
+    assert report.status == "DEGRADED"
+    reward_status = next(
+        item for item in report.quote_statuses
+        if item.token_mint == "reward"
+    )
+    assert reward_status.available is False
+    assert any("token quote" in reason for reason in report.reasons)
