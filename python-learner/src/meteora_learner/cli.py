@@ -33,6 +33,7 @@ from .phase_promotion import (
     PHASE6,
     PHASE7,
     PHASE8,
+    PHASE8,
     persist_phase2_promotion,
     persist_phase5_promotion,
     persist_phase6_promotion,
