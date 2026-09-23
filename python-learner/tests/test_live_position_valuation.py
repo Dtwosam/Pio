@@ -89,6 +89,35 @@ def seed(storage):
                 ),
             )
 
+        conn.execute(
+            """
+            INSERT INTO live_execution_receipts(
+                decision_id, signature, observed_at, mode, action,
+                pool_address, intent_status, slot, block_time,
+                network_fee_lamports, compute_units_consumed, succeeded,
+                event_count, add_request_count, rebalance_request_count,
+                raw_json
+            ) VALUES (
+                'settle', 'sig-settle', ?, 'LIVE', 'EXIT',
+                'pool', 'CONFIRMED', 30, 120,
+                5000, 90000, 1, 3, 0, 0, '{}'
+            )
+            """,
+            (T3,),
+        )
+        conn.execute(
+            """
+            INSERT INTO live_position_closure_proofs(
+                decision_id, signature, position_address,
+                receipt_slot, proof_slot, observed_at, closed, raw_json
+            ) VALUES (
+                'settle', 'sig-settle', 'position',
+                30, 31, ?, 1, '{}'
+            )
+            """,
+            (T3,),
+        )
+
         outcome = {
             "position_address": "position",
             "pool_address": "pool",
