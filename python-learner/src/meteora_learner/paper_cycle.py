@@ -145,6 +145,7 @@ def apply_paper_observation(
     emergency_exit: bool = False,
     estimated_exit_cost_quote: float = 0.0,
     rebalance_cost_quote: float | None = None,
+    event_time: str | None = None,
     config: PositionManagementConfig = PositionManagementConfig(),
 ) -> PaperObservationResult:
     """
@@ -166,6 +167,7 @@ def apply_paper_observation(
         mark_quote=mark_quote,
         fee_delta_quote=fee_delta_quote,
         reward_delta_quote=reward_delta_quote,
+        event_time=event_time,
     )
     policy = evaluate_paper_position_policy(
         storage,
@@ -188,6 +190,7 @@ def apply_paper_observation(
             position_id=position_id,
             final_mark_quote=mark_quote,
             exit_cost_quote=estimated_exit_cost_quote,
+            event_time=event_time,
         )
         executed_action = "EXIT"
     elif policy.decision.action == "REBALANCE":
@@ -210,6 +213,7 @@ def apply_paper_observation(
                 new_max_bin_id=new_max,
                 new_mark_quote=mark_quote,
                 rebalance_cost_quote=rebalance_cost_quote,
+                event_time=event_time,
             )
             executed_action = "REBALANCE"
 
