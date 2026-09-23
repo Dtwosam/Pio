@@ -1214,3 +1214,31 @@ def test_forged_wallet_flow_metric_blocks_bundle(tmp_path):
         "immutable position-event IDs" in reason
         for reason in report.reasons
     )
+
+
+def test_forged_adaptive_metric_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    forged["qualified_pool_rate"] = 0.5
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+        as_of="2026-09-23T12:12:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "immutable chain snapshot IDs" in reason
+        for reason in report.reasons
+    )
