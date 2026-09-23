@@ -801,6 +801,9 @@ mod tests {
                 &id,
                 &keypair,
                 &accepted_phase5_gate(),
+                &accepted_phase6_readiness(
+                    &keypair.pubkey().to_string(),
+                ),
                 &live,
                 950,
                 |_| Ok("must-not-send".into()),
