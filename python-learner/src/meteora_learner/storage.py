@@ -386,6 +386,33 @@ CREATE TABLE IF NOT EXISTS execution_intents (
 CREATE INDEX IF NOT EXISTS idx_execution_intents_status
 ON execution_intents(status, updated_at_unix);
 
+CREATE TABLE IF NOT EXISTS live_execution_receipts (
+    decision_id TEXT PRIMARY KEY,
+    signature TEXT NOT NULL UNIQUE,
+    observed_at TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK(mode = 'LIVE'),
+    action TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    intent_status TEXT NOT NULL CHECK(
+        intent_status IN ('CONFIRMED', 'FAILED')
+    ),
+    slot INTEGER NOT NULL,
+    block_time INTEGER,
+    network_fee_lamports INTEGER,
+    compute_units_consumed INTEGER,
+    succeeded INTEGER NOT NULL CHECK(succeeded IN (0, 1)),
+    event_count INTEGER NOT NULL,
+    add_request_count INTEGER NOT NULL,
+    rebalance_request_count INTEGER NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_execution_receipts_signature
+ON live_execution_receipts(signature);
+
+CREATE INDEX IF NOT EXISTS idx_live_execution_receipts_pool_slot
+ON live_execution_receipts(pool_address, slot);
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
