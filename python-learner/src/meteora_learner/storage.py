@@ -256,6 +256,54 @@ ON position_event_history(position_address, block_time, ix_index);
 CREATE INDEX IF NOT EXISTS idx_position_event_history_signature
 ON position_event_history(signature, ix_index);
 
+CREATE TRIGGER IF NOT EXISTS chain_pool_snapshots_no_update
+BEFORE UPDATE ON chain_pool_snapshots
+BEGIN
+    SELECT RAISE(ABORT, 'chain_pool_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS chain_pool_snapshots_no_delete
+BEFORE DELETE ON chain_pool_snapshots
+BEGIN
+    SELECT RAISE(ABORT, 'chain_pool_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS token_mint_snapshots_no_update
+BEFORE UPDATE ON token_mint_snapshots
+BEGIN
+    SELECT RAISE(ABORT, 'token_mint_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS token_mint_snapshots_no_delete
+BEFORE DELETE ON token_mint_snapshots
+BEGIN
+    SELECT RAISE(ABORT, 'token_mint_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS bin_liquidity_snapshots_no_update
+BEFORE UPDATE ON bin_liquidity_snapshots
+BEGIN
+    SELECT RAISE(ABORT, 'bin_liquidity_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS bin_liquidity_snapshots_no_delete
+BEFORE DELETE ON bin_liquidity_snapshots
+BEGIN
+    SELECT RAISE(ABORT, 'bin_liquidity_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS position_event_history_no_update
+BEFORE UPDATE ON position_event_history
+BEGIN
+    SELECT RAISE(ABORT, 'position_event_history is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS position_event_history_no_delete
+BEFORE DELETE ON position_event_history
+BEGIN
+    SELECT RAISE(ABORT, 'position_event_history is immutable');
+END;
+
 CREATE TABLE IF NOT EXISTS chain_transaction_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
