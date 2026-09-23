@@ -1886,61 +1886,27 @@ class Storage:
                 str(item["amount_y_usd"]),
                 str(item["total_usd"]),
                 item["created_at"],
-                json.dumps(
-                    item.get("raw", {}),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
+                json.dumps(item.get("raw", {}), separators=(",", ":")),
             )
             for item in events
         ]
-        insert_sql = """
-            INSERT OR IGNORE INTO position_event_history(
-                observed_at, position_address, signature, ix_index, event_type,
-                block_time, slot, pool_address, user_address, token_x, token_y,
-                amount_x, amount_y, amount_x_usd, amount_y_usd, total_usd,
-                created_at, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        select_sql = """
-            SELECT observed_at, position_address, signature, ix_index,
-                   event_type, block_time, slot, pool_address,
-                   user_address, token_x, token_y, amount_x, amount_y,
-                   amount_x_usd, amount_y_usd, total_usd, created_at,
-                   raw_json
-            FROM position_event_history
-            WHERE position_address = ?
-              AND signature = ?
-              AND ix_index = ?
-              AND event_type = ?
-            LIMIT 1
-        """
+        inserted = 0
         with self.connect() as conn:
             for row in rows:
-                cursor = conn.execute(insert_sql, row)
-                if cursor.rowcount == 1:
-                    continue
-                existing = conn.execute(
-                    select_sql,
-                    (row[1], row[2], row[3], row[4]),
-                ).fetchone()
-                if existing is None:
-                    raise ValueError(
-                        "position event insert was ignored without an existing event"
-                    )
-                same_fields = tuple(existing[:17]) == tuple(row[:17])
-                try:
-                    same_raw = (
-                        json.loads(str(existing[17]))
-                        == json.loads(str(row[17]))
-                    )
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    same_raw = False
-                if not same_fields or not same_raw:
-                    raise ValueError(
-                        "immutable position event key already exists with different payload"
-                    )
-        return len(rows)
+                cursor = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO position_event_history(
+                        observed_at, position_address, signature, ix_index,
+                        event_type, block_time, slot, pool_address,
+                        user_address, token_x, token_y, amount_x, amount_y,
+                        amount_x_usd, amount_y_usd, total_usd,
+                        created_at, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    row,
+                )
+                inserted += int(cursor.rowcount > 0)
+        return inserted
 
     def save_chain_transaction_events(
         self,
