@@ -198,10 +198,15 @@ def run_phase9_history_capture(
                 raise ValueError(
                     "Rust inspector returned a different pool_address"
                 )
+            persisted_observed_at = (
+                explicit_observed_at
+                if explicit_observed_at is not None
+                else datetime.now(timezone.utc)
+            )
             result = ingest_chain_snapshot(
                 storage,
                 payload,
-                observed_at=ingest_observed_at,
+                observed_at=persisted_observed_at.isoformat(),
             )
             captured += 1
             items.append(
@@ -216,9 +221,7 @@ def run_phase9_history_capture(
                     status="CAPTURED",
                     latest_observed_at=latest_text,
                     capture_observed_at=(
-                        explicit_observed_at.isoformat()
-                        if explicit_observed_at is not None
-                        else None
+                        persisted_observed_at.isoformat()
                     ),
                     bin_arrays=result.bin_arrays,
                     bins=result.bins,
