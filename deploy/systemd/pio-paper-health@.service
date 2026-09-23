@@ -1,0 +1,17 @@
+[Unit]
+Description=Pio PAPER health check for account %i
+After=pio-paper@%i.service
+
+[Service]
+Type=oneshot
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/pio paper-health --account %i --require-healthy
+TimeoutStartSec=2min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pio/data
