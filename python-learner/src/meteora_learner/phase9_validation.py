@@ -25,6 +25,7 @@ class Phase9ResearchBundleCriteria:
     require_adaptive_multi_pool: bool = True
     require_portfolio_allocation: bool = True
     require_contextual_bandit: bool = True
+    require_contextual_bandit_lineage: bool = True
 
     def __post_init__(self) -> None:
         if self.min_mint_risk_pools < 1:
@@ -137,6 +138,32 @@ def _summary(
     )
 
 
+def _bandit_lineage_valid(storage: Storage) -> bool:
+    rows = _latest_by_pool(
+        storage,
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+    )
+    if not rows:
+        return False
+    row = rows[0]
+    lineage = row["evidence"].get("dataset_lineage")
+    if not isinstance(lineage, dict):
+        return False
+    required = (
+        "cycle_id",
+        "champion_model_id",
+        "dataset_evidence_id",
+        "dataset_version",
+        "dataset_sha256",
+        "cutoff",
+        "output_file",
+    )
+    return all(
+        lineage.get(field) not in (None, "")
+        for field in required
+    )
+
+
 def evaluate_phase9_research_bundle(
     storage: Storage,
     *,
@@ -219,6 +246,16 @@ def evaluate_phase9_research_bundle(
     ):
         reasons.append(
             "qualified contextual-bandit evidence is required"
+        )
+    if (
+        criteria.require_contextual_bandit
+        and criteria.require_contextual_bandit_lineage
+        and bandit.qualified_records >= 1
+        and not _bandit_lineage_valid(storage)
+    ):
+        reasons.append(
+            "qualified contextual-bandit evidence must be bound to a "
+            "checksum-verified retraining dataset lineage"
         )
 
     ready = not reasons
