@@ -808,6 +808,33 @@ def test_work_queue_mint_snapshot_command_uses_requested_rpc(tmp_path):
     assert " > " not in task.shell_command
 
 
+def test_work_queue_mint_snapshot_defaults_to_env_rpc(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+
+    queue = build_phase9_work_queue(
+        storage,
+        criteria=Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=1,
+            min_wallet_flow_pools=1,
+            min_static_hedge_pools=1,
+        ),
+    )
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "MINT_SNAPSHOT"
+    )
+    assert task.shell_command is not None
+    assert "inspect-mint-env" in task.shell_command
+    assert "<RPC_URL>" not in task.shell_command
+    assert "ingest-mint-snapshot --file -" in task.shell_command
+
+
 def test_work_queue_prefers_cycle_bound_bandit_when_lineage_exists(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_retraining_dataset_evidence(storage)
