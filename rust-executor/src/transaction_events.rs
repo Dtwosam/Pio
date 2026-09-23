@@ -19,6 +19,20 @@ pub struct TransactionEventRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExplicitBinDistribution {
+    pub bin_id: i32,
+    pub distribution_x: u16,
+    pub distribution_y: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WeightedBinDistribution {
+    pub bin_id: i32,
+    pub weight: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LiquidityAddRequest {
     pub instruction_index: usize,
     pub instruction_type: String,
@@ -26,6 +40,11 @@ pub struct LiquidityAddRequest {
     pub requested_amount_y: String,
     pub observed_active_id: Option<i32>,
     pub max_active_bin_slippage: Option<i32>,
+    pub min_bin_id: Option<i32>,
+    pub max_bin_id: Option<i32>,
+    pub strategy_variant: Option<u8>,
+    pub explicit_distribution: Vec<ExplicitBinDistribution>,
+    pub weighted_distribution: Vec<WeightedBinDistribution>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +66,18 @@ const ADD_BY_STRATEGY2_IX: [u8; 8] = [3, 221, 149, 218, 111, 141, 118, 213];
 const ADD_BY_WEIGHT_IX: [u8; 8] = [28, 140, 238, 99, 231, 162, 21, 149];
 const ADD_BY_WEIGHT2_IX: [u8; 8] = [209, 59, 63, 91, 111, 200, 153, 228];
 
+fn read_i32_at(data: &[u8], offset: usize) -> Option<i32> {
+    Some(i32::from_le_bytes(data.get(offset..offset + 4)?.try_into().ok()?))
+}
+
+fn read_u16_at(data: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(data.get(offset..offset + 2)?.try_into().ok()?))
+}
+
+fn read_u32_at(data: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(data.get(offset..offset + 4)?.try_into().ok()?))
+}
+
 fn decode_add_request(data: &[u8], instruction_index: usize) -> Option<LiquidityAddRequest> {
     if data.len() < 24 {
         return None;
@@ -55,26 +86,68 @@ fn decode_add_request(data: &[u8], instruction_index: usize) -> Option<Liquidity
     let amount_x = u64::from_le_bytes(data[8..16].try_into().ok()?);
     let amount_y = u64::from_le_bytes(data[16..24].try_into().ok()?);
 
-    let (instruction_type, has_active_guard) = match discriminator {
-        ADD_LIQUIDITY_IX => ("add_liquidity", false),
-        ADD_LIQUIDITY2_IX => ("add_liquidity2", false),
-        ADD_BY_STRATEGY_IX => ("add_liquidity_by_strategy", true),
-        ADD_BY_STRATEGY2_IX => ("add_liquidity_by_strategy2", true),
-        ADD_BY_WEIGHT_IX => ("add_liquidity_by_weight", true),
-        ADD_BY_WEIGHT2_IX => ("add_liquidity_by_weight2", true),
-        _ => return None,
-    };
+    let mut observed_active_id = None;
+    let mut max_active_bin_slippage = None;
+    let mut min_bin_id = None;
+    let mut max_bin_id = None;
+    let mut strategy_variant = None;
+    let mut explicit_distribution = Vec::new();
+    let mut weighted_distribution = Vec::new();
 
-    let (observed_active_id, max_active_bin_slippage) = if has_active_guard {
-        if data.len() < 32 {
-            return None;
+    let instruction_type = match discriminator {
+        ADD_LIQUIDITY_IX | ADD_LIQUIDITY2_IX => {
+            let count = read_u32_at(data, 24)? as usize;
+            let mut offset = 28usize;
+            for _ in 0..count {
+                let bin_id = read_i32_at(data, offset)?;
+                let distribution_x = read_u16_at(data, offset + 4)?;
+                let distribution_y = read_u16_at(data, offset + 6)?;
+                explicit_distribution.push(ExplicitBinDistribution {
+                    bin_id,
+                    distribution_x,
+                    distribution_y,
+                });
+                offset += 8;
+            }
+            if discriminator == ADD_LIQUIDITY_IX {
+                "add_liquidity"
+            } else {
+                "add_liquidity2"
+            }
         }
-        (
-            Some(i32::from_le_bytes(data[24..28].try_into().ok()?)),
-            Some(i32::from_le_bytes(data[28..32].try_into().ok()?)),
-        )
-    } else {
-        (None, None)
+        ADD_BY_STRATEGY_IX | ADD_BY_STRATEGY2_IX => {
+            if data.len() < 105 {
+                return None;
+            }
+            observed_active_id = Some(read_i32_at(data, 24)?);
+            max_active_bin_slippage = Some(read_i32_at(data, 28)?);
+            min_bin_id = Some(read_i32_at(data, 32)?);
+            max_bin_id = Some(read_i32_at(data, 36)?);
+            strategy_variant = data.get(40).copied();
+            if discriminator == ADD_BY_STRATEGY_IX {
+                "add_liquidity_by_strategy"
+            } else {
+                "add_liquidity_by_strategy2"
+            }
+        }
+        ADD_BY_WEIGHT_IX | ADD_BY_WEIGHT2_IX => {
+            observed_active_id = Some(read_i32_at(data, 24)?);
+            max_active_bin_slippage = Some(read_i32_at(data, 28)?);
+            let count = read_u32_at(data, 32)? as usize;
+            let mut offset = 36usize;
+            for _ in 0..count {
+                let bin_id = read_i32_at(data, offset)?;
+                let weight = read_u16_at(data, offset + 4)?;
+                weighted_distribution.push(WeightedBinDistribution { bin_id, weight });
+                offset += 6;
+            }
+            if discriminator == ADD_BY_WEIGHT_IX {
+                "add_liquidity_by_weight"
+            } else {
+                "add_liquidity_by_weight2"
+            }
+        }
+        _ => return None,
     };
 
     Some(LiquidityAddRequest {
@@ -84,9 +157,13 @@ fn decode_add_request(data: &[u8], instruction_index: usize) -> Option<Liquidity
         requested_amount_y: amount_y.to_string(),
         observed_active_id,
         max_active_bin_slippage,
+        min_bin_id,
+        max_bin_id,
+        strategy_variant,
+        explicit_distribution,
+        weighted_distribution,
     })
 }
-
 fn decode_add_requests(value: &Value) -> Vec<LiquidityAddRequest> {
     let Some(instructions) = value
         .pointer("/transaction/transaction/message/instructions")
@@ -281,7 +358,10 @@ mod tests {
         bytes.extend_from_slice(&200u64.to_le_bytes());
         bytes.extend_from_slice(&12i32.to_le_bytes());
         bytes.extend_from_slice(&3i32.to_le_bytes());
-        bytes.extend_from_slice(&[0u8; 20]);
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.push(0u8);
+        bytes.extend_from_slice(&[0u8; 64]);
 
         let request = decode_add_request(&bytes, 7).expect("request");
         assert_eq!(request.instruction_index, 7);
@@ -290,6 +370,9 @@ mod tests {
         assert_eq!(request.requested_amount_y, "200");
         assert_eq!(request.observed_active_id, Some(12));
         assert_eq!(request.max_active_bin_slippage, Some(3));
+        assert_eq!(request.min_bin_id, Some(0));
+        assert_eq!(request.max_bin_id, Some(0));
+        assert_eq!(request.strategy_variant, Some(0));
     }
 
     #[test]
@@ -319,6 +402,7 @@ mod tests {
         assert_eq!(requests[0].requested_amount_x, "10");
         assert_eq!(requests[0].requested_amount_y, "20");
         assert_eq!(requests[0].observed_active_id, None);
+        assert!(requests[0].explicit_distribution.is_empty());
     }
 
     #[test]
