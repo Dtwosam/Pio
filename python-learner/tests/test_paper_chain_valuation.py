@@ -214,3 +214,63 @@ def test_chain_valuation_fails_closed_on_unvalued_reward(tmp_path):
             position_id="pos",
             observed_at="2026-09-23T09:05:00+00:00",
         )
+
+
+
+def test_chain_valuation_continues_after_rebalance_reset(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_chain(storage, "2026-09-23T09:00:00+00:00")
+    save_chain(
+        storage,
+        "2026-09-23T09:05:00+00:00",
+        active_id=1,
+    )
+    save_chain(
+        storage,
+        "2026-09-23T09:10:00+00:00",
+        active_id=1,
+        fee_checkpoint=Q64,
+    )
+    seed_position(storage)
+    initialize_paper_counterfactual(
+        storage,
+        position_id="pos",
+        plan=plan(),
+    )
+
+    first = apply_paper_chain_valuation(
+        storage,
+        position_id="pos",
+        observed_at="2026-09-23T09:05:00+00:00",
+        holding_observations=1,
+        rebalance_cost_quote=1.0,
+        config=PositionManagementConfig(
+            stop_loss_bps=5000,
+            max_rebalances=3,
+        ),
+    )
+    assert first.executed_action == "REBALANCE"
+
+    second = apply_paper_chain_valuation(
+        storage,
+        position_id="pos",
+        observed_at="2026-09-23T09:10:00+00:00",
+        holding_observations=2,
+        config=PositionManagementConfig(
+            stop_loss_bps=5000,
+            max_rebalances=3,
+        ),
+    )
+    assert second.executed_action == "HOLD"
+    assert second.valuation.fee_delta_quote >= 0
+
+    with storage.connect() as conn:
+        reset = conn.execute(
+            """
+            SELECT next_state_json
+            FROM paper_chain_valuations
+            WHERE position_id = 'pos'
+              AND observed_at = '2026-09-23T09:05:00+00:00'
+            """
+        ).fetchone()[0]
+    assert '"rebalance_reset":true' in reset
