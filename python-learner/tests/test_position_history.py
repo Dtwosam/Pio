@@ -83,8 +83,11 @@ def test_collect_position_history_persists_raw_and_normalized_rows(tmp_path):
 
 def test_position_event_upsert_is_idempotent(tmp_path):
     storage = Storage(tmp_path / "pio.db")
-    collect_position_history(storage, FakeAPI(), "position")
-    collect_position_history(storage, FakeAPI(), "position")
+    first = collect_position_history(storage, FakeAPI(), "position")
+    second = collect_position_history(storage, FakeAPI(), "position")
+
+    assert first.events == 1
+    assert second.events == 0
 
     conn = sqlite3.connect(storage.path)
     try:
