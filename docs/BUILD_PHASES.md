@@ -176,7 +176,7 @@ Still needed:
 - external alert delivery/integration around the implemented health metrics, if required by deployment
 
 ## Phase 6 — Rust Transaction Executor
-Status: guarded pre-sign execution infrastructure in progress; live signing/sending disabled.
+Status: implementation complete behind fail-closed gates; controlled live validation pending and public signing/sending disabled.
 
 Built:
 - isolated Rust wallet loader using an absolute owner-only keypair file
@@ -222,10 +222,13 @@ Built:
 - immutable Rust execution-decision context export and Python receipt-reconciled ingestion
 - immutable learner labels joining confirmed ENTER model/strategy/range/capital to realized live return and prediction error
 - fail-closed live execution ledger integrity audit including valuation/learning-label completeness
+- Token-2022 transfer-hook / remaining-account entry, rebalance, exit and settlement construction
+- Rust read-only Phase 5 promotion verification against persisted Python evidence
+- Phase 6 deployment-readiness gate binding Phase 5 promotion, isolated wallet and strict action policy
+- internal submission coordinator refuses live submission without an accepted Phase 5 promotion gate
 - Phase 6 execution runbook and reproducible guard/request examples
 
 Still needed:
-- Token-2022 transfer-hook / remaining-account execution support
 - end-to-end controlled executor validation after Phase 5 promotion evidence exists
 
 Live signing and transaction sending remain unavailable.
