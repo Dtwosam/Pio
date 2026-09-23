@@ -84,6 +84,7 @@ def build_phase3_research_plan(
     baseline_config: BaselinePolicyConfig = BaselinePolicyConfig(),
     sizing_config: CapitalSizingConfig = CapitalSizingConfig(),
     observation_limit: int = 12,
+    observation_times: Sequence[str] | None = None,
     half_widths: Sequence[int] = (0, 1, 2, 5, 10),
     center_offsets: Sequence[int] = (0,),
     strategies: Sequence[StrategyType | str] = (
@@ -100,9 +101,15 @@ def build_phase3_research_plan(
     This combines pool safety, chain replay candidate selection, capital sizing,
     and the Phase 3 authorization gate. It does not build or sign a transaction.
     """
+    safety_as_of = (
+        str(observation_times[-1])
+        if observation_times
+        else None
+    )
     safety_report = screen_pool_universe(
         database_path,
         config=safety_config,
+        as_of=safety_as_of,
     )
     safety = next(
         (
@@ -146,6 +153,7 @@ def build_phase3_research_plan(
         amount_x=amount_x,
         amount_y=amount_y,
         observation_limit=observation_limit,
+        observation_times=observation_times,
         half_widths=half_widths,
         center_offsets=center_offsets,
         strategies=strategies,
