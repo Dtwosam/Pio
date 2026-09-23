@@ -10,16 +10,34 @@ from .storage import Storage, utc_now_iso
 
 
 @dataclass(frozen=True)
+class Phase9PoolEvidenceProgress:
+    pool_address: str
+    rank: int
+    api_observed_at: str | None
+    tvl: float | None
+    volume_24h: float | None
+    chain_observations: int
+    observations_remaining: int
+    chain_observed: bool
+    history_ready: bool
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Phase9PoolCohortProgress:
     api_ranking_as_of: str
     fresh_api_pools: int
     stale_api_pools_excluded: int
     required_observations: int
+    max_history_samples_remaining: int
     desired_pools: tuple[str, ...]
     research_pools: tuple[str, ...]
     sampling_pools: tuple[str, ...]
     missing_chain_pools: tuple[str, ...]
     research_ready: bool
+    pools: tuple[Phase9PoolEvidenceProgress, ...]
     reasons: tuple[str, ...]
 
     def to_record(self) -> dict[str, Any]:
@@ -139,16 +157,42 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         storage,
         as_of=progress_as_of,
     )
+    cohort_pools = tuple(
+        Phase9PoolEvidenceProgress(
+            pool_address=item.pool_address,
+            rank=item.rank,
+            api_observed_at=item.api_observed_at,
+            tvl=item.tvl,
+            volume_24h=item.volume_24h,
+            chain_observations=item.chain_observations,
+            observations_remaining=max(
+                0,
+                cohort.required_observations - item.chain_observations,
+            ),
+            chain_observed=item.chain_observed,
+            history_ready=item.history_ready,
+        )
+        for item in cohort.items
+    )
     pool_cohort = Phase9PoolCohortProgress(
         api_ranking_as_of=progress_as_of,
         fresh_api_pools=cohort.api_pools_seen,
         stale_api_pools_excluded=cohort.stale_api_pools_excluded,
         required_observations=cohort.required_observations,
+        max_history_samples_remaining=max(
+            (
+                item.observations_remaining
+                for item in cohort_pools
+                if item.pool_address in cohort.sampling_pools
+            ),
+            default=0,
+        ),
         desired_pools=cohort.desired_pools,
         research_pools=cohort.research_pools,
         sampling_pools=cohort.sampling_pools,
         missing_chain_pools=cohort.missing_chain_pools,
         research_ready=cohort.research_ready,
+        pools=cohort_pools,
         reasons=cohort.reasons,
     )
     wallet_activity_scans = _wallet_activity_scans(storage)
