@@ -11,6 +11,7 @@ mod journaled_dry_run;
 mod models;
 mod preflight;
 mod prestate_verifier;
+mod position_closure;
 mod presign;
 mod rebalance;
 mod risk;
@@ -34,6 +35,7 @@ fn usage() {
   meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
+  meteora-executor verify-position-closed <RPC_URL> <POSITION_ADDRESS>
   meteora-executor risk-check <PROPOSAL_JSON_OR_-> <RISK_CONFIG_JSON>
   meteora-executor dry-run-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
   meteora-executor preflight-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
@@ -102,6 +104,25 @@ RPC_URL is accepted as a compatibility fallback",
             let snapshot =
                 state_reader::inspect_pool(&rpc_url, &pool_address, array_radius).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "verify-position-closed" => {
+            let rpc_url = args.next().context("RPC_URL is required")?;
+            let position_address = args
+                .next()
+                .context("POSITION_ADDRESS is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "verify-position-closed accepts exactly two arguments"
+                );
+            }
+            let proof = position_closure::verify_position_closed(
+                &rpc_url,
+                &position_address,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&proof)?);
+            if !proof.closed {
+                std::process::exit(2);
+            }
         }
         "risk-check" => {
             let proposal_source = args
