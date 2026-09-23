@@ -127,6 +127,7 @@ pio phase9-maintenance-status  # shared source/research lease state
 pio phase9-source-freshness  # replay-valid evidence vs latest persisted source observations
 pio phase9-evidence-status  # quantitative ranked-cohort/source/family readiness
 pio phase9-evidence-plan  # ranked evidence debt + one deterministic next safe action
+pio phase9-evidence-step-run  # execute exactly one planner-selected safe evidence step
 pio phase9-research-refresh-run  # replay-aware automatic research refresh; no promotion
 pio phase9-chain-capture-plan --rpc-url <RPC_URL> --require-ready
 pio phase9-chain-capture-run --require-target  # uses SOLANA_RPC_URL; read-only inspect + local ingest
