@@ -206,15 +206,17 @@ Built:
 - unsigned standard-SPL Meteora RemoveAllLiquidity emergency-exit builder
 - chain-resolved emergency-exit account derivation and ownership validation
 - strict pinned RemoveAllLiquidity discriminator policy for EXIT actions
+- unsigned standard-SPL live entry builder using deterministic executor-wallet position PDA
+- chain-resolved entry pool/token/bin-array validation with missing-bin initialization
+- unsigned standard-SPL rebalance builder consuming precomputed validated remove/add parameters
+- chain-resolved rebalance position ownership, pool/token and bin-array validation
+- isolated deterministic one-signer transaction signer bound to persisted final-presign evidence
+- idempotent internal submission coordinator that persists SENT/signature before RPC submission and retries only the same signed transaction
 - Phase 6 execution runbook and reproducible guard/request examples
 
 Still needed:
-- normal live entry instruction construction
-- normal live rebalance instruction construction
 - fee/reward claim and final position-account close sequence
 - Token-2022 transfer-hook / remaining-account execution support
-- isolated transaction signer implementation
-- send/retry logic with ambiguous-outcome recovery and no duplicate execution
 - receipt-driven live account/PnL mutation and learning-label reconciliation
 - end-to-end controlled executor validation after Phase 5 promotion evidence exists
 
