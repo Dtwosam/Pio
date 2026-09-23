@@ -70,6 +70,7 @@ class Phase9HistoryCaptureReport:
     pools_skipped_interval: int
     pools_failed: int
     min_observation_interval_seconds: int
+    continue_sampling_when_ready: bool
     history_ready_before: bool
     history_ready_after: bool
     observations_remaining_after: int
@@ -96,6 +97,7 @@ def run_phase9_history_capture(
     timeout_seconds: int = 120,
     ingest_observed_at: str | None = None,
     min_observation_interval_seconds: int = 0,
+    continue_sampling_when_ready: bool = False,
 ) -> Phase9HistoryCaptureReport:
     if bin_array_radius < 0:
         raise ValueError("bin_array_radius cannot be negative")
@@ -127,11 +129,17 @@ def run_phase9_history_capture(
     else:
         inspect = inspector
 
-    attempted_pools = tuple(
+    deficient_pools = tuple(
         item
         for item in before.pools
         if item.additional_observations_needed > 0
     )
+    if deficient_pools:
+        attempted_pools = deficient_pools
+    elif continue_sampling_when_ready and before.plan_ready:
+        attempted_pools = before.pools
+    else:
+        attempted_pools = ()
     items: list[Phase9HistoryCaptureItem] = []
     captured = 0
     skipped_interval = 0
@@ -277,9 +285,15 @@ def run_phase9_history_capture(
             "capture can complete"
         )
     if before.plan_ready:
-        reasons.append(
-            "Phase 9 chain-history depth was already ready"
-        )
+        if continue_sampling_when_ready:
+            reasons.append(
+                "Phase 9 chain-history depth was already ready; ongoing "
+                "cadence sampling remained enabled"
+            )
+        else:
+            reasons.append(
+                "Phase 9 chain-history depth was already ready"
+            )
     if skipped_interval:
         reasons.append(
             f"{skipped_interval} pool(s) skipped because the minimum "
@@ -306,6 +320,7 @@ def run_phase9_history_capture(
         min_observation_interval_seconds=(
             min_observation_interval_seconds
         ),
+        continue_sampling_when_ready=continue_sampling_when_ready,
         history_ready_before=before.plan_ready,
         history_ready_after=after.plan_ready,
         observations_remaining_after=remaining,
