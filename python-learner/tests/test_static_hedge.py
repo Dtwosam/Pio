@@ -119,6 +119,10 @@ def test_full_static_x_hedge_reduces_directional_variability(tmp_path):
     assert report.mean_abs_return_reduction_bps > 100
     assert report.worst_loss_improvement_bps > 100
     assert report.policy_actionable is False
+    assert len(report.source_observations) == 24
+    assert len(report.source_path_sha256) == 64
+    assert report.source_observations[0].pool_snapshot_id > 0
+    assert report.source_observations[0].bin_liquidity_snapshot_id > 0
 
 
 def test_hedge_cost_can_disqualify_research(tmp_path):
@@ -178,6 +182,8 @@ def test_hedge_research_is_no_lookahead(tmp_path):
 
     assert after.windows == before.windows
     assert after.window_results == before.window_results
+    assert after.source_observations == before.source_observations
+    assert after.source_path_sha256 == before.source_path_sha256
     assert (
         after.mean_abs_return_reduction_bps
         == before.mean_abs_return_reduction_bps
