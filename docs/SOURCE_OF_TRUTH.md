@@ -497,7 +497,12 @@ be synthesized. They may be persisted only in a checksum-bound
 `PHASE8_RETRAIN_INPUTS_V1` artifact tied to the current champion model ID and
 dataset version. Champion rotation invalidates the artifact. A valid artifact
 may be used to build the no-lookahead retraining dataset and start a retraining
-cycle, but it does not authorize model training, PAPER transition, champion
+cycle. Once that cycle has persisted checksum-valid dataset evidence, offline
+challenger training may use a deterministic model ID/artifact directory, and
+offline qualification may run only after the dataset bytes/version/cutoff
+re-verify. Qualification requires both cycle walk-forward and the held-out
+offline challenger gate. These stages may advance only as far as
+`OFFLINE_QUALIFIED`; they do not authorize PAPER transition, champion
 promotion, rollback, Phase 8 promotion, or LIVE execution.
 
 The `phase8-evidence-plan` view is advisory. It may identify the next
