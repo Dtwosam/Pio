@@ -1,3 +1,4 @@
+mod blockhash;
 mod confirmation;
 mod dry_run;
 mod emergency_exit;
