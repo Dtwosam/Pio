@@ -23,6 +23,7 @@ from meteora_learner.phase9_validation import (
     evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
     persist_phase9_research_bundle,
+    phase9_research_bundle_sha256,
 )
 from meteora_learner.phase_promotion import (
     PHASE8,
@@ -599,7 +600,9 @@ def test_phase9_promotion_persists_non_actionable_ready_bundle(tmp_path):
 
     assert report.promotion_ready is True
     assert report.research_bundle_evidence_id == bundle_id
+    assert report.persisted_bundle_hash_valid is True
     assert report.persisted_bundle_matches_current is True
+    assert report.persisted_bundle_sha256 == report.research_bundle_sha256
     assert report.research_only is True
     assert report.policy_actionable is False
 
@@ -614,6 +617,57 @@ def test_phase9_promotion_persists_non_actionable_ready_bundle(tmp_path):
         phase_name=PHASE9,
     ).promoted is True
 
+
+
+def test_phase9_promotion_rejects_tampered_bundle_payload(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    bundle_id = persist_phase9_research_bundle(
+        storage,
+        report=bundle,
+    )
+
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
+        pool_address="__PHASE9_RESEARCH__",
+    )
+    assert latest is not None
+    assert latest["id"] == bundle_id
+    persisted = dict(latest["evidence"])
+    expected_sha = persisted["bundle_sha256"]
+    payload = {
+        key: value
+        for key, value in persisted.items()
+        if key != "bundle_sha256"
+    }
+    assert phase9_research_bundle_sha256(payload) == expected_sha
+
+    import json
+
+    payload["status"] = "TAMPERED_READY"
+    tampered = {
+        **payload,
+        "bundle_sha256": expected_sha,
+    }
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE advanced_edge_evidence
+            SET evidence_json = ?
+            WHERE id = ?
+            """,
+            (json.dumps(tampered, sort_keys=True), bundle_id),
+        )
+
+    report = evaluate_phase9_promotion(storage)
+
+    assert report.promotion_ready is False
+    assert report.persisted_bundle_hash_valid is False
+    assert any(
+        "checksum is invalid" in reason
+        for reason in report.reasons
+    )
 
 def test_phase9_promotion_requires_complete_research_bundle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
