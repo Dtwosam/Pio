@@ -193,8 +193,7 @@ def seed_explicit_inputs(storage):
 
 def seed_bandit_explicit_inputs(storage):
     base = seed_explicit_inputs(storage)
-    payload = base.inputs.to_record()
-    payload["pool_inputs"] = list(payload["pool_inputs"])
+    payload = json.loads(json.dumps(base.inputs.to_record()))
     payload["pool_inputs"].append(
         {
             "pool_address": "pool-c",
