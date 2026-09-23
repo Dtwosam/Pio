@@ -681,3 +681,34 @@ The output remains `research_only=true`, `simulation_only=true`,
 `policy_actionable=false` and `execution_wired=false`. A ready pre-wiring
 audit is the end of the simulation evidence chain, not permission to connect
 Phase 9 to the LIVE executor.
+
+
+## End-to-end Phase 9 work queue
+
+`pio phase9-work-queue` is the single dependency-aware planner for both the
+research milestone and the future-policy simulation evidence chain. It does not
+skip prerequisites.
+
+Before Phase 9 research promotion is current, it continues to surface storage,
+Phase 8, research-family, bundle and promotion blockers. After Phase 9
+promotion is current, the same queue advances in order through:
+
+1. post-promotion shadow evidence;
+2. replay-current authorization evidence;
+3. fresh independent controlled holdout evidence;
+4. disabled bounded-rollout simulation;
+5. rollback simulation and observation depth/remediation;
+6. final pre-wiring readiness.
+
+When a required artifact can be produced reproducibly from existing persisted
+inputs, the queue emits the concrete CLI command. When a genuinely new external
+artifact is required—such as a fresh retraining cycle, rollout envelope or
+updated rollback metrics—it says so instead of fabricating one.
+
+Persisting the queue snapshot with `--persist-snapshot` records the new
+policy-evidence readiness fields as sanitized append-only state. No emitted
+shell commands, RPC URLs or secrets are stored. `pio phase9-progress` now
+reports the highest reached checkpoint, including
+`POLICY_AUTHORIZATION_CURRENT`, `CONTROLLED_VALIDATION_CURRENT`,
+`ROLLOUT_SIMULATION_CURRENT`, `ROLLBACK_SIMULATION_CURRENT` and
+`PREWIRE_READY`.
