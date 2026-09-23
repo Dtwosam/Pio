@@ -46,6 +46,7 @@ class Phase9ProgressReport:
     rollback_simulation_current: bool
     prewire_ready: bool
     prewire_manifest_current: bool
+    research_sources_current: bool
     latest_queue_sha256: str | None
     wallet_activity_scans: tuple[Phase9WalletActivityProgress, ...]
     reasons: tuple[str, ...]
@@ -148,6 +149,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             rollback_simulation_current=False,
             prewire_ready=False,
             prewire_manifest_current=False,
+            research_sources_current=False,
             latest_queue_sha256=None,
             wallet_activity_scans=wallet_activity_scans,
             reasons=(
@@ -210,6 +212,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
             rollback_simulation_current=False,
             prewire_ready=False,
             prewire_manifest_current=False,
+            research_sources_current=False,
             latest_queue_sha256=None,
             wallet_activity_scans=wallet_activity_scans,
             reasons=tuple(reasons),
@@ -245,6 +248,14 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         latest[4].get("prewire_manifest_current")
     )
 
+    research_sources_current = bool(
+        latest[4].get("research_sources_current")
+    )
+    source_refresh_pending = any(
+        task.startswith("RESEARCH_SOURCE_REFRESH:")
+        for task in latest_tasks
+    )
+
     if not integrity_verified:
         status = "INTEGRITY_FAILED"
     elif prewire_manifest_current:
@@ -267,6 +278,8 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         status = "RESEARCH_BUNDLE_READY"
     elif not phase8_current:
         status = "PHASE8_BLOCKED"
+    elif source_refresh_pending:
+        status = "SOURCE_REFRESH_PENDING"
     elif latest_tasks:
         status = "EVIDENCE_PENDING"
     else:
@@ -294,6 +307,7 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         rollback_simulation_current=rollback_simulation_current,
         prewire_ready=prewire_ready,
         prewire_manifest_current=prewire_manifest_current,
+        research_sources_current=research_sources_current,
         latest_queue_sha256=latest[2],
         wallet_activity_scans=wallet_activity_scans,
         reasons=tuple(reasons),
