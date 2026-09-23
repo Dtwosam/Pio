@@ -16,7 +16,7 @@ from .storage import Storage
 class Phase9HistoryPoolPlan:
     pool_address: str
     observations: int
-    adaptive_required_observations: int
+    adaptive_required_observations: int | None
     regime_required_observations: int
     required_observations: int
     additional_observations_needed: int
@@ -150,11 +150,7 @@ def build_phase9_history_plan(
             Phase9HistoryPoolPlan(
                 pool_address=pool_address,
                 observations=observations,
-                adaptive_required_observations=(
-                    adaptive_required
-                    if adaptive_required is not None
-                    else -1
-                ),
+                adaptive_required_observations=adaptive_required,
                 regime_required_observations=(
                     regime_criteria.min_observations
                 ),
