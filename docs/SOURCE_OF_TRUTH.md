@@ -382,6 +382,20 @@ sources, original cutoff and original criteria/assumptions, and the normalized
 replayed report must equal the persisted evidence. Valid source hashes alone do
 not make edited derived metrics acceptable.
 
+
+Phase 9 persistence is append-only at the database boundary. Authoritative
+chain-pool snapshots, token-mint snapshots, bin-liquidity snapshots and
+position-event history reject UPDATE/DELETE operations. Persisted
+`advanced_edge_evidence` rows are likewise immutable; corrected or newer
+research is represented by a new evidence row rather than rewriting history.
+The current phase-promotion pointer may be refreshed after revalidation, but
+every promotion write is also copied into immutable
+`phase_promotion_evidence_history` so prior promotion states remain auditable.
+
+Checksum-bound contextual-bandit retraining datasets must use an absolute,
+regular, non-symlink file path. The stored bytes are re-hashed during replay,
+so path indirection or file replacement cannot silently preserve qualification.
+
 Portfolio-allocation qualification is artifact-bound. The preferred Phase 9
 flow persists the exact multi-pool candidate corpus, source pool inputs,
 account-state assumptions and ranked comparison as immutable
