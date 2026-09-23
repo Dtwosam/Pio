@@ -2,6 +2,7 @@ import json
 import hashlib
 from datetime import datetime, timedelta, timezone
 import sqlite3
+from types import SimpleNamespace
 import meteora_learner.phase9_work_queue as work_queue_module
 from pathlib import Path
 from meteora_learner.adaptive_range import AdaptiveRangeCriteria
