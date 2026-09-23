@@ -50,6 +50,12 @@ from .paper_account import (
 from .paper_policy import evaluate_paper_position_policy
 from .paper_cycle import apply_paper_observation
 from .paper_runner import PaperBatchObservation, run_paper_observation_batch
+from .paper_chain import (
+    apply_chain_paper_observation,
+    bind_paper_position_to_chain,
+    paper_chain_binding,
+    value_paper_position_from_chain,
+)
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -271,6 +277,60 @@ def main() -> None:
     paper_observe.add_argument("--max-rebalances", type=int, default=3)
     paper_observe.add_argument("--max-holding-observations", type=int)
     paper_observe.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
+
+    paper_chain_bind = subparsers.add_parser(
+        "paper-chain-bind",
+        help="Bind an open paper position to atomic chain replay state",
+    )
+    paper_chain_bind.add_argument("--position", required=True)
+    paper_chain_bind.add_argument("--observed-at", required=True)
+    paper_chain_bind.add_argument("--amount-x", required=True, type=int)
+    paper_chain_bind.add_argument("--amount-y", required=True, type=int)
+    paper_chain_bind.add_argument(
+        "--token-y-quote-per-atomic",
+        required=True,
+        type=float,
+    )
+    paper_chain_bind.add_argument("--max-notional-error-bps", type=int, default=50)
+    paper_chain_bind.add_argument("--max-share-bps", type=int, default=500)
+    paper_chain_bind.add_argument("--favor-x-active", action="store_true")
+
+    paper_chain_value = subparsers.add_parser(
+        "paper-chain-value",
+        help="Preview a paper position mark directly from chain snapshots",
+    )
+    paper_chain_value.add_argument("--position", required=True)
+    paper_chain_value.add_argument("--observed-at", required=True)
+    paper_chain_value.add_argument(
+        "--token-y-quote-per-atomic",
+        required=True,
+        type=float,
+    )
+
+    paper_chain_observe = subparsers.add_parser(
+        "paper-chain-observe",
+        help="Value and apply one paper observation directly from chain state",
+    )
+    paper_chain_observe.add_argument("--position", required=True)
+    paper_chain_observe.add_argument("--observed-at", required=True)
+    paper_chain_observe.add_argument(
+        "--token-y-quote-per-atomic",
+        required=True,
+        type=float,
+    )
+    paper_chain_observe.add_argument("--estimated-exit-cost", type=float, default=0.0)
+    paper_chain_observe.add_argument("--rebalance-cost", type=float)
+    paper_chain_observe.add_argument("--pool-unsafe", action="store_true")
+    paper_chain_observe.add_argument("--emergency-exit", action="store_true")
+    paper_chain_observe.add_argument("--stop-loss-bps", type=int, default=500)
+    paper_chain_observe.add_argument("--take-profit-bps", type=int)
+    paper_chain_observe.add_argument("--max-rebalances", type=int, default=3)
+    paper_chain_observe.add_argument("--max-holding-observations", type=int)
+    paper_chain_observe.add_argument(
         "--proactive-rebalance-buffer-bins",
         type=int,
         default=0,
@@ -1327,6 +1387,60 @@ def main() -> None:
             emergency_exit=args.emergency_exit,
             estimated_exit_cost_quote=args.estimated_exit_cost,
             rebalance_cost_quote=args.rebalance_cost,
+            config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-chain-bind":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = bind_paper_position_to_chain(
+            storage,
+            position_id=args.position,
+            observed_at=args.observed_at,
+            amount_x=args.amount_x,
+            amount_y=args.amount_y,
+            token_y_quote_per_atomic=args.token_y_quote_per_atomic,
+            max_notional_error_bps=args.max_notional_error_bps,
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-chain-value":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = value_paper_position_from_chain(
+            storage,
+            position_id=args.position,
+            observed_at=args.observed_at,
+            token_y_quote_per_atomic=args.token_y_quote_per_atomic,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-chain-observe":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = apply_chain_paper_observation(
+            storage,
+            position_id=args.position,
+            observed_at=args.observed_at,
+            token_y_quote_per_atomic=args.token_y_quote_per_atomic,
+            pool_safe=not args.pool_unsafe,
+            estimated_exit_cost_quote=args.estimated_exit_cost,
+            rebalance_cost_quote=args.rebalance_cost,
+            emergency_exit=args.emergency_exit,
             config=PositionManagementConfig(
                 stop_loss_bps=args.stop_loss_bps,
                 take_profit_bps=args.take_profit_bps,
