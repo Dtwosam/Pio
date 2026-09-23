@@ -497,5 +497,6 @@ explicit economic assumptions, persist promotion/authorization evidence, alter
 rollout/rollback state, or grant LIVE execution authority. Non-actionable
 dependencies such as stale Phase 8 currentness remain visible even when a
 different safe evidence-acquisition step is the next executable action.
+The separate `phase9-evidence-step-run` may execute exactly one such planner-selected operation only through direct in-process calls to the existing bounded collectors/research refresh under the shared maintenance lease. It must not parse or execute planner shell text, auto-fill explicit assumptions, persist promotion/authorization evidence, alter rollout/rollback state, or invoke any LIVE submission path.
 
 Phase 9 unattended source capture and research refresh share one mutable SQLite maintenance lease. Overlapping invocations must return busy without running the underlying job; expired leases may be recovered. The lease is operational state, not research evidence, and is intentionally outside append-only evidence immutability checks.
