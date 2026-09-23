@@ -16,7 +16,7 @@ class Phase2CapabilityStatus:
     composition_event_labels: bool = True
     composition_formula_reconciliation: bool = False
     rebalance_lifecycle: bool = False
-    reward_accounting: bool = False
+    reward_accounting: bool = True
 
 
 CURRENT_PHASE2_CAPABILITIES = Phase2CapabilityStatus()
@@ -28,6 +28,8 @@ class Phase2PromotionCriteria:
     min_amount_bins: int
     min_fee_intervals: int
     min_fee_bins: int
+    min_reward_intervals: int
+    min_reward_growth_bins: int
     min_amount_coverage_rate: float = 1.0
 
     def __post_init__(self) -> None:
@@ -39,6 +41,10 @@ class Phase2PromotionCriteria:
             raise ValueError("min_fee_intervals must be positive")
         if self.min_fee_bins <= 0:
             raise ValueError("min_fee_bins must be positive")
+        if self.min_reward_intervals <= 0:
+            raise ValueError("min_reward_intervals must be positive")
+        if self.min_reward_growth_bins <= 0:
+            raise ValueError("min_reward_growth_bins must be positive")
         if not 0.0 <= self.min_amount_coverage_rate <= 1.0:
             raise ValueError("min_amount_coverage_rate must be between 0 and 1")
 
@@ -85,6 +91,10 @@ def evaluate_phase2_promotion_gate(
             reasons.append("no eligible amount-state reconciliation samples")
         if corpus.fee_intervals_eligible == 0:
             reasons.append("no eligible fee reconciliation intervals")
+        if corpus.reward_intervals_eligible == 0:
+            reasons.append("no eligible reward reconciliation intervals")
+        if corpus.reward_bins_with_checkpoint_growth == 0:
+            reasons.append("no reward bins with checkpoint growth")
         if corpus.amount_mismatched_bins:
             reasons.append(
                 f"{corpus.amount_mismatched_bins} amount-state bins do not match exactly"
@@ -92,6 +102,10 @@ def evaluate_phase2_promotion_gate(
         if corpus.fee_mismatched_bins:
             reasons.append(
                 f"{corpus.fee_mismatched_bins} fee bins do not match exactly"
+            )
+        if corpus.reward_mismatched_bins:
+            reasons.append(
+                f"{corpus.reward_mismatched_bins} reward bins do not match exactly"
             )
 
     sample_checks = [
@@ -113,6 +127,17 @@ def evaluate_phase2_promotion_gate(
             corpus.fee_bins_checked >= criteria.min_fee_bins,
             f"fee_bins_checked {corpus.fee_bins_checked} < required "
             f"{criteria.min_fee_bins}",
+        ),
+        (
+            corpus.reward_intervals_eligible >= criteria.min_reward_intervals,
+            f"reward_intervals_eligible {corpus.reward_intervals_eligible} < required "
+            f"{criteria.min_reward_intervals}",
+        ),
+        (
+            corpus.reward_bins_with_checkpoint_growth >= criteria.min_reward_growth_bins,
+            f"reward_bins_with_checkpoint_growth "
+            f"{corpus.reward_bins_with_checkpoint_growth} < required "
+            f"{criteria.min_reward_growth_bins}",
         ),
         (
             amount_coverage_rate >= criteria.min_amount_coverage_rate,
