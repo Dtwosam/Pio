@@ -158,6 +158,40 @@ def _latest_retraining_dataset_cycle(
     return cycle_id
 
 
+def _mint_evaluation_as_of(
+    storage: Storage,
+    *,
+    selected_pools: tuple[str, ...],
+    mint_plan,
+) -> str:
+    source_times = [
+        str(item.latest_snapshot_at)
+        for item in mint_plan.candidates
+        if item.latest_snapshot_at is not None
+    ]
+    if selected_pools:
+        placeholders = ",".join("?" for _ in selected_pools)
+        with storage.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT observed_at
+                FROM chain_pool_snapshots
+                WHERE pool_address IN ({placeholders})
+                  AND id IN (
+                      SELECT MAX(id)
+                      FROM chain_pool_snapshots
+                      WHERE pool_address IN ({placeholders})
+                      GROUP BY pool_address
+                  )
+                """,
+                (*selected_pools, *selected_pools),
+            ).fetchall()
+        source_times.extend(str(row[0]) for row in rows)
+    if not source_times:
+        raise ValueError("mint research has no source timestamps")
+    return max(source_times)
+
+
 def _replay_statuses(
     storage: Storage,
     *,
@@ -333,12 +367,17 @@ def run_phase9_research_refresh(
                     )
                 )
             else:
+                mint_as_of = _mint_evaluation_as_of(
+                    storage,
+                    selected_pools=mint_plan.selected_pools,
+                    mint_plan=mint_plan,
+                )
                 for pool in mint_plan.selected_pools:
                     report = research_pool_mint_risk(
                         storage,
                         pool_address=pool,
                         criteria=mint_criteria,
-                        as_of=mint_plan.as_of,
+                        as_of=mint_as_of,
                     )
                     status, evidence_id = _persist_if_changed(
                         storage,
@@ -574,25 +613,13 @@ def run_phase9_research_refresh(
             ),
         )
 
-    automatic_names = {
-        "adaptive_regime",
-        "mint_risk",
-        "wallet_flow",
-        "contextual_bandit",
-    }
-    automatic_ready = all(
-        any(
-            item.family == family
-            and (
-                item.research_qualified is True
-                or (
-                    item.status == "UNCHANGED"
-                    and "replay-verified" in item.reason
-                )
-            )
-            for item in items
-        )
-        for family in automatic_names
+    automatic_ready = (
+        bundle.adaptive_multi_pool.qualified_records >= 1
+        and bundle.mint_risk.qualified_records
+            >= criteria.min_mint_risk_pools
+        and bundle.wallet_flow.qualified_records
+            >= criteria.min_wallet_flow_pools
+        and bundle.contextual_bandit.qualified_records >= 1
     )
 
     return Phase9ResearchRefreshReport(
