@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -613,7 +615,7 @@ def _bandit_lineage_valid(storage: Storage) -> bool:
     if not isinstance(dataset, dict):
         return False
 
-    return (
+    metadata_matches = (
         str(payload.get("cycle_id", ""))
         == str(lineage["cycle_id"])
         and str(payload.get("cutoff", ""))
@@ -631,6 +633,20 @@ def _bandit_lineage_valid(storage: Storage) -> bool:
         and str(cycle_row[1]) == str(lineage["cutoff"])
         and str(cycle_row[2])
         == str(lineage["dataset_version"])
+    )
+    if not metadata_matches:
+        return False
+
+    path = Path(str(lineage["output_file"]))
+    if not path.is_file():
+        return False
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    expected_sha = str(lineage["dataset_sha256"])
+    expected_version = str(lineage["dataset_version"])
+    return (
+        digest == expected_sha
+        and expected_version
+        == f"ML_ACTION_DATASET_V1:{digest[:16]}"
     )
 
 
