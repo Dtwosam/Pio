@@ -108,11 +108,13 @@ def build_phase9_evidence_plan(
                 current=0,
                 required=1,
                 remaining=1,
-                shell_command=None,
+                shell_command="pio phase8-evidence-plan",
                 reason=(
                     "Phase 8 promotion is not current. Phase 9 source "
                     "collection can continue, but research-bundle readiness "
-                    "cannot complete until Phase 8 is current."
+                    "cannot complete until Phase 8 is current. Inspect the "
+                    "upstream continuous-learning evidence plan before any "
+                    "Phase 8 state transition."
                 ),
             )
         )
