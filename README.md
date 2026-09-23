@@ -18,9 +18,9 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 0: complete
 - Phase 1: implemented; extended live validation pending
 - Phase 2: standard-SPL simulator implementation complete; real promotion evidence pending
-- Phase 3: deterministic research policy implemented; promotion evidence pending
-- Phase 4: experimental no-lookahead ML challenger pipeline implemented; not promoted
-- Phase 5: persistent paper ledger and automatic position-management cycle implemented; continuous live orchestration pending
+- Phase 3: deterministic policy + persisted validation/promotion workflow implemented; real promotion evidence pending
+- Phase 4: reproducible no-lookahead ML challenger workflow implemented; not promoted
+- Phase 5: chain-driven, idempotent multi-position paper trader implemented; unattended live orchestration/validation pending
 - Default mode: PAPER
 - Live signing: not implemented
 
@@ -73,6 +73,25 @@ pio paper-observe --event-key-prefix <KEY> --position <ID> --active-bin <BIN> \
   --holding-observations <N> --mark <QUOTE> --estimated-exit-cost <QUOTE> \
   --rebalance-cost <QUOTE>
 pio paper-performance --account paper --policy-source DETERMINISTIC
+
+# Chain-valued paper path
+pio paper-chain-bind --position <ID> --observed-at <TIME> \
+  --amount-x <ATOMIC_X> --amount-y <ATOMIC_Y> \
+  --token-y-quote-per-atomic <QUOTE_RATE>
+pio paper-chain-value --position <ID> --observed-at <TIME> \
+  --token-y-quote-per-atomic <QUOTE_RATE>
+pio paper-chain-observe --position <ID> --observed-at <TIME> \
+  --token-y-quote-per-atomic <QUOTE_RATE> --rebalance-cost <QUOTE>
+pio paper-chain-run --run-id <RUN> --observed-at <TIME> --file <ITEMS_JSON>
+
+# Persisted promotion / ML workflow
+pio phase-status
+pio phase3-validate --file <POOLS_JSON>
+pio ml-train-csv --file <DATASET_CSV> --model-id <MODEL> \
+  --dataset-version <VERSION> --artifact-dir <DIR>
+pio ml-offline-evaluate-csv --file <DATASET_CSV> --model-id <MODEL>
+pio ml-start-paper --model-id <MODEL>
+pio ml-model-status --model-id <MODEL>
 ```
 
 Real execution/calibration commands:
