@@ -121,7 +121,7 @@ Still needed:
 - retraining cadence and drift monitoring for Phase 8
 
 ## Phase 5 — Live Paper Trader
-Status: unattended chain-driven PAPER orchestration implemented; extended live validation pending.
+Status: implementation complete; persisted real PAPER promotion evidence pending.
 
 Built:
 - persistent paper accounts
