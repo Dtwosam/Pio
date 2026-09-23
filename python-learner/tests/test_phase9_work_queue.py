@@ -10,6 +10,11 @@ from meteora_learner.chain_snapshot_lineage import (
 )
 from meteora_learner.contextual_bandit import (
     CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+    ContextualBanditCriteria,
+)
+from meteora_learner.contextual_bandit_cycle import (
+    evaluate_cycle_contextual_bandit,
+    persist_cycle_contextual_bandit,
 )
 from meteora_learner.market_regime import DLMMRegimeCriteria
 from meteora_learner.mint_risk import (
@@ -123,8 +128,26 @@ def seed_retraining_dataset_evidence(
         / f"{cycle_id}-retrain.csv"
     )
     dataset_path.write_text(
-        "decision_observed_at,forward_end_observed_at\n"
-        "2026-09-23T10:00:00+00:00,2026-09-23T11:00:00+00:00\n",
+        "pool_address,decision_observed_at,forward_end_observed_at,"
+        "strategy,baseline_selected,strategy_spot,strategy_curve,"
+        "strategy_bid_ask,half_width,center_offset,range_width_bins,"
+        "active_bin_id,active_bin_move_1,occupied_bins,"
+        "fee_growth_bins_x,fee_growth_bins_y,"
+        "trailing_excess_vs_hold_bps,trailing_net_return_bps,"
+        "trailing_max_observed_share_bps,target_net_return_bps,"
+        "target_excess_vs_hold_bps,target_positive_excess,"
+        "deposit_fee_rate_bps,active_liquidity_ratio,"
+        "near_active_liquidity_ratio,below_active_liquidity_ratio,"
+        "above_active_liquidity_ratio,liquidity_weighted_distance_bins,"
+        "trailing_range_survival_ratio,target_range_survival_ratio\n"
+        "pool-a,2026-09-23T10:00:00+00:00,"
+        "2026-09-23T11:00:00+00:00,SPOT,1,1,0,0,1,0,3,"
+        "0,0,3,0,0,0,0,100,10,10,1,0,0.5,0.5,0.25,0.25,"
+        "1.0,1.0,1.0\n"
+        "pool-a,2026-09-23T10:00:00+00:00,"
+        "2026-09-23T11:00:00+00:00,CURVE,0,0,1,0,2,0,5,"
+        "0,0,3,0,0,0,0,100,20,20,1,0,0.5,0.5,0.25,0.25,"
+        "1.0,1.0,1.0\n",
         encoding="utf-8",
     )
     digest = hashlib.sha256(dataset_path.read_bytes()).hexdigest()
@@ -433,10 +456,25 @@ def seed_static_hedge_lineage(storage, pool):
 def seed_ready(storage):
     promote_phase8(storage)
     portfolio_lineage = seed_portfolio_candidate_lineage(storage)
-    bandit_lineage = seed_retraining_dataset_evidence(
+    seed_retraining_dataset_evidence(
         storage,
         cycle_id="cycle",
     )
+    bandit = evaluate_cycle_contextual_bandit(
+        storage,
+        cycle_id="cycle",
+        criteria=ContextualBanditCriteria(
+            warmup_decisions_per_context=1,
+            exploration_bonus_bps=0.0,
+            min_decisions=1,
+            min_pools=1,
+            min_selected_arms=1,
+            min_mean_uplift_vs_baseline_bps=-10_000.0,
+            max_mean_regret_vs_oracle_bps=10_000.0,
+        ),
+    )
+    assert bandit.report.research_qualified is True
+    persist_cycle_contextual_bandit(storage, result=bandit)
     for pool in ("pool-a", "pool-b"):
         seed_mint_risk_lineage(storage, pool)
         seed_wallet_flow_lineage(storage, pool)
@@ -451,12 +489,6 @@ def seed_ready(storage):
         extra={"candidate_lineage": portfolio_lineage},
     )
     seed_static_hedge_lineage(storage, "pool-a")
-    evidence(
-        storage,
-        CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
-        "__CONTEXTUAL_BANDIT__",
-        extra={"dataset_lineage": bandit_lineage},
-    )
 
 
 def test_work_queue_surfaces_concrete_missing_research(tmp_path):
