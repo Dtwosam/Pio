@@ -126,11 +126,14 @@ RPC_URL is accepted as a compatibility fallback",
             let config_path = args
                 .next()
                 .context("RISK_CONFIG_JSON is required")?;
+            let transaction_config_path = args
+                .next()
+                .context("TRANSACTION_GUARD_CONFIG_JSON is required")?;
             let execution_db = args
                 .next()
                 .context("EXECUTION_DB is required")?;
             if args.next().is_some() {
-                anyhow::bail!("dry-run-execution accepts exactly three arguments");
+                anyhow::bail!("dry-run-execution accepts exactly four arguments");
             }
 
             let request_json = if request_source == "-" {
@@ -147,16 +150,26 @@ RPC_URL is accepted as a compatibility fallback",
             };
             let config_json = std::fs::read_to_string(&config_path)
                 .with_context(|| format!("failed to read risk config JSON: {config_path}"))?;
+            let transaction_config_json =
+                std::fs::read_to_string(&transaction_config_path)
+                    .with_context(|| {
+                        format!(
+                            "failed to read transaction guard config JSON: {transaction_config_path}"
+                        )
+                    })?;
             let request: dry_run::DryRunExecutionRequest =
                 serde_json::from_str(&request_json)
                     .context("invalid dry-run execution request JSON")?;
             let config: risk::RiskConfig = serde_json::from_str(&config_json)
                 .context("invalid risk config JSON")?;
+            let transaction_config:
+                transaction_guard::TransactionGuardConfig =
+                serde_json::from_str(&transaction_config_json)
+                    .context("invalid transaction guard config JSON")?;
             let rpc_url = std::env::var("SOLANA_RPC_URL")
                 .or_else(|_| std::env::var("RPC_URL"))
                 .context(
-                    "SOLANA_RPC_URL environment variable is required; \
-RPC_URL is accepted as a compatibility fallback",
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
                 )?;
             let store = execution_store::ExecutionIntentStore::open(
                 &execution_db,
@@ -166,6 +179,7 @@ RPC_URL is accepted as a compatibility fallback",
                 &store,
                 &request,
                 &config,
+                &transaction_config,
                 |encoded| simulation::simulate_base64_transaction(&rpc_url, encoded),
             )?;
             println!("{}", serde_json::to_string_pretty(&report)?);
