@@ -1,3 +1,4 @@
+mod dry_run;
 mod events;
 mod execution_guard;
 mod models;
@@ -17,6 +18,7 @@ fn usage() {
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
   meteora-executor risk-check <PROPOSAL_JSON_OR_-> <RISK_CONFIG_JSON>
+  meteora-executor dry-run-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON>
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
   meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>
   meteora-executor verify-prestate <RPC_URL> <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]"
@@ -107,6 +109,53 @@ RPC_URL is accepted as a compatibility fallback",
             let snapshot =
                 state_reader::inspect_position(&rpc_url, &position_address).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "dry-run-execution" => {
+            let request_source = args
+                .next()
+                .context("REQUEST_JSON_OR_- is required")?;
+            let config_path = args
+                .next()
+                .context("RISK_CONFIG_JSON is required")?;
+            if args.next().is_some() {
+                anyhow::bail!("dry-run-execution accepts exactly two arguments");
+            }
+
+            let request_json = if request_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read dry-run request JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&request_source)
+                    .with_context(|| {
+                        format!("failed to read dry-run request JSON: {request_source}")
+                    })?
+            };
+            let config_json = std::fs::read_to_string(&config_path)
+                .with_context(|| format!("failed to read risk config JSON: {config_path}"))?;
+            let request: dry_run::DryRunExecutionRequest =
+                serde_json::from_str(&request_json)
+                    .context("invalid dry-run execution request JSON")?;
+            let config: risk::RiskConfig = serde_json::from_str(&config_json)
+                .context("invalid risk config JSON")?;
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                )?;
+
+            let report = dry_run::evaluate_dry_run_with(
+                &request,
+                &config,
+                |encoded| simulation::simulate_base64_transaction(&rpc_url, encoded),
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.accepted {
+                std::process::exit(2);
+            }
         }
         "simulate-transaction" => {
             let transaction_source = args
