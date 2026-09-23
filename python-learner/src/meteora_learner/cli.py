@@ -17,6 +17,7 @@ from .baseline_policy import BaselinePolicyConfig
 from .baseline_walk_forward import walk_forward_baseline
 from .calibration_queue import build_calibration_work_queue
 from .capital_sizing import CapitalSizingConfig, size_position
+from .cross_pool_research import CrossPoolResearchCandidate, CrossPoolResearchReport
 from .calibration_status import build_phase2_calibration_evidence
 from .chain_ingest import ingest_chain_snapshot
 from .chain_replay import replay_small_lp_history
@@ -62,6 +63,11 @@ from .phase3_workflow import (
 )
 from .pool_safety import PoolSafetyConfig, screen_pool_universe
 from .position_policy import PositionManagementConfig, decide_position_action
+from .portfolio_allocation import (
+    PortfolioAllocationCriteria,
+    persist_portfolio_allocation_research,
+    research_portfolio_allocation,
+)
 from .paper_account import (
     close_paper_position,
     create_paper_account,
@@ -1204,6 +1210,61 @@ def main() -> None:
     adaptive_range.add_argument("--as-of")
     adaptive_range.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    portfolio_allocation = subparsers.add_parser(
+        "portfolio-allocation-research",
+        help="Allocate a research-only quote budget across qualified pool candidates",
+    )
+    portfolio_allocation.add_argument(
+        "--file",
+        required=True,
+        help="JSON candidate array or object containing a candidates array",
+    )
+    portfolio_allocation.add_argument(
+        "--budget-quote",
+        type=float,
+        required=True,
+    )
+    portfolio_allocation.add_argument(
+        "--max-positions",
+        type=int,
+        default=3,
+    )
+    portfolio_allocation.add_argument(
+        "--min-positions",
+        type=int,
+        default=2,
+    )
+    portfolio_allocation.add_argument(
+        "--max-pool-allocation-bps",
+        type=int,
+        default=4000,
+    )
+    portfolio_allocation.add_argument(
+        "--min-range-survival-ratio",
+        type=float,
+        default=0.75,
+    )
+    portfolio_allocation.add_argument(
+        "--min-excess-vs-hold-bps",
+        type=int,
+        default=0,
+    )
+    portfolio_allocation.add_argument(
+        "--min-position-quote",
+        type=float,
+        default=10.0,
+    )
+    portfolio_allocation.add_argument(
+        "--min-budget-utilization-rate",
+        type=float,
+        default=0.75,
+    )
+    portfolio_allocation.add_argument("--persist", action="store_true")
+    portfolio_allocation.add_argument(
+        "--require-qualified",
         action="store_true",
     )
 
@@ -2802,6 +2863,96 @@ def main() -> None:
             args.require_ready
             and result.status != "RESEARCH_READY"
         ):
+            raise SystemExit(2)
+        return
+
+    if args.command == "portfolio-allocation-research":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        with open(args.file, "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+        raw_candidates = (
+            raw.get("candidates")
+            if isinstance(raw, dict)
+            else raw
+        )
+        if not isinstance(raw_candidates, list):
+            raise ValueError(
+                "portfolio allocation file must contain a JSON candidate array"
+            )
+        candidates = tuple(
+            CrossPoolResearchCandidate(
+                rank=int(item["rank"]),
+                pool_address=str(item["pool_address"]),
+                strategy=str(item["strategy"]),
+                min_bin_id=int(item["min_bin_id"]),
+                max_bin_id=int(item["max_bin_id"]),
+                half_width=int(item["half_width"]),
+                center_offset=int(item["center_offset"]),
+                net_return_bps=int(item["net_return_bps"]),
+                hold_return_bps=int(item["hold_return_bps"]),
+                excess_vs_hold_initial_bps=int(
+                    item["excess_vs_hold_initial_bps"]
+                ),
+                range_survival_ratio=float(
+                    item["range_survival_ratio"]
+                ),
+                max_observed_share_bps=int(
+                    item["max_observed_share_bps"]
+                ),
+                sized_quote=float(item["sized_quote"]),
+                phase2_ready=bool(item["phase2_ready"]),
+                policy_authorized=bool(
+                    item["policy_authorized"]
+                ),
+            )
+            for item in raw_candidates
+        )
+        comparison = CrossPoolResearchReport(
+            plans_seen=len(candidates),
+            comparable_plans=len(candidates),
+            excluded_plans=0,
+            leader_pool_address=(
+                candidates[0].pool_address
+                if candidates
+                else None
+            ),
+            ranking_rule="external JSON research candidates",
+            candidates=candidates,
+        )
+        result = research_portfolio_allocation(
+            storage,
+            comparison=comparison,
+            budget_quote=args.budget_quote,
+            criteria=PortfolioAllocationCriteria(
+                max_positions=args.max_positions,
+                min_positions=args.min_positions,
+                max_pool_allocation_bps=(
+                    args.max_pool_allocation_bps
+                ),
+                min_range_survival_ratio=(
+                    args.min_range_survival_ratio
+                ),
+                min_excess_vs_hold_bps=(
+                    args.min_excess_vs_hold_bps
+                ),
+                min_position_quote=args.min_position_quote,
+                min_budget_utilization_rate=(
+                    args.min_budget_utilization_rate
+                ),
+            ),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_portfolio_allocation_research(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not result.research_qualified:
             raise SystemExit(2)
         return
 
