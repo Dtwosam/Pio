@@ -258,6 +258,8 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
 
     if not integrity_verified:
         status = "INTEGRITY_FAILED"
+    elif source_refresh_pending:
+        status = "SOURCE_REFRESH_PENDING"
     elif prewire_manifest_current:
         status = "PREWIRE_MANIFEST_CURRENT"
     elif prewire_ready:
@@ -278,8 +280,6 @@ def evaluate_phase9_progress(storage: Storage) -> Phase9ProgressReport:
         status = "RESEARCH_BUNDLE_READY"
     elif not phase8_current:
         status = "PHASE8_BLOCKED"
-    elif source_refresh_pending:
-        status = "SOURCE_REFRESH_PENDING"
     elif latest_tasks:
         status = "EVIDENCE_PENDING"
     else:
