@@ -167,6 +167,7 @@ def run_phase9_source_capture(
             min_observation_interval_seconds=(
                 history_min_observation_interval_seconds
             ),
+            continue_sampling_when_ready=True,
         )
         history_record = history.to_record()
     except Exception as exc:
