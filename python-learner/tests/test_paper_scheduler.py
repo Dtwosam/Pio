@@ -114,6 +114,12 @@ def test_scheduler_recovers_expired_lease_and_updates_health(tmp_path):
             """
         )
 
+    calls = []
+
+    def recovered_tick(storage, **kwargs):
+        calls.append(kwargs)
+        return fake_tick("FAILED")(storage, **kwargs)
+
     result = run_scheduled_paper_tick(
         storage,
         account_id="paper",
@@ -121,10 +127,11 @@ def test_scheduler_recovers_expired_lease_and_updates_health(tmp_path):
         lease_seconds=240,
         owner_id="worker-b",
         as_of=NOW,
-        tick_runner=fake_tick("FAILED"),
+        tick_runner=recovered_tick,
     )
 
     assert result.recovered_stale_lease is True
+    assert calls[0]["retry_failed"] is True
     assert result.status == "FAILED"
     assert result.scheduler_state.owner_id is None
     assert result.scheduler_state.total_ticks == 5
