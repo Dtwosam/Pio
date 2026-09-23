@@ -1148,11 +1148,20 @@ def evaluate_phase9_promotion(
     criteria: Phase9ResearchBundleCriteria = (
         Phase9ResearchBundleCriteria()
     ),
+    research_bundle: Phase9ResearchBundleReport | None = None,
 ) -> Phase9PromotionReport:
-    bundle = evaluate_phase9_research_bundle(
-        storage,
-        criteria=criteria,
+    bundle = (
+        research_bundle
+        if research_bundle is not None
+        else evaluate_phase9_research_bundle(
+            storage,
+            criteria=criteria,
+        )
     )
+    if bundle.criteria != criteria:
+        raise ValueError(
+            "precomputed Phase 9 research bundle criteria do not match"
+        )
     latest_bundle = storage.latest_advanced_edge_evidence(
         edge_type=PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
         pool_address="__PHASE9_RESEARCH__",
@@ -1248,11 +1257,20 @@ def audit_persisted_phase9_promotion(
     criteria: Phase9ResearchBundleCriteria = (
         Phase9ResearchBundleCriteria()
     ),
+    current_report: Phase9PromotionReport | None = None,
 ) -> Phase9PersistedPromotionAudit:
-    current_report = evaluate_phase9_promotion(
-        storage,
-        criteria=criteria,
+    current_report = (
+        current_report
+        if current_report is not None
+        else evaluate_phase9_promotion(
+            storage,
+            criteria=criteria,
+        )
     )
+    if current_report.research_bundle.criteria != criteria:
+        raise ValueError(
+            "precomputed Phase 9 promotion criteria do not match"
+        )
     with storage.connect() as conn:
         row = conn.execute(
             """
