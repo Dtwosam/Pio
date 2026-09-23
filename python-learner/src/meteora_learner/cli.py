@@ -112,6 +112,7 @@ from .execution_receipt_audit import audit_execution_receipts
 from .live_execution_effects import apply_live_execution_effect
 from .live_position_ledger import apply_live_position_effect
 from .live_position_closure import finalize_live_position_closure
+from .live_position_outcome import build_live_position_outcome
 from .transaction_costs import build_transaction_cost_report
 
 
@@ -1007,6 +1008,12 @@ def main() -> None:
         help="JSON file path, or - for stdin",
     )
 
+    live_outcome_cmd = subparsers.add_parser(
+        "build-live-position-outcome",
+        help="Aggregate one CLOSED live position into immutable atomic outcome evidence",
+    )
+    live_outcome_cmd.add_argument("--position", required=True)
+
     live_close_cmd = subparsers.add_parser(
         "finalize-live-position-closure",
         help="Mark a liquidity-removed live position closed from confirmed Rust RPC proof",
@@ -1393,6 +1400,15 @@ def main() -> None:
                 payload = json.load(handle)
         result = ingest_chain_snapshot(Storage(settings.database_path), payload)
         print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "build-live-position-outcome":
+        settings = Settings.from_env()
+        result = build_live_position_outcome(
+            Storage(settings.database_path),
+            position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "finalize-live-position-closure":
