@@ -787,6 +787,42 @@ This command is manual by design. The work queue emits the plan step, not the
 capture-run step, so evidence acquisition does not start implicitly.
 
 
+### Fresh authoritative mint inputs
+
+Mint-risk evidence has a freshness boundary, not just an existence check. The
+default mint-risk criterion accepts a required mint snapshot only when it is no
+more than 3,600 seconds old at the evaluation cutoff.
+
+Inspect exact mint input state for the selected Phase 9 pools with:
+
+```bash
+pio phase9-mint-capture-plan --target-pools 2
+```
+
+Use `--pools <POOL_A,POOL_B>` to bind the plan to an exact pool set instead
+of automatic highest-depth selection. Shared token/reward mints are
+deduplicated across those pools.
+
+Capture only missing or stale mint accounts through the read-only Rust path:
+
+```bash
+SOLANA_RPC_URL=<RPC_URL> \
+pio phase9-mint-capture-run --target-pools 2 --require-ready
+```
+
+The Rust executor uses `inspect-mint-env`, so the RPC URL stays in the
+environment rather than process arguments. Python validates that each returned
+`mint_address` matches the requested mint before append-only local ingestion.
+Per-mint failures are isolated.
+
+`phase9-work-queue` uses the same planner. For a live queue it emits one
+exact-pool `phase9-mint-capture-run` task whenever required mint inputs are
+missing or stale, and emits `mint-risk-research` only after those inputs are
+current. An optional `phase9-work-queue --as-of <TIME>` creates a reproducible
+historical plan. If authoritative mint state was missing or stale at that
+historical cutoff, the queue refuses to propose a later capture as a backfill;
+future state cannot prove past state.
+
 ### Exact adaptive/regime history depth
 
 Distinct pool coverage is only the first requirement. Phase 9 adaptive
