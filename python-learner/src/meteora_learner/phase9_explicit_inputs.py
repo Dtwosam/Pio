@@ -124,6 +124,61 @@ def _normalized(value: Any) -> Any:
     return json.loads(json.dumps(value, sort_keys=True))
 
 
+def _portfolio_source_watermarks(
+    storage: Storage,
+    *,
+    source_inputs: list[dict[str, Any]],
+    comparison_result: Any,
+) -> list[dict[str, Any]]:
+    decision_times: dict[str, str] = {}
+    for plan in getattr(comparison_result, "plans", ()) or ():
+        pool = str(getattr(plan, "pool_address", "")).strip()
+        observed_at = getattr(plan, "decision_observed_at", None)
+        if pool and observed_at:
+            decision_times[pool] = str(observed_at)
+
+    watermarks: list[dict[str, Any]] = []
+    with storage.connect() as conn:
+        for item in source_inputs:
+            pool = str(item.get("pool_address", "")).strip()
+            if not pool:
+                continue
+            decision_at = decision_times.get(pool)
+            if decision_at is not None:
+                row = conn.execute(
+                    """
+                    SELECT id, observed_at
+                    FROM chain_pool_snapshots
+                    WHERE pool_address = ?
+                      AND observed_at = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (pool, decision_at),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT id, observed_at
+                    FROM chain_pool_snapshots
+                    WHERE pool_address = ?
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (pool,),
+                ).fetchone()
+            if row is None:
+                continue
+            watermarks.append(
+                {
+                    "pool_address": pool,
+                    "snapshot_id": int(row[0]),
+                    "observed_at": str(row[1]),
+                }
+            )
+    return watermarks
+
+
 def _latest_evidence_matches(
     storage: Storage,
     *,
@@ -785,11 +840,17 @@ def run_phase9_explicit_research(
             source_inputs = [
                 asdict(item) for item in artifact.inputs.pool_inputs
             ]
+            source_chain_watermarks = _portfolio_source_watermarks(
+                storage,
+                source_inputs=source_inputs,
+                comparison_result=comparison_result,
+            )
             assumptions = {
                 "explicit_input_evidence_id": artifact.evidence_id,
                 "explicit_input_artifact_sha256": (
                     artifact.artifact_sha256
                 ),
+                "source_chain_watermarks": source_chain_watermarks,
                 "account_equity_quote": portfolio.account_equity_quote,
                 "cash_quote": portfolio.cash_quote,
                 "current_deployed_quote": (
