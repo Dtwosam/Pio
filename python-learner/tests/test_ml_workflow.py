@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pandas as pd
 
 from meteora_learner.ml_challenger import MLChallengerCriteria
