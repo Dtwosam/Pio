@@ -108,11 +108,37 @@ CREATE TABLE IF NOT EXISTS chain_pool_snapshots (
 CREATE INDEX IF NOT EXISTS idx_chain_pool_time
 ON chain_pool_snapshots(pool_address, observed_at);
 
+CREATE TABLE IF NOT EXISTS chain_pool_capture_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    capture_slot_start INTEGER,
+    capture_slot_end INTEGER,
+    clock_unix_timestamp INTEGER,
+    fee_base_factor INTEGER,
+    fee_filter_period INTEGER,
+    fee_decay_period INTEGER,
+    fee_reduction_factor INTEGER,
+    fee_variable_fee_control INTEGER,
+    fee_max_volatility_accumulator INTEGER,
+    fee_base_fee_power_factor INTEGER,
+    fee_volatility_accumulator INTEGER,
+    fee_volatility_reference INTEGER,
+    fee_index_reference INTEGER,
+    fee_last_update_timestamp INTEGER,
+    raw_json TEXT NOT NULL,
+    UNIQUE(pool_address, observed_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chain_pool_capture_slot
+ON chain_pool_capture_state(pool_address, capture_slot_end);
+
 CREATE TABLE IF NOT EXISTS bin_liquidity_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
     pool_address TEXT NOT NULL,
     bin_array_index INTEGER NOT NULL,
+    bin_array_address TEXT,
     bin_id INTEGER NOT NULL,
     price TEXT NOT NULL DEFAULT '0',
     amount_x TEXT NOT NULL,
@@ -324,6 +350,7 @@ VOLUME_BUCKET_EXTRA_COLUMNS = {
 
 BIN_LIQUIDITY_EXTRA_COLUMNS = {
     "price": "TEXT NOT NULL DEFAULT '0'",
+    "bin_array_address": "TEXT",
     "reward_per_token_stored_0": "TEXT NOT NULL DEFAULT '0'",
     "reward_per_token_stored_1": "TEXT NOT NULL DEFAULT '0'",
 }
@@ -701,6 +728,12 @@ class Storage:
             )
         ):
             raise ValueError("reward metadata arrays must contain exactly two values")
+        capture_slot_start = snapshot.get("capture_slot_start")
+        capture_slot_end = snapshot.get("capture_slot_end")
+        clock_unix_timestamp = snapshot.get("clock_unix_timestamp")
+        fee_state = snapshot.get("fee_state")
+        if fee_state is not None and not isinstance(fee_state, dict):
+            raise ValueError("fee_state must be an object when supplied")
         bin_arrays = snapshot.get("bin_arrays")
         if not isinstance(bin_arrays, list):
             raise ValueError("bin_arrays must be a list")
@@ -711,6 +744,7 @@ class Storage:
             if not isinstance(array, dict):
                 raise ValueError("each bin array must be an object")
             index = int(array["index"])
+            array_address = str(array.get("address")) if array.get("address") is not None else None
             bins = array.get("bins")
             if not isinstance(bins, list):
                 raise ValueError("bin array bins must be a list")
@@ -723,6 +757,7 @@ class Storage:
                         observed_at,
                         pool_address,
                         index,
+                        array_address,
                         int(bin_row["bin_id"]),
                         str(bin_row["price"]),
                         str(bin_row["amount_x"]),
@@ -777,15 +812,78 @@ class Storage:
                     json.dumps(snapshot, separators=(",", ":")),
                 ),
             )
+            if (
+                capture_slot_start is not None
+                or capture_slot_end is not None
+                or clock_unix_timestamp is not None
+                or fee_state is not None
+            ):
+                fee_state = fee_state or {}
+                conn.execute(
+                    """
+                    INSERT INTO chain_pool_capture_state(
+                        observed_at, pool_address,
+                        capture_slot_start, capture_slot_end, clock_unix_timestamp,
+                        fee_base_factor, fee_filter_period, fee_decay_period,
+                        fee_reduction_factor, fee_variable_fee_control,
+                        fee_max_volatility_accumulator, fee_base_fee_power_factor,
+                        fee_volatility_accumulator, fee_volatility_reference,
+                        fee_index_reference, fee_last_update_timestamp, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(pool_address, observed_at) DO UPDATE SET
+                        capture_slot_start=excluded.capture_slot_start,
+                        capture_slot_end=excluded.capture_slot_end,
+                        clock_unix_timestamp=excluded.clock_unix_timestamp,
+                        fee_base_factor=excluded.fee_base_factor,
+                        fee_filter_period=excluded.fee_filter_period,
+                        fee_decay_period=excluded.fee_decay_period,
+                        fee_reduction_factor=excluded.fee_reduction_factor,
+                        fee_variable_fee_control=excluded.fee_variable_fee_control,
+                        fee_max_volatility_accumulator=excluded.fee_max_volatility_accumulator,
+                        fee_base_fee_power_factor=excluded.fee_base_fee_power_factor,
+                        fee_volatility_accumulator=excluded.fee_volatility_accumulator,
+                        fee_volatility_reference=excluded.fee_volatility_reference,
+                        fee_index_reference=excluded.fee_index_reference,
+                        fee_last_update_timestamp=excluded.fee_last_update_timestamp,
+                        raw_json=excluded.raw_json
+                    """,
+                    (
+                        observed_at,
+                        pool_address,
+                        int(capture_slot_start) if capture_slot_start is not None else None,
+                        int(capture_slot_end) if capture_slot_end is not None else None,
+                        int(clock_unix_timestamp) if clock_unix_timestamp is not None else None,
+                        int(fee_state["base_factor"]) if fee_state.get("base_factor") is not None else None,
+                        int(fee_state["filter_period"]) if fee_state.get("filter_period") is not None else None,
+                        int(fee_state["decay_period"]) if fee_state.get("decay_period") is not None else None,
+                        int(fee_state["reduction_factor"]) if fee_state.get("reduction_factor") is not None else None,
+                        int(fee_state["variable_fee_control"]) if fee_state.get("variable_fee_control") is not None else None,
+                        int(fee_state["max_volatility_accumulator"]) if fee_state.get("max_volatility_accumulator") is not None else None,
+                        int(fee_state["base_fee_power_factor"]) if fee_state.get("base_fee_power_factor") is not None else None,
+                        int(fee_state["volatility_accumulator"]) if fee_state.get("volatility_accumulator") is not None else None,
+                        int(fee_state["volatility_reference"]) if fee_state.get("volatility_reference") is not None else None,
+                        int(fee_state["index_reference"]) if fee_state.get("index_reference") is not None else None,
+                        int(fee_state["last_update_timestamp"]) if fee_state.get("last_update_timestamp") is not None else None,
+                        json.dumps(
+                            {
+                                "capture_slot_start": capture_slot_start,
+                                "capture_slot_end": capture_slot_end,
+                                "clock_unix_timestamp": clock_unix_timestamp,
+                                "fee_state": fee_state,
+                            },
+                            separators=(",", ":"),
+                        ),
+                    ),
+                )
             if bin_rows:
                 conn.executemany(
                     """
                     INSERT INTO bin_liquidity_snapshots(
-                        observed_at, pool_address, bin_array_index, bin_id, price,
-                        amount_x, amount_y, liquidity_supply,
+                        observed_at, pool_address, bin_array_index, bin_array_address,
+                        bin_id, price, amount_x, amount_y, liquidity_supply,
                         fee_amount_x_per_token_stored, fee_amount_y_per_token_stored,
                         reward_per_token_stored_0, reward_per_token_stored_1
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     bin_rows,
                 )
