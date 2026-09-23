@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Sequence
 
-from .baseline_policy import replay_economics
+from .baseline_policy import (
+    BaselinePolicyConfig,
+    replay_economics,
+    select_deterministic_baseline,
+)
 from .chain_features import fee_checkpoint_activity, summarize_liquidity_shape
 from .chain_replay import replay_small_lp_history
 from .chain_scan import ChainCandidateOutcome, scan_chain_candidates
@@ -83,6 +87,7 @@ def build_ml_action_dataset(
     max_share_bps: int = 500,
     favor_x_in_active_bin: bool = False,
     near_liquidity_radius: int = 5,
+    baseline_config: BaselinePolicyConfig | None = None,
 ) -> MLActionDatasetReport:
     """
     Label every replay-valid candidate action at each no-lookahead decision point.
@@ -178,6 +183,16 @@ def build_ml_action_dataset(
             max_share_bps=max_share_bps,
             favor_x_in_active_bin=favor_x_in_active_bin,
         )
+        effective_baseline_config = baseline_config or BaselinePolicyConfig(
+            estimated_network_cost_y_atomic=network_cost_y_atomic,
+        )
+        baseline_selection = select_deterministic_baseline(
+            database_path,
+            scan=scan,
+            phase2_gate=None,
+            config=effective_baseline_config,
+        )
+        baseline_choice = baseline_selection.research_choice
 
         for candidate in scan.candidates:
             candidates_seen += 1
@@ -291,6 +306,12 @@ def build_ml_action_dataset(
                     decision_observed_at=decision_time,
                     forward_end_observed_at=forward_times[-1],
                     strategy=strategy,
+                    baseline_selected=int(
+                        baseline_choice is not None
+                        and candidate.strategy == baseline_choice.strategy
+                        and candidate.half_width == baseline_choice.half_width
+                        and candidate.center_offset == baseline_choice.center_offset
+                    ),
                     strategy_spot=int(strategy == "SPOT"),
                     strategy_curve=int(strategy == "CURVE"),
                     strategy_bid_ask=int(strategy == "BID_ASK"),
