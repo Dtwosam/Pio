@@ -106,3 +106,30 @@ def test_phase3_gate_rejects_zero_size():
 
     assert result.sizing_ready is False
     assert result.entry_authorized is False
+
+
+
+def test_phase3_gate_requires_rescale_when_requested_notional_is_capped():
+    capped = CapitalSizingResult(
+        account_equity_quote=10000,
+        cash_quote=10000,
+        current_deployed_quote=0,
+        portfolio_drawdown_bps=0,
+        requested_quote=2000.0,
+        max_position_quote=1000.0,
+        portfolio_room_quote=7000.0,
+        reserve_room_quote=7000.0,
+        drawdown_multiplier=1.0,
+        sized_quote=1000.0,
+        blocked=False,
+        reasons=(),
+    )
+    result = evaluate_phase3_entry_gate(
+        pool_safety=safety(),
+        baseline=baseline(phase2_ready=True),
+        sizing=capped,
+    )
+
+    assert result.sizing_ready is False
+    assert result.entry_authorized is False
+    assert any("rescaled" in reason for reason in result.reasons)
