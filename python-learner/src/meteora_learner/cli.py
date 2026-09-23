@@ -117,6 +117,12 @@ from .paper_challenger import (
 from .phase3_plan import build_phase3_research_plan
 from .multi_pool_research import PoolResearchInput, build_multi_pool_research
 from .market_regime import DLMMRegimeCriteria, classify_dlmm_regime
+from .mint_ingest import ingest_mint_snapshot
+from .mint_risk import (
+    MintRiskCriteria,
+    persist_pool_mint_risk,
+    research_pool_mint_risk,
+)
 from .ml_challenger import MLChallengerCriteria
 from .ml_inference import MLInferenceConfig
 from .ml_registry import model_record, start_paper_challenger
@@ -1215,6 +1221,51 @@ def main() -> None:
     adaptive_range.add_argument("--as-of")
     adaptive_range.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    mint_ingest = subparsers.add_parser(
+        "mint-snapshot-ingest",
+        help="Persist one authoritative Rust Solana mint snapshot JSON",
+    )
+    mint_ingest.add_argument("--file", required=True)
+    mint_ingest.add_argument("--observed-at")
+
+    mint_risk = subparsers.add_parser(
+        "mint-risk-research",
+        help="Evaluate no-lookahead research-only mint risk for one pool",
+    )
+    mint_risk.add_argument("--pool", required=True)
+    mint_risk.add_argument(
+        "--max-snapshot-age-seconds",
+        type=int,
+        default=3600,
+    )
+    mint_risk.add_argument("--max-decimals", type=int, default=12)
+    mint_risk.add_argument(
+        "--allow-active-mint-authority",
+        action="store_true",
+    )
+    mint_risk.add_argument(
+        "--allow-active-freeze-authority",
+        action="store_true",
+    )
+    mint_risk.add_argument(
+        "--disallow-token-2022",
+        action="store_true",
+    )
+    mint_risk.add_argument(
+        "--allow-token-2022-extension-data",
+        action="store_true",
+    )
+    mint_risk.add_argument(
+        "--exclude-reward-mints",
+        action="store_true",
+    )
+    mint_risk.add_argument("--as-of")
+    mint_risk.add_argument("--persist", action="store_true")
+    mint_risk.add_argument(
+        "--require-qualified",
         action="store_true",
     )
 
@@ -2900,6 +2951,62 @@ def main() -> None:
             args.require_ready
             and result.status != "RESEARCH_READY"
         ):
+            raise SystemExit(2)
+        return
+
+    if args.command == "mint-snapshot-ingest":
+        settings = Settings.from_env()
+        with open(args.file, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        result = ingest_mint_snapshot(
+            Storage(settings.database_path),
+            payload,
+            observed_at=args.observed_at,
+        )
+        print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "mint-risk-research":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = research_pool_mint_risk(
+            storage,
+            pool_address=args.pool,
+            criteria=MintRiskCriteria(
+                max_snapshot_age_seconds=(
+                    args.max_snapshot_age_seconds
+                ),
+                max_decimals=args.max_decimals,
+                require_initialized=True,
+                require_mint_authority_revoked=(
+                    not args.allow_active_mint_authority
+                ),
+                require_freeze_authority_revoked=(
+                    not args.allow_active_freeze_authority
+                ),
+                allow_token_2022=(
+                    not args.disallow_token_2022
+                ),
+                allow_token_2022_extension_data=(
+                    args.allow_token_2022_extension_data
+                ),
+                include_reward_mints=(
+                    not args.exclude_reward_mints
+                ),
+            ),
+            as_of=args.as_of,
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_pool_mint_risk(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not result.research_qualified:
             raise SystemExit(2)
         return
 
