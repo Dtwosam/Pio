@@ -235,4 +235,148 @@ mod tests {
                 .is_err()
         );
     }
+
+    fn ready_store(
+        keypair: &Keypair,
+    ) -> (ExecutionIntentStore, std::path::PathBuf, String) {
+        use crate::dry_run::DryRunExecutionRequest;
+        use crate::execution_guard::RiskCheckReport;
+        use crate::models::{Action, Mode, TradeProposal};
+        use crate::risk::RiskConfig;
+        use crate::simulation::SimulationReport;
+        use crate::transaction_guard::TransactionGuardReport;
+        use crate::wallet_guard::WalletAuthorizationReport;
+        use serde_json::json;
+        use uuid::Uuid;
+
+        let path = std::env::temp_dir().join(format!(
+            "pio-signer-{}.db",
+            Uuid::new_v4()
+        ));
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let prepared = prepared_for(keypair);
+        let decision_id = Uuid::new_v4();
+        let request = DryRunExecutionRequest {
+            proposal: TradeProposal {
+                decision_id,
+                mode: Mode::Live,
+                action: Action::Enter,
+                pool_address: Pubkey::new_unique().to_string(),
+                capital_quote: 10.0,
+                account_equity_quote: 1_000.0,
+                portfolio_deployed_quote: 100.0,
+                daily_drawdown_pct: 0.5,
+                min_bin_id: -1,
+                max_bin_id: 1,
+                strategy: "SPOT".into(),
+                expected_net_return_pct: 1.0,
+                expected_downside_pct: 0.5,
+                model_version: "baseline".into(),
+                data_age_seconds: 1,
+            },
+            transaction_base64: prepared.transaction_base64.clone(),
+        };
+        let config = RiskConfig {
+            max_capital_per_position_pct: 2.0,
+            max_total_deployed_pct: 20.0,
+            max_daily_drawdown_pct: 3.0,
+            min_expected_edge_pct: 0.25,
+            max_expected_downside_pct: 2.0,
+            max_data_age_seconds: 30,
+        };
+        let risk = RiskCheckReport {
+            decision_id,
+            mode: Mode::Live,
+            action: Action::Enter,
+            accepted: true,
+            reason: "approved".into(),
+        };
+        let guard = TransactionGuardReport {
+            accepted: true,
+            reason: "approved".into(),
+            fee_payer: keypair.pubkey().to_string(),
+            pool_account_present: true,
+            required_accounts_present: true,
+            instruction_count: 1,
+            static_account_count: 2,
+            required_signatures: 1,
+            signatures_all_default: true,
+            address_lookup_table_count: 0,
+            program_ids: vec![Pubkey::new_unique().to_string()],
+            instruction_fingerprints: vec![],
+        };
+        let initial_simulation = SimulationReport {
+            succeeded: true,
+            rpc_context_slot: 90,
+            result: json!({"err": null}),
+        };
+        let final_simulation = SimulationReport {
+            succeeded: true,
+            rpc_context_slot: 101,
+            result: json!({"err": null}),
+        };
+        let wallet = WalletAuthorizationReport {
+            accepted: true,
+            reason: "approved".into(),
+            wallet_pubkey: keypair.pubkey().to_string(),
+            transaction_fee_payer: keypair.pubkey().to_string(),
+        };
+
+        let id = decision_id.to_string();
+        store.register(&request, &config).unwrap();
+        store.record_risk(&id, &risk).unwrap();
+        store.record_transaction_guard(&id, &guard).unwrap();
+        store.record_simulation(&id, &initial_simulation).unwrap();
+        store.record_wallet_authorization(&id, &wallet).unwrap();
+        store
+            .record_final_presign(
+                &id,
+                &prepared,
+                &guard,
+                &wallet,
+                &final_simulation,
+            )
+            .unwrap();
+
+        (store, path, id)
+    }
+
+    #[test]
+    fn execution_intent_signer_enters_signing_and_is_restart_deterministic() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+
+        let first =
+            sign_execution_intent(&store, &id, &keypair).unwrap();
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::Signing
+        );
+
+        let second =
+            sign_execution_intent(&store, &id, &keypair).unwrap();
+        assert_eq!(first.signature, second.signature);
+        assert_eq!(
+            first.transaction_base64,
+            second.transaction_base64
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn execution_intent_signer_rejects_different_loaded_wallet() {
+        let expected = Keypair::new();
+        let other = Keypair::new();
+        let (store, path, id) = ready_store(&expected);
+
+        assert!(sign_execution_intent(&store, &id, &other).is_err());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::Signing
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
 }
