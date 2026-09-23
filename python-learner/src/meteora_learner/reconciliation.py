@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
 
-from .liquidity_math import amounts_from_liquidity_share, fee_from_checkpoint_delta
+from .liquidity_math import (
+    amounts_from_liquidity_share,
+    fee_from_checkpoint_delta,
+    reward_from_checkpoint_delta,
+)
 from .research_store import ResearchStore
+
+
+DEFAULT_PUBKEY = "11111111111111111111111111111111"
 
 
 @dataclass(frozen=True)
@@ -70,9 +78,48 @@ class PositionFeeReconciliation:
 
 
 @dataclass(frozen=True)
+class PositionRewardBinCheck:
+    bin_id: int
+    liquidity_share: int
+    reward_one_checkpoint_delta: int
+    reward_two_checkpoint_delta: int
+    predicted_reward_one_delta: int
+    actual_reward_one_delta: int
+    error_one: int
+    predicted_reward_two_delta: int
+    actual_reward_two_delta: int
+    error_two: int
+
+
+@dataclass(frozen=True)
+class PositionRewardReconciliation:
+    position_address: str
+    start_observed_at: str
+    end_observed_at: str
+    reward_mint_0: str
+    reward_mint_1: str
+    bins_checked: int
+    bins_with_checkpoint_growth: int
+    mismatched_bins: int
+    predicted_reward_one_delta: int
+    actual_reward_one_delta: int
+    predicted_reward_two_delta: int
+    actual_reward_two_delta: int
+    total_abs_error_one: int
+    total_abs_error_two: int
+    exact_match: bool
+    bins: tuple[PositionRewardBinCheck, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class PositionReconciliationReport:
     amount_state: PositionAmountReconciliation
     fee_interval: PositionFeeReconciliation | None
+    reward_interval: PositionRewardReconciliation | None
+    reward_interval_error: str | None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -80,6 +127,85 @@ class PositionReconciliationReport:
 
 def _int(row: dict[str, Any], key: str) -> int:
     return int(str(row[key]))
+
+
+def _position_interval(
+    store: ResearchStore,
+    *,
+    position_address: str,
+    start_observed_at: str,
+    end_observed_at: str,
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    dict[int, dict[str, Any]],
+    dict[int, dict[str, Any]],
+]:
+    if start_observed_at >= end_observed_at:
+        raise ValueError("reconciliation interval must move forward in time")
+
+    start = store.position_snapshot_at(position_address, start_observed_at)
+    end = store.position_snapshot_at(position_address, end_observed_at)
+    if start is None or end is None:
+        raise ValueError("missing position snapshot")
+    if str(start["pool_address"]) != str(end["pool_address"]):
+        raise ValueError("position pool changed across reconciliation interval")
+    if (
+        int(start["lower_bin_id"]) != int(end["lower_bin_id"])
+        or int(start["upper_bin_id"]) != int(end["upper_bin_id"])
+    ):
+        raise ValueError("position range changed across reconciliation interval")
+
+    previous = {
+        int(row["bin_id"]): row
+        for row in store.load_position_bins(
+            position_address,
+            observed_at=start_observed_at,
+        )
+    }
+    current = {
+        int(row["bin_id"]): row
+        for row in store.load_position_bins(
+            position_address,
+            observed_at=end_observed_at,
+        )
+    }
+    if set(previous) != set(current):
+        raise ValueError("position bin coverage changed across reconciliation interval")
+
+    for bin_id in sorted(previous):
+        if _int(previous[bin_id], "position_liquidity") != _int(
+            current[bin_id],
+            "position_liquidity",
+        ):
+            raise ValueError(
+                f"position liquidity changed in bin {bin_id} across reconciliation interval"
+            )
+
+    return start, end, previous, current
+
+
+def _iso_epoch(value: str) -> int:
+    return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp())
+
+
+def _has_position_event_between(
+    store: ResearchStore,
+    *,
+    position_address: str,
+    event_type: str,
+    start_observed_at: str,
+    end_observed_at: str,
+) -> bool:
+    start_epoch = _iso_epoch(start_observed_at)
+    end_epoch = _iso_epoch(end_observed_at)
+    return any(
+        start_epoch < int(row["block_time"]) <= end_epoch
+        for row in store.load_position_history_events(
+            position_address,
+            event_type=event_type,
+        )
+    )
 
 
 def reconcile_position_amounts(
@@ -94,12 +220,10 @@ def reconcile_position_amounts(
         if snapshot is None:
             raise ValueError(f"no stored position snapshot for {position_address}")
         observed_at = str(snapshot["observed_at"])
-    else:
-        snapshot = store.position_snapshot_at(position_address, observed_at)
-        if snapshot is None:
-            raise ValueError(
-                f"no stored position snapshot for {position_address} at {observed_at}"
-            )
+    elif store.position_snapshot_at(position_address, observed_at) is None:
+        raise ValueError(
+            f"no stored position snapshot for {position_address} at {observed_at}"
+        )
 
     rows = store.load_position_bins(position_address, observed_at=observed_at)
     if not rows:
@@ -151,54 +275,24 @@ def reconcile_position_fee_interval(
     start_observed_at: str,
     end_observed_at: str,
 ) -> PositionFeeReconciliation:
-    if start_observed_at >= end_observed_at:
-        raise ValueError("fee reconciliation interval must move forward in time")
-
     store = ResearchStore(database_path)
-    start = store.position_snapshot_at(position_address, start_observed_at)
-    end = store.position_snapshot_at(position_address, end_observed_at)
-    if start is None or end is None:
-        raise ValueError("missing position snapshot")
-
-    if str(start["pool_address"]) != str(end["pool_address"]):
-        raise ValueError("position pool changed across reconciliation interval")
-    if (
-        int(start["lower_bin_id"]) != int(end["lower_bin_id"])
-        or int(start["upper_bin_id"]) != int(end["upper_bin_id"])
-    ):
-        raise ValueError("position range changed across reconciliation interval")
+    start, end, previous, current = _position_interval(
+        store,
+        position_address=position_address,
+        start_observed_at=start_observed_at,
+        end_observed_at=end_observed_at,
+    )
     if (
         str(start["total_claimed_fee_x_amount"]) != str(end["total_claimed_fee_x_amount"])
         or str(start["total_claimed_fee_y_amount"]) != str(end["total_claimed_fee_y_amount"])
     ):
         raise ValueError("position claimed fees changed across reconciliation interval")
 
-    previous = {
-        int(row["bin_id"]): row
-        for row in store.load_position_bins(
-            position_address,
-            observed_at=start_observed_at,
-        )
-    }
-    current = {
-        int(row["bin_id"]): row
-        for row in store.load_position_bins(
-            position_address,
-            observed_at=end_observed_at,
-        )
-    }
-    if set(previous) != set(current):
-        raise ValueError("position bin coverage changed across reconciliation interval")
-
     checks: list[PositionFeeBinCheck] = []
     for bin_id in sorted(previous):
         before = previous[bin_id]
         after = current[bin_id]
         share = _int(before, "position_liquidity")
-        if share != _int(after, "position_liquidity"):
-            raise ValueError(
-                f"position liquidity changed in bin {bin_id} across reconciliation interval"
-            )
 
         checkpoint_x_before = _int(before, "bin_fee_x_per_token_stored")
         checkpoint_x_after = _int(after, "bin_fee_x_per_token_stored")
@@ -257,6 +351,127 @@ def reconcile_position_fee_interval(
     )
 
 
+def reconcile_position_reward_interval(
+    database_path: str,
+    *,
+    position_address: str,
+    start_observed_at: str,
+    end_observed_at: str,
+) -> PositionRewardReconciliation:
+    store = ResearchStore(database_path)
+    start, end, previous, current = _position_interval(
+        store,
+        position_address=position_address,
+        start_observed_at=start_observed_at,
+        end_observed_at=end_observed_at,
+    )
+
+    metadata = (
+        start.get("supports_limit_order"),
+        start.get("reward_mint_0"),
+        start.get("reward_mint_1"),
+        end.get("supports_limit_order"),
+        end.get("reward_mint_0"),
+        end.get("reward_mint_1"),
+    )
+    if any(value is None for value in metadata):
+        raise ValueError("reward campaign metadata missing; collect fresh position snapshots")
+    if bool(start["supports_limit_order"]) or bool(end["supports_limit_order"]):
+        raise ValueError("reward reconciliation is not applicable to limit-order pools")
+    start_mints = (str(start["reward_mint_0"]), str(start["reward_mint_1"]))
+    end_mints = (str(end["reward_mint_0"]), str(end["reward_mint_1"]))
+    if start_mints != end_mints:
+        raise ValueError("reward campaign mint changed across reconciliation interval")
+    if start_mints == (DEFAULT_PUBKEY, DEFAULT_PUBKEY):
+        raise ValueError("no active reward campaign in reconciliation interval")
+    if _has_position_event_between(
+        store,
+        position_address=position_address,
+        event_type="claim_reward",
+        start_observed_at=start_observed_at,
+        end_observed_at=end_observed_at,
+    ):
+        raise ValueError("position claimed rewards across reconciliation interval")
+
+    checks: list[PositionRewardBinCheck] = []
+    for bin_id in sorted(previous):
+        before = previous[bin_id]
+        after = current[bin_id]
+        if not bool(before["reward_checkpoint_available"]) or not bool(
+            after["reward_checkpoint_available"]
+        ):
+            raise ValueError(
+                "reward checkpoint metadata missing; collect fresh position snapshots"
+            )
+
+        share = _int(before, "position_liquidity")
+        checkpoint_one_before = _int(before, "bin_reward_per_token_stored_0")
+        checkpoint_one_after = _int(after, "bin_reward_per_token_stored_0")
+        checkpoint_two_before = _int(before, "bin_reward_per_token_stored_1")
+        checkpoint_two_after = _int(after, "bin_reward_per_token_stored_1")
+        if (
+            checkpoint_one_after < checkpoint_one_before
+            or checkpoint_two_after < checkpoint_two_before
+        ):
+            raise ValueError(f"reward checkpoint decreased in bin {bin_id}")
+
+        delta_one = checkpoint_one_after - checkpoint_one_before
+        delta_two = checkpoint_two_after - checkpoint_two_before
+        predicted_one = reward_from_checkpoint_delta(
+            liquidity_share=share,
+            reward_per_token_delta=delta_one,
+        )
+        predicted_two = reward_from_checkpoint_delta(
+            liquidity_share=share,
+            reward_per_token_delta=delta_two,
+        )
+        actual_one = _int(after, "reward_one") - _int(before, "reward_one")
+        actual_two = _int(after, "reward_two") - _int(before, "reward_two")
+        if actual_one < 0 or actual_two < 0:
+            raise ValueError(
+                f"position rewards decreased in bin {bin_id}; claim/reset interval is ineligible"
+            )
+
+        checks.append(
+            PositionRewardBinCheck(
+                bin_id=bin_id,
+                liquidity_share=share,
+                reward_one_checkpoint_delta=delta_one,
+                reward_two_checkpoint_delta=delta_two,
+                predicted_reward_one_delta=predicted_one,
+                actual_reward_one_delta=actual_one,
+                error_one=predicted_one - actual_one,
+                predicted_reward_two_delta=predicted_two,
+                actual_reward_two_delta=actual_two,
+                error_two=predicted_two - actual_two,
+            )
+        )
+
+    mismatched = sum(item.error_one != 0 or item.error_two != 0 for item in checks)
+    return PositionRewardReconciliation(
+        position_address=position_address,
+        start_observed_at=start_observed_at,
+        end_observed_at=end_observed_at,
+        reward_mint_0=start_mints[0],
+        reward_mint_1=start_mints[1],
+        bins_checked=len(checks),
+        bins_with_checkpoint_growth=sum(
+            item.reward_one_checkpoint_delta > 0
+            or item.reward_two_checkpoint_delta > 0
+            for item in checks
+        ),
+        mismatched_bins=mismatched,
+        predicted_reward_one_delta=sum(item.predicted_reward_one_delta for item in checks),
+        actual_reward_one_delta=sum(item.actual_reward_one_delta for item in checks),
+        predicted_reward_two_delta=sum(item.predicted_reward_two_delta for item in checks),
+        actual_reward_two_delta=sum(item.actual_reward_two_delta for item in checks),
+        total_abs_error_one=sum(abs(item.error_one) for item in checks),
+        total_abs_error_two=sum(abs(item.error_two) for item in checks),
+        exact_match=mismatched == 0,
+        bins=tuple(checks),
+    )
+
+
 def reconcile_latest_position_fee_interval(
     database_path: str,
     *,
@@ -266,7 +481,6 @@ def reconcile_latest_position_fee_interval(
     times = store.position_observation_times(position_address, limit=2)
     if len(times) < 2:
         raise ValueError("need at least two position observations for fee reconciliation")
-
     end_time, start_time = times[0], times[1]
     return reconcile_position_fee_interval(
         database_path,
@@ -274,6 +488,25 @@ def reconcile_latest_position_fee_interval(
         start_observed_at=start_time,
         end_observed_at=end_time,
     )
+
+
+def reconcile_latest_position_reward_interval(
+    database_path: str,
+    *,
+    position_address: str,
+) -> PositionRewardReconciliation:
+    store = ResearchStore(database_path)
+    times = store.position_observation_times(position_address, limit=2)
+    if len(times) < 2:
+        raise ValueError("need at least two position observations for reward reconciliation")
+    end_time, start_time = times[0], times[1]
+    return reconcile_position_reward_interval(
+        database_path,
+        position_address=position_address,
+        start_observed_at=start_time,
+        end_observed_at=end_time,
+    )
+
 
 def reconcile_position(
     database_path: str,
@@ -286,12 +519,24 @@ def reconcile_position(
     )
     store = ResearchStore(database_path)
     fee_interval = None
+    reward_interval = None
+    reward_interval_error = None
     if len(store.position_observation_times(position_address, limit=2)) >= 2:
         fee_interval = reconcile_latest_position_fee_interval(
             database_path,
             position_address=position_address,
         )
+        try:
+            reward_interval = reconcile_latest_position_reward_interval(
+                database_path,
+                position_address=position_address,
+            )
+        except ValueError as exc:
+            reward_interval_error = str(exc)
+
     return PositionReconciliationReport(
         amount_state=amount_state,
         fee_interval=fee_interval,
+        reward_interval=reward_interval,
+        reward_interval_error=reward_interval_error,
     )
