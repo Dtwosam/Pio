@@ -135,6 +135,13 @@ from .phase9_position_discovery import (
 from .phase9_wallet_flow_capture import (
     run_phase9_wallet_flow_capture,
 )
+from .phase9_explicit_inputs import (
+    build_phase9_explicit_input_template,
+    load_phase9_explicit_inputs,
+    parse_phase9_explicit_inputs,
+    persist_phase9_explicit_inputs,
+    run_phase9_explicit_research,
+)
 from .phase9_chain_capture import run_phase9_chain_capture_batch
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
@@ -2276,6 +2283,36 @@ def main() -> None:
         default=120,
     )
     phase9_wallet_capture.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_input_template = subparsers.add_parser(
+        "phase9-research-input-template",
+        help="Generate a Phase 9 explicit-assumption template without inventing economic inputs",
+    )
+    phase9_input_template.add_argument(
+        "--pools",
+        help="Optional comma-separated pool set; defaults to current highest-depth chain pools",
+    )
+
+    phase9_inputs_ingest = subparsers.add_parser(
+        "phase9-research-inputs-ingest",
+        help="Validate and persist checksum-bound explicit hedge/portfolio research assumptions",
+    )
+    phase9_inputs_ingest.add_argument("--file", required=True)
+
+    phase9_explicit_run = subparsers.add_parser(
+        "phase9-explicit-research-run",
+        help="Run static-hedge and portfolio research from a persisted checksum-bound explicit input artifact",
+    )
+    phase9_explicit_run.add_argument(
+        "--input-evidence-id",
+        type=int,
+        help="Explicit input evidence ID; defaults to the latest valid artifact",
+    )
+    phase9_explicit_run.add_argument("--persist", action="store_true")
+    phase9_explicit_run.add_argument(
         "--require-ready",
         action="store_true",
     )
@@ -5054,6 +5091,59 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.source_after.ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-research-input-template":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        template_pools = (
+            tuple(
+                item.strip()
+                for item in args.pools.split(",")
+                if item.strip()
+            )
+            if args.pools
+            else None
+        )
+        result = build_phase9_explicit_input_template(
+            storage,
+            pool_addresses=template_pools,
+        )
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "phase9-research-inputs-ingest":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        with open(args.file, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        inputs = parse_phase9_explicit_inputs(payload)
+        result = persist_phase9_explicit_inputs(
+            storage,
+            inputs=inputs,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase9-explicit-research-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        artifact = load_phase9_explicit_inputs(
+            storage,
+            evidence_id=args.input_evidence_id,
+        )
+        if artifact is None:
+            raise ValueError(
+                "no persisted Phase 9 explicit research input artifact exists"
+            )
+        result = run_phase9_explicit_research(
+            storage,
+            artifact=artifact,
+            persist=args.persist,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.explicit_research_ready:
             raise SystemExit(2)
         return
 
