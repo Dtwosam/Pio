@@ -94,6 +94,12 @@ from .phase9_policy_controlled_validation import (
 from .phase9_policy_readiness import (
     evaluate_phase9_policy_readiness,
 )
+from .phase9_policy_rollout_simulation import (
+    Phase9PolicyRolloutEnvelope,
+    evaluate_phase9_policy_rollout_simulation,
+    persist_phase9_policy_rollout_simulation,
+    audit_persisted_phase9_policy_rollout_simulation,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -1861,6 +1867,33 @@ def main() -> None:
     )
     phase9_policy_readiness.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    phase9_policy_rollout = subparsers.add_parser(
+        "phase9-policy-rollout-simulate",
+        help="Validate a disabled Phase 9 rollout envelope against current controlled-live limits without wiring it to execution",
+    )
+    phase9_policy_rollout.add_argument(
+        "--file",
+        required=True,
+        help="JSON object with current and proposed controlled-live envelope objects",
+    )
+    phase9_policy_rollout.add_argument(
+        "--persist",
+        action="store_true",
+    )
+    phase9_policy_rollout.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_policy_rollout_audit = subparsers.add_parser(
+        "phase9-policy-rollout-audit",
+        help="Audit whether persisted disabled Phase 9 rollout simulation still matches current policy readiness",
+    )
+    phase9_policy_rollout_audit.add_argument(
+        "--require-current",
         action="store_true",
     )
 
@@ -4196,6 +4229,70 @@ def main() -> None:
         result = evaluate_phase9_policy_readiness(storage)
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-rollout-simulate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        with open(args.file, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "phase9-policy-rollout-simulate file must contain an object"
+            )
+        current_raw = payload.get("current")
+        proposed_raw = payload.get("proposed")
+        if not isinstance(current_raw, dict) or not isinstance(
+            proposed_raw,
+            dict,
+        ):
+            raise ValueError(
+                "rollout simulation file requires current and proposed objects"
+            )
+
+        def _rollout_envelope(raw):
+            pools = raw.get("allowed_pool_addresses")
+            if not isinstance(pools, list):
+                raise ValueError(
+                    "allowed_pool_addresses must be a JSON array"
+                )
+            return Phase9PolicyRolloutEnvelope(
+                allowed_pool_addresses=tuple(str(item) for item in pools),
+                **{
+                    key: value
+                    for key, value in raw.items()
+                    if key != "allowed_pool_addresses"
+                },
+            )
+
+        result = evaluate_phase9_policy_rollout_simulation(
+            storage,
+            current=_rollout_envelope(current_raw),
+            proposed=_rollout_envelope(proposed_raw),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_phase9_policy_rollout_simulation(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.rollout_simulation_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-policy-rollout-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = audit_persisted_phase9_policy_rollout_simulation(
+            storage,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_current and not result.current:
             raise SystemExit(2)
         return
 
