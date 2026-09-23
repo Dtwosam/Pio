@@ -54,6 +54,7 @@ class MLV1Bundle:
 
 def _prepare_frame(df: pd.DataFrame) -> pd.DataFrame:
     required = {
+        "pool_address",
         "decision_observed_at",
         *ML_FEATURE_COLUMNS,
         *ML_TARGET_COLUMNS,
