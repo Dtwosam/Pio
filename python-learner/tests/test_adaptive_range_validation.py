@@ -1,6 +1,8 @@
 from meteora_learner.adaptive_range import AdaptiveRangeCriteria
 from meteora_learner.adaptive_range_validation import (
+    ADAPTIVE_RANGE_WALK_FORWARD_EVIDENCE_TYPE,
     AdaptiveRangeValidationCriteria,
+    persist_adaptive_range_validation,
     validate_adaptive_range_walk_forward,
 )
 from meteora_learner.phase_promotion import (
@@ -177,3 +179,34 @@ def test_width_cost_can_disqualify_trivial_widening(tmp_path):
         "mean width" in reason
         for reason in report.reasons
     )
+
+
+def test_walk_forward_evidence_round_trip(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_moving_history(storage)
+    promote_phase8(storage)
+
+    report = validate_adaptive_range_walk_forward(
+        storage,
+        pool_address="pool",
+        adaptive_criteria=adaptive_criteria(),
+        validation_criteria=validation_criteria(),
+        as_of="2026-09-23T23:00:00+00:00",
+    )
+    evidence_id = persist_adaptive_range_validation(
+        storage,
+        report=report,
+    )
+
+    assert evidence_id > 0
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=ADAPTIVE_RANGE_WALK_FORWARD_EVIDENCE_TYPE,
+        pool_address="pool",
+    )
+    assert latest is not None
+    assert latest["qualified"] is True
+    assert latest["status"] == "QUALIFIED_RESEARCH"
+    assert latest["as_of"] == "2026-09-23T23:00:00+00:00"
+    assert latest["evidence"]["pool_address"] == "pool"
+    assert latest["evidence"]["research_only"] is True
+    assert latest["evidence"]["policy_actionable"] is False
