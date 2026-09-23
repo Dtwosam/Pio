@@ -107,6 +107,7 @@ def criteria():
     return Phase8PromotionCriteria(
         min_completed_cycles=1,
         min_live_labels=1,
+        min_live_pools=1,
         max_realized_drawdown_bps=10_000,
         max_single_loss_bps=10_000,
         min_win_rate=0.0,
@@ -181,3 +182,31 @@ def test_phase8_persistence_refuses_unready_report(tmp_path):
         storage,
         phase_name=PHASE8,
     ).promoted is False
+
+
+def test_phase8_requires_live_pool_diversity(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_phase7(storage)
+    seed_champion(storage, with_cycle=True)
+    add_live_label(storage, 0)
+    add_live_label(storage, 1)
+
+    strict = Phase8PromotionCriteria(
+        min_completed_cycles=1,
+        min_live_labels=2,
+        min_live_pools=2,
+        max_realized_drawdown_bps=10_000,
+        max_single_loss_bps=10_000,
+        min_win_rate=0.0,
+        min_mean_return_bps=-10_000,
+        max_mean_abs_prediction_error_bps=10_000,
+    )
+    report = evaluate_phase8_promotion(
+        storage,
+        criteria=strict,
+    )
+
+    assert report.promotion_ready is False
+    assert report.live_champion is not None
+    assert report.live_champion.status == "INSUFFICIENT_EVIDENCE"
+    assert report.live_champion.distinct_pools == 1
