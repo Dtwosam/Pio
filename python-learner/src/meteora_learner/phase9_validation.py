@@ -1093,7 +1093,7 @@ def evaluate_phase9_research_bundle(
     ):
         reasons.append(
             "qualified contextual-bandit evidence must be bound to a "
-            "checksum-verified retraining dataset lineage"
+            "checksum-verified dataset lineage"
         )
 
     ready = not reasons
