@@ -56,12 +56,18 @@ fn signed_for_current(
     store: &ExecutionIntentStore,
     decision_id: &str,
     keypair: &Keypair,
+    phase5_gate: &Phase5PromotionGateReport,
 ) -> Result<(SignedExecutionTransaction, bool)> {
     let current = store.load(decision_id)?;
     match current.status {
         ExecutionIntentStatus::SimulationPassed
         | ExecutionIntentStatus::Signing => Ok((
-            sign_execution_intent(store, decision_id, keypair)?,
+            sign_execution_intent(
+                store,
+                decision_id,
+                keypair,
+                phase5_gate,
+            )?,
             false,
         )),
         ExecutionIntentStatus::Sent => {
@@ -113,7 +119,12 @@ where
         current_block_height,
     )?;
     let (signed, reused_persisted_signature) =
-        signed_for_current(store, decision_id, keypair)?;
+        signed_for_current(
+            store,
+            decision_id,
+            keypair,
+            phase5_gate,
+        )?;
 
     let current = store.load(decision_id)?;
     if current.status == ExecutionIntentStatus::Signing {
