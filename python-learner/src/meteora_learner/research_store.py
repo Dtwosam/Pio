@@ -675,3 +675,51 @@ class ResearchStore:
             conn.close()
         return [str(row["position_address"]) for row in rows]
 
+    def latest_pool_snapshots(self) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT p.observed_at, p.address, p.name, p.tvl, p.volume_24h,
+                       p.fees_24h, p.current_price, p.bin_step, p.active_bin_id,
+                       p.apr, p.apy, p.token_x_symbol, p.token_y_symbol,
+                       p.token_x_decimals, p.token_y_decimals,
+                       p.dynamic_fee_pct, p.base_fee_pct, p.max_fee_pct,
+                       p.protocol_fee_pct, p.collect_fee_mode,
+                       p.is_blacklisted, p.pool_created_at
+                FROM pool_snapshots p
+                JOIN (
+                    SELECT address, MAX(observed_at) AS max_observed_at
+                    FROM pool_snapshots
+                    GROUP BY address
+                ) latest
+                  ON latest.address = p.address
+                 AND latest.max_observed_at = p.observed_at
+                WHERE p.id = (
+                    SELECT MAX(p2.id)
+                    FROM pool_snapshots p2
+                    WHERE p2.address = p.address
+                      AND p2.observed_at = p.observed_at
+                )
+                ORDER BY p.address ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
+    def chain_observation_count(self, pool_address: str) -> int:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT observed_at) AS observation_count
+                FROM chain_pool_snapshots
+                WHERE pool_address = ?
+                """,
+                (pool_address,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return int(row["observation_count"]) if row is not None else 0
+
