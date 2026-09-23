@@ -356,6 +356,20 @@ ON chain_transaction_events(signature, parent_ix_index);
 CREATE INDEX IF NOT EXISTS idx_chain_tx_event_position
 ON chain_transaction_events(position_address, signature);
 
+CREATE TABLE IF NOT EXISTS token_quote_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_mint TEXT NOT NULL,
+    quote_unit TEXT NOT NULL,
+    quote_per_atomic TEXT NOT NULL,
+    source TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    UNIQUE(token_mint, quote_unit, source, observed_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_quote_latest
+ON token_quote_observations(token_mint, quote_unit, observed_at);
+
 CREATE TABLE IF NOT EXISTS paper_accounts (
     account_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
