@@ -85,6 +85,19 @@ class Phase9ExplicitInputsArtifact:
 
 
 @dataclass(frozen=True)
+class Phase9ExplicitInputsAudit:
+    exists: bool
+    valid: bool
+    boundary_valid: bool
+    evidence_id: int | None
+    artifact_sha256: str | None
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Phase9ExplicitResearchRun:
     research_only: bool
     policy_actionable: bool
@@ -511,6 +524,82 @@ def persist_phase9_explicit_inputs(
         evidence_id=evidence_id,
         artifact_sha256=digest,
         inputs=inputs,
+    )
+
+
+def audit_phase9_explicit_inputs(
+    storage: Storage,
+) -> Phase9ExplicitInputsAudit:
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+        pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
+    )
+    if latest is None:
+        return Phase9ExplicitInputsAudit(
+            exists=False,
+            valid=False,
+            boundary_valid=False,
+            evidence_id=None,
+            artifact_sha256=None,
+            reasons=("persisted Phase 9 explicit input artifact is missing",),
+        )
+
+    reasons: list[str] = []
+    evidence = latest.get("evidence")
+    if not isinstance(evidence, dict):
+        return Phase9ExplicitInputsAudit(
+            exists=True,
+            valid=False,
+            boundary_valid=False,
+            evidence_id=int(latest["id"]),
+            artifact_sha256=None,
+            reasons=("persisted explicit input evidence is malformed",),
+        )
+
+    raw_inputs = evidence.get("inputs")
+    boundary_valid = (
+        isinstance(raw_inputs, dict)
+        and raw_inputs.get("research_only") is True
+        and raw_inputs.get("policy_actionable") is False
+        and raw_inputs.get("execution_wired") is False
+    )
+    if not boundary_valid:
+        reasons.append(
+            "persisted explicit input artifact violates the non-actionable boundary"
+        )
+    if str(latest.get("status", "")) != "INPUTS_VALIDATED":
+        reasons.append(
+            "persisted explicit input artifact status is not INPUTS_VALIDATED"
+        )
+    if bool(latest.get("qualified")):
+        reasons.append(
+            "explicit input artifact must not be marked as qualified research"
+        )
+
+    digest = None
+    try:
+        inputs = parse_phase9_explicit_inputs(raw_inputs)
+        digest = _canonical_sha256(inputs.to_record())
+    except (KeyError, TypeError, ValueError) as exc:
+        reasons.append(f"explicit input validation failed: {exc}")
+    else:
+        persisted_digest = str(
+            evidence.get("artifact_sha256", "")
+        ).strip()
+        if not persisted_digest:
+            reasons.append("explicit input artifact SHA-256 is missing")
+        elif persisted_digest != digest:
+            reasons.append(
+                "explicit input artifact SHA-256 does not match normalized inputs"
+            )
+
+    return Phase9ExplicitInputsAudit(
+        exists=True,
+        valid=not reasons,
+        boundary_valid=boundary_valid,
+        evidence_id=int(latest["id"]),
+        artifact_sha256=digest,
+        reasons=tuple(reasons),
     )
 
 
