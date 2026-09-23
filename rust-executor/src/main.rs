@@ -14,6 +14,7 @@ mod models;
 mod phase5_gate;
 mod phase6_readiness;
 mod phase6_gate;
+mod phase7_gate;
 mod preflight;
 mod prestate_verifier;
 mod position_closure;
@@ -54,6 +55,7 @@ fn usage() {
   meteora-executor phase5-promotion-gate <PIO_DATABASE>
   meteora-executor phase6-readiness <PIO_DATABASE> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor phase6-promotion-gate <PIO_DATABASE>
+  meteora-executor phase7-promotion-gate <PIO_DATABASE>
   meteora-executor controlled-live-check <PIO_DATABASE> <PROPOSAL_JSON_OR_-> <CONTROLLED_LIVE_CONFIG_JSON>
   meteora-executor controlled-live-intent-check <PIO_DATABASE> <EXECUTION_DB> <DECISION_ID> <CONTROLLED_LIVE_CONFIG_JSON>
   meteora-executor execution-decision-context <EXECUTION_DB> <DECISION_ID>
@@ -652,6 +654,23 @@ RPC_URL is accepted as a compatibility fallback",
                 std::path::Path::new(&database_path),
                 &proposal,
                 &config,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.accepted {
+                std::process::exit(2);
+            }
+        }
+        "phase7-promotion-gate" => {
+            let database_path = args
+                .next()
+                .context("PIO_DATABASE is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "phase7-promotion-gate accepts exactly one argument"
+                );
+            }
+            let report = phase7_gate::verify_phase7_promotion_database(
+                std::path::Path::new(&database_path),
             )?;
             println!("{}", serde_json::to_string_pretty(&report)?);
             if !report.accepted {
