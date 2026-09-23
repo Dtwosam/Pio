@@ -122,6 +122,7 @@ pio phase9-storage-integrity --require-verified
 pio phase9-replay-audit --require-verified
 pio phase9-promotion-audit --require-current
 pio phase9-operational-audit --require-verified
+pio phase9-source-capture-run  # one bounded read-only source-acquisition pass
 pio phase9-chain-capture-plan --rpc-url <RPC_URL> --require-ready
 pio phase9-chain-capture-run --require-target  # uses SOLANA_RPC_URL; read-only inspect + local ingest
 pio phase9-mint-capture-plan --target-pools 2 --require-ready
