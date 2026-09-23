@@ -310,7 +310,8 @@ Built:
 - static inventory hedge research with explicit instrument identity, venue, liquidity-share, leverage, funding and trading-cost assumptions
 - offline contextual-bandit replay over fully labeled counterfactual actions, with adversarial no-lookahead tests and fixed-CSV replay workflow
 - persistent Phase 9 research-bundle readiness gate spanning adaptive/regime, mint risk, wallet flow, allocation, hedge and bandit evidence while remaining `policy_actionable=false`
-- persistent non-actionable Phase 9 promotion evidence requiring Phase 8 promotion and a ready research bundle; this milestone remains `research_only=true`
+- persistent non-actionable Phase 9 promotion evidence requiring Phase 8 promotion and a current immutable ready research bundle; this milestone remains `research_only=true`
+- dependency-aware Phase 9 evidence work queue that stages authoritative mint snapshots before mint-risk research and surfaces artifact/assumption gaps without inventing inputs
 - fail-closed range-cap and insufficient-history states
 - CLI research workflow with optional readiness exit status
 
