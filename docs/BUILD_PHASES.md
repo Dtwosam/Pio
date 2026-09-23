@@ -318,6 +318,7 @@ Built:
 - deterministic full-report replay across all qualified Phase 9 research families so source-valid but metric-forged evidence fails closed
 - explicit read-only replay audit across every required Phase 9 research family, including checked evidence IDs and fail-able verification status
 - database-enforced append-only Phase 9 source/evidence history plus immutable promotion-history records
+- fail-able Phase 9 storage-integrity preflight required by bundle readiness and replay audit
 - absolute regular-file / non-symlink retraining dataset requirements with replay-time byte checksum verification
 - fail-closed range-cap and insufficient-history states
 - CLI research workflow with optional readiness exit status
