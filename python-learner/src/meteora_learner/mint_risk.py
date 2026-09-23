@@ -36,6 +36,7 @@ class MintRiskCriteria:
 class MintRiskAssessment:
     mint_address: str
     roles: tuple[str, ...]
+    mint_snapshot_id: int | None
     observed_at: str | None
     age_seconds: int | None
     expected_program: str | None
@@ -52,6 +53,7 @@ class MintRiskAssessment:
 @dataclass(frozen=True)
 class PoolMintRiskReport:
     pool_address: str
+    pool_snapshot_id: int
     as_of: str
     phase8_promoted: bool
     research_only: bool
@@ -95,7 +97,7 @@ def research_pool_mint_risk(
         if as_of is None:
             pool = conn.execute(
                 """
-                SELECT token_x_mint, token_y_mint,
+                SELECT id, token_x_mint, token_y_mint,
                        token_x_program, token_y_program,
                        reward_mint_0, reward_mint_1
                 FROM chain_pool_snapshots
@@ -108,7 +110,7 @@ def research_pool_mint_risk(
         else:
             pool = conn.execute(
                 """
-                SELECT token_x_mint, token_y_mint,
+                SELECT id, token_x_mint, token_y_mint,
                        token_x_program, token_y_program,
                        reward_mint_0, reward_mint_1
                 FROM chain_pool_snapshots
@@ -124,8 +126,8 @@ def research_pool_mint_risk(
 
         required: dict[str, dict[str, Any]] = {}
         for role, mint, program in (
-            ("TOKEN_X", pool[0], pool[2]),
-            ("TOKEN_Y", pool[1], pool[3]),
+            ("TOKEN_X", pool[1], pool[3]),
+            ("TOKEN_Y", pool[2], pool[4]),
         ):
             required.setdefault(str(mint), {"roles": [], "programs": set()})
             required[str(mint)]["roles"].append(role)
@@ -133,7 +135,7 @@ def research_pool_mint_risk(
                 required[str(mint)]["programs"].add(str(program))
 
         if criteria.include_reward_mints:
-            for index, mint in enumerate((pool[4], pool[5])):
+            for index, mint in enumerate((pool[5], pool[6])):
                 if mint is None or str(mint) == DEFAULT_PUBKEY:
                     continue
                 required.setdefault(
@@ -146,7 +148,7 @@ def research_pool_mint_risk(
             if as_of is None:
                 row = conn.execute(
                     """
-                    SELECT observed_at, token_program, decimals,
+                    SELECT id, observed_at, token_program, decimals,
                            is_initialized, mint_authority,
                            freeze_authority,
                            token_2022_extension_data_len
@@ -160,7 +162,7 @@ def research_pool_mint_risk(
             else:
                 row = conn.execute(
                     """
-                    SELECT observed_at, token_program, decimals,
+                    SELECT id, observed_at, token_program, decimals,
                            is_initialized, mint_authority,
                            freeze_authority,
                            token_2022_extension_data_len
@@ -188,6 +190,7 @@ def research_pool_mint_risk(
                     MintRiskAssessment(
                         mint_address=mint,
                         roles=tuple(metadata["roles"]),
+                        mint_snapshot_id=None,
                         observed_at=None,
                         age_seconds=None,
                         expected_program=expected_program,
@@ -203,14 +206,15 @@ def research_pool_mint_risk(
                 )
                 continue
 
-            observed_at = str(row[0])
+            mint_snapshot_id = int(row[0])
+            observed_at = str(row[1])
             age = int((now - _parse_time(observed_at)).total_seconds())
-            program = str(row[1])
-            decimals = int(row[2])
-            initialized = bool(row[3])
-            mint_revoked = row[4] is None
-            freeze_revoked = row[5] is None
-            extension_len = int(row[6])
+            program = str(row[2])
+            decimals = int(row[3])
+            initialized = bool(row[4])
+            mint_revoked = row[5] is None
+            freeze_revoked = row[6] is None
+            extension_len = int(row[7])
 
             if age < 0:
                 reasons.append("mint snapshot is after evaluation time")
@@ -248,6 +252,7 @@ def research_pool_mint_risk(
                 MintRiskAssessment(
                     mint_address=mint,
                     roles=tuple(metadata["roles"]),
+                    mint_snapshot_id=mint_snapshot_id,
                     observed_at=observed_at,
                     age_seconds=age,
                     expected_program=expected_program,
@@ -280,6 +285,7 @@ def research_pool_mint_risk(
 
     return PoolMintRiskReport(
         pool_address=pool_address,
+        pool_snapshot_id=int(pool[0]),
         as_of=as_of_text,
         phase8_promoted=phase8_promoted,
         research_only=True,
