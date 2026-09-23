@@ -24,6 +24,9 @@ from .phase9_policy_rollback_simulation import (
     audit_persisted_phase9_policy_rollback_simulation,
 )
 from .phase9_policy_prewire import evaluate_phase9_policy_prewire_audit
+from .phase9_policy_manifest import (
+    audit_persisted_phase9_policy_prewire_manifest,
+)
 from .phase9_shadow import evaluate_phase9_shadow
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
@@ -58,6 +61,7 @@ class Phase9WorkQueue:
     rollout_simulation_current: bool = False
     rollback_simulation_current: bool = False
     prewire_ready: bool = False
+    prewire_manifest_current: bool = False
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -96,6 +100,7 @@ def _snapshot_state(queue: Phase9WorkQueue) -> dict[str, Any]:
             queue.rollback_simulation_current
         ),
         "prewire_ready": queue.prewire_ready,
+        "prewire_manifest_current": queue.prewire_manifest_current,
         "candidate_pools": list(queue.candidate_pools),
         "items": [
             {
@@ -320,6 +325,7 @@ def build_phase9_work_queue(
     rollout_simulation_current = False
     rollback_simulation_current = False
     prewire_ready = False
+    prewire_manifest_current = False
 
     if not bundle.storage_integrity_verified:
         items.append(
@@ -1070,6 +1076,37 @@ def build_phase9_work_queue(
             prewire = evaluate_phase9_policy_prewire_audit(storage)
             prewire_ready = prewire.ready
 
+            if prewire_ready:
+                manifest_audit = (
+                    audit_persisted_phase9_policy_prewire_manifest(
+                        storage,
+                    )
+                )
+                prewire_manifest_current = manifest_audit.current
+                if not prewire_manifest_current:
+                    items.append(
+                        Phase9WorkItem(
+                            task_type="PERSIST_PREWIRE_MANIFEST",
+                            scope="PHASE9_POLICY_PREWIRE_MANIFEST",
+                            reason=(
+                                "pre-wiring evidence is current and ready but "
+                                "the immutable component manifest is missing "
+                                "or stale"
+                                + (
+                                    ": " + "; ".join(
+                                        manifest_audit.reasons
+                                    )
+                                    if manifest_audit.reasons
+                                    else ""
+                                )
+                            ),
+                            shell_command=(
+                                "pio phase9-policy-manifest "
+                                "--persist --require-ready"
+                            ),
+                        )
+                    )
+
     return Phase9WorkQueue(
         phase8_promoted=phase8_promoted,
         research_bundle_ready=bundle.research_ready,
@@ -1080,6 +1117,7 @@ def build_phase9_work_queue(
         rollout_simulation_current=rollout_simulation_current,
         rollback_simulation_current=rollback_simulation_current,
         prewire_ready=prewire_ready,
+        prewire_manifest_current=prewire_manifest_current,
         candidate_pools=pools,
         items=tuple(items),
     )
