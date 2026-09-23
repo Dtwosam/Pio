@@ -4328,7 +4328,7 @@ def main() -> None:
         if args.persist_phase9_candidates:
             evidence_id, digest = persist_portfolio_candidate_research(
                 Storage(settings.database_path),
-                comparison=result,
+                comparison=result.comparison,
                 source_inputs=raw_inputs,
                 assumptions={
                     "account_equity_quote": args.equity,
