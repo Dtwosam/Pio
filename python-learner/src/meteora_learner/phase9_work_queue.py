@@ -359,6 +359,7 @@ def build_phase9_work_queue(
                     "--file <POOL_INPUTS_JSON> "
                     "--equity <EQUITY> --cash <CASH> "
                     "--deployed <DEPLOYED> --drawdown-bps <BPS> "
+                    "--persist-phase9-candidates "
                     "> phase9-multi-pool.json && "
                     "pio portfolio-allocation-research "
                     "--file phase9-multi-pool.json "
