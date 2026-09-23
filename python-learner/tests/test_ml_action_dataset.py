@@ -78,3 +78,36 @@ def test_action_dataset_labels_multiple_actions_at_same_decision(tmp_path):
         item.forward_end_observed_at for item in report.examples
     } == {"2026-09-23T00:10:00+00:00"}
     assert sum(item.baseline_selected for item in report.examples) == 1
+
+
+
+def test_action_dataset_respects_max_observed_at_cutoff(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_snapshot(storage, 0, 0, 0)
+    save_snapshot(storage, 5, 0, Q64)
+    save_snapshot(storage, 10, 1, 2 * Q64)
+    save_snapshot(storage, 15, 1, 3 * Q64)
+
+    report = build_ml_action_dataset(
+        str(storage.path),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=10,
+        network_cost_y_atomic=0,
+        lookback_observations=2,
+        forward_observations=2,
+        half_widths=(1,),
+        center_offsets=(0,),
+        strategies=(StrategyType.SPOT,),
+        max_share_bps=500,
+        max_observed_at="2026-09-23T00:10:00+00:00",
+    )
+
+    assert report.decision_points == 1
+    assert report.examples_built == 1
+    assert report.examples[0].decision_observed_at == (
+        "2026-09-23T00:05:00+00:00"
+    )
+    assert report.examples[0].forward_end_observed_at == (
+        "2026-09-23T00:10:00+00:00"
+    )
