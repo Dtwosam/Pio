@@ -241,6 +241,82 @@ def test_source_capture_forwards_history_observation_interval(
     assert seen["interval"] == 5400
 
 
+def test_source_capture_forwards_wallet_owner_expansion_bounds(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    settings = Settings(database_path=storage.path)
+    seen = {}
+
+    monkeypatch.setattr(
+        source_module,
+        "collect_once",
+        lambda settings: SimpleNamespace(run_id="api"),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_chain_capture_batch",
+        lambda *args, **kwargs: DummyRecord(target_met=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_history_capture",
+        lambda *args, **kwargs: DummyRecord(history_ready_after=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_mint_capture",
+        lambda *args, **kwargs: DummyRecord(inputs_ready_after=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "_top_chain_pools",
+        lambda storage, limit: ("pool-a",),
+    )
+
+    def fake_wallet(storage, *, pool_address, **kwargs):
+        seen["expand"] = kwargs["expand_closed_positions"]
+        seen["owners"] = kwargs["owner_expansion_limit"]
+        seen["pages"] = kwargs["owner_position_max_pages"]
+        return DummyRecord(pool_address=pool_address)
+
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_wallet_flow_capture",
+        fake_wallet,
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_history_plan",
+        lambda storage: SimpleNamespace(plan_ready=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_mint_capture_plan",
+        lambda *args, **kwargs: SimpleNamespace(inputs_ready=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "wallet_flow_source_state",
+        lambda *args, **kwargs: SimpleNamespace(ready=False),
+    )
+
+    run_phase9_source_capture(
+        storage,
+        settings=settings,
+        wallet_expand_closed_positions=False,
+        wallet_owner_expansion_limit=7,
+        wallet_owner_position_max_pages=2,
+    )
+
+    assert seen == {
+        "expand": False,
+        "owners": 7,
+        "pages": 2,
+    }
+
+
 def test_source_capture_can_skip_api_refresh(monkeypatch, tmp_path):
     storage = Storage(tmp_path / "pio.db")
     settings = Settings(database_path=storage.path)
