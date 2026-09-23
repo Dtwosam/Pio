@@ -2391,7 +2391,10 @@ def main() -> None:
             criteria=Phase8PromotionCriteria(
                 min_completed_cycles=args.min_completed_cycles,
                 min_live_labels=args.min_live_labels,
-                max_realized_drawdown_bps=args.max_drawdown_bps,
+                min_live_pools=args.min_live_pools,
+                max_realized_drawdown_bps=(
+                    args.max_realized_drawdown_bps
+                ),
                 max_single_loss_bps=args.max_single_loss_bps,
                 min_win_rate=args.min_win_rate,
                 min_mean_return_bps=args.min_mean_return_bps,
