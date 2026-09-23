@@ -116,10 +116,15 @@ def _parse_time(value: str) -> datetime:
 def _authorization_lineage(
     evidence: dict[str, Any],
 ) -> tuple[set[str], set[str]]:
-    qualifying_ids = {
-        int(value)
-        for value in evidence.get("qualifying_evidence_ids", ())
-    }
+    qualifying_ids: set[int] = set()
+    raw_ids = evidence.get("qualifying_evidence_ids", ())
+    if isinstance(raw_ids, (list, tuple)):
+        for value in raw_ids:
+            try:
+                qualifying_ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+
     cycles: set[str] = set()
     dataset_hashes: set[str] = set()
     shadow_evidence = evidence.get("shadow_evidence")
