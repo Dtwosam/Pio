@@ -120,6 +120,49 @@ def test_mint_evaluation_cutoff_uses_latest_timestamp_not_latest_id(
     assert cutoff == "2026-09-23T14:00:00+00:00"
 
 
+def test_research_refresh_stops_when_storage_integrity_is_invalid(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_storage_integrity",
+        lambda storage: SimpleNamespace(
+            verified=False,
+            reasons=("immutable trigger missing",),
+        ),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: calls.append("phase8"),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "_replay_statuses",
+        lambda *args, **kwargs: calls.append("replay"),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: bundle(ready=False),
+    )
+
+    report = run_phase9_research_refresh(storage)
+
+    assert calls == []
+    assert report.storage_integrity_verified is False
+    assert report.storage_integrity_verified is True
+    assert report.phase8_current is False
+    assert report.automatic_families_ready is False
+    assert report.items[0].family == "storage_integrity"
+    assert report.items[0].status == "BLOCKED"
+    assert "immutable trigger missing" in report.items[0].reason
+
+
 def test_research_refresh_stops_when_phase8_is_not_current(
     monkeypatch,
     tmp_path,
@@ -392,6 +435,7 @@ def test_research_refresh_runs_ready_missing_families_and_bundle(
 
     report = run_phase9_research_refresh(storage)
 
+    assert report.storage_integrity_verified is True
     assert report.phase8_current is True
     assert report.automatic_families_ready is True
     assert report.bundle_ready_after is True
