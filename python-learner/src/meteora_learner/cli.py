@@ -138,6 +138,8 @@ from .retraining_cycle import (
     attach_retraining_challenger,
     retraining_cycle,
     start_retraining_cycle,
+    sync_retraining_cycle,
+    cancel_retraining_cycle,
 )
 from .live_champion_monitor import (
     LiveChampionCriteria,
@@ -1079,6 +1081,19 @@ def main() -> None:
         help="Inspect an active or named continuous retraining cycle",
     )
     ml_retrain_status.add_argument("--cycle-id")
+
+    ml_retrain_sync = subparsers.add_parser(
+        "ml-retrain-sync",
+        help="Synchronize a retraining cycle with its challenger registry state",
+    )
+    ml_retrain_sync.add_argument("--cycle-id", required=True)
+
+    ml_retrain_cancel = subparsers.add_parser(
+        "ml-retrain-cancel",
+        help="Cancel a retraining cycle after any attached challenger is terminal",
+    )
+    ml_retrain_cancel.add_argument("--cycle-id", required=True)
+    ml_retrain_cancel.add_argument("--notes")
 
     ml_retrain_attach = subparsers.add_parser(
         "ml-retrain-attach",
@@ -2311,6 +2326,25 @@ def main() -> None:
                 indent=2,
             )
         )
+        return
+
+    if args.command == "ml-retrain-sync":
+        settings = Settings.from_env()
+        result = sync_retraining_cycle(
+            Storage(settings.database_path),
+            cycle_id=args.cycle_id,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "ml-retrain-cancel":
+        settings = Settings.from_env()
+        result = cancel_retraining_cycle(
+            Storage(settings.database_path),
+            cycle_id=args.cycle_id,
+            notes=args.notes,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "ml-retrain-attach":
