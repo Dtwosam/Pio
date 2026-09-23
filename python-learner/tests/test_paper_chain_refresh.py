@@ -1,7 +1,10 @@
 from meteora_learner.chain_replay import STANDARD_SPL_TOKEN_PROGRAM
 from meteora_learner.liquidity_math import Q64
 from meteora_learner.paper_account import create_paper_account, open_paper_position
-from meteora_learner.paper_chain_refresh import refresh_paper_chain_state
+from meteora_learner.paper_chain_refresh import (
+    inspect_pool_with_rust,
+    refresh_paper_chain_state,
+)
 from meteora_learner.storage import Storage
 
 
@@ -121,3 +124,36 @@ def test_refresh_isolates_pool_failure(tmp_path):
     assert by_pool["bad"].status == "FAILED"
     assert "rpc unavailable" in by_pool["bad"].error
     assert by_pool["good"].status == "REFRESHED"
+
+
+
+def test_rust_inspector_accepts_solana_rpc_url_env(tmp_path, monkeypatch):
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text("[package]\nname='test'\nversion='0.1.0'\n")
+    monkeypatch.setenv("SOLANA_RPC_URL", "https://rpc.example")
+    monkeypatch.delenv("RPC_URL", raising=False)
+
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = '{"pool_address":"pool"}'
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return Result()
+
+    monkeypatch.setattr(
+        "meteora_learner.paper_chain_refresh.subprocess.run",
+        fake_run,
+    )
+
+    result = inspect_pool_with_rust(
+        "pool",
+        1,
+        rust_manifest_path=manifest,
+    )
+
+    assert result["pool_address"] == "pool"
+    assert "inspect-pool-env" in calls[0][0]
