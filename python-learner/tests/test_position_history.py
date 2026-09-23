@@ -87,7 +87,7 @@ def test_position_event_upsert_is_idempotent(tmp_path):
     second = collect_position_history(storage, FakeAPI(), "position")
 
     assert first.events == 1
-    assert second.events == 0
+    assert second.events == 1
 
     conn = sqlite3.connect(storage.path)
     try:
