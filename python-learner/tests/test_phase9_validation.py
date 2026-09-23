@@ -646,3 +646,31 @@ def test_forged_mint_snapshot_lineage_blocks_bundle(tmp_path):
         "authoritative pool and mint snapshot IDs" in reason
         for reason in report.reasons
     )
+
+
+def test_forged_wallet_flow_lineage_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    forged["source_event_sha256"] = "0" * 64
+    storage.save_advanced_edge_evidence(
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:04:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "immutable source event IDs and SHA-256" in reason
+        for reason in report.reasons
+    )
