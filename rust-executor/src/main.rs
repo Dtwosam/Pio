@@ -1,4 +1,5 @@
 mod events;
+mod execution_guard;
 mod models;
 mod prestate_verifier;
 mod risk;
@@ -6,6 +7,7 @@ mod state_reader;
 mod transaction_events;
 
 use anyhow::{Context, Result};
+use std::io::Read;
 
 fn usage() {
     eprintln!(
@@ -13,6 +15,7 @@ fn usage() {
   meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
+  meteora-executor risk-check <PROPOSAL_JSON_OR_-> <RISK_CONFIG_JSON>
   meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>
   meteora-executor verify-prestate <RPC_URL> <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]"
     );
@@ -61,6 +64,40 @@ RPC_URL is accepted as a compatibility fallback",
             let snapshot =
                 state_reader::inspect_pool(&rpc_url, &pool_address, array_radius).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "risk-check" => {
+            let proposal_source = args
+                .next()
+                .context("PROPOSAL_JSON_OR_- is required")?;
+            let config_path = args
+                .next()
+                .context("RISK_CONFIG_JSON is required")?;
+            if args.next().is_some() {
+                anyhow::bail!("risk-check accepts exactly two arguments");
+            }
+
+            let proposal_json = if proposal_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read proposal JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&proposal_source)
+                    .with_context(|| format!("failed to read proposal JSON: {proposal_source}"))?
+            };
+            let config_json = std::fs::read_to_string(&config_path)
+                .with_context(|| format!("failed to read risk config JSON: {config_path}"))?;
+
+            let proposal: models::TradeProposal = serde_json::from_str(&proposal_json)
+                .context("invalid trade proposal JSON")?;
+            let config: risk::RiskConfig = serde_json::from_str(&config_json)
+                .context("invalid risk config JSON")?;
+            let report = execution_guard::check_proposal(&proposal, &config);
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.accepted {
+                std::process::exit(2);
+            }
         }
         "inspect-position" => {
             let rpc_url = args.next().context("RPC_URL is required")?;
