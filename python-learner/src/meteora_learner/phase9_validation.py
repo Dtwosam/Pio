@@ -873,7 +873,7 @@ def _bandit_lineage_valid(storage: Storage) -> bool:
         return False
 
     path = Path(str(lineage["output_file"]))
-    if not path.is_file():
+    if not path.is_absolute() or path.is_symlink() or not path.is_file():
         return False
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     expected_sha = str(lineage["dataset_sha256"])
