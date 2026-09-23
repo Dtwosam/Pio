@@ -4,6 +4,10 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .chain_snapshot_lineage import (
+    chain_snapshot_source_record,
+    chain_snapshot_source_sha256,
+)
 from .contextual_bandit import CONTEXTUAL_BANDIT_EVIDENCE_TYPE
 from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .phase9_research import PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE
@@ -31,6 +35,7 @@ class Phase9ResearchBundleCriteria:
     require_mint_snapshot_lineage: bool = True
     min_static_hedge_pools: int = 1
     require_adaptive_multi_pool: bool = True
+    require_adaptive_snapshot_lineage: bool = True
     require_portfolio_allocation: bool = True
     require_portfolio_allocation_lineage: bool = True
     require_contextual_bandit: bool = True
@@ -145,6 +150,96 @@ def _summary(
         latest_evidence_ids=tuple(int(row["id"]) for row in rows),
         boundary_valid=boundary_valid,
     )
+
+
+def _adaptive_snapshot_lineage_valid(
+    storage: Storage,
+) -> bool:
+    rows = _latest_by_pool(
+        storage,
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+    )
+    qualified = [row for row in rows if row["qualified"]]
+    if not qualified:
+        return False
+
+    with storage.connect() as conn:
+        for row in qualified:
+            pools = row["evidence"].get("pools")
+            if not isinstance(pools, list) or not pools:
+                return False
+            for item in pools:
+                if not isinstance(item, dict):
+                    return False
+                pool_address = str(
+                    item.get("pool_address", "")
+                ).strip()
+                if not pool_address:
+                    return False
+
+                for family in ("adaptive", "regime"):
+                    report = item.get(family)
+                    if not isinstance(report, dict):
+                        return False
+                    raw_ids = report.get("source_snapshot_ids")
+                    expected_sha = str(
+                        report.get("source_snapshot_sha256", "")
+                    ).strip()
+                    if (
+                        not isinstance(raw_ids, list)
+                        or not raw_ids
+                        or not expected_sha
+                    ):
+                        return False
+                    try:
+                        snapshot_ids = [
+                            int(value) for value in raw_ids
+                        ]
+                    except (TypeError, ValueError):
+                        return False
+                    if len(snapshot_ids) != len(set(snapshot_ids)):
+                        return False
+
+                    records: list[dict[str, Any]] = []
+                    for snapshot_id in snapshot_ids:
+                        source = conn.execute(
+                            """
+                            SELECT id, pool_address,
+                                   observed_at, active_bin_id
+                            FROM chain_pool_snapshots
+                            WHERE id = ?
+                            """,
+                            (snapshot_id,),
+                        ).fetchone()
+                        if source is None:
+                            return False
+                        if str(source[1]) != pool_address:
+                            return False
+                        as_of = report.get("as_of")
+                        if (
+                            as_of is not None
+                            and conn.execute(
+                                """
+                                SELECT julianday(?) <= julianday(?)
+                                """,
+                                (
+                                    str(source[2]),
+                                    str(as_of),
+                                ),
+                            ).fetchone()[0]
+                            != 1
+                        ):
+                            return False
+                        records.append(
+                            chain_snapshot_source_record(source)
+                        )
+
+                    if (
+                        chain_snapshot_source_sha256(records)
+                        != expected_sha
+                    ):
+                        return False
+    return True
 
 
 def _mint_lineage_valid(storage: Storage) -> bool:
@@ -470,6 +565,16 @@ def evaluate_phase9_research_bundle(
     ):
         reasons.append(
             "qualified adaptive multi-pool evidence is required"
+        )
+    if (
+        criteria.require_adaptive_multi_pool
+        and criteria.require_adaptive_snapshot_lineage
+        and adaptive.qualified_records >= 1
+        and not _adaptive_snapshot_lineage_valid(storage)
+    ):
+        reasons.append(
+            "qualified adaptive/regime evidence must resolve to immutable "
+            "chain snapshot IDs with matching source hashes"
         )
     if mint.qualified_records < criteria.min_mint_risk_pools:
         reasons.append(
