@@ -316,6 +316,7 @@ Built:
 - immutable source-lineage verification across adaptive/regime chain snapshots, wallet-flow event windows, static-hedge pool/bin price paths, mint snapshots, portfolio candidate artifacts and contextual-bandit retraining datasets
 - deterministic source hashes for wallet-flow, adaptive/regime, static-hedge and portfolio-candidate evidence with forged/stale lineage tests and repair tasks
 - deterministic full-report replay across all qualified Phase 9 research families so source-valid but metric-forged evidence fails closed
+- explicit read-only replay audit across every required Phase 9 research family, including checked evidence IDs and fail-able verification status
 - fail-closed range-cap and insufficient-history states
 - CLI research workflow with optional readiness exit status
 
