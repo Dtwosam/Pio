@@ -8,6 +8,7 @@ from meteora_learner.phase_promotion import PHASE7, PHASE7_EVIDENCE_TYPE
 from meteora_learner.retraining_workflow import (
     RETRAIN_DATASET_EVIDENCE_TYPE,
     start_retraining_cycle_with_dataset,
+    train_retraining_cycle_challenger,
 )
 from meteora_learner.storage import Storage
 
@@ -135,3 +136,60 @@ def test_dataset_build_and_cycle_share_cutoff_and_hash(tmp_path):
         result.dataset.dataset_sha256
     )
     assert Path(result.output_file) == output
+
+
+
+def test_cycle_bound_training_rejects_tampered_dataset(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed(storage)
+    output = tmp_path / "retrain.csv"
+
+    result = start_retraining_cycle_with_dataset(
+        storage,
+        pools=(
+            MLRetrainPoolSpec(
+                pool_address="pool",
+                amount_x=0,
+                amount_y=10,
+                network_cost_y_atomic=0,
+            ),
+        ),
+        output_file=output,
+        cycle_id="cycle",
+        as_of=NOW,
+        criteria=ContinuousLearningCriteria(
+            min_new_chain_observations=3,
+            min_new_chain_pools=1,
+            min_new_live_labels=0,
+            max_champion_age_days=1,
+        ),
+        lookback_observations=2,
+        forward_observations=2,
+        half_widths=(1,),
+        center_offsets=(0,),
+        max_share_bps=500,
+    )
+    assert result.cycle.target_dataset_version.startswith(
+        "ML_ACTION_DATASET_V1:"
+    )
+
+    output.write_text(
+        output.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+
+    try:
+        train_retraining_cycle_challenger(
+            storage,
+            cycle_id="cycle",
+            dataset_file=output,
+            model_id="challenger",
+            artifact_directory=tmp_path / "artifacts",
+            min_rows=1,
+        )
+    except ValueError as exc:
+        assert "checksum/version" in str(exc)
+    else:
+        raise AssertionError("expected tampered dataset refusal")
+
+    assert storage.model_registry_entry("challenger") is None
