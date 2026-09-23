@@ -77,3 +77,4 @@ def test_action_dataset_labels_multiple_actions_at_same_decision(tmp_path):
     assert {
         item.forward_end_observed_at for item in report.examples
     } == {"2026-09-23T00:10:00+00:00"}
+    assert sum(item.baseline_selected for item in report.examples) == 1
