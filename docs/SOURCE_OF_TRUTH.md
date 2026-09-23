@@ -490,6 +490,21 @@ does not grant LIVE policy authority. A consolidated policy-readiness audit may 
 
 Meteora API TVL/volume snapshots are discovery and ranking context only. The ranked sampling cohort is also the default source pool set for adaptive/regime, mint-risk and wallet-flow acquisition/research. A previously qualified mint or wallet report on a different pool does not make the currently ranked source cohort current; operational freshness must surface the missing ranked-pool evidence and route refresh to those pools. When the ranked cohort cannot provide enough chain-observed pools, chain-depth leaders may fill only the missing slots so evidence collection can continue without inventing pool state. They must not steer new Phase 9 chain onboarding or ranked-cohort replacement indefinitely. Live cohort/capture decisions use a bounded API-ranking age (three hours by default); stale ranking rows are excluded, while already persisted chain observations may remain available as an explicitly unranked depth fallback. Historical `as_of` evaluation must first exclude API rows after the cutoff before selecting each pool's latest ranking snapshot.
 
+Phase 8 continuous-learning orchestration must preserve the same explicit-input
+boundary used elsewhere in the project. Retraining may rank/select persisted
+chain pools, but per-pool token amounts and network-cost assumptions must never
+be synthesized. They may be persisted only in a checksum-bound
+`PHASE8_RETRAIN_INPUTS_V1` artifact tied to the current champion model ID and
+dataset version. Champion rotation invalidates the artifact. A valid artifact
+may be used to build the no-lookahead retraining dataset and start a retraining
+cycle, but it does not authorize model training, PAPER transition, champion
+promotion, rollback, Phase 8 promotion, or LIVE execution.
+
+The `phase8-evidence-plan` view is advisory. It may identify the next
+continuous-learning stage and show existing CLI commands, but any step requiring
+dataset economics, model/artifact identity, PAPER account selection, champion
+rotation, rollback or Phase 8 promotion remains explicit and operator-owned.
+
 Phase 9 quantitative evidence planning is advisory and deterministic. The
 `phase9-evidence-plan` view may rank evidence debt and emit only existing
 research/read-only commands. It must not execute shell commands itself, fill
