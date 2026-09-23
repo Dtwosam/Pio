@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import shlex
-from typing import Any
+from typing import Any, Sequence
 
 from .storage import Storage
 
@@ -48,6 +48,8 @@ class Phase9ChainCapturePlan:
     capture_required: bool
     api_pool_count: int
     candidates_available: int
+    preferred_pool_count: int
+    preferred_missing_chain_pools: tuple[str, ...]
     plan_ready: bool
     criteria: Phase9ChainCaptureCriteria
     candidates: tuple[Phase9ChainCaptureCandidate, ...]
@@ -127,10 +129,20 @@ def build_phase9_chain_capture_plan(
     criteria: Phase9ChainCaptureCriteria = Phase9ChainCaptureCriteria(),
     rpc_url: str | None = None,
     executor_bin: str = "meteora-executor",
+    preferred_pool_addresses: Sequence[str] | None = None,
+    max_preferred_candidates: int | None = None,
 ) -> Phase9ChainCapturePlan:
     criteria.validate()
     if not executor_bin.strip():
         raise ValueError("executor_bin is required")
+
+    if (
+        max_preferred_candidates is not None
+        and max_preferred_candidates < 1
+    ):
+        raise ValueError(
+            "max_preferred_candidates must be positive when provided"
+        )
 
     api_pools = _latest_api_pools(storage)
     chain_pools = _chain_pool_addresses(storage)
@@ -143,7 +155,60 @@ def build_phase9_chain_capture_plan(
         for item in api_pools
         if item["pool_address"] not in chain_pools
     )
-    selected = available[: min(needed, criteria.max_candidates)]
+    api_by_pool = {
+        str(item["pool_address"]): item
+        for item in api_pools
+    }
+    preferred = tuple(
+        dict.fromkeys(
+            str(pool).strip()
+            for pool in (preferred_pool_addresses or ())
+            if str(pool).strip()
+        )
+    )
+    preferred_missing = tuple(
+        pool
+        for pool in preferred
+        if pool not in chain_pools
+    )
+    preferred_limit = (
+        criteria.max_candidates
+        if max_preferred_candidates is None
+        else min(
+            criteria.max_candidates,
+            max_preferred_candidates,
+        )
+    )
+    selected_items: list[dict[str, Any]] = []
+    for pool in preferred_missing:
+        item = api_by_pool.get(pool)
+        if item is None:
+            continue
+        if len(selected_items) >= preferred_limit:
+            break
+        selected_items.append(item)
+
+    remaining_capacity = criteria.max_candidates - len(selected_items)
+    minimum_remaining = max(
+        0,
+        needed - len(selected_items),
+    )
+    if remaining_capacity > 0 and minimum_remaining > 0:
+        selected_pools = {
+            str(item["pool_address"])
+            for item in selected_items
+        }
+        for item in available:
+            if str(item["pool_address"]) in selected_pools:
+                continue
+            selected_items.append(item)
+            selected_pools.add(str(item["pool_address"]))
+            if (
+                len(selected_items) >= criteria.max_candidates
+                or len(selected_items) >= needed
+            ):
+                break
+    selected = tuple(selected_items)
     rpc = rpc_url if rpc_url is not None else "<RPC_URL>"
 
     candidates = tuple(
@@ -169,23 +234,44 @@ def build_phase9_chain_capture_plan(
     )
 
     reasons: list[str] = []
-    if needed == 0:
+    unresolved_preferred = tuple(
+        pool
+        for pool in preferred_missing
+        if pool not in {
+            str(item["pool_address"])
+            for item in selected
+        }
+    )
+    if needed == 0 and not preferred_missing:
         reasons.append(
             "target chain-observed pool count is already satisfied"
         )
-    elif not api_pools:
+    elif needed == 0 and preferred_missing:
+        reasons.append(
+            "minimum chain-pool count is satisfied but ranked cohort "
+            "onboarding is still required"
+        )
+    if not api_pools and (needed > 0 or preferred_missing):
         reasons.append(
             "no discovered API pool snapshots are available; run collect-once "
             "before building a chain capture plan"
         )
-    elif len(candidates) < needed:
+    if len(candidates) < needed:
         reasons.append(
             f"{needed - len(candidates)} additional discovered pool(s) are "
             "still needed to reach the target chain-pool count"
         )
+    if unresolved_preferred:
+        reasons.append(
+            "ranked cohort pool(s) still require chain capture: "
+            + ", ".join(unresolved_preferred)
+        )
 
-    capture_required = needed > 0
-    plan_ready = needed == 0 or len(candidates) >= needed
+    capture_required = needed > 0 or bool(preferred_missing)
+    plan_ready = (
+        (needed == 0 or len(candidates) >= needed)
+        and not unresolved_preferred
+    )
 
     return Phase9ChainCapturePlan(
         research_only=True,
@@ -198,6 +284,8 @@ def build_phase9_chain_capture_plan(
         capture_required=capture_required,
         api_pool_count=len(api_pools),
         candidates_available=len(available),
+        preferred_pool_count=len(preferred),
+        preferred_missing_chain_pools=preferred_missing,
         plan_ready=plan_ready,
         criteria=criteria,
         candidates=candidates,
