@@ -150,6 +150,12 @@ from .phase9_explicit_inputs import (
     persist_phase9_explicit_inputs,
     run_phase9_explicit_research,
 )
+from .phase9_bandit_dataset import (
+    build_phase9_bandit_dataset,
+    evaluate_phase9_contextual_bandit_from_dataset,
+    persist_phase9_bandit_dataset,
+    persist_phase9_contextual_bandit_from_dataset,
+)
 from .phase9_chain_capture import run_phase9_chain_capture_batch
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
@@ -2472,6 +2478,33 @@ def main() -> None:
     phase9_explicit_run.add_argument("--persist", action="store_true")
     phase9_explicit_run.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    phase9_bandit_run = subparsers.add_parser(
+        "phase9-bandit-research-run",
+        help="Build a checksum-bound Phase 9 counterfactual action dataset from explicit inputs and run contextual-bandit research",
+    )
+    phase9_bandit_run.add_argument(
+        "--input-evidence-id",
+        type=int,
+        help="Explicit input evidence ID; defaults to the latest valid artifact",
+    )
+    phase9_bandit_run.add_argument(
+        "--output-directory",
+        help="Optional directory for deterministic checksum-named dataset CSVs",
+    )
+    phase9_bandit_run.add_argument(
+        "--cutoff",
+        help="Optional timezone-aware source cutoff; defaults to the latest common observation across the explicit pools",
+    )
+    phase9_bandit_run.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist contextual-bandit research evidence; the checksum-bound dataset artifact is always persisted",
+    )
+    phase9_bandit_run.add_argument(
+        "--require-qualified",
         action="store_true",
     )
 
@@ -5445,6 +5478,66 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.explicit_research_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-bandit-research-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        if args.input_evidence_id is None:
+            audit = audit_phase9_explicit_inputs(storage)
+            if not audit.valid or audit.evidence_id is None:
+                raise ValueError(
+                    "a valid persisted Phase 9 explicit input artifact is required: "
+                    + "; ".join(audit.reasons)
+                )
+            input_evidence_id = audit.evidence_id
+        else:
+            input_evidence_id = args.input_evidence_id
+        explicit_artifact = load_phase9_explicit_inputs(
+            storage,
+            evidence_id=input_evidence_id,
+        )
+        if explicit_artifact is None:
+            raise ValueError(
+                "no persisted Phase 9 explicit research input artifact exists"
+            )
+        dataset_payload, dataset_bytes = build_phase9_bandit_dataset(
+            storage,
+            artifact=explicit_artifact,
+            output_directory=args.output_directory,
+            cutoff=args.cutoff,
+        )
+        dataset_artifact = persist_phase9_bandit_dataset(
+            storage,
+            payload=dataset_payload,
+            raw_dataset=dataset_bytes,
+        )
+        result = evaluate_phase9_contextual_bandit_from_dataset(
+            storage,
+            dataset_evidence_id=dataset_artifact.evidence_id,
+        )
+        bandit_evidence_id = (
+            persist_phase9_contextual_bandit_from_dataset(
+                storage,
+                result=result,
+            )
+            if args.persist
+            else None
+        )
+        output = {
+            "research_only": True,
+            "policy_actionable": False,
+            "execution_wired": False,
+            "dataset": dataset_artifact.to_record(),
+            "bandit_evidence_id": bandit_evidence_id,
+            "report": result.report.to_record(),
+        }
+        print(json.dumps(output, indent=2))
+        if (
+            args.require_qualified
+            and not result.report.research_qualified
+        ):
             raise SystemExit(2)
         return
 
