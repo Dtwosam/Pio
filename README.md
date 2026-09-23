@@ -23,9 +23,9 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 3: deterministic policy + persisted validation/promotion workflow implemented; real promotion evidence pending
 - Phase 4: reproducible no-lookahead ML challenger workflow implemented; not promoted
 - Phase 5: implementation complete; persisted real PAPER promotion evidence pending
-- Phase 6: guarded Rust pre-sign execution infrastructure in progress; signing/sending disabled
+- Phase 6: standard-SPL entry/rebalance + guarded presign + internal deterministic signer/submission infrastructure in progress; public signing/sending disabled
 - Default mode: PAPER
-- Live signing: not implemented
+- Live signing: implemented internally behind persisted presign evidence; no public sign/send command
 
 Current research paths:
 - `DISCRETE_COMPLETED_BIN_V1`: OHLC inventory/IL studies.
@@ -130,10 +130,12 @@ ML v1 is research-only: it learns from all replay-valid candidate actions at eac
 
 ## Rust execution preflight
 
-Phase 6 currently stops before signing/sending. The Rust executor can enforce
+Phase 6 public commands still stop before signing/sending. The Rust executor can enforce
 risk, transaction/account/instruction policy, simulation, isolated-wallet
-authorization, durable restart state, confirmation reconciliation for an
-already-sent signature, and chain-resolved unsigned emergency-exit building.
+authorization, durable restart state, build chain-resolved unsigned standard-SPL
+entry/rebalance/emergency-exit transactions, deterministically sign exact persisted
+presign evidence internally, coordinate same-signature submission retries, and
+reconcile confirmation/receipts. Public sign/send exposure remains disabled.
 
 See `docs/PHASE6_EXECUTION_RUNBOOK.md`.
 
