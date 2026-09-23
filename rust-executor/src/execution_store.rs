@@ -762,6 +762,33 @@ impl ExecutionIntentStore {
         )
     }
 
+    pub fn unresolved_live_entry_decision_ids(
+        &self,
+        exclude_decision_id: Option<&str>,
+    ) -> Result<Vec<String>> {
+        let conn = self.connection()?;
+        let mut statement = conn.prepare(
+            r#"
+            SELECT decision_id
+            FROM execution_intents
+            WHERE mode = 'LIVE'
+              AND action = 'ENTER'
+              AND status IN ('SIGNING', 'SENT', 'CONFIRMED')
+            ORDER BY created_at_unix ASC, decision_id ASC
+            "#,
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut result = vec![];
+        for row in rows {
+            let decision_id = row?;
+            if exclude_decision_id == Some(decision_id.as_str()) {
+                continue;
+            }
+            result.push(decision_id);
+        }
+        Ok(result)
+    }
+
     pub fn load_request(
         &self,
         decision_id: &str,
@@ -1376,6 +1403,71 @@ mod tests {
         assert_eq!(
             loaded.proposal.capital_quote,
             request.proposal.capital_quote
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn unresolved_live_entries_include_confirmed_until_reconciled() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+        let cfg = config();
+
+        store.register(&request, &cfg).unwrap();
+        store
+            .record_risk(
+                &id,
+                &risk(true, request.proposal.decision_id),
+            )
+            .unwrap();
+        store.record_transaction_guard(&id, &guard(true)).unwrap();
+        store.record_simulation(&id, &simulation(true)).unwrap();
+
+        let authorization = WalletAuthorizationReport {
+            accepted: true,
+            reason: "approved".into(),
+            wallet_pubkey: "payer".into(),
+            transaction_fee_payer: "payer".into(),
+        };
+        store
+            .record_wallet_authorization(&id, &authorization)
+            .unwrap();
+        store
+            .record_final_presign(
+                &id,
+                &PreparedUnsignedTransaction {
+                    transaction_base64: "prepared".into(),
+                    recent_blockhash: "blockhash".into(),
+                    last_valid_block_height: 123,
+                    rpc_context_slot: 99,
+                    signatures_all_default: true,
+                },
+                &guard(true),
+                &authorization,
+                &simulation(true),
+            )
+            .unwrap();
+        store.begin_signing(&id).unwrap();
+
+        assert_eq!(
+            store.unresolved_live_entry_decision_ids(None).unwrap(),
+            vec![id.clone()]
+        );
+        assert!(
+            store
+                .unresolved_live_entry_decision_ids(Some(&id))
+                .unwrap()
+                .is_empty()
+        );
+
+        store.record_sent(&id, "signature").unwrap();
+        store.record_confirmed(&id, "signature").unwrap();
+        assert_eq!(
+            store.unresolved_live_entry_decision_ids(None).unwrap(),
+            vec![id.clone()]
         );
 
         let _ = std::fs::remove_file(path);
