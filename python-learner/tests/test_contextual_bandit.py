@@ -12,7 +12,6 @@ from meteora_learner.contextual_bandit import (
     persist_contextual_bandit_research,
 )
 from meteora_learner.ml_dataset import MLTrainingExample
-from meteora_learner.phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from meteora_learner.phase_promotion import (
     PHASE7,
     PHASE7_EVIDENCE_TYPE,
