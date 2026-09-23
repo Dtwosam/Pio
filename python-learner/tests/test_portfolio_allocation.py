@@ -12,6 +12,7 @@ from meteora_learner.portfolio_allocation import (
     PortfolioAllocationCriteria,
     persist_portfolio_allocation_research,
     persist_portfolio_candidate_research,
+    portfolio_candidate_artifact_sha256,
     research_portfolio_allocation,
 )
 from meteora_learner.storage import Storage
@@ -278,3 +279,36 @@ def test_portfolio_candidate_artifact_lineage_round_trip(tmp_path):
         "candidate_evidence_id": evidence_id,
         "candidate_evidence_sha256": digest,
     }
+
+
+def test_portfolio_candidate_hash_matches_persisted_payload(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    report = comparison(
+        candidate(1, "pool-a"),
+        candidate(2, "pool-b"),
+    )
+    source_inputs = [{"pool_address": "pool-a"}]
+    assumptions = {"budget_context": "test"}
+
+    evidence_id, digest = persist_portfolio_candidate_research(
+        storage,
+        comparison=report,
+        source_inputs=source_inputs,
+        assumptions=assumptions,
+    )
+
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO_CANDIDATES__",
+    )
+    assert latest is not None
+    assert latest["id"] == evidence_id
+    payload = {
+        "research_only": True,
+        "policy_actionable": False,
+        "source_inputs": source_inputs,
+        "assumptions": assumptions,
+        "comparison": report.to_record(),
+    }
+    assert digest == portfolio_candidate_artifact_sha256(payload)
+    assert latest["evidence"]["artifact_sha256"] == digest
