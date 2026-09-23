@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v0.8
+Status: v0.9
 
 ## Phase 0 — Foundation
 Status: complete.
@@ -87,12 +87,55 @@ Still needed before Phase 3 promotion:
 The baseline never ranks by headline APR alone. Research output can exist before Phase 2 promotion, but entry authorization remains blocked. Live transaction construction/signing remains outside Phase 3.
 
 ## Phase 4 — ML v1
+Status: experimental infrastructure implemented; promotion evidence pending.
 
-Walk-forward supervised models for future net return, downside, fee yield, range survival and holding-period quality.
+Built:
+- no-lookahead decision-time feature dataset
+- all-candidate action labels for Spot / Curve / Bid-Ask alternatives
+- forward net-return / excess-vs-hold / range-survival labels
+- time-ordered train/validation split
+- expected net-return model
+- excess-vs-hold model
+- downside model
+- range-survival model
+- positive-edge probability model
+- research-only risk-adjusted inference
+- held-out challenger versus deterministic-baseline evaluation
+- persistent model registry
+- staged OFFLINE_CANDIDATE -> OFFLINE_QUALIFIED -> PAPER_CHALLENGER lifecycle
+- evidence-gated CHAMPION promotion
+- single-champion guard and rollback state
+
+Still needed:
+- materially larger multi-pool action dataset
+- regime-diverse time windows
+- stable offline challenger qualification
+- artifact serialization/version pinning for trained models
+- repeated paper validation before any champion is used outside paper mode
 
 ## Phase 5 — Live Paper Trader
+Status: persistent accounting and management loop implemented; continuous live orchestration pending.
 
-Run the full decision loop on live data without signing.
+Built:
+- persistent paper accounts
+- persistent paper positions and idempotent event ledger
+- cash/equity/high-water/drawdown accounting
+- fee/reward/cost/realized-PnL accounting
+- deterministic paper HOLD / REBALANCE / EXIT evaluation
+- automatic paper observation cycle
+- stop-loss and safety exits on net liquidation economics
+- same-width deterministic recentering for paper rebalances
+- fail-closed pending state when rebalance cost is unknown
+- paper cohort performance metrics
+- ML paper challenger versus deterministic baseline validation
+- stored paper evidence required for champion promotion
+
+Still needed:
+- continuous collector -> decision -> paper-action orchestration
+- automatic mark/fee/reward valuation from each new live chain observation
+- multi-position portfolio scheduling
+- restart/recovery integration tests over long paper runs
+- extended paper validation on real live observations.
 
 ## Phase 6 — Rust Transaction Executor
 
