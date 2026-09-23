@@ -6,10 +6,10 @@ from meteora_learner.paper_account import (
     paper_account_snapshot,
 )
 from meteora_learner.paper_chain import (
-    apply_chain_paper_observation,
+    apply_prepared_chain_valuation,
     bind_paper_position_to_chain,
-    paper_chain_binding,
-    value_paper_position_from_chain,
+    counterfactual_binding,
+    prepare_chain_valuation,
 )
 from meteora_learner.position_policy import PositionManagementConfig
 from meteora_learner.storage import Storage
@@ -94,7 +94,7 @@ def test_chain_binding_derives_mark_and_fee_delta(tmp_path):
     )
     assert binding.amount_y == 100
 
-    valuation = value_paper_position_from_chain(
+    valuation = prepare_chain_valuation(
         storage,
         position_id="pos",
         observed_at="2026-09-23T00:05:00+00:00",
@@ -119,7 +119,7 @@ def test_chain_observation_updates_paper_ledger_without_manual_mark(tmp_path):
         token_y_quote_per_atomic=1.0,
     )
 
-    result = apply_chain_paper_observation(
+    result = apply_prepared_chain_valuation(
         storage,
         position_id="pos",
         observed_at="2026-09-23T00:05:00+00:00",
@@ -130,9 +130,18 @@ def test_chain_observation_updates_paper_ledger_without_manual_mark(tmp_path):
     assert result.executed_action == "HOLD"
     account = paper_account_snapshot(storage, account_id="paper")
     assert account.open_positions == 1
-    assert paper_chain_binding(storage, position_id="pos").last_observed_at == (
-        "2026-09-23T00:05:00+00:00"
-    )
+    binding = counterfactual_binding(storage, position_id="pos")
+    assert binding.entry_observed_at == "2026-09-23T00:00:00+00:00"
+    with storage.connect() as conn:
+        status = conn.execute(
+            """
+            SELECT status
+            FROM paper_chain_valuations
+            WHERE position_id = 'pos'
+              AND observed_at = '2026-09-23T00:05:00+00:00'
+            """
+        ).fetchone()[0]
+    assert status == "APPLIED"
 
 
 def test_chain_binding_rejects_wrong_atomic_notional(tmp_path):
