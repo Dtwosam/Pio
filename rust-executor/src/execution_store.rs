@@ -1,3 +1,4 @@
+use crate::blockhash::PreparedUnsignedTransaction;
 use crate::dry_run::DryRunExecutionRequest;
 use crate::execution_guard::RiskCheckReport;
 use crate::simulation::SimulationReport;
@@ -68,6 +69,8 @@ pub struct ExecutionIntentRecord {
     pub simulation: Option<SimulationReport>,
     pub transaction_guard: Option<TransactionGuardReport>,
     pub wallet_authorization: Option<WalletAuthorizationReport>,
+    pub prepared_transaction: Option<PreparedUnsignedTransaction>,
+    pub final_simulation: Option<SimulationReport>,
     pub signature: Option<String>,
     pub error: Option<String>,
 }
@@ -140,6 +143,8 @@ impl ExecutionIntentStore {
                 simulation_json TEXT,
                 transaction_guard_json TEXT,
                 wallet_authorization_json TEXT,
+                prepared_transaction_json TEXT,
+                final_simulation_json TEXT,
                 signature TEXT,
                 error TEXT
             );
@@ -163,6 +168,18 @@ impl ExecutionIntentStore {
         if !names.iter().any(|name| name == "wallet_authorization_json") {
             conn.execute(
                 "ALTER TABLE execution_intents ADD COLUMN wallet_authorization_json TEXT",
+                [],
+            )?;
+        }
+        if !names.iter().any(|name| name == "prepared_transaction_json") {
+            conn.execute(
+                "ALTER TABLE execution_intents ADD COLUMN prepared_transaction_json TEXT",
+                [],
+            )?;
+        }
+        if !names.iter().any(|name| name == "final_simulation_json") {
+            conn.execute(
+                "ALTER TABLE execution_intents ADD COLUMN final_simulation_json TEXT",
                 [],
             )?;
         }
@@ -485,6 +502,110 @@ impl ExecutionIntentStore {
         self.load(decision_id)
     }
 
+    pub fn record_final_presign(
+        &self,
+        decision_id: &str,
+        prepared: &PreparedUnsignedTransaction,
+        transaction: &TransactionGuardReport,
+        wallet: &WalletAuthorizationReport,
+        simulation: &SimulationReport,
+    ) -> Result<ExecutionIntentRecord> {
+        let current = self.load(decision_id)?;
+        if current.status != ExecutionIntentStatus::SimulationPassed {
+            anyhow::bail!(
+                "final presign requires SIMULATION_PASSED status; current status is {:?}",
+                current.status
+            );
+        }
+        if !prepared.signatures_all_default {
+            anyhow::bail!("final presign transaction must remain unsigned");
+        }
+        if !transaction.accepted {
+            anyhow::bail!("final presign requires accepted transaction guard");
+        }
+        if !wallet.accepted {
+            anyhow::bail!("final presign requires accepted wallet authorization");
+        }
+        if !simulation.succeeded {
+            anyhow::bail!("final presign requires successful exact simulation");
+        }
+
+        let persisted_guard = current
+            .transaction_guard
+            .as_ref()
+            .context("final presign requires persisted transaction guard")?;
+        if serde_json::to_string(persisted_guard)?
+            != serde_json::to_string(transaction)?
+        {
+            anyhow::bail!(
+                "final presign transaction guard differs from persisted guard"
+            );
+        }
+        let persisted_wallet = current
+            .wallet_authorization
+            .as_ref()
+            .context("final presign requires persisted wallet authorization")?;
+        if serde_json::to_string(persisted_wallet)?
+            != serde_json::to_string(wallet)?
+        {
+            anyhow::bail!(
+                "final presign wallet authorization differs from persisted authorization"
+            );
+        }
+
+        if let (Some(existing_prepared), Some(existing_simulation)) = (
+            &current.prepared_transaction,
+            &current.final_simulation,
+        ) {
+            if serde_json::to_string(existing_prepared)?
+                == serde_json::to_string(prepared)?
+                && serde_json::to_string(existing_simulation)?
+                    == serde_json::to_string(simulation)?
+            {
+                return Ok(current);
+            }
+            anyhow::bail!(
+                "execution intent {decision_id} already has different final presign evidence"
+            );
+        }
+        if current.prepared_transaction.is_some()
+            || current.final_simulation.is_some()
+        {
+            anyhow::bail!(
+                "execution intent {decision_id} has incomplete final presign evidence"
+            );
+        }
+
+        let prepared_json = serde_json::to_string(prepared)?;
+        let simulation_json = serde_json::to_string(simulation)?;
+        let now = now_unix()?;
+        let conn = self.connection()?;
+        let changed = conn.execute(
+            r#"
+            UPDATE execution_intents
+            SET prepared_transaction_json = ?,
+                final_simulation_json = ?,
+                updated_at_unix = ?
+            WHERE decision_id = ?
+              AND status = 'SIMULATION_PASSED'
+              AND prepared_transaction_json IS NULL
+              AND final_simulation_json IS NULL
+            "#,
+            params![
+                prepared_json,
+                simulation_json,
+                now,
+                decision_id,
+            ],
+        )?;
+        if changed != 1 {
+            anyhow::bail!(
+                "execution intent {decision_id} changed concurrently while recording final presign"
+            );
+        }
+        self.load(decision_id)
+    }
+
     fn transition(
         &self,
         decision_id: &str,
@@ -560,6 +681,20 @@ impl ExecutionIntentStore {
         if !authorization.accepted {
             anyhow::bail!("signing requires accepted wallet authorization");
         }
+        let prepared = current
+            .prepared_transaction
+            .as_ref()
+            .context("signing requires persisted prepared transaction")?;
+        if !prepared.signatures_all_default {
+            anyhow::bail!("signing requires an unsigned prepared transaction");
+        }
+        let final_simulation = current
+            .final_simulation
+            .as_ref()
+            .context("signing requires persisted exact final simulation")?;
+        if !final_simulation.succeeded {
+            anyhow::bail!("signing requires successful exact final simulation");
+        }
         self.transition(
             decision_id,
             &[ExecutionIntentStatus::SimulationPassed],
@@ -634,7 +769,8 @@ impl ExecutionIntentStore {
             SELECT decision_id, mode, action, pool_address, status,
                    created_at_unix, updated_at_unix,
                    risk_json, simulation_json, transaction_guard_json,
-                   wallet_authorization_json, signature, error
+                   wallet_authorization_json, prepared_transaction_json,
+                   final_simulation_json, signature, error
             FROM execution_intents
             WHERE decision_id = ?
             "#,
@@ -655,6 +791,8 @@ impl ExecutionIntentStore {
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
                 ))
             })
             .with_context(|| format!("unknown execution decision_id: {decision_id}"))?;
@@ -683,8 +821,16 @@ impl ExecutionIntentStore {
                 .10
                 .map(|value| serde_json::from_str(&value))
                 .transpose()?,
-            signature: raw.11,
-            error: raw.12,
+            prepared_transaction: raw
+                .11
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            final_simulation: raw
+                .12
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            signature: raw.13,
+            error: raw.14,
         })
     }
 }
