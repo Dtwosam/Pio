@@ -5,6 +5,9 @@ from typing import Any
 
 from .phase9_replay_audit import evaluate_phase9_replay_audit
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
+from .phase9_source_freshness import (
+    evaluate_phase9_source_freshness,
+)
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
     audit_persisted_phase9_promotion,
@@ -20,10 +23,12 @@ class Phase9OperationalAuditReport:
     storage_integrity_verified: bool
     replay_verified: bool
     promotion_current: bool
+    source_freshness_current: bool
     verified: bool
     storage_integrity: dict[str, Any]
     replay_audit: dict[str, Any]
     promotion_currentness: dict[str, Any]
+    source_freshness: dict[str, Any]
     reasons: tuple[str, ...]
 
     def to_record(self) -> dict[str, Any]:
@@ -51,6 +56,8 @@ def evaluate_phase9_operational_audit(
         criteria=criteria,
         current_report=promotion_report,
     )
+
+    source_freshness = evaluate_phase9_source_freshness(storage)
 
     reasons = tuple(
         [
@@ -80,9 +87,11 @@ def evaluate_phase9_operational_audit(
         storage_integrity_verified=storage_integrity.verified,
         replay_verified=replay.verified,
         promotion_current=promotion.current,
+        source_freshness_current=source_freshness.current,
         verified=verified,
         storage_integrity=storage_integrity.to_record(),
         replay_audit=replay.to_record(),
         promotion_currentness=promotion.to_record(),
+        source_freshness=source_freshness.to_record(),
         reasons=reasons,
     )
