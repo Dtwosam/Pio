@@ -919,6 +919,16 @@ mod tests {
         }
     }
 
+    fn prepared_transaction() -> PreparedUnsignedTransaction {
+        PreparedUnsignedTransaction {
+            transaction_base64: "prepared".into(),
+            recent_blockhash: "blockhash".into(),
+            last_valid_block_height: 123,
+            rpc_context_slot: 99,
+            signatures_all_default: true,
+        }
+    }
+
     fn simulation(succeeded: bool) -> SimulationReport {
         SimulationReport {
             succeeded,
@@ -1017,6 +1027,16 @@ mod tests {
         store
             .record_wallet_authorization(&id, &wallet_authorization())
             .unwrap();
+        assert!(store.begin_signing(&id).is_err());
+        store
+            .record_final_presign(
+                &id,
+                &prepared_transaction(),
+                &guard(true),
+                &wallet_authorization(),
+                &simulation(true),
+            )
+            .unwrap();
 
         assert_eq!(
             store.begin_signing(&id).unwrap().status,
@@ -1060,6 +1080,15 @@ mod tests {
         store.record_simulation(&id, &simulation(true)).unwrap();
         store
             .record_wallet_authorization(&id, &wallet_authorization())
+            .unwrap();
+        store
+            .record_final_presign(
+                &id,
+                &prepared_transaction(),
+                &guard(true),
+                &wallet_authorization(),
+                &simulation(true),
+            )
             .unwrap();
         store.begin_signing(&id).unwrap();
 
@@ -1207,6 +1236,92 @@ mod tests {
             store
                 .record_wallet_authorization(&id, &wallet_authorization())
                 .is_ok()
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+
+    #[test]
+    fn final_presign_requires_persisted_wallet_authorization() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+
+        store.register(&request, &config()).unwrap();
+        store
+            .record_risk(&id, &risk(true, request.proposal.decision_id))
+            .unwrap();
+        store.record_transaction_guard(&id, &guard(true)).unwrap();
+        store.record_simulation(&id, &simulation(true)).unwrap();
+
+        assert!(
+            store
+                .record_final_presign(
+                    &id,
+                    &prepared_transaction(),
+                    &guard(true),
+                    &wallet_authorization(),
+                    &simulation(true),
+                )
+                .is_err()
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn final_presign_is_idempotent_and_blocks_different_evidence() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+
+        store.register(&request, &config()).unwrap();
+        store
+            .record_risk(&id, &risk(true, request.proposal.decision_id))
+            .unwrap();
+        store.record_transaction_guard(&id, &guard(true)).unwrap();
+        store.record_simulation(&id, &simulation(true)).unwrap();
+        store
+            .record_wallet_authorization(&id, &wallet_authorization())
+            .unwrap();
+
+        let prepared = prepared_transaction();
+        store
+            .record_final_presign(
+                &id,
+                &prepared,
+                &guard(true),
+                &wallet_authorization(),
+                &simulation(true),
+            )
+            .unwrap();
+        assert!(
+            store
+                .record_final_presign(
+                    &id,
+                    &prepared,
+                    &guard(true),
+                    &wallet_authorization(),
+                    &simulation(true),
+                )
+                .is_ok()
+        );
+
+        let mut different = prepared;
+        different.recent_blockhash = "different".into();
+        assert!(
+            store
+                .record_final_presign(
+                    &id,
+                    &different,
+                    &guard(true),
+                    &wallet_authorization(),
+                    &simulation(true),
+                )
+                .is_err()
         );
 
         let _ = std::fs::remove_file(path);
