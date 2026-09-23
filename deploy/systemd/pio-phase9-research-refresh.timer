@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh reproducible Phase 9 research after source capture
+
+[Timer]
+OnBootSec=25min
+OnUnitActiveSec=70min
+AccuracySec=2min
+Persistent=true
+Unit=pio-phase9-research-refresh.service
+
+[Install]
+WantedBy=timers.target
