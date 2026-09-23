@@ -8,6 +8,23 @@ from .storage import Storage
 
 
 @dataclass(frozen=True)
+class Phase9OperationLeaseStatus:
+    operation_key: str
+    as_of: str
+    exists: bool
+    active: bool
+    expired: bool
+    owner_id: str | None
+    lease_until: str | None
+    acquired_at: str | None
+    updated_at: str | None
+    remaining_seconds: int | None
+
+    def to_record(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Phase9OperationLease:
     operation_key: str
     owner_id: str
@@ -120,6 +137,64 @@ def acquire_phase9_operation_lease(
         lease_until=lease_until,
         existing_owner_id=existing_owner,
         existing_lease_until=existing_until,
+    )
+
+
+def phase9_operation_lease_status(
+    storage: Storage,
+    *,
+    operation_key: str,
+    as_of: str | None = None,
+) -> Phase9OperationLeaseStatus:
+    key = operation_key.strip()
+    if not key:
+        raise ValueError("operation_key is required")
+    now = (
+        _parse_time(as_of)
+        if as_of is not None
+        else datetime.now(timezone.utc)
+    )
+    now_text = _time_text(now)
+
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT owner_id, lease_until, acquired_at, updated_at
+            FROM phase9_operation_leases
+            WHERE operation_key = ?
+            """,
+            (key,),
+        ).fetchone()
+
+    if row is None:
+        return Phase9OperationLeaseStatus(
+            operation_key=key,
+            as_of=now_text,
+            exists=False,
+            active=False,
+            expired=False,
+            owner_id=None,
+            lease_until=None,
+            acquired_at=None,
+            updated_at=None,
+            remaining_seconds=None,
+        )
+
+    lease_until_text = str(row[1])
+    lease_until = _parse_time(lease_until_text)
+    remaining = int((lease_until - now).total_seconds())
+    active = remaining > 0
+    return Phase9OperationLeaseStatus(
+        operation_key=key,
+        as_of=now_text,
+        exists=True,
+        active=active,
+        expired=not active,
+        owner_id=str(row[0]),
+        lease_until=lease_until_text,
+        acquired_at=str(row[2]),
+        updated_at=str(row[3]),
+        remaining_seconds=max(0, remaining),
     )
 
 
