@@ -8,6 +8,7 @@ mod journaled_dry_run;
 mod models;
 mod preflight;
 mod prestate_verifier;
+mod presign;
 mod risk;
 mod simulation;
 mod state_reader;
@@ -28,6 +29,7 @@ fn usage() {
   meteora-executor risk-check <PROPOSAL_JSON_OR_-> <RISK_CONFIG_JSON>
   meteora-executor dry-run-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
   meteora-executor preflight-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
+  meteora-executor presign-preflight <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-wallet-authorize <EXECUTION_DB> <DECISION_ID>
@@ -260,6 +262,93 @@ RPC_URL is accepted as a compatibility fallback",
                 &transaction_config,
                 |encoded| {
                     simulation::simulate_base64_transaction(
+                        &rpc_url,
+                        encoded,
+                    )
+                },
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.accepted {
+                std::process::exit(2);
+            }
+        }
+        "presign-preflight" => {
+            let request_source = args
+                .next()
+                .context("REQUEST_JSON_OR_- is required")?;
+            let risk_config_path = args
+                .next()
+                .context("RISK_CONFIG_JSON is required")?;
+            let transaction_config_path = args
+                .next()
+                .context("TRANSACTION_GUARD_CONFIG_JSON is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "presign-preflight accepts exactly three arguments"
+                );
+            }
+
+            let request_json = if request_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read execution request JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&request_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read execution request JSON: {request_source}"
+                        )
+                    })?
+            };
+            let risk_config_json = std::fs::read_to_string(&risk_config_path)
+                .with_context(|| {
+                    format!(
+                        "failed to read risk config JSON: {risk_config_path}"
+                    )
+                })?;
+            let transaction_config_json =
+                std::fs::read_to_string(&transaction_config_path)
+                    .with_context(|| {
+                        format!(
+                            "failed to read transaction guard config JSON: {transaction_config_path}"
+                        )
+                    })?;
+
+            let request: dry_run::DryRunExecutionRequest =
+                serde_json::from_str(&request_json)
+                    .context("invalid execution request JSON")?;
+            let risk_config: risk::RiskConfig =
+                serde_json::from_str(&risk_config_json)
+                    .context("invalid risk config JSON")?;
+            let transaction_config:
+                transaction_guard::TransactionGuardConfig =
+                serde_json::from_str(&transaction_config_json)
+                    .context("invalid transaction guard config JSON")?;
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let wallet_status = wallet::inspect_executor_wallet_from_env()?;
+            let wallet_pubkey: solana_sdk::pubkey::Pubkey =
+                wallet_status.pubkey.parse()
+                    .context("executor wallet pubkey is invalid")?;
+
+            let report = presign::evaluate_final_presign_with(
+                &request,
+                &risk_config,
+                &transaction_config,
+                &wallet_pubkey,
+                |encoded| {
+                    blockhash::prepare_unsigned_transaction_with_latest_blockhash(
+                        &rpc_url,
+                        encoded,
+                    )
+                },
+                |encoded| {
+                    simulation::simulate_exact_base64_transaction(
                         &rpc_url,
                         encoded,
                     )
