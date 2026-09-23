@@ -17,6 +17,7 @@ from .storage import Storage
 class Phase8PromotionCriteria:
     min_completed_cycles: int = 1
     min_live_labels: int = 10
+    min_live_pools: int = 2
     max_realized_drawdown_bps: int = 2_000
     max_single_loss_bps: int = 1_500
     min_win_rate: float = 0.30
@@ -28,6 +29,7 @@ class Phase8PromotionCriteria:
             raise ValueError("min_completed_cycles must be positive")
         LiveChampionCriteria(
             min_live_labels=self.min_live_labels,
+            min_live_pools=self.min_live_pools,
             max_realized_drawdown_bps=self.max_realized_drawdown_bps,
             max_single_loss_bps=self.max_single_loss_bps,
             min_win_rate=self.min_win_rate,
@@ -41,6 +43,7 @@ class Phase8PromotionCriteria:
         self.validate()
         return LiveChampionCriteria(
             min_live_labels=self.min_live_labels,
+            min_live_pools=self.min_live_pools,
             max_realized_drawdown_bps=self.max_realized_drawdown_bps,
             max_single_loss_bps=self.max_single_loss_bps,
             min_win_rate=self.min_win_rate,
