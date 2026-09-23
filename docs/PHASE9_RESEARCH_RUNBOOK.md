@@ -92,10 +92,9 @@ pio phase9-research-validate \
 Collect mint state directly from Solana with the read-only Rust executor:
 
 ```bash
-meteora-executor inspect-mint <RPC_URL> <MINT_ADDRESS> > mint.json
-pio mint-snapshot-ingest \
-  --file mint.json \
-  --observed-at <CAPTURE_TIME>
+SOLANA_RPC_URL=<RPC_URL> \
+meteora-executor inspect-mint-env <MINT_ADDRESS> \
+  | pio ingest-mint-snapshot --file -
 ```
 
 Repeat for token X, token Y and relevant reward mints, then evaluate one pool:
