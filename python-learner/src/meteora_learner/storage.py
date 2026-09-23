@@ -145,6 +145,9 @@ CREATE TABLE IF NOT EXISTS chain_position_snapshots (
     last_updated_at INTEGER NOT NULL,
     total_claimed_fee_x_amount TEXT NOT NULL,
     total_claimed_fee_y_amount TEXT NOT NULL,
+    supports_limit_order INTEGER,
+    reward_mint_0 TEXT,
+    reward_mint_1 TEXT,
     raw_json TEXT NOT NULL
 );
 
@@ -164,6 +167,7 @@ CREATE TABLE IF NOT EXISTS position_bin_snapshots (
     bin_fee_y_per_token_stored TEXT NOT NULL DEFAULT '0',
     bin_reward_per_token_stored_0 TEXT NOT NULL DEFAULT '0',
     bin_reward_per_token_stored_1 TEXT NOT NULL DEFAULT '0',
+    reward_checkpoint_available INTEGER NOT NULL DEFAULT 0,
     position_liquidity TEXT NOT NULL,
     position_x_amount TEXT NOT NULL,
     position_y_amount TEXT NOT NULL,
@@ -284,6 +288,13 @@ POSITION_BIN_EXTRA_COLUMNS = {
     "bin_fee_y_per_token_stored": "TEXT NOT NULL DEFAULT '0'",
     "bin_reward_per_token_stored_0": "TEXT NOT NULL DEFAULT '0'",
     "bin_reward_per_token_stored_1": "TEXT NOT NULL DEFAULT '0'",
+    "reward_checkpoint_available": "INTEGER NOT NULL DEFAULT 0",
+}
+
+CHAIN_POSITION_EXTRA_COLUMNS = {
+    "supports_limit_order": "INTEGER",
+    "reward_mint_0": "TEXT",
+    "reward_mint_1": "TEXT",
 }
 
 CHAIN_POOL_EXTRA_COLUMNS = {
@@ -402,6 +413,7 @@ class Storage:
             _ensure_columns(conn, "bin_liquidity_snapshots", BIN_LIQUIDITY_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_pool_snapshots", CHAIN_POOL_EXTRA_COLUMNS)
             _ensure_columns(conn, "position_bin_snapshots", POSITION_BIN_EXTRA_COLUMNS)
+            _ensure_columns(conn, "chain_position_snapshots", CHAIN_POSITION_EXTRA_COLUMNS)
 
     def save_raw(
         self,
@@ -737,6 +749,14 @@ class Storage:
             rewards = row.get("position_reward_amounts")
             if not isinstance(rewards, list) or len(rewards) != 2:
                 raise ValueError("position_reward_amounts must contain two values")
+            reward_checkpoints = row.get("bin_reward_per_token_stored")
+            reward_checkpoint_available = (
+                isinstance(reward_checkpoints, list) and len(reward_checkpoints) == 2
+            )
+            if reward_checkpoint_available:
+                reward_checkpoint_values = reward_checkpoints
+            else:
+                reward_checkpoint_values = ["0", "0"]
             bin_rows.append(
                 (
                     observed_at,
@@ -748,8 +768,9 @@ class Storage:
                     str(row["bin_liquidity"]),
                     str(row.get("bin_fee_x_per_token_stored", "0")),
                     str(row.get("bin_fee_y_per_token_stored", "0")),
-                    str((row.get("bin_reward_per_token_stored") or ["0", "0"])[0]),
-                    str((row.get("bin_reward_per_token_stored") or ["0", "0"])[1]),
+                    str(reward_checkpoint_values[0]),
+                    str(reward_checkpoint_values[1]),
+                    int(reward_checkpoint_available),
                     str(row["position_liquidity"]),
                     str(row["position_x_amount"]),
                     str(row["position_y_amount"]),
@@ -767,8 +788,9 @@ class Storage:
                     observed_at, position_address, pool_address, owner, fee_owner,
                     lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
                     fee_x, fee_y, reward_one, reward_two, last_updated_at,
-                    total_claimed_fee_x_amount, total_claimed_fee_y_amount, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    total_claimed_fee_x_amount, total_claimed_fee_y_amount,
+                    supports_limit_order, reward_mint_0, reward_mint_1, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observed_at,
@@ -787,6 +809,23 @@ class Storage:
                     int(snapshot["last_updated_at"]),
                     str(snapshot["total_claimed_fee_x_amount"]),
                     str(snapshot["total_claimed_fee_y_amount"]),
+                    (
+                        int(bool(snapshot["supports_limit_order"]))
+                        if snapshot.get("supports_limit_order") is not None
+                        else None
+                    ),
+                    (
+                        str(snapshot["reward_mints"][0])
+                        if isinstance(snapshot.get("reward_mints"), list)
+                        and len(snapshot["reward_mints"]) == 2
+                        else None
+                    ),
+                    (
+                        str(snapshot["reward_mints"][1])
+                        if isinstance(snapshot.get("reward_mints"), list)
+                        and len(snapshot["reward_mints"]) == 2
+                        else None
+                    ),
                     json.dumps(snapshot, separators=(",", ":")),
                 ),
             )
@@ -798,10 +837,11 @@ class Storage:
                         bin_x_amount, bin_y_amount, bin_liquidity,
                         bin_fee_x_per_token_stored, bin_fee_y_per_token_stored,
                         bin_reward_per_token_stored_0, bin_reward_per_token_stored_1,
+                        reward_checkpoint_available,
                         position_liquidity, position_x_amount, position_y_amount,
                         position_fee_x_amount, position_fee_y_amount,
                         reward_one, reward_two
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     bin_rows,
                 )
