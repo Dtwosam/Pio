@@ -1,6 +1,7 @@
 mod blockhash;
 mod confirmation;
 mod dry_run;
+mod entry;
 mod emergency_exit;
 mod events;
 mod execution_guard;
@@ -40,6 +41,7 @@ fn usage() {
   meteora-executor execution-presign-prepare <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
   meteora-executor build-emergency-exit <REQUEST_JSON_OR_->
   meteora-executor wallet-status
+  meteora-executor build-standard-spl-entry <ENTRY_REQUEST_JSON_OR_->
   meteora-executor wallet-authorize-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
   meteora-executor guard-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
@@ -671,6 +673,35 @@ RPC_URL is accepted as a compatibility fallback",
                     &rpc_url,
                     &request,
                 )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        "build-standard-spl-entry" => {
+            let request_source = args
+                .next()
+                .context("ENTRY_REQUEST_JSON_OR_- is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "build-standard-spl-entry accepts exactly one argument"
+                );
+            }
+            let request_json = if request_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read entry request JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&request_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read entry request JSON: {request_source}"
+                        )
+                    })?
+            };
+            let request: entry::StandardSplEntryRequest =
+                serde_json::from_str(&request_json)
+                    .context("invalid standard-SPL entry request JSON")?;
+            let report = entry::build_standard_spl_entry(&request)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         "wallet-status" => {
