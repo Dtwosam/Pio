@@ -15,6 +15,7 @@ from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
     PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+    portfolio_candidate_artifact_sha256,
 )
 from .static_hedge import (
     STATIC_HEDGE_EVIDENCE_TYPE,
@@ -420,14 +421,26 @@ def _allocation_lineage_valid(storage: Storage) -> bool:
         evidence = json.loads(str(row[4]))
     except (TypeError, ValueError, json.JSONDecodeError):
         return False
+    if (
+        evidence.get("research_only") is not True
+        or evidence.get("policy_actionable") is not False
+        or not isinstance(evidence.get("comparison"), dict)
+        or not isinstance(evidence.get("source_inputs"), list)
+        or not isinstance(evidence.get("assumptions"), dict)
+    ):
+        return False
+    payload = {
+        "research_only": True,
+        "policy_actionable": False,
+        "source_inputs": evidence["source_inputs"],
+        "assumptions": evidence["assumptions"],
+        "comparison": evidence["comparison"],
+    }
+    recomputed_sha = portfolio_candidate_artifact_sha256(payload)
     return (
         str(evidence.get("artifact_sha256", "")).strip()
         == expected_sha
-        and evidence.get("research_only") is True
-        and evidence.get("policy_actionable") is False
-        and isinstance(evidence.get("comparison"), dict)
-        and isinstance(evidence.get("source_inputs"), list)
-        and isinstance(evidence.get("assumptions"), dict)
+        == recomputed_sha
     )
 
 
