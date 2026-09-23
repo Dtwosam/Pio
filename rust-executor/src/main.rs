@@ -507,6 +507,17 @@ RPC_URL is accepted as a compatibility fallback",
                 );
             }
 
+            let phase6 =
+                phase6_gate::verify_phase6_promotion_database(
+                    std::path::Path::new(&database_path),
+                )?;
+            if !phase6.accepted {
+                anyhow::bail!(
+                    "Phase 6 promotion gate rejected controlled live submission: {}",
+                    phase6.reason
+                );
+            }
+
             let keypair = wallet::load_executor_keypair_from_env()?;
             use solana_sdk::signature::Signer as _;
             let readiness =
@@ -546,6 +557,7 @@ RPC_URL is accepted as a compatibility fallback",
                 &keypair,
                 &phase5,
                 &readiness,
+                &phase6,
                 &live,
             )?;
             println!("{}", serde_json::to_string_pretty(&report)?);
