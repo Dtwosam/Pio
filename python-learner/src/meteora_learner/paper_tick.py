@@ -85,8 +85,8 @@ def run_paper_tick(
     2. refresh missing/stale chain state through read-only Rust;
     3. run dependency-aware paper management using fresh persisted quotes.
 
-    Quote acquisition is intentionally outside this function. Missing/stale
-    quotes remain visible blockers instead of being guessed.
+    Quote acquisition is optional. When Jupiter refresh is disabled or a mint
+    has no valid price, missing/stale quotes remain blockers instead of being guessed.
     """
     if not account_id.strip():
         raise ValueError("account_id is required")
@@ -237,6 +237,7 @@ def run_paper_tick(
             "observed_at": timestamp,
             "market": market_record,
             "chain": chain_record,
+            "quote_refresh": quote_refresh_record,
             "supervisor": supervisor_record,
             "error": error,
         }
@@ -263,6 +264,7 @@ def run_paper_tick(
             reused_existing_tick=False,
             market=market_record,
             chain=chain_record,
+            quote_refresh=quote_refresh_record,
             supervisor=supervisor_record,
             error=error,
         )
