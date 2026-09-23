@@ -122,6 +122,7 @@ pio phase9-storage-integrity --require-verified
 pio phase9-replay-audit --require-verified
 pio phase9-promotion-audit --require-current
 pio phase9-operational-audit --require-verified
+pio phase9-chain-capture-plan --rpc-url <RPC_URL> --require-ready
 pio phase9-work-queue --persist-snapshot  # research -> promotion -> policy-simulation blockers
 pio phase9-progress --require-snapshot --require-integrity  # reports through PREWIRE_READY
 pio phase9-shadow-validate --cycle-id <POST_PROMOTION_CYCLE_ID> --persist --require-ready
