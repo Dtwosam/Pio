@@ -164,6 +164,8 @@ Built:
 - unprivileged systemd service/timer deployment templates
 - current health report with Prometheus-compatible gauges
 - evidence-based PAPER endurance report with configurable runtime, reliability, dependency-blockage and applied-valuation thresholds
+- decimal-exact PAPER event-ledger reconciliation audit
+- evidence-gated persistent Phase 5 promotion requiring Phase 3 promotion, endurance, multi-position/pool coverage, closed-position samples and clean accounting
 - paper cohort performance metrics
 - ML paper challenger versus deterministic baseline validation
 - stored paper evidence required for champion promotion
