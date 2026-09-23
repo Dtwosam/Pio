@@ -1355,4 +1355,30 @@ mod tests {
     }
 
 
+    #[test]
+    fn persisted_request_can_be_loaded_immutably() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+
+        store.register(&request, &config()).unwrap();
+        let loaded = store.load_request(&id).unwrap();
+
+        assert_eq!(
+            loaded.proposal.decision_id,
+            request.proposal.decision_id
+        );
+        assert_eq!(
+            loaded.proposal.pool_address,
+            request.proposal.pool_address
+        );
+        assert_eq!(
+            loaded.proposal.capital_quote,
+            request.proposal.capital_quote
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
 }
