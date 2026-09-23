@@ -5,6 +5,7 @@ import json
 import sys
 
 from .add_execution import build_add_execution_calibration
+from .calibration_status import build_phase2_calibration_evidence
 from .chain_ingest import ingest_chain_snapshot
 from .chain_replay import replay_small_lp_history
 from .chain_scan import scan_chain_candidates
@@ -21,6 +22,7 @@ from .position_history import collect_position_history
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .reconciliation import reconcile_position
 from .reconciliation_corpus import build_reconciliation_corpus
+from .rebalance_execution import build_rebalance_execution_calibration
 from .rebalance_replay import replay_rebalance_lifecycle
 from .research import inventory_backtest_from_store
 from .settings import Settings
@@ -93,6 +95,21 @@ def main() -> None:
         "--position",
         required=True,
         help="Meteora position address",
+    )
+
+    rebalance_execution = subparsers.add_parser(
+        "rebalance-execution",
+        help="Check real Meteora rebalance events against transaction guard bounds",
+    )
+    rebalance_execution.add_argument(
+        "--position",
+        required=True,
+        help="Meteora position address",
+    )
+
+    subparsers.add_parser(
+        "phase2-evidence",
+        help="Summarize exact real-data calibration evidence for Phase 2",
     )
 
     transaction_costs = subparsers.add_parser(
@@ -237,6 +254,10 @@ def main() -> None:
     phase2_gate.add_argument("--min-fee-bins", required=True, type=int)
     phase2_gate.add_argument("--min-reward-intervals", required=True, type=int)
     phase2_gate.add_argument("--min-reward-growth-bins", required=True, type=int)
+    phase2_gate.add_argument("--min-composition-samples", type=int, default=1)
+    phase2_gate.add_argument("--min-add-execution-samples", type=int, default=1)
+    phase2_gate.add_argument("--min-rebalance-guard-samples", type=int, default=1)
+    phase2_gate.add_argument("--min-transaction-fee-samples", type=int, default=1)
     phase2_gate.add_argument(
         "--min-amount-coverage-rate",
         type=float,
@@ -370,6 +391,23 @@ def main() -> None:
         result = build_add_execution_calibration(
             str(settings.database_path),
             position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "rebalance-execution":
+        settings = Settings.from_env()
+        result = build_rebalance_execution_calibration(
+            str(settings.database_path),
+            position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase2-evidence":
+        settings = Settings.from_env()
+        result = build_phase2_calibration_evidence(
+            str(settings.database_path),
         )
         print(json.dumps(result.to_record(), indent=2))
         return
@@ -513,6 +551,10 @@ def main() -> None:
                 min_fee_bins=args.min_fee_bins,
                 min_reward_intervals=args.min_reward_intervals,
                 min_reward_growth_bins=args.min_reward_growth_bins,
+                min_composition_samples=args.min_composition_samples,
+                min_add_execution_samples=args.min_add_execution_samples,
+                min_rebalance_guard_samples=args.min_rebalance_guard_samples,
+                min_transaction_fee_samples=args.min_transaction_fee_samples,
                 min_amount_coverage_rate=args.min_amount_coverage_rate,
             ),
             position_limit=args.position_limit,
