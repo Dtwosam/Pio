@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from meteora_learner.contextual_bandit import (
     CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
 )
@@ -289,3 +291,42 @@ def test_phase9_promotion_rejects_stale_persisted_bundle(tmp_path):
         "stale versus current evidence" in reason
         for reason in report.reasons
     )
+
+
+def test_phase9_promotion_refuses_live_policy_authority(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    report = evaluate_phase9_promotion(storage)
+    assert report.promotion_ready is True
+
+    actionable = replace(
+        report,
+        policy_actionable=True,
+    )
+    try:
+        persist_phase9_promotion(
+            storage,
+            report=actionable,
+        )
+    except ValueError as exc:
+        assert "must not grant live-policy authority" in str(exc)
+    else:
+        raise AssertionError(
+            "expected actionable Phase 9 promotion refusal"
+        )
+
+    not_research_only = replace(
+        report,
+        research_only=False,
+    )
+    try:
+        persist_phase9_promotion(
+            storage,
+            report=not_research_only,
+        )
+    except ValueError as exc:
+        assert "must remain research-only" in str(exc)
+    else:
+        raise AssertionError(
+            "expected non-research Phase 9 promotion refusal"
+        )
