@@ -146,6 +146,11 @@ from .research import inventory_backtest_from_store
 from .settings import Settings
 from .storage import Storage
 from .strategy import StrategyType
+from .static_hedge import (
+    StaticHedgeCriteria,
+    persist_static_hedge_research,
+    research_static_inventory_hedge,
+)
 from .transaction_event_ingest import ingest_transaction_events
 from .execution_receipt_ingest import ingest_execution_receipt
 from .execution_decision_context_ingest import ingest_execution_decision_context
@@ -1221,6 +1226,56 @@ def main() -> None:
     adaptive_range.add_argument("--as-of")
     adaptive_range.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    static_hedge = subparsers.add_parser(
+        "static-hedge-research",
+        help="Walk-forward study a static token-X hedge using persisted DLMM prices",
+    )
+    static_hedge.add_argument("--pool", required=True)
+    static_hedge.add_argument("--amount-x", type=int, required=True)
+    static_hedge.add_argument("--amount-y", type=int, required=True)
+    static_hedge.add_argument(
+        "--observation-limit",
+        type=int,
+        default=96,
+    )
+    static_hedge.add_argument(
+        "--holding-observations",
+        type=int,
+        default=6,
+    )
+    static_hedge.add_argument(
+        "--hedge-fraction",
+        type=float,
+        default=1.0,
+    )
+    static_hedge.add_argument(
+        "--hedge-round-trip-cost-bps",
+        type=float,
+        default=10.0,
+    )
+    static_hedge.add_argument("--min-windows", type=int, default=20)
+    static_hedge.add_argument(
+        "--min-mean-abs-return-reduction-bps",
+        type=float,
+        default=0.0,
+    )
+    static_hedge.add_argument(
+        "--min-worst-loss-improvement-bps",
+        type=float,
+        default=0.0,
+    )
+    static_hedge.add_argument(
+        "--max-mean-return-drag-bps",
+        type=float,
+        default=100.0,
+    )
+    static_hedge.add_argument("--as-of")
+    static_hedge.add_argument("--persist", action="store_true")
+    static_hedge.add_argument(
+        "--require-qualified",
         action="store_true",
     )
 
@@ -2975,6 +3030,48 @@ def main() -> None:
             args.require_ready
             and result.status != "RESEARCH_READY"
         ):
+            raise SystemExit(2)
+        return
+
+    if args.command == "static-hedge-research":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = research_static_inventory_hedge(
+            storage,
+            pool_address=args.pool,
+            amount_x=args.amount_x,
+            amount_y=args.amount_y,
+            criteria=StaticHedgeCriteria(
+                observation_limit=args.observation_limit,
+                holding_observations=args.holding_observations,
+                hedge_fraction=args.hedge_fraction,
+                hedge_round_trip_cost_bps=(
+                    args.hedge_round_trip_cost_bps
+                ),
+                min_windows=args.min_windows,
+                min_mean_abs_return_reduction_bps=(
+                    args.min_mean_abs_return_reduction_bps
+                ),
+                min_worst_loss_improvement_bps=(
+                    args.min_worst_loss_improvement_bps
+                ),
+                max_mean_return_drag_bps=(
+                    args.max_mean_return_drag_bps
+                ),
+            ),
+            as_of=args.as_of,
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_static_hedge_research(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not result.research_qualified:
             raise SystemExit(2)
         return
 
