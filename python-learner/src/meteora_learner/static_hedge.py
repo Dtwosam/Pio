@@ -8,7 +8,7 @@ from statistics import fmean
 from typing import Any
 
 from .liquidity_math import Q64
-from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
+from .phase8_validation import audit_persisted_phase8_promotion
 from .storage import Storage
 
 
@@ -286,10 +286,8 @@ def research_static_inventory_hedge(
     if amount_x == 0 and amount_y == 0:
         raise ValueError("at least one token amount must be positive")
 
-    phase8_promoted = storage.phase_is_promoted(
-        PHASE8,
-        evidence_type=PHASE8_EVIDENCE_TYPE,
-    )
+    phase8_audit = audit_persisted_phase8_promotion(storage)
+    phase8_promoted = phase8_audit.current
     path, source_observations = _active_price_path(
         storage,
         pool_address=pool_address,
@@ -470,7 +468,11 @@ def research_static_inventory_hedge(
     if not phase8_promoted:
         reasons.insert(
             0,
-            "Phase 8 must be persistently promoted before hedge research can qualify",
+            "Phase 8 promotion must still be current before hedge research can qualify",
+        )
+        reasons.extend(
+            f"Phase 8 currentness: {reason}"
+            for reason in phase8_audit.reasons
         )
 
     qualified = not reasons
