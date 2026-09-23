@@ -51,3 +51,32 @@ pub struct ExecutionResult {
     pub reason: String,
     pub signature: Option<String>,
 }
+
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::risk::RiskConfig;
+
+    #[test]
+    fn shared_trade_proposal_fixture_deserializes() {
+        let raw = include_str!(
+            "../../contracts/examples/trade_proposal.live.example.json"
+        );
+        let proposal: TradeProposal = serde_json::from_str(raw).unwrap();
+        assert_eq!(proposal.mode, Mode::Live);
+        assert_eq!(proposal.action, Action::Enter);
+        assert_eq!(proposal.strategy, "SPOT");
+        assert_eq!(proposal.data_age_seconds, 5);
+    }
+
+    #[test]
+    fn shared_risk_config_fixture_deserializes() {
+        let raw = include_str!(
+            "../../contracts/examples/risk_config.example.json"
+        );
+        let config: RiskConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(config.max_capital_per_position_pct, 2.0);
+        assert_eq!(config.max_data_age_seconds, 30);
+    }
+}
