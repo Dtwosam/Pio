@@ -11,7 +11,7 @@ from .mint_snapshot_lineage import (
     mint_risk_pool_source_record,
     mint_risk_source_sha256,
 )
-from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
+from .phase8_validation import audit_persisted_phase8_promotion
 from .storage import Storage
 
 
@@ -97,10 +97,8 @@ def research_pool_mint_risk(
         raise ValueError("pool_address is required")
     now = _parse_time(as_of) if as_of else datetime.now(timezone.utc)
     as_of_text = now.isoformat()
-    phase8_promoted = storage.phase_is_promoted(
-        PHASE8,
-        evidence_type=PHASE8_EVIDENCE_TYPE,
-    )
+    phase8_audit = audit_persisted_phase8_promotion(storage)
+    phase8_promoted = phase8_audit.current
 
     with storage.connect() as conn:
         if as_of is None:
@@ -309,7 +307,11 @@ def research_pool_mint_risk(
     reasons: list[str] = []
     if not phase8_promoted:
         reasons.append(
-            "Phase 8 must be persistently promoted before mint-risk research can qualify"
+            "Phase 8 promotion must still be current before mint-risk research can qualify"
+        )
+        reasons.extend(
+            f"Phase 8 currentness: {reason}"
+            for reason in phase8_audit.reasons
         )
     if failed:
         reasons.append(f"{len(failed)} required mint(s) failed risk checks")
