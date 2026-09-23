@@ -881,6 +881,73 @@ def test_work_queue_releases_adaptive_research_after_exact_history_depth(
     assert "pool-a,pool-b,pool-c" in adaptive.shell_command
 
 
+def test_work_queue_prefers_ranked_pool_over_deeper_chain_pool(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        work_queue_module,
+        "utc_now_iso",
+        lambda: "2026-09-23T13:00:00+00:00",
+    )
+
+    for index in range(3):
+        save_pool(
+            storage,
+            "pool-a",
+            f"2026-09-23T10:00:0{index}+00:00",
+        )
+    save_pool(
+        storage,
+        "pool-b",
+        "2026-09-23T10:00:00+00:00",
+    )
+    save_pool(
+        storage,
+        "pool-c",
+        "2026-09-23T10:00:00+00:00",
+    )
+    with storage.connect() as conn:
+        for pool, tvl in (
+            ("pool-b", 3_000.0),
+            ("pool-c", 2_000.0),
+            ("pool-a", 1_000.0),
+        ):
+            conn.execute(
+                """
+                INSERT INTO pool_snapshots(
+                    observed_at, address, name, tvl,
+                    volume_24h, fees_24h, raw_json
+                ) VALUES (
+                    '2026-09-23T12:00:00+00:00',
+                    ?, ?, ?, 100, 1, '{}'
+                )
+                """,
+                (pool, pool, tvl),
+            )
+
+    queue = build_phase9_work_queue(
+        storage,
+        criteria=Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=1,
+            min_wallet_flow_pools=1,
+            min_static_hedge_pools=1,
+        ),
+    )
+
+    mint = next(
+        item for item in queue.items
+        if item.task_type == "MINT_SNAPSHOT"
+    )
+    wallet = next(
+        item for item in queue.items
+        if item.task_type == "WALLET_FLOW_CAPTURE"
+    )
+    assert mint.scope == "pool-b"
+    assert wallet.scope == "pool-b"
+
+
 def test_work_queue_blocks_wallet_flow_until_source_thresholds(
     tmp_path,
 ):
