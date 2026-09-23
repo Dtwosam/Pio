@@ -48,6 +48,32 @@ class PaperCounterfactualState:
 
 
 @dataclass(frozen=True)
+class CounterfactualPlanPreview:
+    pool_address: str
+    entry_observed_at: str
+    amount_x_atomic: int
+    amount_y_atomic: int
+    idle_x_atomic: int
+    idle_y_atomic: int
+    entry_price_q64: int
+    entry_value_y_atomic: int
+    max_share_bps: int
+    favor_x_active: bool
+    token_x_mint: str
+    token_y_mint: str
+    reward_mint_0: str | None
+    reward_mint_1: str | None
+    strategy: str
+    min_bin_id: int
+    max_bin_id: int
+    bins: int
+    initial_state_json: str
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class PaperChainValuation:
     position_id: str
     observed_at: str
@@ -122,17 +148,11 @@ def _state_row(
     }
 
 
-def initialize_paper_counterfactual(
+def prepare_counterfactual_plan(
     storage: Storage,
     *,
-    position_id: str,
     plan: Phase3ResearchPlan,
-) -> PaperCounterfactualState:
-    position = paper_position_snapshot(storage, position_id=position_id)
-    if position.status != "OPEN":
-        raise ValueError("paper position must be open")
-    if position.rebalances != 0:
-        raise ValueError("counterfactual state must be initialized before rebalancing")
+) -> CounterfactualPlanPreview:
     if plan.entry_gate is None or plan.entry_gate.proposal is None:
         raise ValueError("Phase 3 plan has no proposal")
     if plan.decision_observed_at is None:
@@ -141,17 +161,8 @@ def initialize_paper_counterfactual(
         raise ValueError("Phase 3 plan token amounts cannot be negative")
     if plan.amount_x == 0 and plan.amount_y == 0:
         raise ValueError("Phase 3 plan has no atomic entry amount")
-    if position.pool_address != plan.pool_address:
-        raise ValueError("paper position and Phase 3 plan use different pools")
 
     proposal = plan.entry_gate.proposal
-    if (
-        position.strategy != proposal.strategy
-        or position.min_bin_id != proposal.min_bin_id
-        or position.max_bin_id != proposal.max_bin_id
-    ):
-        raise ValueError("paper position does not match Phase 3 proposal")
-
     store = ResearchStore(storage.path)
     pool = store.chain_pool_snapshot_at(
         plan.pool_address,
@@ -230,58 +241,7 @@ def initialize_paper_counterfactual(
         "idle_y_atomic": deposit.idle_y,
         "max_observed_share_bps": max_share,
     }
-    with storage.connect() as conn:
-        existing = conn.execute(
-            """
-            SELECT position_id
-            FROM paper_counterfactual_positions
-            WHERE position_id = ?
-            """,
-            (position_id,),
-        ).fetchone()
-        if existing is not None:
-            raise ValueError("paper counterfactual state already exists")
-        conn.execute(
-            """
-            INSERT INTO paper_counterfactual_positions(
-                position_id, pool_address, entry_observed_at,
-                amount_x_atomic, amount_y_atomic, idle_x_atomic, idle_y_atomic,
-                entry_price_q64, entry_value_y_atomic, capital_quote,
-                max_share_bps, favor_x_active, token_x_mint, token_y_mint,
-                reward_mint_0, reward_mint_1, initial_state_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                position_id,
-                plan.pool_address,
-                plan.decision_observed_at,
-                str(plan.amount_x),
-                str(plan.amount_y),
-                str(deposit.idle_x),
-                str(deposit.idle_y),
-                str(entry_price_q64),
-                str(entry_value),
-                str(position.entry_capital_quote),
-                int(plan.max_share_bps),
-                int(plan.favor_x_in_active_bin),
-                str(pool["token_x_mint"]),
-                str(pool["token_y_mint"]),
-                (
-                    str(pool["reward_mint_0"])
-                    if pool.get("reward_mint_0") is not None
-                    else None
-                ),
-                (
-                    str(pool["reward_mint_1"])
-                    if pool.get("reward_mint_1") is not None
-                    else None
-                ),
-                json.dumps(payload, separators=(",", ":")),
-            ),
-        )
-
-    return PaperCounterfactualState(
-        position_id=position_id,
+    return CounterfactualPlanPreview(
         pool_address=plan.pool_address,
         entry_observed_at=plan.decision_observed_at,
         amount_x_atomic=plan.amount_x,
@@ -290,12 +250,122 @@ def initialize_paper_counterfactual(
         idle_y_atomic=deposit.idle_y,
         entry_price_q64=entry_price_q64,
         entry_value_y_atomic=entry_value,
-        capital_quote=position.entry_capital_quote,
         max_share_bps=plan.max_share_bps,
         favor_x_active=plan.favor_x_in_active_bin,
+        token_x_mint=str(pool["token_x_mint"]),
+        token_y_mint=str(pool["token_y_mint"]),
+        reward_mint_0=(
+            str(pool["reward_mint_0"])
+            if pool.get("reward_mint_0") is not None
+            else None
+        ),
+        reward_mint_1=(
+            str(pool["reward_mint_1"])
+            if pool.get("reward_mint_1") is not None
+            else None
+        ),
+        strategy=proposal.strategy,
+        min_bin_id=proposal.min_bin_id,
+        max_bin_id=proposal.max_bin_id,
         bins=len(state_bins),
+        initial_state_json=json.dumps(payload, separators=(",", ":")),
     )
 
+
+def _insert_counterfactual_preview(
+    conn: Any,
+    *,
+    position_id: str,
+    capital_quote: float,
+    preview: CounterfactualPlanPreview,
+) -> None:
+    existing = conn.execute(
+        """
+        SELECT position_id
+        FROM paper_counterfactual_positions
+        WHERE position_id = ?
+        """,
+        (position_id,),
+    ).fetchone()
+    if existing is not None:
+        raise ValueError("paper counterfactual state already exists")
+    conn.execute(
+        """
+        INSERT INTO paper_counterfactual_positions(
+            position_id, pool_address, entry_observed_at,
+            amount_x_atomic, amount_y_atomic, idle_x_atomic, idle_y_atomic,
+            entry_price_q64, entry_value_y_atomic, capital_quote,
+            max_share_bps, favor_x_active, token_x_mint, token_y_mint,
+            reward_mint_0, reward_mint_1, initial_state_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            position_id,
+            preview.pool_address,
+            preview.entry_observed_at,
+            str(preview.amount_x_atomic),
+            str(preview.amount_y_atomic),
+            str(preview.idle_x_atomic),
+            str(preview.idle_y_atomic),
+            str(preview.entry_price_q64),
+            str(preview.entry_value_y_atomic),
+            str(capital_quote),
+            int(preview.max_share_bps),
+            int(preview.favor_x_active),
+            preview.token_x_mint,
+            preview.token_y_mint,
+            preview.reward_mint_0,
+            preview.reward_mint_1,
+            preview.initial_state_json,
+        ),
+    )
+
+
+def initialize_paper_counterfactual(
+    storage: Storage,
+    *,
+    position_id: str,
+    plan: Phase3ResearchPlan,
+) -> PaperCounterfactualState:
+    position = paper_position_snapshot(storage, position_id=position_id)
+    if position.status != "OPEN":
+        raise ValueError("paper position must be open")
+    if position.rebalances != 0:
+        raise ValueError("counterfactual state must be initialized before rebalancing")
+
+    preview = prepare_counterfactual_plan(storage, plan=plan)
+    if position.pool_address != preview.pool_address:
+        raise ValueError("paper position and Phase 3 plan use different pools")
+    if (
+        position.strategy != preview.strategy
+        or position.min_bin_id != preview.min_bin_id
+        or position.max_bin_id != preview.max_bin_id
+    ):
+        raise ValueError("paper position does not match Phase 3 proposal")
+
+    with storage.connect() as conn:
+        _insert_counterfactual_preview(
+            conn,
+            position_id=position_id,
+            capital_quote=position.entry_capital_quote,
+            preview=preview,
+        )
+
+    return PaperCounterfactualState(
+        position_id=position_id,
+        pool_address=preview.pool_address,
+        entry_observed_at=preview.entry_observed_at,
+        amount_x_atomic=preview.amount_x_atomic,
+        amount_y_atomic=preview.amount_y_atomic,
+        idle_x_atomic=preview.idle_x_atomic,
+        idle_y_atomic=preview.idle_y_atomic,
+        entry_price_q64=preview.entry_price_q64,
+        entry_value_y_atomic=preview.entry_value_y_atomic,
+        capital_quote=position.entry_capital_quote,
+        max_share_bps=preview.max_share_bps,
+        favor_x_active=preview.favor_x_active,
+        bins=preview.bins,
+    )
 
 def _counterfactual_row(
     storage: Storage,
