@@ -69,6 +69,10 @@ from .phase8_retrain_inputs import (
     persist_phase8_retrain_inputs,
     run_phase8_retrain_build_from_inputs,
 )
+from .phase8_offline_retraining import (
+    train_phase8_cycle_challenger,
+    validate_phase8_cycle_challenger_offline,
+)
 from .phase9_research import (
     Phase9ResearchCriteria,
     evaluate_phase9_research,
@@ -1419,6 +1423,34 @@ def main() -> None:
         "--max-champion-age-days",
         type=float,
         default=14.0,
+    )
+
+    phase8_retrain_train_run = subparsers.add_parser(
+        "phase8-retrain-train-run",
+        help="Train and attach an offline challenger from the active cycle's checksum-verified dataset without PAPER or champion promotion",
+    )
+    phase8_retrain_train_run.add_argument("--cycle-id")
+    phase8_retrain_train_run.add_argument("--model-id")
+    phase8_retrain_train_run.add_argument("--artifact-directory")
+    phase8_retrain_train_run.add_argument(
+        "--split-fraction",
+        type=float,
+        default=0.8,
+    )
+    phase8_retrain_train_run.add_argument(
+        "--min-rows",
+        type=int,
+        default=50,
+    )
+
+    phase8_retrain_offline_validate = subparsers.add_parser(
+        "phase8-retrain-offline-validate-run",
+        help="Run cycle walk-forward plus held-out offline validation and qualify only when both gates pass",
+    )
+    phase8_retrain_offline_validate.add_argument("--cycle-id")
+    phase8_retrain_offline_validate.add_argument(
+        "--require-qualified",
+        action="store_true",
     )
 
     phase8_validate = subparsers.add_parser(
@@ -4693,6 +4725,32 @@ def main() -> None:
             output["persisted"] = None
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase8-retrain-train-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = train_phase8_cycle_challenger(
+            storage,
+            cycle_id=args.cycle_id,
+            model_id=args.model_id,
+            artifact_directory=args.artifact_directory,
+            split_fraction=args.split_fraction,
+            min_rows=args.min_rows,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase8-retrain-offline-validate-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = validate_phase8_cycle_challenger_offline(
+            storage,
+            cycle_id=args.cycle_id,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_qualified and not result.offline_qualified:
             raise SystemExit(2)
         return
 
