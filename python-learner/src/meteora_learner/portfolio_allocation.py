@@ -125,6 +125,14 @@ def research_portfolio_allocation(
     if budget_quote <= 0:
         raise ValueError("budget_quote must be positive")
 
+    candidate_pools = [
+        item.pool_address for item in comparison.candidates
+    ]
+    if len(candidate_pools) != len(set(candidate_pools)):
+        raise ValueError(
+            "duplicate pool_address candidates are not allowed"
+        )
+
     phase8_promoted = storage.phase_is_promoted(
         PHASE8,
         evidence_type=PHASE8_EVIDENCE_TYPE,
