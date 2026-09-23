@@ -1,6 +1,7 @@
 use crate::dry_run::DryRunExecutionRequest;
 use crate::execution_guard::RiskCheckReport;
 use crate::simulation::SimulationReport;
+use crate::transaction_guard::TransactionGuardReport;
 use crate::risk::RiskConfig;
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
@@ -64,6 +65,7 @@ pub struct ExecutionIntentRecord {
     pub updated_at_unix: u64,
     pub risk: Option<RiskCheckReport>,
     pub simulation: Option<SimulationReport>,
+    pub transaction_guard: Option<TransactionGuardReport>,
     pub signature: Option<String>,
     pub error: Option<String>,
 }
@@ -134,6 +136,7 @@ impl ExecutionIntentStore {
                 updated_at_unix INTEGER NOT NULL,
                 risk_json TEXT,
                 simulation_json TEXT,
+                transaction_guard_json TEXT,
                 signature TEXT,
                 error TEXT
             );
@@ -141,6 +144,19 @@ impl ExecutionIntentStore {
             ON execution_intents(status, updated_at_unix);
             "#,
         )?;
+
+        let mut columns = conn.prepare(
+            "PRAGMA table_info(execution_intents)"
+        )?;
+        let names = columns
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if !names.iter().any(|name| name == "transaction_guard_json") {
+            conn.execute(
+                "ALTER TABLE execution_intents ADD COLUMN transaction_guard_json TEXT",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -229,11 +245,79 @@ impl ExecutionIntentStore {
         self.load(decision_id)
     }
 
+    pub fn record_transaction_guard(
+        &self,
+        decision_id: &str,
+        guard: &TransactionGuardReport,
+    ) -> Result<ExecutionIntentRecord> {
+        let current = self.load(decision_id)?;
+        if let Some(existing) = &current.transaction_guard {
+            let existing_json = serde_json::to_string(existing)?;
+            let incoming_json = serde_json::to_string(guard)?;
+            if existing_json == incoming_json {
+                return Ok(current);
+            }
+            anyhow::bail!(
+                "execution intent {decision_id} already has a different transaction guard result"
+            );
+        }
+        if current.status != ExecutionIntentStatus::RiskApproved {
+            anyhow::bail!(
+                "transaction guard requires RISK_APPROVED status; current status is {:?}",
+                current.status
+            );
+        }
+        let payload = serde_json::to_string(guard)?;
+        let next_status = if guard.accepted {
+            ExecutionIntentStatus::RiskApproved
+        } else {
+            ExecutionIntentStatus::Rejected
+        };
+        let now = now_unix()?;
+        let conn = self.connection()?;
+        let changed = conn.execute(
+            r#"
+            UPDATE execution_intents
+            SET status = ?, transaction_guard_json = ?,
+                updated_at_unix = ?, error = ?
+            WHERE decision_id = ? AND status = 'RISK_APPROVED'
+              AND transaction_guard_json IS NULL
+            "#,
+            params![
+                next_status.as_str(),
+                payload,
+                now,
+                if guard.accepted {
+                    None::<String>
+                } else {
+                    Some(guard.reason.clone())
+                },
+                decision_id,
+            ],
+        )?;
+        if changed != 1 {
+            anyhow::bail!(
+                "execution intent {decision_id} changed concurrently while recording transaction guard"
+            );
+        }
+        self.load(decision_id)
+    }
+
     pub fn record_simulation(
         &self,
         decision_id: &str,
         simulation: &SimulationReport,
     ) -> Result<ExecutionIntentRecord> {
+        let current = self.load(decision_id)?;
+        let guard = current
+            .transaction_guard
+            .as_ref()
+            .context("simulation requires an accepted transaction guard")?;
+        if current.status != ExecutionIntentStatus::RiskApproved || !guard.accepted {
+            anyhow::bail!(
+                "simulation requires RISK_APPROVED status and an accepted transaction guard"
+            );
+        }
         let status = if simulation.succeeded {
             ExecutionIntentStatus::SimulationPassed
         } else {
@@ -246,7 +330,7 @@ impl ExecutionIntentStore {
             r#"
             UPDATE execution_intents
             SET status = ?, simulation_json = ?, updated_at_unix = ?, error = ?
-            WHERE decision_id = ?
+            WHERE decision_id = ? AND status = 'RISK_APPROVED'
             "#,
             params![
                 status.as_str(),
@@ -406,7 +490,8 @@ impl ExecutionIntentStore {
             r#"
             SELECT decision_id, mode, action, pool_address, status,
                    created_at_unix, updated_at_unix,
-                   risk_json, simulation_json, signature, error
+                   risk_json, simulation_json, transaction_guard_json,
+                   signature, error
             FROM execution_intents
             WHERE decision_id = ?
             "#,
@@ -425,6 +510,7 @@ impl ExecutionIntentStore {
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             })
             .with_context(|| format!("unknown execution decision_id: {decision_id}"))?;
@@ -445,8 +531,12 @@ impl ExecutionIntentStore {
                 .8
                 .map(|value| serde_json::from_str(&value))
                 .transpose()?,
-            signature: raw.9,
-            error: raw.10,
+            transaction_guard: raw
+                .9
+                .map(|value| serde_json::from_str(&value))
+                .transpose()?,
+            signature: raw.10,
+            error: raw.11,
         })
     }
 }
