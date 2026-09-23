@@ -222,3 +222,70 @@ def test_capture_plan_onboards_preferred_pool_after_minimum_target(tmp_path):
         "pool-e" in reason
         for reason in plan.reasons
     )
+
+
+def test_capture_plan_excludes_stale_api_candidates(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_api_pool(
+        storage,
+        "pool-a",
+        tvl=1_000.0,
+        volume=100.0,
+        observed_at="2026-09-23T10:00:00+00:00",
+    )
+
+    plan = build_phase9_chain_capture_plan(
+        storage,
+        criteria=Phase9ChainCaptureCriteria(
+            target_chain_pools=1,
+            max_candidates=2,
+            max_api_snapshot_age_seconds=3_600,
+        ),
+        as_of="2026-09-23T14:00:00+00:00",
+    )
+
+    assert plan.api_pool_count == 0
+    assert plan.stale_api_pool_count == 1
+    assert plan.api_ranking_as_of == "2026-09-23T14:00:00+00:00"
+    assert plan.candidates == ()
+    assert plan.plan_ready is False
+    assert any(
+        "no fresh discovered API pool snapshots" in reason
+        for reason in plan.reasons
+    )
+
+
+def test_capture_plan_historical_cutoff_ignores_future_latest_row(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_api_pool(
+        storage,
+        "pool-a",
+        tvl=500.0,
+        volume=50.0,
+        observed_at="2026-09-23T12:00:00+00:00",
+    )
+    seed_api_pool(
+        storage,
+        "pool-a",
+        tvl=5_000.0,
+        volume=5_000.0,
+        observed_at="2026-09-23T18:00:00+00:00",
+    )
+
+    plan = build_phase9_chain_capture_plan(
+        storage,
+        criteria=Phase9ChainCaptureCriteria(
+            target_chain_pools=1,
+            max_candidates=2,
+            max_api_snapshot_age_seconds=7_200,
+        ),
+        as_of="2026-09-23T14:00:00+00:00",
+    )
+
+    assert plan.api_pool_count == 1
+    assert plan.stale_api_pool_count == 0
+    assert plan.candidates[0].pool_address == "pool-a"
+    assert plan.candidates[0].api_observed_at == (
+        "2026-09-23T12:00:00+00:00"
+    )
+    assert plan.candidates[0].tvl == 500.0
