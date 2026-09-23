@@ -260,7 +260,7 @@ from .rebalance_execution import build_rebalance_execution_calibration
 from .rebalance_replay import replay_rebalance_lifecycle
 from .research import inventory_backtest_from_store
 from .settings import Settings
-from .storage import Storage
+from .storage import Storage, utc_now_iso
 from .strategy import StrategyType
 from .static_hedge import (
     HedgeInstrumentAssumptions,
@@ -2166,6 +2166,16 @@ def main() -> None:
         default=1,
     )
     phase9_capture_plan.add_argument(
+        "--max-api-snapshot-age-seconds",
+        type=int,
+        default=10_800,
+        help="Maximum age of API pool rankings allowed to steer chain onboarding",
+    )
+    phase9_capture_plan.add_argument(
+        "--as-of",
+        help="Optional timezone-aware ranking cutoff; defaults to current time",
+    )
+    phase9_capture_plan.add_argument(
         "--rpc-url",
         help="Optional Solana RPC URL inserted into emitted read-only capture commands",
     )
@@ -2383,6 +2393,12 @@ def main() -> None:
         default=8,
     )
     phase9_source_capture.add_argument(
+        "--api-ranking-max-age-seconds",
+        type=int,
+        default=10_800,
+        help="Maximum age of API pool rankings allowed to steer unattended cohort capture",
+    )
+    phase9_source_capture.add_argument(
         "--bin-array-radius",
         type=int,
         default=1,
@@ -2453,6 +2469,10 @@ def main() -> None:
     phase9_source_freshness = subparsers.add_parser(
         "phase9-source-freshness",
         help="Show whether persisted Phase 9 research has incorporated the latest source observations",
+    )
+    phase9_source_freshness.add_argument(
+        "--as-of",
+        help="Optional timezone-aware ranking freshness cutoff; defaults to current time",
     )
     phase9_source_freshness.add_argument(
         "--require-current",
@@ -2748,6 +2768,15 @@ def main() -> None:
         "--bin-array-radius",
         type=int,
         default=1,
+    )
+    phase9_capture_run.add_argument(
+        "--max-api-snapshot-age-seconds",
+        type=int,
+        default=10_800,
+    )
+    phase9_capture_run.add_argument(
+        "--api-ranking-as-of",
+        help="Optional timezone-aware API ranking cutoff; defaults to current time",
     )
     phase9_capture_run.add_argument(
         "--rust-manifest-path",
@@ -5256,9 +5285,13 @@ def main() -> None:
                 target_chain_pools=args.target_chain_pools,
                 max_candidates=args.max_candidates,
                 bin_array_radius=args.bin_array_radius,
+                max_api_snapshot_age_seconds=(
+                    args.max_api_snapshot_age_seconds
+                ),
             ),
             rpc_url=args.rpc_url,
             executor_bin=args.executor_bin,
+            as_of=args.as_of or utc_now_iso(),
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.plan_ready:
@@ -5442,7 +5475,10 @@ def main() -> None:
     if args.command == "phase9-source-freshness":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
-        result = evaluate_phase9_source_freshness(storage)
+        result = evaluate_phase9_source_freshness(
+            storage,
+            as_of=args.as_of or utc_now_iso(),
+        )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_current and not result.current:
             raise SystemExit(2)
@@ -5484,6 +5520,9 @@ def main() -> None:
                 refresh_api=not args.skip_api_refresh,
                 chain_pool_target=args.chain_pool_target,
                 chain_max_candidates=args.chain_max_candidates,
+                api_ranking_max_age_seconds=(
+                    args.api_ranking_max_age_seconds
+                ),
                 bin_array_radius=args.bin_array_radius,
                 mint_max_snapshot_age_seconds=(
                     args.mint_max_snapshot_age_seconds
@@ -5790,11 +5829,19 @@ def main() -> None:
                 target_chain_pools=args.target_chain_pools,
                 max_candidates=args.max_candidates,
                 bin_array_radius=args.bin_array_radius,
+                max_api_snapshot_age_seconds=(
+                    args.max_api_snapshot_age_seconds
+                ),
             ),
             rust_manifest_path=args.rust_manifest_path,
             rust_binary_path=args.rust_binary_path,
             timeout_seconds=args.timeout_seconds,
             ingest_observed_at=args.observed_at,
+            api_ranking_as_of=(
+                args.api_ranking_as_of
+                or args.observed_at
+                or utc_now_iso()
+            ),
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_target and not result.target_met:
