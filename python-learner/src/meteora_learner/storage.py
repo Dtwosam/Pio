@@ -439,6 +439,47 @@ ON live_execution_effects(position_address, observed_at);
 CREATE INDEX IF NOT EXISTS idx_live_execution_effects_pool
 ON live_execution_effects(pool_address, observed_at);
 
+CREATE TABLE IF NOT EXISTS live_positions (
+    position_address TEXT PRIMARY KEY,
+    pool_address TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(
+        status IN ('OPEN', 'LIQUIDITY_REMOVED', 'CLOSED')
+    ),
+    opened_decision_id TEXT NOT NULL UNIQUE,
+    opened_signature TEXT NOT NULL UNIQUE,
+    opened_at TEXT NOT NULL,
+    min_bin_id INTEGER,
+    max_bin_id INTEGER,
+    last_decision_id TEXT NOT NULL,
+    last_signature TEXT NOT NULL,
+    last_observed_at TEXT NOT NULL,
+    rebalances INTEGER NOT NULL DEFAULT 0,
+    closed_decision_id TEXT,
+    closed_signature TEXT,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_positions_pool_status
+ON live_positions(pool_address, status);
+
+CREATE TABLE IF NOT EXISTS live_position_events (
+    decision_id TEXT PRIMARY KEY,
+    signature TEXT NOT NULL UNIQUE,
+    position_address TEXT NOT NULL,
+    event_time TEXT NOT NULL,
+    action TEXT NOT NULL CHECK(
+        action IN ('ENTER', 'REBALANCE', 'EXIT', 'CLOSE')
+    ),
+    prior_status TEXT,
+    next_status TEXT NOT NULL,
+    min_bin_id INTEGER,
+    max_bin_id INTEGER,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_position_events_position_time
+ON live_position_events(position_address, event_time);
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
