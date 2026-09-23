@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from types import SimpleNamespace
 from typing import Any, Sequence
 
 from .baseline_policy import (
@@ -15,13 +16,34 @@ from .capital_sizing import (
 )
 from .chain_scan import ChainScanResult, scan_chain_candidates
 from .phase2_gate import Phase2PromotionGate
+from .phase_promotion import PHASE2, PHASE2_EVIDENCE_TYPE
 from .phase3_gate import Phase3EntryGate, evaluate_phase3_entry_gate
 from .pool_safety import (
     PoolSafetyAssessment,
     PoolSafetyConfig,
     screen_pool_universe,
 )
+from .storage import Storage
 from .strategy import StrategyType
+
+
+def _effective_phase2_gate(
+    database_path: str,
+    phase2_gate: Phase2PromotionGate | None,
+) -> Phase2PromotionGate | SimpleNamespace | None:
+    if phase2_gate is not None:
+        return phase2_gate
+
+    storage = Storage(database_path)
+    if storage.phase_is_promoted(
+        PHASE2,
+        evidence_type=PHASE2_EVIDENCE_TYPE,
+    ):
+        return SimpleNamespace(
+            promotion_ready=True,
+            reasons=(),
+        )
+    return None
 
 
 @dataclass(frozen=True)
@@ -130,10 +152,14 @@ def build_phase3_research_plan(
         max_share_bps=max_share_bps,
         favor_x_in_active_bin=favor_x_in_active_bin,
     )
+    effective_phase2_gate = _effective_phase2_gate(
+        database_path,
+        phase2_gate,
+    )
     baseline = select_deterministic_baseline(
         database_path,
         scan=scan,
-        phase2_gate=phase2_gate,
+        phase2_gate=effective_phase2_gate,
         config=baseline_config,
     )
     sizing = size_position(
