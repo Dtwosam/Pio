@@ -1,0 +1,608 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+import json
+from typing import Any, Callable
+
+from .contextual_bandit import CONTEXTUAL_BANDIT_EVIDENCE_TYPE
+from .contextual_bandit_cycle import (
+    evaluate_cycle_contextual_bandit,
+    persist_cycle_contextual_bandit,
+)
+from .mint_risk import (
+    MINT_RISK_EVIDENCE_TYPE,
+    MintRiskCriteria,
+    persist_pool_mint_risk,
+    research_pool_mint_risk,
+)
+from .phase8_validation import audit_persisted_phase8_promotion
+from .phase9_history_plan import build_phase9_history_plan
+from .phase9_mint_capture import (
+    Phase9MintCaptureCriteria,
+    build_phase9_mint_capture_plan,
+)
+from .phase9_replay_audit import evaluate_phase9_replay_audit
+from .phase9_research import (
+    PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+    evaluate_phase9_research,
+    persist_phase9_research,
+)
+from .phase9_validation import (
+    PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
+    Phase9ResearchBundleCriteria,
+    evaluate_phase9_research_bundle,
+    persist_phase9_research_bundle,
+    phase9_research_bundle_sha256,
+)
+from .phase9_wallet_flow_capture import wallet_flow_source_state
+from .storage import Storage
+from .wallet_flow import (
+    WALLET_FLOW_EVIDENCE_TYPE,
+    WalletFlowCriteria,
+    persist_wallet_flow_research,
+    research_wallet_flow,
+)
+
+
+@dataclass(frozen=True)
+class Phase9ResearchRefreshItem:
+    family: str
+    scope: str
+    status: str
+    research_qualified: bool | None
+    persisted_evidence_id: int | None
+    reason: str
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class Phase9ResearchRefreshReport:
+    research_only: bool
+    policy_actionable: bool
+    execution_wired: bool
+    phase8_current: bool
+    automatic_families_ready: bool
+    bundle_ready_after: bool
+    bundle_persisted_evidence_id: int | None
+    items: tuple[Phase9ResearchRefreshItem, ...]
+    bundle_reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _normalized(value: Any) -> Any:
+    return json.loads(json.dumps(value, sort_keys=True))
+
+
+def _persist_if_changed(
+    storage: Storage,
+    *,
+    edge_type: str,
+    pool_address: str,
+    evidence: dict[str, Any],
+    persist: Callable[[], int],
+) -> tuple[str, int | None]:
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=edge_type,
+        pool_address=pool_address,
+    )
+    if (
+        latest is not None
+        and _normalized(latest.get("evidence"))
+        == _normalized(evidence)
+    ):
+        return "UNCHANGED", int(latest["id"])
+    return "PERSISTED", int(persist())
+
+
+def _top_chain_pools(
+    storage: Storage,
+    *,
+    limit: int,
+) -> tuple[str, ...]:
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT pool_address, COUNT(*) AS observations
+            FROM chain_pool_snapshots
+            WHERE pool_address IS NOT NULL
+              AND TRIM(pool_address) != ''
+            GROUP BY pool_address
+            ORDER BY observations DESC, pool_address ASC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return tuple(str(row[0]) for row in rows)
+
+
+def _latest_retraining_dataset_cycle(
+    storage: Storage,
+) -> str | None:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT evidence_json
+            FROM model_live_evidence
+            WHERE evidence_type = 'CONTINUOUS_RETRAIN_DATASET_V1'
+              AND status = 'BUILT'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(str(row[0]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    dataset = payload.get("dataset")
+    cycle_id = str(payload.get("cycle_id", "")).strip()
+    target_version = str(
+        payload.get("target_dataset_version", "")
+    ).strip()
+    output_file = str(payload.get("output_file", "")).strip()
+    if (
+        not cycle_id
+        or not target_version
+        or not output_file
+        or not isinstance(dataset, dict)
+        or not str(dataset.get("dataset_sha256", "")).strip()
+        or str(dataset.get("dataset_version", "")).strip()
+        != target_version
+    ):
+        return None
+    return cycle_id
+
+
+def _replay_statuses(
+    storage: Storage,
+    *,
+    criteria: Phase9ResearchBundleCriteria,
+) -> dict[str, bool]:
+    audit = evaluate_phase9_replay_audit(
+        storage,
+        criteria=criteria,
+    )
+    return {
+        item.family: bool(item.replay_verified)
+        for item in audit.families
+    }
+
+
+def run_phase9_research_refresh(
+    storage: Storage,
+    *,
+    criteria: Phase9ResearchBundleCriteria = (
+        Phase9ResearchBundleCriteria()
+    ),
+    mint_criteria: MintRiskCriteria = MintRiskCriteria(),
+    wallet_criteria: WalletFlowCriteria = WalletFlowCriteria(),
+    persist_bundle_when_ready: bool = True,
+) -> Phase9ResearchRefreshReport:
+    phase8 = audit_persisted_phase8_promotion(storage)
+    items: list[Phase9ResearchRefreshItem] = []
+
+    if not phase8.current:
+        bundle = evaluate_phase9_research_bundle(
+            storage,
+            criteria=criteria,
+        )
+        items.append(
+            Phase9ResearchRefreshItem(
+                family="phase8",
+                scope="PHASE8_PROMOTION",
+                status="BLOCKED",
+                research_qualified=None,
+                persisted_evidence_id=None,
+                reason=(
+                    "Phase 8 promotion is not current; automatic Phase 9 "
+                    "research refresh is skipped"
+                ),
+            )
+        )
+        return Phase9ResearchRefreshReport(
+            research_only=True,
+            policy_actionable=False,
+            execution_wired=False,
+            phase8_current=False,
+            automatic_families_ready=False,
+            bundle_ready_after=bundle.research_ready,
+            bundle_persisted_evidence_id=None,
+            items=tuple(items),
+            bundle_reasons=bundle.reasons,
+        )
+
+    replay = _replay_statuses(
+        storage,
+        criteria=criteria,
+    )
+
+    # Adaptive/regime multi-pool research.
+    if replay.get("adaptive_regime", False):
+        items.append(
+            Phase9ResearchRefreshItem(
+                family="adaptive_regime",
+                scope="__MULTI_POOL__",
+                status="UNCHANGED",
+                research_qualified=True,
+                persisted_evidence_id=None,
+                reason="latest qualified evidence is replay-verified",
+            )
+        )
+    else:
+        try:
+            history = build_phase9_history_plan(storage)
+            if not history.plan_ready:
+                detail = "; ".join(history.reasons) or (
+                    "chain-history depth is below the exact requirement"
+                )
+                items.append(
+                    Phase9ResearchRefreshItem(
+                        family="adaptive_regime",
+                        scope="__MULTI_POOL__",
+                        status="SKIPPED_SOURCE_NOT_READY",
+                        research_qualified=None,
+                        persisted_evidence_id=None,
+                        reason=detail,
+                    )
+                )
+            else:
+                pools = tuple(
+                    item.pool_address for item in history.pools
+                )
+                report = evaluate_phase9_research(
+                    storage,
+                    pool_addresses=pools,
+                )
+                status, evidence_id = _persist_if_changed(
+                    storage,
+                    edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+                    pool_address="__MULTI_POOL__",
+                    evidence=report.to_record(),
+                    persist=lambda: persist_phase9_research(
+                        storage,
+                        report=report,
+                    ),
+                )
+                items.append(
+                    Phase9ResearchRefreshItem(
+                        family="adaptive_regime",
+                        scope="__MULTI_POOL__",
+                        status=status,
+                        research_qualified=report.research_qualified,
+                        persisted_evidence_id=evidence_id,
+                        reason=(
+                            "recomputed from persisted chain-history sources"
+                        ),
+                    )
+                )
+        except Exception as exc:
+            items.append(
+                Phase9ResearchRefreshItem(
+                    family="adaptive_regime",
+                    scope="__MULTI_POOL__",
+                    status="FAILED",
+                    research_qualified=None,
+                    persisted_evidence_id=None,
+                    reason=f"{type(exc).__name__}: {str(exc)[:1000]}",
+                )
+            )
+
+    # Mint risk for the exact currently selected mint-source pools.
+    if replay.get("mint_risk", False):
+        items.append(
+            Phase9ResearchRefreshItem(
+                family="mint_risk",
+                scope="AUTO",
+                status="UNCHANGED",
+                research_qualified=True,
+                persisted_evidence_id=None,
+                reason="required qualified mint-risk evidence is replay-verified",
+            )
+        )
+    else:
+        try:
+            mint_plan = build_phase9_mint_capture_plan(
+                storage,
+                criteria=Phase9MintCaptureCriteria(
+                    target_pools=criteria.min_mint_risk_pools,
+                    max_snapshot_age_seconds=(
+                        mint_criteria.max_snapshot_age_seconds
+                    ),
+                    include_reward_mints=(
+                        mint_criteria.include_reward_mints
+                    ),
+                ),
+            )
+            if not mint_plan.inputs_ready:
+                detail = "; ".join(mint_plan.reasons) or (
+                    f"{mint_plan.captures_required} mint capture(s) remain"
+                )
+                items.append(
+                    Phase9ResearchRefreshItem(
+                        family="mint_risk",
+                        scope="AUTO",
+                        status="SKIPPED_SOURCE_NOT_READY",
+                        research_qualified=None,
+                        persisted_evidence_id=None,
+                        reason=detail,
+                    )
+                )
+            else:
+                for pool in mint_plan.selected_pools:
+                    report = research_pool_mint_risk(
+                        storage,
+                        pool_address=pool,
+                        criteria=mint_criteria,
+                        as_of=mint_plan.as_of,
+                    )
+                    status, evidence_id = _persist_if_changed(
+                        storage,
+                        edge_type=MINT_RISK_EVIDENCE_TYPE,
+                        pool_address=pool,
+                        evidence=report.to_record(),
+                        persist=lambda report=report: (
+                            persist_pool_mint_risk(
+                                storage,
+                                report=report,
+                            )
+                        ),
+                    )
+                    items.append(
+                        Phase9ResearchRefreshItem(
+                            family="mint_risk",
+                            scope=pool,
+                            status=status,
+                            research_qualified=report.research_qualified,
+                            persisted_evidence_id=evidence_id,
+                            reason=(
+                                "recomputed from authoritative persisted "
+                                "pool/mint snapshots"
+                            ),
+                        )
+                    )
+        except Exception as exc:
+            items.append(
+                Phase9ResearchRefreshItem(
+                    family="mint_risk",
+                    scope="AUTO",
+                    status="FAILED",
+                    research_qualified=None,
+                    persisted_evidence_id=None,
+                    reason=f"{type(exc).__name__}: {str(exc)[:1000]}",
+                )
+            )
+
+    # Descriptive wallet-flow research over the same bounded source window.
+    if replay.get("wallet_flow", False):
+        items.append(
+            Phase9ResearchRefreshItem(
+                family="wallet_flow",
+                scope="AUTO",
+                status="UNCHANGED",
+                research_qualified=True,
+                persisted_evidence_id=None,
+                reason="required qualified wallet-flow evidence is replay-verified",
+            )
+        )
+    else:
+        wallet_pools = _top_chain_pools(
+            storage,
+            limit=criteria.min_wallet_flow_pools,
+        )
+        if len(wallet_pools) < criteria.min_wallet_flow_pools:
+            items.append(
+                Phase9ResearchRefreshItem(
+                    family="wallet_flow",
+                    scope="AUTO",
+                    status="SKIPPED_SOURCE_NOT_READY",
+                    research_qualified=None,
+                    persisted_evidence_id=None,
+                    reason=(
+                        f"chain-observed wallet-flow pools "
+                        f"{len(wallet_pools)} are below "
+                        f"{criteria.min_wallet_flow_pools}"
+                    ),
+                )
+            )
+        else:
+            for pool in wallet_pools:
+                try:
+                    source = wallet_flow_source_state(
+                        storage,
+                        pool_address=pool,
+                        criteria=wallet_criteria,
+                    )
+                    if not source.ready:
+                        items.append(
+                            Phase9ResearchRefreshItem(
+                                family="wallet_flow",
+                                scope=pool,
+                                status="SKIPPED_SOURCE_NOT_READY",
+                                research_qualified=None,
+                                persisted_evidence_id=None,
+                                reason=(
+                                    f"events {source.events}/"
+                                    f"{wallet_criteria.min_events}, unique "
+                                    f"users {source.unique_users}/"
+                                    f"{wallet_criteria.min_unique_users}"
+                                ),
+                            )
+                        )
+                        continue
+                    report = research_wallet_flow(
+                        storage,
+                        pool_address=pool,
+                        criteria=wallet_criteria,
+                    )
+                    status, evidence_id = _persist_if_changed(
+                        storage,
+                        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+                        pool_address=pool,
+                        evidence=report.to_record(),
+                        persist=lambda report=report: (
+                            persist_wallet_flow_research(
+                                storage,
+                                report=report,
+                            )
+                        ),
+                    )
+                    items.append(
+                        Phase9ResearchRefreshItem(
+                            family="wallet_flow",
+                            scope=pool,
+                            status=status,
+                            research_qualified=report.research_qualified,
+                            persisted_evidence_id=evidence_id,
+                            reason=(
+                                "recomputed from immutable persisted "
+                                "position-event history"
+                            ),
+                        )
+                    )
+                except Exception as exc:
+                    items.append(
+                        Phase9ResearchRefreshItem(
+                            family="wallet_flow",
+                            scope=pool,
+                            status="FAILED",
+                            research_qualified=None,
+                            persisted_evidence_id=None,
+                            reason=(
+                                f"{type(exc).__name__}: "
+                                f"{str(exc)[:1000]}"
+                            ),
+                        )
+                    )
+
+    # Contextual bandit uses only a checksum-bound retraining cycle dataset.
+    if replay.get("contextual_bandit", False):
+        items.append(
+            Phase9ResearchRefreshItem(
+                family="contextual_bandit",
+                scope="__CONTEXTUAL_BANDIT__",
+                status="UNCHANGED",
+                research_qualified=True,
+                persisted_evidence_id=None,
+                reason="latest qualified bandit evidence is replay-verified",
+            )
+        )
+    else:
+        cycle_id = _latest_retraining_dataset_cycle(storage)
+        if cycle_id is None:
+            items.append(
+                Phase9ResearchRefreshItem(
+                    family="contextual_bandit",
+                    scope="DATASET_REQUIRED",
+                    status="SKIPPED_SOURCE_NOT_READY",
+                    research_qualified=None,
+                    persisted_evidence_id=None,
+                    reason=(
+                        "no valid checksum-bound continuous retraining "
+                        "dataset is available"
+                    ),
+                )
+            )
+        else:
+            try:
+                result = evaluate_cycle_contextual_bandit(
+                    storage,
+                    cycle_id=cycle_id,
+                )
+                evidence = result.report.to_record()
+                evidence["dataset_lineage"] = asdict(result.lineage)
+                status, evidence_id = _persist_if_changed(
+                    storage,
+                    edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+                    pool_address="__CONTEXTUAL_BANDIT__",
+                    evidence=evidence,
+                    persist=lambda: persist_cycle_contextual_bandit(
+                        storage,
+                        result=result,
+                    ),
+                )
+                items.append(
+                    Phase9ResearchRefreshItem(
+                        family="contextual_bandit",
+                        scope=cycle_id,
+                        status=status,
+                        research_qualified=(
+                            result.report.research_qualified
+                        ),
+                        persisted_evidence_id=evidence_id,
+                        reason=(
+                            "recomputed from checksum-bound retraining "
+                            "dataset lineage"
+                        ),
+                    )
+                )
+            except Exception as exc:
+                items.append(
+                    Phase9ResearchRefreshItem(
+                        family="contextual_bandit",
+                        scope=cycle_id,
+                        status="FAILED",
+                        research_qualified=None,
+                        persisted_evidence_id=None,
+                        reason=f"{type(exc).__name__}: {str(exc)[:1000]}",
+                    )
+                )
+
+    bundle = evaluate_phase9_research_bundle(
+        storage,
+        criteria=criteria,
+    )
+    bundle_id = None
+    if bundle.research_ready and persist_bundle_when_ready:
+        payload = bundle.to_record()
+        evidence = {
+            **payload,
+            "bundle_sha256": phase9_research_bundle_sha256(payload),
+        }
+        _, bundle_id = _persist_if_changed(
+            storage,
+            edge_type=PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
+            pool_address="__PHASE9_RESEARCH__",
+            evidence=evidence,
+            persist=lambda: persist_phase9_research_bundle(
+                storage,
+                report=bundle,
+            ),
+        )
+
+    automatic_names = {
+        "adaptive_regime",
+        "mint_risk",
+        "wallet_flow",
+        "contextual_bandit",
+    }
+    automatic_ready = all(
+        any(
+            item.family == family
+            and (
+                item.research_qualified is True
+                or (
+                    item.status == "UNCHANGED"
+                    and "replay-verified" in item.reason
+                )
+            )
+            for item in items
+        )
+        for family in automatic_names
+    )
+
+    return Phase9ResearchRefreshReport(
+        research_only=True,
+        policy_actionable=False,
+        execution_wired=False,
+        phase8_current=True,
+        automatic_families_ready=automatic_ready,
+        bundle_ready_after=bundle.research_ready,
+        bundle_persisted_evidence_id=bundle_id,
+        items=tuple(items),
+        bundle_reasons=bundle.reasons,
+    )
