@@ -187,6 +187,8 @@ mod tests {
             max_static_accounts: 8,
             allow_address_lookup_tables: false,
             require_unsigned: true,
+            require_proposal_pool_account: true,
+            required_account_pubkeys: vec![],
             require_instruction_policy: true,
             instruction_policies: vec![ProgramInstructionPolicy {
                 program_id: program.to_string(),
