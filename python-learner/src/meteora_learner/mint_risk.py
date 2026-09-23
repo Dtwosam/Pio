@@ -4,6 +4,13 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from .mint_snapshot_lineage import (
+    MINT_SOURCE_COLUMNS,
+    POOL_SOURCE_COLUMNS,
+    mint_risk_mint_source_record,
+    mint_risk_pool_source_record,
+    mint_risk_source_sha256,
+)
 from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .storage import Storage
 
@@ -37,6 +44,7 @@ class MintRiskAssessment:
     mint_address: str
     roles: tuple[str, ...]
     mint_snapshot_id: int | None
+    mint_snapshot_sha256: str | None
     observed_at: str | None
     age_seconds: int | None
     expected_program: str | None
@@ -54,6 +62,7 @@ class MintRiskAssessment:
 class PoolMintRiskReport:
     pool_address: str
     pool_snapshot_id: int
+    pool_snapshot_sha256: str
     as_of: str
     phase8_promoted: bool
     research_only: bool
@@ -124,6 +133,20 @@ def research_pool_mint_risk(
         if pool is None:
             raise ValueError(f"no chain pool snapshot for {pool_address}")
 
+        pool_source = conn.execute(
+            f"""
+            SELECT {", ".join(POOL_SOURCE_COLUMNS)}
+            FROM chain_pool_snapshots
+            WHERE id = ?
+            """,
+            (int(pool[0]),),
+        ).fetchone()
+        if pool_source is None:
+            raise ValueError("selected pool snapshot disappeared")
+        pool_snapshot_sha256 = mint_risk_source_sha256(
+            mint_risk_pool_source_record(pool_source)
+        )
+
         required: dict[str, dict[str, Any]] = {}
         for role, mint, program in (
             ("TOKEN_X", pool[1], pool[3]),
@@ -191,6 +214,7 @@ def research_pool_mint_risk(
                         mint_address=mint,
                         roles=tuple(metadata["roles"]),
                         mint_snapshot_id=None,
+                        mint_snapshot_sha256=None,
                         observed_at=None,
                         age_seconds=None,
                         expected_program=expected_program,
@@ -207,6 +231,19 @@ def research_pool_mint_risk(
                 continue
 
             mint_snapshot_id = int(row[0])
+            mint_source = conn.execute(
+                f"""
+                SELECT {", ".join(MINT_SOURCE_COLUMNS)}
+                FROM token_mint_snapshots
+                WHERE id = ?
+                """,
+                (mint_snapshot_id,),
+            ).fetchone()
+            if mint_source is None:
+                raise ValueError("selected mint snapshot disappeared")
+            mint_snapshot_sha256 = mint_risk_source_sha256(
+                mint_risk_mint_source_record(mint_source)
+            )
             observed_at = str(row[1])
             age = int((now - _parse_time(observed_at)).total_seconds())
             program = str(row[2])
@@ -253,6 +290,7 @@ def research_pool_mint_risk(
                     mint_address=mint,
                     roles=tuple(metadata["roles"]),
                     mint_snapshot_id=mint_snapshot_id,
+                    mint_snapshot_sha256=mint_snapshot_sha256,
                     observed_at=observed_at,
                     age_seconds=age,
                     expected_program=expected_program,
@@ -286,6 +324,7 @@ def research_pool_mint_risk(
     return PoolMintRiskReport(
         pool_address=pool_address,
         pool_snapshot_id=int(pool[0]),
+        pool_snapshot_sha256=pool_snapshot_sha256,
         as_of=as_of_text,
         phase8_promoted=phase8_promoted,
         research_only=True,
