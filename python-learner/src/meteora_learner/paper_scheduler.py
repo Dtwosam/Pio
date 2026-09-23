@@ -243,7 +243,7 @@ def run_scheduled_paper_tick(
     *,
     account_id: str,
     interval_seconds: int = 300,
-    lease_seconds: int = 240,
+    lease_seconds: int = 900,
     owner_id: str | None = None,
     as_of: str | None = None,
     settings: Settings | None = None,
@@ -254,7 +254,7 @@ def run_scheduled_paper_tick(
     safety_config: PoolSafetyConfig = PoolSafetyConfig(),
     management_config: PositionManagementConfig = PositionManagementConfig(),
     retry_failed: bool = False,
-    refresh_jupiter_quotes: bool = True,
+    refresh_jupiter_quotes: bool = False,
     tick_runner: TickRunner = run_paper_tick,
 ) -> ScheduledPaperTickReport:
     """
@@ -270,8 +270,6 @@ def run_scheduled_paper_tick(
         raise ValueError("interval_seconds must be positive")
     if lease_seconds <= 0:
         raise ValueError("lease_seconds must be positive")
-    if lease_seconds >= interval_seconds:
-        raise ValueError("lease_seconds must be shorter than interval_seconds")
 
     now = _parse_time(as_of) if as_of is not None else datetime.now(timezone.utc)
     bucket = _bucket_start(now, interval_seconds)
