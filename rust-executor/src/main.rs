@@ -2,6 +2,7 @@ mod events;
 mod models;
 mod risk;
 mod state_reader;
+mod transaction_events;
 
 use anyhow::{Context, Result};
 
@@ -9,7 +10,8 @@ fn usage() {
     eprintln!(
         "Usage:
   meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
-  meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>"
+  meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
+  meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>"
     );
 }
 
@@ -43,6 +45,13 @@ async fn main() -> Result<()> {
             let position_address = args.next().context("POSITION_ADDRESS is required")?;
             let snapshot =
                 state_reader::inspect_position(&rpc_url, &position_address).await?;
+            println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "inspect-transaction-events" => {
+            let rpc_url = args.next().context("RPC_URL is required")?;
+            let signature = args.next().context("SIGNATURE is required")?;
+            let snapshot =
+                transaction_events::inspect_transaction_events(&rpc_url, &signature).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
         }
         _ => {
