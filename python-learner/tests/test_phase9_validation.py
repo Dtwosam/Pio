@@ -915,3 +915,31 @@ def test_tampered_portfolio_candidate_payload_blocks_bundle(tmp_path):
         "immutable candidate-artifact lineage" in reason
         for reason in report.reasons
     )
+
+
+def test_tampered_bandit_dataset_file_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+    )
+    assert latest is not None
+    lineage = latest["evidence"]["dataset_lineage"]
+    dataset_path = Path(str(lineage["output_file"]))
+    assert dataset_path.is_file()
+
+    dataset_path.write_text(
+        dataset_path.read_text(encoding="utf-8")
+        + "2026-09-23T11:00:00+00:00,"
+        "2026-09-23T11:30:00+00:00\n",
+        encoding="utf-8",
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "checksum-verified retraining dataset lineage" in reason
+        for reason in report.reasons
+    )
