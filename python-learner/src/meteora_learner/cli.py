@@ -72,6 +72,10 @@ from .paper_chain_collection import build_paper_chain_collection_queue
 from .quote_registry import save_token_quote, token_quote_status
 from .paper_supervisor import run_paper_supervisor
 from .paper_tick import run_paper_tick
+from .paper_scheduler import (
+    paper_scheduler_state,
+    run_scheduled_paper_tick,
+)
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -198,6 +202,41 @@ def main() -> None:
         default=0,
     )
 
+    paper_scheduler_run = subparsers.add_parser(
+        "paper-scheduler-run",
+        help="Run one leased, time-bucketed paper tick for cron/systemd",
+    )
+    paper_scheduler_run.add_argument("--account", required=True)
+    paper_scheduler_run.add_argument("--interval-seconds", type=int, default=300)
+    paper_scheduler_run.add_argument("--lease-seconds", type=int, default=900)
+    paper_scheduler_run.add_argument("--owner-id")
+    paper_scheduler_run.add_argument("--max-chain-age-seconds", type=int, default=300)
+    paper_scheduler_run.add_argument("--max-quote-age-seconds", type=int, default=300)
+    paper_scheduler_run.add_argument("--array-radius", type=int, default=1)
+    paper_scheduler_run.add_argument("--max-positions", type=int)
+    paper_scheduler_run.add_argument("--retry-failed", action="store_true")
+    paper_scheduler_run.add_argument("--refresh-jupiter-quotes", action="store_true")
+    paper_scheduler_run.add_argument("--stop-loss-bps", type=int, default=500)
+    paper_scheduler_run.add_argument("--take-profit-bps", type=int)
+    paper_scheduler_run.add_argument("--max-rebalances", type=int, default=3)
+    paper_scheduler_run.add_argument("--max-holding-observations", type=int)
+    paper_scheduler_run.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
+    paper_scheduler_run.add_argument("--min-tvl-usd", type=float, default=50000.0)
+    paper_scheduler_run.add_argument("--min-volume-24h-usd", type=float, default=10000.0)
+    paper_scheduler_run.add_argument("--min-pool-age-hours", type=float, default=24.0)
+    paper_scheduler_run.add_argument("--min-chain-observations", type=int, default=12)
+    paper_scheduler_run.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
+
+    paper_scheduler_status = subparsers.add_parser(
+        "paper-scheduler-status",
+        help="Show persisted paper scheduler lease and health state",
+    )
+    paper_scheduler_status.add_argument("--account", required=True)
+
     paper_tick = subparsers.add_parser(
         "paper-tick",
         help="Refresh open-paper market/chain state and run one idempotent paper cycle",
@@ -209,6 +248,7 @@ def main() -> None:
     paper_tick.add_argument("--array-radius", type=int, default=1)
     paper_tick.add_argument("--max-positions", type=int)
     paper_tick.add_argument("--retry-failed", action="store_true")
+    paper_tick.add_argument("--refresh-jupiter-quotes", action="store_true")
     paper_tick.add_argument("--stop-loss-bps", type=int, default=500)
     paper_tick.add_argument("--take-profit-bps", type=int)
     paper_tick.add_argument("--max-rebalances", type=int, default=3)
@@ -1547,6 +1587,46 @@ def main() -> None:
         print(json.dumps(record.__dict__, indent=2))
         return
 
+    if args.command == "paper-scheduler-run":
+        settings = Settings.from_env()
+        result = run_scheduled_paper_tick(
+            Storage(settings.database_path),
+            account_id=args.account,
+            interval_seconds=args.interval_seconds,
+            lease_seconds=args.lease_seconds,
+            owner_id=args.owner_id,
+            settings=settings,
+            chain_max_age_seconds=args.max_chain_age_seconds,
+            quote_max_age_seconds=args.max_quote_age_seconds,
+            array_radius=args.array_radius,
+            max_positions=args.max_positions,
+            safety_config=_pool_safety_config_from_args(args),
+            management_config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+            retry_failed=args.retry_failed,
+            refresh_jupiter_quotes=args.refresh_jupiter_quotes,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if result.status in {"FAILED", "MARKET_REFRESH_FAILED"}:
+            raise SystemExit(2)
+        return
+
+    if args.command == "paper-scheduler-status":
+        settings = Settings.from_env()
+        result = paper_scheduler_state(
+            Storage(settings.database_path),
+            account_id=args.account,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
     if args.command == "paper-tick":
         settings = Settings.from_env()
         result = run_paper_tick(
@@ -1569,6 +1649,7 @@ def main() -> None:
                 ),
             ),
             retry_failed=args.retry_failed,
+            refresh_jupiter_quotes=args.refresh_jupiter_quotes,
         )
         print(json.dumps(result.to_record(), indent=2))
         if result.status == "FAILED":
