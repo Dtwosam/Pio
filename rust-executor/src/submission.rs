@@ -351,6 +351,8 @@ mod tests {
             max_capital_quote_per_entry: 50.0,
             daily_submitted_entry_capital_quote: 0.0,
             max_daily_entry_capital_quote: 100.0,
+            daily_submitted_entry_count: 0,
+            max_daily_entry_submissions: 3,
             daily_realized_loss_quote: 0.0,
             max_daily_realized_loss_quote: 20.0,
             unvalued_closed_positions_today: 0,
