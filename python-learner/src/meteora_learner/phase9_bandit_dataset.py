@@ -124,12 +124,14 @@ def _build_parameters(
     lookback_observations: int,
     forward_observations: int,
     step_observations: int | None,
+    max_source_observations: int,
 ) -> dict[str, Any]:
     portfolio = artifact.inputs.portfolio
     return {
         "lookback_observations": lookback_observations,
         "forward_observations": forward_observations,
         "step_observations": step_observations,
+        "max_source_observations": max_source_observations,
         "half_widths": list(portfolio.half_widths),
         "center_offsets": list(portfolio.center_offsets),
         "strategies": list(portfolio.strategies),
@@ -188,6 +190,9 @@ def _build_dataset(
             build_parameters["favor_x_in_active_bin"]
         ),
         max_observed_at=cutoff,
+        max_source_observations=int(
+            build_parameters["max_source_observations"]
+        ),
     )
 
 
@@ -208,11 +213,18 @@ def build_phase9_bandit_dataset(
     lookback_observations: int = 12,
     forward_observations: int = 2,
     step_observations: int | None = None,
+    max_source_observations: int = 96,
 ) -> tuple[dict[str, Any], bytes]:
     if len(artifact.inputs.pool_inputs) < 3:
         raise ValueError(
             "Phase 9 contextual-bandit research requires at least three "
             "explicit pool inputs"
+        )
+    minimum_window = lookback_observations + forward_observations - 1
+    if max_source_observations < minimum_window:
+        raise ValueError(
+            "max_source_observations must fit the Phase 9 bandit "
+            "lookback and forward window"
         )
     selected_cutoff = (
         _time(cutoff).isoformat()
@@ -230,6 +242,7 @@ def build_phase9_bandit_dataset(
         lookback_observations=lookback_observations,
         forward_observations=forward_observations,
         step_observations=step_observations,
+        max_source_observations=max_source_observations,
     )
     dataset = _build_dataset(
         storage,
