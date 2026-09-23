@@ -354,6 +354,7 @@ Built:
 - freshness-bounded API pool ranking for Phase 9 cohort steering and chain onboarding, with a 3-hour live default, deterministic historical `as_of` cutoffs, future-row exclusion before per-pool ranking and chain-depth fallback when discovery is stale
 - shared ranked-cohort source selection across adaptive/regime, authoritative mint and wallet-flow acquisition/research, with operational freshness invalidating old qualified mint/wallet evidence when the ranked target set moves and chain-depth fallback only when ranked observed coverage is insufficient
 - Phase 9 progress now exposes ranked cohort freshness plus per-pool chain observation depth and maximum fresh history samples remaining toward the exact qualification floor
+- deterministic Phase 9 evidence-debt planner that ranks Phase 8 dependency, fresh API coverage, chain onboarding/history depth, mint freshness, wallet-flow source deficits, explicit inputs and research refresh, emitting one executable next safe action while remaining research-only
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
