@@ -10,8 +10,9 @@ Its outputs are intentionally non-actionable:
 
 - `research_only=true`;
 - `policy_actionable=false`;
-- no Phase 9 entry exists in the live promotion chain;
-- no Phase 9 report can authorize Rust signing/submission.
+- a persisted Phase 9 promotion record is a research milestone only;
+- Phase 9 promotion evidence must remain `research_only=true` and `policy_actionable=false`;
+- no Phase 9 report or promotion record can authorize Rust signing/submission.
 
 A qualified Phase 9 research bundle means the research corpus is internally
 complete enough for review. It does **not** mean Phase 9 may affect LIVE policy.
@@ -151,9 +152,28 @@ The bundle uses the latest persisted evidence per research family/pool. A newer
 record that violates the research-only boundary invalidates readiness even if
 an older record qualified.
 
+## Research-only Phase 9 promotion
+
+Once the bundle is ready, Phase 9 can persist a research milestone:
+
+```bash
+pio phase9-validate --persist-ready --require-ready
+```
+
+This writes `PHASE9_PROMOTION_V1` only when Phase 8 is promoted and the
+research bundle is ready. The persistence function rejects reports that are
+policy-actionable or not research-only. `pio phase-status` therefore shows
+Phase 9 with explicit `research_only=true` and
+`policy_actionable=false`.
+
+A persisted Phase 9 research promotion does not alter the Rust executor,
+controlled-live authorization, deterministic/ML champion policy, position
+sizing, or submission gates.
+
 ## What remains after bundle readiness
 
-Phase 9 research-bundle readiness does not authorize deployment.
+Phase 9 research-bundle readiness or research promotion does not authorize
+deployment.
 
 Before any Phase 9 signal could influence LIVE policy, a separate future design
 must define:
@@ -163,7 +183,7 @@ must define:
 - explicit comparison against the current promoted baseline/champion;
 - rollback conditions;
 - bounded capital/risk effects;
-- a new promotion/authorization path that is not implicitly created by this
-  research bundle.
+- a new **LIVE-policy** promotion/authorization path that is separate from the
+  research-only `PHASE9_PROMOTION_V1` milestone.
 
 Until such a design is implemented and validated, Phase 9 stays research-only.
