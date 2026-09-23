@@ -146,6 +146,7 @@ mod tests {
     use crate::risk::RiskConfig;
     use crate::simulation::SimulationReport;
     use crate::transaction_guard::TransactionGuardReport;
+    use crate::wallet_guard::WalletAuthorizationReport;
     use serde_json::json;
     use std::cell::Cell;
     use std::path::PathBuf;
@@ -244,6 +245,17 @@ mod tests {
             .unwrap();
         store.record_transaction_guard(&id, &guard()).unwrap();
         store.record_simulation(&id, &simulation()).unwrap();
+        store
+            .record_wallet_authorization(
+                &id,
+                &WalletAuthorizationReport {
+                    accepted: true,
+                    reason: "approved".into(),
+                    wallet_pubkey: "payer".into(),
+                    transaction_fee_payer: "payer".into(),
+                },
+            )
+            .unwrap();
         store.begin_signing(&id).unwrap();
         store.record_sent(&id, "signature-1").unwrap();
         (store, path, id)
