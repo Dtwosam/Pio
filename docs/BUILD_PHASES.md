@@ -352,6 +352,8 @@ Built:
 - shared SQLite Phase 9 maintenance lease serializing source capture and research refresh, with stale-lease recovery and a 30-minute lease around 20-minute bounded services
 - artifact-backed automatic refresh for static hedge and portfolio allocation when (and only when) a valid checksum-bound explicit-input artifact already exists; identical recomputations reuse evidence IDs instead of appending duplicates
 - freshness-bounded API pool ranking for Phase 9 cohort steering and chain onboarding, with a 3-hour live default, deterministic historical `as_of` cutoffs, future-row exclusion before per-pool ranking and chain-depth fallback when discovery is stale
+- shared ranked-cohort source selection across adaptive/regime, authoritative mint and wallet-flow acquisition/research, with operational freshness invalidating old qualified mint/wallet evidence when the ranked target set moves and chain-depth fallback only when ranked observed coverage is insufficient
+- Phase 9 progress now exposes ranked cohort freshness plus per-pool chain observation depth and maximum fresh history samples remaining toward the exact qualification floor
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
