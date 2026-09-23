@@ -67,6 +67,7 @@ from .paper_latest import (
     run_latest_live_paper_cycle,
 )
 from .paper_portfolio import run_portfolio_live_paper_cycle
+from .paper_entry_workflow import build_and_open_bound_phase3_paper_entry
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -192,6 +193,54 @@ def main() -> None:
         type=int,
         default=0,
     )
+
+    paper_phase3_open = subparsers.add_parser(
+        "paper-open-phase3",
+        help="Build an authorized Phase 3 plan from the paper account and atomically chain-bind it",
+    )
+    paper_phase3_open.add_argument("--account", required=True)
+    paper_phase3_open.add_argument("--position", required=True)
+    paper_phase3_open.add_argument("--event-key", required=True)
+    paper_phase3_open.add_argument("--pool", required=True)
+    paper_phase3_open.add_argument("--amount-x", required=True, type=int)
+    paper_phase3_open.add_argument("--amount-y", required=True, type=int)
+    paper_phase3_open.add_argument("--requested-quote", required=True, type=float)
+    paper_phase3_open.add_argument("--network-cost-y-atomic", required=True, type=int)
+    paper_phase3_open.add_argument("--entry-cost", type=float, default=0.0)
+    paper_phase3_open.add_argument("--observations", type=int, default=12)
+    paper_phase3_open.add_argument(
+        "--half-widths",
+        type=_parse_int_csv,
+        default=(0, 1, 2, 5, 10),
+    )
+    paper_phase3_open.add_argument(
+        "--center-offsets",
+        type=_parse_int_csv,
+        default=(0,),
+    )
+    paper_phase3_open.add_argument(
+        "--strategies",
+        type=_parse_strategy_csv,
+        default=tuple(StrategyType),
+    )
+    paper_phase3_open.add_argument("--max-share-bps", type=int, default=500)
+    paper_phase3_open.add_argument("--favor-x-active", action="store_true")
+    paper_phase3_open.add_argument("--max-position-bps", type=int, default=1000)
+    paper_phase3_open.add_argument("--max-deployed-bps", type=int, default=7000)
+    paper_phase3_open.add_argument("--reserve-bps", type=int, default=3000)
+    paper_phase3_open.add_argument("--soft-drawdown-bps", type=int, default=500)
+    paper_phase3_open.add_argument("--hard-drawdown-bps", type=int, default=1500)
+    paper_phase3_open.add_argument(
+        "--drawdown-size-multiplier-bps",
+        type=int,
+        default=5000,
+    )
+    paper_phase3_open.add_argument("--min-position", type=float, default=0.0)
+    paper_phase3_open.add_argument("--min-tvl-usd", type=float, default=50000.0)
+    paper_phase3_open.add_argument("--min-volume-24h-usd", type=float, default=10000.0)
+    paper_phase3_open.add_argument("--min-pool-age-hours", type=float, default=24.0)
+    paper_phase3_open.add_argument("--min-chain-observations", type=int, default=12)
+    paper_phase3_open.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
 
     paper_create = subparsers.add_parser(
         "paper-create-account",
@@ -1416,6 +1465,44 @@ def main() -> None:
             model_id=args.model_id,
         )
         print(json.dumps(record.__dict__, indent=2))
+        return
+
+    if args.command == "paper-open-phase3":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_and_open_bound_phase3_paper_entry(
+            storage,
+            account_id=args.account,
+            position_id=args.position,
+            event_key=args.event_key,
+            pool_address=args.pool,
+            amount_x=args.amount_x,
+            amount_y=args.amount_y,
+            requested_quote=args.requested_quote,
+            network_cost_y_atomic=args.network_cost_y_atomic,
+            entry_cost_quote=args.entry_cost,
+            safety_config=_pool_safety_config_from_args(args),
+            sizing_config=CapitalSizingConfig(
+                max_position_bps=args.max_position_bps,
+                max_total_deployed_bps=args.max_deployed_bps,
+                min_cash_reserve_bps=args.reserve_bps,
+                soft_drawdown_bps=args.soft_drawdown_bps,
+                hard_drawdown_bps=args.hard_drawdown_bps,
+                drawdown_size_multiplier_bps=(
+                    args.drawdown_size_multiplier_bps
+                ),
+                min_position_quote=args.min_position,
+            ),
+            observation_limit=args.observations,
+            half_widths=args.half_widths,
+            center_offsets=args.center_offsets,
+            strategies=args.strategies,
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if not result.entry.opened:
+            raise SystemExit(2)
         return
 
     if args.command == "paper-create-account":
