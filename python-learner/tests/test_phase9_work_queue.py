@@ -1,5 +1,6 @@
 import hashlib
 import sqlite3
+import meteora_learner.phase9_work_queue as work_queue_module
 from pathlib import Path
 from meteora_learner.adaptive_range import AdaptiveRangeCriteria
 from meteora_learner.adaptive_range_validation import (
@@ -1018,3 +1019,329 @@ def test_work_queue_snapshot_is_sanitized_and_immutable(tmp_path):
             assert "immutable" in str(exc)
         else:
             raise AssertionError("expected immutable snapshot update refusal")
+
+
+class DummyPolicyAudit:
+    def __init__(
+        self,
+        *,
+        current=False,
+        exists=True,
+        reasons=(),
+        rollback_required=None,
+        status=None,
+    ):
+        self.current = current
+        self.exists = exists
+        self.reasons = tuple(reasons)
+        self.rollback_required = rollback_required
+        self.status = status
+
+    def to_record(self):
+        return {
+            "current": self.current,
+            "exists": self.exists,
+            "reasons": list(self.reasons),
+            "rollback_required": self.rollback_required,
+            "status": self.status,
+        }
+
+
+class DummyAuthorizationReport:
+    def __init__(self, *, ready=False, reasons=()):
+        self.authorization_ready = ready
+        self.reasons = tuple(reasons)
+
+
+class DummyShadowReport:
+    def __init__(self, *, ready=False, reasons=()):
+        self.shadow_ready = ready
+        self.reasons = tuple(reasons)
+
+
+class DummyControlledReport:
+    def __init__(self, *, ready=False, reasons=()):
+        self.controlled_validation_ready = ready
+        self.reasons = tuple(reasons)
+
+
+class DummyPrewire:
+    def __init__(self, *, ready):
+        self.ready = ready
+
+
+def seed_current_phase9(storage):
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(storage, report=bundle)
+    from meteora_learner.phase9_validation import evaluate_phase9_promotion
+
+    report = evaluate_phase9_promotion(storage)
+    assert report.promotion_ready is True
+    persist_phase9_promotion(storage, report=report)
+
+
+def test_work_queue_advances_to_shadow_after_current_phase9(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(
+            current=False,
+            exists=False,
+            reasons=("authorization evidence is missing",),
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_policy_authorization",
+        lambda storage: DummyAuthorizationReport(
+            ready=False,
+            reasons=("qualifying shadow runs 0 are below 3",),
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_shadow",
+        lambda storage, cycle_id: DummyShadowReport(ready=True),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "PHASE9_SHADOW_VALIDATION"
+    )
+    assert queue.phase9_current is True
+    assert queue.policy_authorization_current is False
+    assert task.scope == "cycle"
+    assert "phase9-shadow-validate --cycle-id cycle" in task.shell_command
+
+
+def test_work_queue_persists_ready_authorization_gate(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(
+            current=False,
+            reasons=("persisted authorization is stale",),
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_policy_authorization",
+        lambda storage: DummyAuthorizationReport(ready=True),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "PERSIST_POLICY_AUTHORIZATION"
+    )
+    assert task.shell_command == (
+        "pio phase9-policy-authorization-gate "
+        "--persist --require-ready"
+    )
+
+
+def test_work_queue_advances_to_fresh_controlled_holdout(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_controlled_validation",
+        lambda storage: DummyPolicyAudit(
+            current=False,
+            reasons=("controlled evidence is missing",),
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "_latest_controlled_validation_cycle",
+        lambda storage: "fresh-cycle",
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_policy_controlled_validation",
+        lambda storage, cycle_id: DummyControlledReport(ready=True),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "PERSIST_CONTROLLED_VALIDATION"
+    )
+    assert queue.policy_authorization_current is True
+    assert queue.controlled_validation_current is False
+    assert task.scope == "fresh-cycle"
+    assert "phase9-policy-controlled-validate" in task.shell_command
+
+
+def test_work_queue_advances_to_bounded_rollout_after_policy_readiness(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_controlled_validation",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_rollout_simulation",
+        lambda storage: DummyPolicyAudit(
+            current=False,
+            reasons=("rollout simulation is missing",),
+        ),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "BOUNDED_ROLLOUT_SIMULATION"
+    )
+    assert queue.controlled_validation_current is True
+    assert queue.rollout_simulation_current is False
+    assert "<ROLLOUT_ENVELOPE_JSON>" in task.shell_command
+
+
+def test_work_queue_surfaces_pending_rollback_observation_depth(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_controlled_validation",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_rollout_simulation",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_rollback_simulation",
+        lambda storage: DummyPolicyAudit(
+            current=True,
+            rollback_required=False,
+            status="OBSERVATION_PENDING",
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_policy_prewire_audit",
+        lambda storage: DummyPrewire(ready=False),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "ROLLBACK_OBSERVATION_DEPTH"
+    )
+    assert queue.rollout_simulation_current is True
+    assert queue.rollback_simulation_current is True
+    assert queue.prewire_ready is False
+    assert "<UPDATED_ROLLBACK_METRICS_JSON>" in task.shell_command
+
+
+def test_work_queue_reports_prewire_ready_when_chain_is_current(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_controlled_validation",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_rollout_simulation",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_rollback_simulation",
+        lambda storage: DummyPolicyAudit(
+            current=True,
+            rollback_required=False,
+            status="NO_ROLLBACK_TRIGGER",
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_policy_prewire_audit",
+        lambda storage: DummyPrewire(ready=True),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    policy_tasks = {
+        "PHASE9_SHADOW_VALIDATION",
+        "POST_PROMOTION_SHADOW_REQUIRED",
+        "PERSIST_POLICY_AUTHORIZATION",
+        "PERSIST_CONTROLLED_VALIDATION",
+        "FRESH_CONTROLLED_HOLDOUT_REQUIRED",
+        "BOUNDED_ROLLOUT_SIMULATION",
+        "ROLLBACK_SIMULATION",
+        "ROLLBACK_REMEDIATION_REQUIRED",
+        "ROLLBACK_OBSERVATION_DEPTH",
+    }
+    assert queue.phase9_current is True
+    assert queue.policy_authorization_current is True
+    assert queue.controlled_validation_current is True
+    assert queue.rollout_simulation_current is True
+    assert queue.rollback_simulation_current is True
+    assert queue.prewire_ready is True
+    assert not any(
+        item.task_type in policy_tasks
+        for item in queue.items
+    )
