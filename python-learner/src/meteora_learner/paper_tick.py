@@ -107,12 +107,14 @@ def run_paper_tick(
     if existing is not None:
         if str(existing[0]) != account_id:
             raise ValueError("tick_id already belongs to another account")
-        if str(existing[2]) != "FAILED" or not retry_failed:
+        existing_status = str(existing[2])
+        recoverable = {"FAILED", "RUNNING"}
+        if existing_status not in recoverable or not retry_failed:
             return _from_stored(
                 tick_id=tick_id,
                 account_id=account_id,
                 started_at=str(existing[1]),
-                status=str(existing[2]),
+                status=existing_status,
                 result_json=existing[3],
                 error=existing[4],
             )
