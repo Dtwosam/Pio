@@ -12,7 +12,10 @@ from .phase9_capture_plan import (
     build_phase9_chain_capture_plan,
 )
 from .phase9_history_plan import build_phase9_history_plan
-from .phase9_pool_cohort import evaluate_phase9_pool_cohort
+from .phase9_pool_cohort import (
+    evaluate_phase9_pool_cohort,
+    select_phase9_cohort_source_pools,
+)
 from .phase9_source_freshness import (
     evaluate_phase9_source_freshness,
 )
@@ -729,6 +732,15 @@ def build_phase9_work_queue(
             )
         )
 
+    ranked_mint_pools = (
+        select_phase9_cohort_source_pools(
+            storage,
+            cohort=live_cohort,
+            limit=criteria.min_mint_risk_pools,
+        )
+        if live_cohort is not None
+        else pools[:criteria.min_mint_risk_pools]
+    )
     qualified_mint = set(bundle.mint_risk.qualified_pools)
     mint_needed = max(
         0,
@@ -736,7 +748,9 @@ def build_phase9_work_queue(
         - bundle.mint_risk.qualified_records,
     )
     mint_candidate_pools = [
-        value for value in pools if value not in qualified_mint
+        value
+        for value in ranked_mint_pools
+        if value not in qualified_mint
     ][:mint_needed]
     for pool in mint_candidate_pools:
         mint_plan = build_phase9_mint_capture_plan(
@@ -835,6 +849,15 @@ def build_phase9_work_queue(
             )
         )
 
+    ranked_wallet_pools = (
+        select_phase9_cohort_source_pools(
+            storage,
+            cohort=live_cohort,
+            limit=criteria.min_wallet_flow_pools,
+        )
+        if live_cohort is not None
+        else pools[:criteria.min_wallet_flow_pools]
+    )
     qualified_wallet = set(bundle.wallet_flow.qualified_pools)
     wallet_needed = max(
         0,
@@ -842,7 +865,9 @@ def build_phase9_work_queue(
         - bundle.wallet_flow.qualified_records,
     )
     wallet_candidate_pools = [
-        value for value in pools if value not in qualified_wallet
+        value
+        for value in ranked_wallet_pools
+        if value not in qualified_wallet
     ][:wallet_needed]
     for pool in wallet_candidate_pools:
         source = wallet_flow_source_state(
