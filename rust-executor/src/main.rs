@@ -24,6 +24,7 @@ mod submission_recovery;
 mod state_reader;
 mod transaction_events;
 mod transaction_guard;
+mod token_extensions;
 mod wallet;
 mod wallet_guard;
 
