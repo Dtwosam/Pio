@@ -190,3 +190,41 @@ def test_supervisor_waits_on_missing_quote(tmp_path):
     assert report.quote_blocked_mints == 1
     assert report.portfolio.scheduled_positions == 0
     assert report.quote_statuses[0].available is False
+
+
+def test_supervisor_waits_on_missing_external_reward_quote(tmp_path):
+    storage = seed(tmp_path)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE paper_counterfactual_positions
+            SET reward_mint_0 = 'reward'
+            WHERE position_id = 'pos'
+            """
+        )
+    save_token_quote(
+        storage,
+        token_mint="y",
+        quote_per_atomic=1.0,
+        source="TEST",
+        observed_at=LATEST,
+    )
+
+    report = run_paper_supervisor(
+        storage,
+        account_id="paper",
+        cycle_id="supervisor-reward-quote",
+        chain_max_age_seconds=300,
+        quote_max_age_seconds=300,
+        as_of="2026-09-23T09:06:00+00:00",
+        safety_config=safety(),
+    )
+
+    assert report.status == "WAITING_QUOTES"
+    assert report.quote_blocked_mints == 1
+    assert report.portfolio.scheduled_positions == 0
+    reward_status = next(
+        item for item in report.quote_statuses
+        if item.token_mint == "reward"
+    )
+    assert reward_status.available is False
