@@ -575,3 +575,41 @@ def test_work_queue_repairs_invalid_bandit_lineage(tmp_path):
     assert task.scope == "cycle"
     assert task.shell_command is not None
     assert "contextual-bandit-cycle-research" in task.shell_command
+
+
+def test_work_queue_repairs_invalid_adaptive_lineage(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    pools = [dict(item) for item in forged["pools"]]
+    pools[0] = {
+        **pools[0],
+        "regime": {
+            **pools[0]["regime"],
+            "source_snapshot_sha256": "0" * 64,
+        },
+    }
+    forged["pools"] = pools
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+        as_of="2026-09-23T12:07:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "ADAPTIVE_MULTI_POOL_REPAIR"
+    )
+    assert task.scope == "__MULTI_POOL__"
+    assert task.shell_command is not None
+    assert "phase9-research-validate" in task.shell_command
