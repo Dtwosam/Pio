@@ -386,6 +386,35 @@ CREATE TABLE IF NOT EXISTS execution_intents (
 CREATE INDEX IF NOT EXISTS idx_execution_intents_status
 ON execution_intents(status, updated_at_unix);
 
+CREATE TABLE IF NOT EXISTS live_decision_contexts (
+    decision_id TEXT PRIMARY KEY,
+    mode TEXT NOT NULL CHECK(mode = 'LIVE'),
+    action TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at_unix INTEGER NOT NULL,
+    updated_at_unix INTEGER NOT NULL,
+    capital_quote TEXT NOT NULL,
+    account_equity_quote TEXT NOT NULL,
+    portfolio_deployed_quote TEXT NOT NULL,
+    daily_drawdown_pct TEXT NOT NULL,
+    min_bin_id INTEGER NOT NULL,
+    max_bin_id INTEGER NOT NULL,
+    strategy TEXT NOT NULL,
+    expected_net_return_pct TEXT NOT NULL,
+    expected_downside_pct TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    data_age_seconds INTEGER NOT NULL,
+    signature TEXT,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_decision_context_pool
+ON live_decision_contexts(pool_address, created_at_unix);
+
+CREATE INDEX IF NOT EXISTS idx_live_decision_context_model
+ON live_decision_contexts(model_version, strategy, created_at_unix);
+
 CREATE TABLE IF NOT EXISTS live_execution_receipts (
     decision_id TEXT PRIMARY KEY,
     signature TEXT NOT NULL UNIQUE,
