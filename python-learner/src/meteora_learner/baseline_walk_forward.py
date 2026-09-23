@@ -26,6 +26,10 @@ class WalkForwardStep:
     phase2_ready: bool
     selected: bool
     proposal: BaselineProposal | None
+    trailing_range_survival_ratio: float | None
+    trailing_excess_vs_hold_bps: int | None
+    trailing_net_return_bps: int | None
+    trailing_max_observed_share_bps: int | None
     forward_status: str
     forward_rejection_reason: str | None
     forward_range_survival_ratio: float | None
@@ -162,6 +166,23 @@ def walk_forward_baseline(
             config=config,
         )
         proposal = selection.research_proposal
+        choice = selection.research_choice
+        trailing_range_survival = (
+            choice.range_survival_ratio if choice is not None else None
+        )
+        trailing_excess_bps = (
+            choice.economics.excess_vs_hold_bps
+            if choice is not None and choice.economics is not None
+            else None
+        )
+        trailing_net_return_bps = (
+            choice.economics.net_return_bps
+            if choice is not None and choice.economics is not None
+            else None
+        )
+        trailing_max_share_bps = (
+            choice.max_observed_share_bps if choice is not None else None
+        )
 
         if proposal is None:
             steps.append(
@@ -172,6 +193,10 @@ def walk_forward_baseline(
                     phase2_ready=phase2_ready,
                     selected=False,
                     proposal=None,
+                    trailing_range_survival_ratio=None,
+                    trailing_excess_vs_hold_bps=None,
+                    trailing_net_return_bps=None,
+                    trailing_max_observed_share_bps=None,
                     forward_status="NO_SELECTION",
                     forward_rejection_reason=(
                         "no trailing candidate passed deterministic baseline rules"
@@ -241,6 +266,10 @@ def walk_forward_baseline(
                     phase2_ready=phase2_ready,
                     selected=True,
                     proposal=proposal,
+                    trailing_range_survival_ratio=trailing_range_survival,
+                    trailing_excess_vs_hold_bps=trailing_excess_bps,
+                    trailing_net_return_bps=trailing_net_return_bps,
+                    trailing_max_observed_share_bps=trailing_max_share_bps,
                     forward_status="REJECTED",
                     forward_rejection_reason=str(exc),
                     forward_range_survival_ratio=None,
@@ -265,6 +294,10 @@ def walk_forward_baseline(
                     phase2_ready=phase2_ready,
                     selected=True,
                     proposal=proposal,
+                    trailing_range_survival_ratio=trailing_range_survival,
+                    trailing_excess_vs_hold_bps=trailing_excess_bps,
+                    trailing_net_return_bps=trailing_net_return_bps,
+                    trailing_max_observed_share_bps=trailing_max_share_bps,
                     forward_status=status,
                     forward_rejection_reason=reason,
                     forward_range_survival_ratio=survival,
