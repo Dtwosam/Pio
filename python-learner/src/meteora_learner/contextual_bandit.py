@@ -158,6 +158,77 @@ def _validate_group(
     return baselines[0], next(iter(contexts))
 
 
+def bandit_examples_from_records(
+    records: Sequence[dict[str, Any]],
+) -> tuple[MLTrainingExample, ...]:
+    if not records:
+        raise ValueError("contextual-bandit dataset is empty")
+
+    string_fields = {
+        "pool_address",
+        "decision_observed_at",
+        "forward_end_observed_at",
+        "strategy",
+    }
+    int_fields = {
+        "baseline_selected",
+        "strategy_spot",
+        "strategy_curve",
+        "strategy_bid_ask",
+        "half_width",
+        "center_offset",
+        "range_width_bins",
+        "active_bin_id",
+        "active_bin_move_1",
+        "occupied_bins",
+        "fee_growth_bins_x",
+        "fee_growth_bins_y",
+        "trailing_excess_vs_hold_bps",
+        "trailing_net_return_bps",
+        "trailing_max_observed_share_bps",
+        "target_net_return_bps",
+        "target_excess_vs_hold_bps",
+        "target_positive_excess",
+    }
+    float_fields = {
+        "deposit_fee_rate_bps",
+        "active_liquidity_ratio",
+        "near_active_liquidity_ratio",
+        "below_active_liquidity_ratio",
+        "above_active_liquidity_ratio",
+        "liquidity_weighted_distance_bins",
+        "trailing_range_survival_ratio",
+        "target_range_survival_ratio",
+    }
+    required = string_fields | int_fields | float_fields
+
+    output: list[MLTrainingExample] = []
+    for index, record in enumerate(records):
+        missing = sorted(
+            field for field in required
+            if field not in record or record[field] is None
+        )
+        if missing:
+            raise ValueError(
+                f"contextual-bandit row {index} missing fields: {missing}"
+            )
+        values: dict[str, Any] = {}
+        for field in string_fields:
+            values[field] = str(record[field])
+        for field in int_fields:
+            values[field] = int(record[field])
+        for field in float_fields:
+            value = float(record[field])
+            if not math.isfinite(value):
+                raise ValueError(
+                    f"contextual-bandit row {index} field {field} is non-finite"
+                )
+            values[field] = value
+        output.append(MLTrainingExample(**values))
+
+    return tuple(output)
+
+
 def evaluate_contextual_bandit(
     storage: Storage,
     *,
