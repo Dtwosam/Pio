@@ -1692,7 +1692,6 @@ def main() -> None:
         type=int,
         default=1,
     )
-    phase9_work_queue.add_argument("--rpc-url")
     phase9_work_queue.add_argument(
         "--rpc-url",
         help="Optional Solana RPC URL used in emitted read-only mint inspection commands",
