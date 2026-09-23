@@ -76,6 +76,7 @@ from .paper_scheduler import (
     paper_scheduler_state,
     run_scheduled_paper_tick,
 )
+from .paper_health import build_paper_health
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -230,6 +231,18 @@ def main() -> None:
     paper_scheduler_run.add_argument("--min-pool-age-hours", type=float, default=24.0)
     paper_scheduler_run.add_argument("--min-chain-observations", type=int, default=12)
     paper_scheduler_run.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
+
+    paper_health = subparsers.add_parser(
+        "paper-health",
+        help="Report PAPER scheduler, tick, chain and quote health",
+    )
+    paper_health.add_argument("--account", required=True)
+    paper_health.add_argument("--max-tick-age-seconds", type=int, default=600)
+    paper_health.add_argument("--max-chain-age-seconds", type=int, default=300)
+    paper_health.add_argument("--max-quote-age-seconds", type=int, default=300)
+    paper_health.add_argument("--max-consecutive-failures", type=int, default=2)
+    paper_health.add_argument("--array-radius", type=int, default=1)
+    paper_health.add_argument("--require-healthy", action="store_true")
 
     paper_scheduler_status = subparsers.add_parser(
         "paper-scheduler-status",
@@ -1615,6 +1628,22 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if result.status in {"FAILED", "MARKET_REFRESH_FAILED"}:
+            raise SystemExit(2)
+        return
+
+    if args.command == "paper-health":
+        settings = Settings.from_env()
+        result = build_paper_health(
+            Storage(settings.database_path),
+            account_id=args.account,
+            max_tick_age_seconds=args.max_tick_age_seconds,
+            max_chain_age_seconds=args.max_chain_age_seconds,
+            max_quote_age_seconds=args.max_quote_age_seconds,
+            max_consecutive_failures=args.max_consecutive_failures,
+            array_radius=args.array_radius,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_healthy and result.status not in {"HEALTHY", "IDLE"}:
             raise SystemExit(2)
         return
 
