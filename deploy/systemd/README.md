@@ -24,16 +24,27 @@ mutations.
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now pio-paper@paper.timer
+sudo systemctl enable --now pio-paper-health@paper.timer
 ```
 
 Inspect health with:
 
 ```bash
 sudo systemctl status pio-paper@paper.timer
+sudo systemctl status pio-paper-health@paper.timer
 journalctl -u pio-paper@paper.service
+journalctl -u pio-paper-health@paper.service
 cd /opt/pio/python-learner
 .venv/bin/pio paper-scheduler-status --account paper
+.venv/bin/pio paper-health --account paper --require-healthy
+.venv/bin/pio paper-endurance-report --account paper
 ```
+
+The health service exits non-zero when an account with open positions is
+degraded or unhealthy. That gives systemd and external service monitors a
+stable failure signal without adding wallet/signing capability. Sites that
+already use a pager or monitoring agent can attach their normal systemd unit
+failure alerting to `pio-paper-health@<account>.service`.
 
 ## Quotes
 
