@@ -404,3 +404,37 @@ For promotion currentness alone:
 ```bash
 pio phase9-promotion-audit --require-current
 ```
+
+
+## Evidence progress snapshots
+
+The work queue can persist a sanitized append-only progress snapshot:
+
+```bash
+pio phase9-work-queue --persist-snapshot
+```
+
+Snapshots store only readiness state, candidate pools, task type/scope/reason,
+criteria, and a SHA-256 checksum. Emitted shell commands and RPC URLs are
+deliberately excluded from persisted state.
+
+Summarize progress across snapshots:
+
+```bash
+pio phase9-progress --require-snapshot --require-integrity
+```
+
+The progress report shows:
+
+- first versus latest blocker count;
+- blockers resolved since the first snapshot;
+- blockers that appeared later;
+- current Phase 8 prerequisite state;
+- research-bundle readiness;
+- Phase 9 promotion readiness;
+- checksum integrity for every persisted snapshot.
+
+A deployment can record these snapshots hourly with
+`pio-phase9-progress.timer`. This timer is observational: it does not execute
+work-queue shell commands, fetch RPC data, persist Phase 9 promotion, or make
+research policy-actionable.
