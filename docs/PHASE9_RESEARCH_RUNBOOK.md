@@ -438,3 +438,33 @@ A deployment can record these snapshots hourly with
 `pio-phase9-progress.timer`. This timer is observational: it does not execute
 work-queue shell commands, fetch RPC data, persist Phase 9 promotion, or make
 research policy-actionable.
+
+
+## Post-promotion shadow validation
+
+A future LIVE-policy authorization must not reuse the corpus that earned the
+Phase 9 research promotion. Validate a **newer**, checksum-bound retraining
+cycle separately:
+
+```bash
+pio phase9-shadow-validate \
+  --cycle-id <POST_PROMOTION_CYCLE_ID> \
+  --persist \
+  --require-ready
+```
+
+The shadow gate requires:
+
+- the persisted Phase 9 promotion to still be current;
+- the retraining dataset to pass the existing absolute-file, no-symlink and
+  SHA-256 lineage checks;
+- the dataset cutoff to be strictly after the Phase 9 promotion timestamp;
+- the contextual-bandit replay to satisfy the shadow thresholds.
+
+Persisted shadow evidence uses
+`PHASE9_POST_PROMOTION_SHADOW_V1` and always carries
+`research_only=true` and `policy_actionable=false`.
+
+A passing shadow report is **not** LIVE-policy authorization. It is only a
+separate post-promotion validation corpus that a future authorization design
+may consume.
