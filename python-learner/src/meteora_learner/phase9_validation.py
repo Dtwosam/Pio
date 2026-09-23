@@ -41,6 +41,10 @@ from .phase9_research import (
     Phase9ResearchCriteria,
     evaluate_phase9_research,
 )
+from .phase9_bandit_dataset import (
+    PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+    evaluate_phase9_contextual_bandit_from_dataset,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase_promotion import (
     PHASE9,
@@ -798,6 +802,47 @@ def _bandit_lineage_valid(storage: Storage) -> bool:
     if not isinstance(lineage, dict):
         return False
 
+    criteria_raw = row["evidence"].get("criteria")
+    if not isinstance(criteria_raw, dict):
+        return False
+    try:
+        criteria = ContextualBanditCriteria(**criteria_raw)
+    except (TypeError, ValueError):
+        return False
+
+    if (
+        str(lineage.get("source_type", ""))
+        == PHASE9_BANDIT_DATASET_EVIDENCE_TYPE
+    ):
+        required = (
+            "dataset_evidence_id",
+            "dataset_artifact_sha256",
+            "dataset_version",
+            "dataset_sha256",
+            "cutoff",
+            "output_file",
+            "explicit_input_evidence_id",
+            "explicit_input_artifact_sha256",
+        )
+        if any(lineage.get(field) in (None, "") for field in required):
+            return False
+        try:
+            dataset_evidence_id = int(lineage["dataset_evidence_id"])
+            replay = evaluate_phase9_contextual_bandit_from_dataset(
+                storage,
+                dataset_evidence_id=dataset_evidence_id,
+                criteria=criteria,
+            )
+        except (TypeError, ValueError):
+            return False
+
+        replay_evidence = replay.report.to_record()
+        replay_evidence["dataset_lineage"] = asdict(replay.lineage)
+        replay_record = json.loads(
+            json.dumps(replay_evidence, sort_keys=True)
+        )
+        return replay_record == row["evidence"]
+
     required = (
         "cycle_id",
         "champion_model_id",
@@ -886,11 +931,7 @@ def _bandit_lineage_valid(storage: Storage) -> bool:
     ):
         return False
 
-    criteria_raw = row["evidence"].get("criteria")
-    if not isinstance(criteria_raw, dict):
-        return False
     try:
-        criteria = ContextualBanditCriteria(**criteria_raw)
         replay = evaluate_cycle_contextual_bandit(
             storage,
             cycle_id=str(lineage["cycle_id"]),
@@ -905,7 +946,6 @@ def _bandit_lineage_valid(storage: Storage) -> bool:
         json.dumps(replay_evidence, sort_keys=True)
     )
     return replay_record == row["evidence"]
-
 
 def evaluate_phase9_research_bundle(
     storage: Storage,
