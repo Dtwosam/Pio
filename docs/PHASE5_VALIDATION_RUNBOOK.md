@@ -50,6 +50,12 @@ Current health:
 pio paper-health --account paper --require-healthy
 ```
 
+Independent event-ledger accounting audit:
+
+```bash
+pio paper-audit --account paper --require-passing
+```
+
 Prometheus-style health metrics:
 
 ```bash
@@ -114,6 +120,7 @@ Before Phase 5 can be called complete, retain a real run corpus showing:
 - dependency blockage is within the configured tolerance;
 - no unexplained scheduler failure streak remains;
 - current `paper-health` is acceptable at review time;
+- `pio paper-audit --account paper --require-passing` passes, proving stored cash/position accounting reconciles to the immutable PAPER event ledger;
 - paper PnL/accounting remains internally reconciled over the validation window.
 
 External reward-token valuation is supported through fresh persisted ACCOUNT_QUOTE observations (including the optional Jupiter refresh path). Missing or stale reward quotes fail closed and block scheduling/valuation.
