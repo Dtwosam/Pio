@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v0.9
+Status: v1.0
 
 ## Phase 0 — Foundation
 Status: complete.
@@ -57,7 +57,7 @@ Exit condition:
 - no required capability remains unvalidated.
 
 ## Phase 3 — Deterministic Baseline Strategy
-Status: deterministic research policy implemented; promotion blocked by Phase 2 evidence and broader validation.
+Status: deterministic implementation complete; promotion evidence pending.
 
 Built:
 - fail-closed pool universe safety screen
@@ -66,7 +66,10 @@ Built:
 - trailing chain candidate comparison by range/strategy
 - decision-time proposal recentering
 - cost-aware excess-versus-hold economics
+- entry-value normalized return / hold / excess metrics
+- equal-notional cross-pool research comparison
 - non-overlapping no-lookahead walk-forward evaluation
+- multi-pool walk-forward validation workflow
 - drawdown-aware capital sizing
 - cash reserve / per-position / total-deployment caps
 - deterministic HOLD / REBALANCE / EXIT policy
@@ -74,17 +77,17 @@ Built:
 - optional take-profit and max-hold exit
 - rebalance-count cap
 - Phase 3 entry authorization gate
-- end-to-end research planner
+- end-to-end single-pool and multi-pool research planners
+- evidence-driven Phase 3 promotion thresholds
+- persistent Phase 2 / Phase 3 promotion evidence and status
 
-Still needed before Phase 3 promotion:
-- Phase 2 evidence gate must pass on real samples
-- standardized cross-pool notional/value normalization
-- multi-pool out-of-sample comparison
-- paper-trading state/account-equity loop
-- larger walk-forward corpus across market regimes
-- explicit policy-promotion thresholds
+Promotion still requires:
+- persisted Phase 2 promotion from real reconciliation/calibration evidence
+- a meaningful multi-pool, regime-diverse walk-forward corpus
+- configured Phase 3 sample, hit-rate, excess-return and downside thresholds to pass
+- persisted Phase 3 promotion evidence before downstream ML/paper gates can treat the policy as promoted
 
-The baseline never ranks by headline APR alone. Research output can exist before Phase 2 promotion, but entry authorization remains blocked. Live transaction construction/signing remains outside Phase 3.
+The baseline never ranks by headline APR alone. Research output can exist before promotion, but downstream promotion-sensitive workflows read persisted gate state rather than caller-supplied booleans. Live transaction construction/signing remains outside Phase 3.
 
 ## Phase 4 — ML v1
 Status: experimental infrastructure implemented; promotion evidence pending.
@@ -102,19 +105,23 @@ Built:
 - research-only risk-adjusted inference
 - held-out challenger versus deterministic-baseline evaluation
 - persistent model registry
+- reproducible model artifact save/load with metadata checks
+- persisted offline challenger evidence
 - staged OFFLINE_CANDIDATE -> OFFLINE_QUALIFIED -> PAPER_CHALLENGER lifecycle
+- persistent Phase 3 promotion required before offline qualification
 - evidence-gated CHAMPION promotion
 - single-champion guard and rollback state
+- CLI workflow for train/register, offline evaluation, paper start and model status
 
 Still needed:
 - materially larger multi-pool action dataset
 - regime-diverse time windows
-- stable offline challenger qualification
-- artifact serialization/version pinning for trained models
-- repeated paper validation before any champion is used outside paper mode
+- stable real-data offline challenger qualification
+- repeated paper validation before any challenger becomes champion
+- retraining cadence and drift monitoring for Phase 8
 
 ## Phase 5 — Live Paper Trader
-Status: persistent accounting and management loop implemented; continuous live orchestration pending.
+Status: chain-driven paper accounting and management implemented; unattended live orchestration/validation pending.
 
 Built:
 - persistent paper accounts
@@ -122,20 +129,28 @@ Built:
 - cash/equity/high-water/drawdown accounting
 - fee/reward/cost/realized-PnL accounting
 - deterministic paper HOLD / REBALANCE / EXIT evaluation
-- automatic paper observation cycle
+- automatic single-position paper observation cycle
+- idempotent multi-position paper observation batches with restart recovery
 - stop-loss and safety exits on net liquidation economics
 - same-width deterministic recentering for paper rebalances
-- fail-closed pending state when rebalance cost is unknown
+- persistent counterfactual per-bin liquidity-share/checkpoint state
+- chain-derived inventory marks from real bin snapshots
+- incremental chain-derived fee and supported reward valuation
+- explicit current token-Y quote-rate support
+- fail-closed handling for unvalued reward tokens / unsupported token programs
+- prepared/applied chain valuation state for idempotent recovery
+- counterfactual atomic-state reset after paper rebalances
+- multi-position chain-valued paper runner
 - paper cohort performance metrics
 - ML paper challenger versus deterministic baseline validation
 - stored paper evidence required for champion promotion
 
 Still needed:
-- continuous collector -> decision -> paper-action orchestration
-- automatic mark/fee/reward valuation from each new live chain observation
-- multi-position portfolio scheduling
-- restart/recovery integration tests over long paper runs
-- extended paper validation on real live observations.
+- unattended collector -> valuation -> decision -> paper-run scheduling
+- automatic binding of newly authorized Phase 3 plans into chain paper state
+- general external quote source for non-X/Y reward tokens and non-stable quote assets
+- long restart/recovery integration runs across many observations and positions
+- extended paper validation on real live observations
 
 ## Phase 6 — Rust Transaction Executor
 
