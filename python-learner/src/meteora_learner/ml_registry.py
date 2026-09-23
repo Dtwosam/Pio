@@ -103,12 +103,6 @@ def register_ml_v1_bundle(
         validation_rows=bundle.validation_rows,
         notes=notes,
     )
-    if new_status == CHAMPION:
-        raise ValueError(
-            "CHAMPION promotion requires qualified paper validation; "
-            "use promote_paper_challenger"
-        )
-
     raw = storage.model_registry_entry(model_id)
     if raw is None:
         raise RuntimeError("registered model disappeared")
@@ -122,6 +116,12 @@ def transition_model(
     new_status: str,
     notes: str | None = None,
 ) -> ModelRegistryRecord:
+    if new_status == CHAMPION:
+        raise ValueError(
+            "CHAMPION promotion requires qualified paper validation; "
+            "use promote_paper_challenger"
+        )
+
     raw = storage.model_registry_entry(model_id)
     if raw is None:
         raise ValueError(f"unknown model_id: {model_id}")
