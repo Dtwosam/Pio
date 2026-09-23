@@ -1901,6 +1901,16 @@ def main() -> None:
         help="JSON file path, or - for stdin",
     )
 
+    ingest_mint = subparsers.add_parser(
+        "ingest-mint-snapshot",
+        help="Ingest JSON emitted by the Rust read-only inspect-mint command",
+    )
+    ingest_mint.add_argument(
+        "--file",
+        default="-",
+        help="JSON file path, or - for stdin",
+    )
+
     ingest_decision_context_cmd = subparsers.add_parser(
         "ingest-execution-decision-context",
         help="Ingest terminal Rust execution decision context for learning attribution",
@@ -2338,6 +2348,20 @@ def main() -> None:
             with open(args.file, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
         result = ingest_chain_snapshot(Storage(settings.database_path), payload)
+        print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "ingest-mint-snapshot":
+        settings = Settings.from_env()
+        if args.file == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with open(args.file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        result = ingest_mint_snapshot(
+            Storage(settings.database_path),
+            payload,
+        )
         print(json.dumps(result.__dict__, indent=2))
         return
 
