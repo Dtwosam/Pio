@@ -743,9 +743,20 @@ history, mint inputs and wallet-flow source thresholds are all satisfied.
 This command performs source acquisition only. It does not run adaptive,
 mint-risk, wallet-flow, hedge, allocation or bandit research; it does not
 persist a Phase 9 bundle/promotion; and it cannot sign or submit Solana
-transactions. Repeated runs are manual/external-scheduler decisions. No default
-history timer is provided because the wall-clock meaning of one Phase 9
-observation has not been silently fixed by the system.
+transactions.
+
+History capture now has an explicit cadence guard. The CLI defaults to a hard
+minimum of 3,600 seconds between persisted chain-history observations for the
+same pool. A retry inside that interval is reported as `SKIPPED_INTERVAL`;
+the Rust inspector is not called and the observation count does not advance.
+
+For unattended evidence accumulation, the repository includes
+`pio-phase9-source-capture.service` and
+`pio-phase9-source-capture.timer`. The timer activates every 70 minutes while
+the service retains the 3,600-second hard minimum. The extra ten minutes keeps
+RPC/API execution jitter from turning an intended hourly research cadence into
+near-duplicate observations. This scheduled path remains source-only,
+read-only and non-actionable.
 
 ## End-to-end Phase 9 work queue
 
