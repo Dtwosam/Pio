@@ -109,6 +109,7 @@ def test_phase8_evidence_status_consolidates_learning_cycle_and_live_gate(
     assert report.active_cycle_id == "cycle-3"
     assert report.active_cycle_status == "PLANNED"
     assert report.active_cycle_challenger_model_id == "challenger-1"
+    assert report.active_cycle_challenger_status == "MISSING"
     assert report.completed_cycles == 2
     assert report.champion_cycle_id == "cycle-2"
     assert report.continuous_promotion_evidence_id == 91
@@ -185,6 +186,7 @@ def test_phase8_evidence_status_surfaces_missing_prerequisites(
     assert report.phase7_promoted is False
     assert report.champion_model_id is None
     assert report.active_cycle_id is None
+    assert report.active_cycle_challenger_status is None
     assert report.live_champion_status is None
     assert report.live_label_count == 0
     assert report.live_distinct_pools == 0
