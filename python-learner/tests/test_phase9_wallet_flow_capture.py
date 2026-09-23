@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from meteora_learner.phase9_position_discovery import (
     Phase9PositionDiscoveryItem,
     Phase9PositionDiscoveryReport,
@@ -293,3 +294,118 @@ def test_wallet_flow_capture_noops_when_source_is_already_ready(tmp_path):
     assert report.source_after.ready is True
     assert calls == []
     assert report.positions_attempted == 0
+
+
+def test_wallet_flow_source_state_uses_same_latest_event_window_as_research(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    base = datetime(2026, 9, 23, 10, 0, tzinfo=timezone.utc)
+    events = []
+
+    # Five older users exist in lifetime history but sit outside the latest
+    # 500-event research window.
+    for index in range(5):
+        created = (base + timedelta(seconds=index)).isoformat()
+        events.append(
+            {
+                "observed_at": created,
+                "position_address": f"old-position-{index}",
+                "signature": f"old-sig-{index}",
+                "ix_index": 0,
+                "event_type": "ADD_LIQUIDITY",
+                "block_time": 1_795_000_000 + index,
+                "slot": 1000 + index,
+                "pool_address": "pool-a",
+                "user_address": f"old-user-{index}",
+                "token_x": "x",
+                "token_y": "y",
+                "amount_x": "1",
+                "amount_y": "1",
+                "amount_x_usd": "1",
+                "amount_y_usd": "1",
+                "total_usd": "2",
+                "created_at": created,
+                "raw": {},
+            }
+        )
+
+    for index in range(500):
+        created = (
+            base + timedelta(minutes=1, seconds=index)
+        ).isoformat()
+        events.append(
+            {
+                "observed_at": created,
+                "position_address": "recent-position",
+                "signature": f"recent-sig-{index}",
+                "ix_index": 0,
+                "event_type": "ADD_LIQUIDITY",
+                "block_time": 1_795_001_000 + index,
+                "slot": 2000 + index,
+                "pool_address": "pool-a",
+                "user_address": "recent-user",
+                "token_x": "x",
+                "token_y": "y",
+                "amount_x": "1",
+                "amount_y": "1",
+                "amount_x_usd": "1",
+                "amount_y_usd": "1",
+                "total_usd": "2",
+                "created_at": created,
+                "raw": {},
+            }
+        )
+    storage.save_position_events(events)
+
+    state = wallet_flow_source_state(
+        storage,
+        pool_address="pool-a",
+        criteria=WalletFlowCriteria(
+            lookback_events=500,
+            min_events=20,
+            min_unique_users=5,
+        ),
+    )
+
+    assert state.events == 500
+    assert state.unique_users == 1
+    assert state.positions == 1
+    assert state.ready is False
+
+
+def test_wallet_flow_source_state_honors_as_of_inside_lookback_window(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_events(
+        storage,
+        pool="pool-a",
+        position="position-a",
+        owner="owner-a",
+        count=5,
+    )
+    seed_events(
+        storage,
+        pool="pool-a",
+        position="position-b",
+        owner="owner-b",
+        count=5,
+        offset=10,
+        created_at_prefix="2026-09-23T14:00:",
+    )
+
+    state = wallet_flow_source_state(
+        storage,
+        pool_address="pool-a",
+        criteria=WalletFlowCriteria(
+            lookback_events=20,
+            min_events=10,
+            min_unique_users=2,
+        ),
+        as_of="2026-09-23T13:00:00+00:00",
+    )
+
+    assert state.events == 5
+    assert state.unique_users == 1
+    assert state.ready is False
