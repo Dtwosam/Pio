@@ -137,3 +137,102 @@ def test_research_store_reads_chain_and_position_snapshots(tmp_path):
     assert position is not None and position["fee_x"] == "3"
     assert position_bins[0]["position_liquidity"] == "3"
 
+
+
+def test_research_store_cutoff_selectors_exclude_future_rows(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    storage.save_pool_snapshot(
+        {
+            "address": "pool",
+            "current_price": 10,
+            "bin_step": 25,
+            "active_id": 100,
+        },
+        observed_at="2026-09-22T10:00:00+00:00",
+    )
+    storage.save_pool_snapshot(
+        {
+            "address": "pool",
+            "current_price": 20,
+            "bin_step": 25,
+            "active_id": 200,
+        },
+        observed_at="2026-09-22T12:00:00+00:00",
+    )
+    for observed, active in (
+        ("2026-09-22T09:00:00+00:00", 90),
+        ("2026-09-22T10:00:00+00:00", 100),
+        ("2026-09-22T12:00:00+00:00", 200),
+    ):
+        storage.save_chain_pool_snapshot(
+            {
+                "pool_address": "pool",
+                "active_bin_id": active,
+                "bin_step": 25,
+                "token_x_mint": "x",
+                "token_y_mint": "y",
+                "bin_arrays": [],
+            },
+            observed_at=observed,
+        )
+
+    store = ResearchStore(db)
+    pools = store.latest_pool_snapshots(
+        as_of="2026-09-22T10:30:00+00:00",
+    )
+    chain = store.latest_chain_pool_snapshot(
+        "pool",
+        as_of="2026-09-22T10:30:00+00:00",
+    )
+    count = store.chain_observation_count(
+        "pool",
+        as_of="2026-09-22T10:30:00+00:00",
+    )
+
+    assert len(pools) == 1
+    assert pools[0]["current_price"] == 10.0
+    assert chain is not None
+    assert chain["active_bin_id"] == 100
+    assert count == 2
+
+
+def test_research_store_cutoff_selectors_return_empty_before_first_row(
+    tmp_path,
+):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    storage.save_pool_snapshot(
+        {
+            "address": "pool",
+            "current_price": 10,
+            "bin_step": 25,
+            "active_id": 100,
+        },
+        observed_at="2026-09-22T10:00:00+00:00",
+    )
+    storage.save_chain_pool_snapshot(
+        {
+            "pool_address": "pool",
+            "active_bin_id": 100,
+            "bin_step": 25,
+            "token_x_mint": "x",
+            "token_y_mint": "y",
+            "bin_arrays": [],
+        },
+        observed_at="2026-09-22T10:00:00+00:00",
+    )
+
+    store = ResearchStore(db)
+
+    assert store.latest_pool_snapshots(
+        as_of="2026-09-22T09:00:00+00:00",
+    ) == []
+    assert store.latest_chain_pool_snapshot(
+        "pool",
+        as_of="2026-09-22T09:00:00+00:00",
+    ) is None
+    assert store.chain_observation_count(
+        "pool",
+        as_of="2026-09-22T09:00:00+00:00",
+    ) == 0
