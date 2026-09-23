@@ -140,6 +140,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blockhash::PreparedUnsignedTransaction;
     use crate::dry_run::DryRunExecutionRequest;
     use crate::execution_guard::RiskCheckReport;
     use crate::models::{Action, Mode, TradeProposal};
@@ -245,15 +246,28 @@ mod tests {
             .unwrap();
         store.record_transaction_guard(&id, &guard()).unwrap();
         store.record_simulation(&id, &simulation()).unwrap();
+        let authorization = WalletAuthorizationReport {
+            accepted: true,
+            reason: "approved".into(),
+            wallet_pubkey: "payer".into(),
+            transaction_fee_payer: "payer".into(),
+        };
         store
-            .record_wallet_authorization(
+            .record_wallet_authorization(&id, &authorization)
+            .unwrap();
+        store
+            .record_final_presign(
                 &id,
-                &WalletAuthorizationReport {
-                    accepted: true,
-                    reason: "approved".into(),
-                    wallet_pubkey: "payer".into(),
-                    transaction_fee_payer: "payer".into(),
+                &PreparedUnsignedTransaction {
+                    transaction_base64: "prepared".into(),
+                    recent_blockhash: "blockhash".into(),
+                    last_valid_block_height: 123,
+                    rpc_context_slot: 99,
+                    signatures_all_default: true,
                 },
+                &guard(),
+                &authorization,
+                &simulation(),
             )
             .unwrap();
         store.begin_signing(&id).unwrap();
