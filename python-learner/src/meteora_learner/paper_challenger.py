@@ -150,6 +150,38 @@ def evaluate_paper_challenger(
     )
 
 
+def persist_paper_challenger_validation(
+    storage: Storage,
+    *,
+    validation: PaperChallengerValidation,
+    evidence_type: str = "PAPER_VALIDATION_V1",
+) -> None:
+    if not validation.paper_qualified:
+        raise ValueError("paper challenger has not passed validation")
+    raw = storage.model_registry_entry(validation.model_id)
+    if raw is None:
+        raise ValueError(f"unknown model_id: {validation.model_id}")
+    if str(raw["status"]) != PAPER_CHALLENGER:
+        raise ValueError("model is no longer in PAPER_CHALLENGER status")
+    if not validation.phase3_ready:
+        raise ValueError(
+            "paper validation was not evaluated with Phase 3 ready"
+        )
+    if not storage.phase_is_promoted(
+        PHASE3,
+        evidence_type=PHASE3_EVIDENCE_TYPE,
+    ):
+        raise ValueError(
+            "Phase 3 deterministic policy is not persistently promoted"
+        )
+    storage.save_model_promotion_evidence(
+        model_id=validation.model_id,
+        evidence_type=evidence_type,
+        qualified=True,
+        evidence=validation.to_record(),
+    )
+
+
 def promote_paper_challenger(
     storage: Storage,
     *,
@@ -172,11 +204,9 @@ def promote_paper_challenger(
             "roll it back before promoting another model"
         )
 
-    storage.save_model_promotion_evidence(
-        model_id=validation.model_id,
-        evidence_type="PAPER_VALIDATION_V1",
-        qualified=validation.paper_qualified,
-        evidence=validation.to_record(),
+    persist_paper_challenger_validation(
+        storage,
+        validation=validation,
     )
     storage.promote_model_to_champion(
         validation.model_id,
