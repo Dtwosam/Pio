@@ -50,14 +50,14 @@ class Phase9WorkQueue:
     phase8_promoted: bool
     research_bundle_ready: bool
     promotion_ready: bool
-    phase9_current: bool
-    policy_authorization_current: bool
-    controlled_validation_current: bool
-    rollout_simulation_current: bool
-    rollback_simulation_current: bool
-    prewire_ready: bool
     candidate_pools: tuple[str, ...]
     items: tuple[Phase9WorkItem, ...]
+    phase9_current: bool = False
+    policy_authorization_current: bool = False
+    controlled_validation_current: bool = False
+    rollout_simulation_current: bool = False
+    rollback_simulation_current: bool = False
+    prewire_ready: bool = False
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
