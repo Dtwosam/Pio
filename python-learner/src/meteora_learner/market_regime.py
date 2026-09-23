@@ -4,6 +4,10 @@ from dataclasses import asdict, dataclass
 import math
 from typing import Any
 
+from .chain_snapshot_lineage import (
+    chain_snapshot_source_record,
+    chain_snapshot_source_sha256,
+)
 from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .storage import Storage
 
@@ -65,6 +69,8 @@ class DLMMRegimeReport:
     historical_quiet_step_threshold: int | None
     historical_active_step_threshold: int | None
     historical_max_abs_step_bins: int | None
+    source_snapshot_ids: tuple[int, ...]
+    source_snapshot_sha256: str
     criteria: DLMMRegimeCriteria
     reasons: tuple[str, ...]
 
@@ -99,7 +105,7 @@ def classify_dlmm_regime(
         if as_of is None:
             rows = conn.execute(
                 """
-                SELECT observed_at, active_bin_id
+                SELECT id, pool_address, observed_at, active_bin_id
                 FROM chain_pool_snapshots
                 WHERE pool_address = ?
                 ORDER BY julianday(observed_at) DESC, id DESC
@@ -110,7 +116,7 @@ def classify_dlmm_regime(
         else:
             rows = conn.execute(
                 """
-                SELECT observed_at, active_bin_id
+                SELECT id, pool_address, observed_at, active_bin_id
                 FROM chain_pool_snapshots
                 WHERE pool_address = ?
                   AND julianday(observed_at) <= julianday(?)
@@ -124,7 +130,18 @@ def classify_dlmm_regime(
                 ),
             ).fetchall()
 
-    active_bins = [int(row[1]) for row in reversed(rows)]
+    source_records = [
+        chain_snapshot_source_record(row) for row in reversed(rows)
+    ]
+    source_snapshot_ids = tuple(
+        int(record["id"]) for record in source_records
+    )
+    source_snapshot_sha256 = chain_snapshot_source_sha256(
+        source_records
+    )
+    active_bins = [
+        int(record["active_bin_id"]) for record in source_records
+    ]
     if len(active_bins) < criteria.min_observations:
         return DLMMRegimeReport(
             pool_address=pool_address,
@@ -143,6 +160,8 @@ def classify_dlmm_regime(
             historical_quiet_step_threshold=None,
             historical_active_step_threshold=None,
             historical_max_abs_step_bins=None,
+            source_snapshot_ids=source_snapshot_ids,
+            source_snapshot_sha256=source_snapshot_sha256,
             criteria=criteria,
             reasons=(
                 f"observations {len(active_bins)} are below "
@@ -238,6 +257,8 @@ def classify_dlmm_regime(
         historical_quiet_step_threshold=quiet_threshold,
         historical_active_step_threshold=active_threshold,
         historical_max_abs_step_bins=max(abs_steps),
+        source_snapshot_ids=source_snapshot_ids,
+        source_snapshot_sha256=source_snapshot_sha256,
         criteria=criteria,
         reasons=tuple(reasons),
     )
