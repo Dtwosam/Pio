@@ -156,10 +156,13 @@ Built:
 - optional Jupiter USD-per-atomic token-Y quote refresh
 - idempotent end-to-end paper ticks
 - durable per-account scheduler lease and health state
+- persisted scheduler lifecycle event history for lease acquisition, overlap, stale-worker recovery and tick completion
 - deterministic time-bucket tick IDs for cron/systemd retries
 - stale RUNNING tick recovery after expired scheduler leases
 - prebuilt Rust executor support for hardened unattended refresh
 - unprivileged systemd service/timer deployment templates
+- current health report with Prometheus-compatible gauges
+- evidence-based PAPER endurance report with configurable runtime, reliability, dependency-blockage and applied-valuation thresholds
 - paper cohort performance metrics
 - ML paper challenger versus deterministic baseline validation
 - stored paper evidence required for champion promotion
@@ -168,7 +171,7 @@ Still needed:
 - external reward-token valuation beyond token X/Y rewards
 - long endurance/restart runs across many observations and positions
 - extended paper validation on real live observations
-- operational alerting/metrics around scheduler failures and stale dependencies
+- external alert delivery/integration around the implemented health metrics, if required by deployment
 
 ## Phase 6 — Rust Transaction Executor
 
