@@ -270,6 +270,18 @@ def research_portfolio_allocation(
     )
 
 
+def portfolio_candidate_artifact_sha256(
+    payload: dict[str, Any],
+) -> str:
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def persist_portfolio_candidate_research(
     storage: Storage,
     *,
@@ -284,12 +296,7 @@ def persist_portfolio_candidate_research(
         "assumptions": assumptions,
         "comparison": comparison.to_record(),
     }
-    canonical = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    digest = hashlib.sha256(canonical).hexdigest()
+    digest = portfolio_candidate_artifact_sha256(payload)
     evidence = {
         "artifact_sha256": digest,
         **payload,
