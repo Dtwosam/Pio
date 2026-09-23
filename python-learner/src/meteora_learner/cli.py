@@ -137,6 +137,10 @@ from .phase9_wallet_flow_capture import (
 )
 from .phase9_source_capture import run_phase9_source_capture
 from .phase9_research_refresh import run_phase9_research_refresh
+from .phase9_operation_lease import (
+    acquire_phase9_operation_lease,
+    release_phase9_operation_lease,
+)
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
@@ -2374,6 +2378,12 @@ def main() -> None:
         "--require-automatic-ready",
         action="store_true",
     )
+    phase9_source_capture.add_argument(
+        "--lease-seconds",
+        type=int,
+        default=1800,
+        help="SQLite lease duration preventing overlapping source-capture runs",
+    )
 
     phase9_research_refresh = subparsers.add_parser(
         "phase9-research-refresh-run",
@@ -2408,6 +2418,12 @@ def main() -> None:
         "--require-bundle-ready",
         action="store_true",
         help="Exit non-zero unless the complete Phase 9 research bundle is ready after refresh",
+    )
+    phase9_research_refresh.add_argument(
+        "--lease-seconds",
+        type=int,
+        default=1800,
+        help="SQLite lease duration preventing overlapping research-refresh runs",
     )
 
     phase9_input_template = subparsers.add_parser(
@@ -5244,64 +5260,109 @@ def main() -> None:
     if args.command == "phase9-source-capture-run":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
-        result = run_phase9_source_capture(
+        lease = acquire_phase9_operation_lease(
             storage,
-            settings=settings,
-            refresh_api=not args.skip_api_refresh,
-            chain_pool_target=args.chain_pool_target,
-            chain_max_candidates=args.chain_max_candidates,
-            bin_array_radius=args.bin_array_radius,
-            mint_max_snapshot_age_seconds=(
-                args.mint_max_snapshot_age_seconds
-            ),
-            history_min_observation_interval_seconds=(
-                args.history_min_observation_interval_seconds
-            ),
-            wallet_discovery_limit=args.wallet_discovery_limit,
-            wallet_max_positions_per_run=(
-                args.wallet_max_positions_per_run
-            ),
-            wallet_expand_closed_positions=(
-                not args.skip_wallet_owner_position_expansion
-            ),
-            wallet_owner_expansion_limit=(
-                args.wallet_owner_expansion_limit
-            ),
-            wallet_owner_position_max_pages=(
-                args.wallet_owner_position_max_pages
-            ),
-            rust_manifest_path=args.rust_manifest_path,
-            rust_binary_path=args.rust_binary_path,
-            timeout_seconds=args.timeout_seconds,
+            operation_key="phase9-source-capture",
+            lease_seconds=args.lease_seconds,
         )
-        print(json.dumps(result.to_record(), indent=2))
-        if (
-            args.require_automatic_ready
-            and not result.automatic_source_ready
-        ):
-            raise SystemExit(2)
+        if not lease.acquired:
+            print(json.dumps({
+                "status": "BUSY",
+                "research_only": True,
+                "read_only_capture": True,
+                "policy_actionable": False,
+                "execution_wired": False,
+                "lease": lease.to_record(),
+            }, indent=2))
+            return
+        try:
+            result = run_phase9_source_capture(
+                storage,
+                settings=settings,
+                refresh_api=not args.skip_api_refresh,
+                chain_pool_target=args.chain_pool_target,
+                chain_max_candidates=args.chain_max_candidates,
+                bin_array_radius=args.bin_array_radius,
+                mint_max_snapshot_age_seconds=(
+                    args.mint_max_snapshot_age_seconds
+                ),
+                history_min_observation_interval_seconds=(
+                    args.history_min_observation_interval_seconds
+                ),
+                wallet_discovery_limit=args.wallet_discovery_limit,
+                wallet_max_positions_per_run=(
+                    args.wallet_max_positions_per_run
+                ),
+                rust_manifest_path=args.rust_manifest_path,
+                rust_binary_path=args.rust_binary_path,
+                timeout_seconds=args.timeout_seconds,
+            )
+            print(json.dumps({
+                "status": "COMPLETE",
+                "lease": lease.to_record(),
+                "report": result.to_record(),
+            }, indent=2))
+            if (
+                args.require_automatic_ready
+                and not result.automatic_source_ready
+            ):
+                raise SystemExit(2)
+        finally:
+            release_phase9_operation_lease(
+                storage,
+                operation_key="phase9-source-capture",
+                owner_id=lease.owner_id,
+            )
         return
 
     if args.command == "phase9-research-refresh-run":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
-        result = run_phase9_research_refresh(
+        lease = acquire_phase9_operation_lease(
             storage,
-            criteria=Phase9ResearchBundleCriteria(
-                min_mint_risk_pools=args.min_mint_risk_pools,
-                min_wallet_flow_pools=args.min_wallet_flow_pools,
-                min_static_hedge_pools=args.min_static_hedge_pools,
-            ),
-            persist_bundle_when_ready=not args.no_persist_bundle,
+            operation_key="phase9-research-refresh",
+            lease_seconds=args.lease_seconds,
         )
-        print(json.dumps(result.to_record(), indent=2))
-        if (
-            args.require_automatic_ready
-            and not result.automatic_families_ready
-        ):
-            raise SystemExit(2)
-        if args.require_bundle_ready and not result.bundle_ready_after:
-            raise SystemExit(2)
+        if not lease.acquired:
+            print(json.dumps({
+                "status": "BUSY",
+                "research_only": True,
+                "policy_actionable": False,
+                "execution_wired": False,
+                "lease": lease.to_record(),
+            }, indent=2))
+            return
+        try:
+            result = run_phase9_research_refresh(
+                storage,
+                criteria=Phase9ResearchBundleCriteria(
+                    min_mint_risk_pools=args.min_mint_risk_pools,
+                    min_wallet_flow_pools=args.min_wallet_flow_pools,
+                    min_static_hedge_pools=args.min_static_hedge_pools,
+                ),
+                persist_bundle_when_ready=not args.no_persist_bundle,
+            )
+            print(json.dumps({
+                "status": "COMPLETE",
+                "lease": lease.to_record(),
+                "report": result.to_record(),
+            }, indent=2))
+            if (
+                args.require_automatic_ready
+                and not result.automatic_families_ready
+            ):
+                raise SystemExit(2)
+            if (
+                args.require_bundle_ready
+                and not result.bundle_ready_after
+            ):
+                raise SystemExit(2)
+        finally:
+            release_phase9_operation_lease(
+                storage,
+                operation_key="phase9-research-refresh",
+                owner_id=lease.owner_id,
+            )
         return
 
     if args.command == "phase9-research-input-template":
