@@ -356,6 +356,31 @@ ON chain_transaction_events(signature, parent_ix_index);
 CREATE INDEX IF NOT EXISTS idx_chain_tx_event_position
 ON chain_transaction_events(position_address, signature);
 
+CREATE TABLE IF NOT EXISTS paper_ticks (
+    tick_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL CHECK(
+        status IN (
+            'RUNNING',
+            'COMPLETE',
+            'PARTIAL',
+            'WAITING_CHAIN',
+            'WAITING_QUOTES',
+            'NO_NEW_OBSERVATIONS',
+            'IDLE',
+            'MARKET_REFRESH_FAILED',
+            'FAILED'
+        )
+    ),
+    result_json TEXT,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_ticks_account_time
+ON paper_ticks(account_id, started_at);
+
 CREATE TABLE IF NOT EXISTS token_quote_observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     token_mint TEXT NOT NULL,
