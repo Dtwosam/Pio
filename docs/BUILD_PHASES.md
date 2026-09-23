@@ -331,7 +331,8 @@ Built:
 - fresh post-authorization simulation-only holdout validation requiring current authorization evidence, a new cycle and dataset hash, a cutoff after authorization creation, deterministic replay and persisted currentness audit
 - consolidated fail-able Phase 9 policy-readiness audit requiring both current authorization evidence and current fresh-holdout controlled validation while remaining non-actionable
 - disabled bounded-rollout simulation that requires a proposed Phase 9 canary envelope to stay within the existing controlled-live allowlist/caps, remain strictly narrower by default, preserve EXIT, disable REBALANCE and persist only non-actionable simulation evidence
+- explicit rollback-trigger simulation with user-supplied sample-depth, loss/drawdown, performance and data-integrity thresholds; stale rollout evidence or hard breaches fail toward rollback while insufficient clean samples remain observation-pending
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
-- explicit future LIVE-policy wiring, bounded-capital rollout rules and rollback design; controlled validation remains simulation-only and non-actionable
+- explicit future LIVE-policy wiring remains intentionally unimplemented; rollout and rollback design are simulation-only and require real evidence before any separate authorization design
