@@ -220,6 +220,30 @@ actions may update the pool/context-local UCB statistics. Current-decision
 oracle rewards are used only after selection for evaluation. Adversarial tests
 lock this no-lookahead property.
 
+## Source freshness
+
+Deterministic replay answers a different question from source freshness. A
+report can still reproduce perfectly from its old immutable lineage while newer
+chain, mint, wallet-flow or dataset observations are already available.
+
+Inspect that state directly:
+
+```bash
+pio phase9-source-freshness
+```
+
+Use `--require-current` when an operational check should fail until every
+research family has incorporated its newest persisted source watermark.
+
+Freshness compares source timestamps first. Database IDs are only a
+same-timestamp tie-break, so a historical backfill inserted later does not make
+current research look stale merely because its SQLite row ID is larger. When a
+genuinely newer source exists, `phase9-research-refresh-run` recomputes the
+affected family even if its previous evidence still passes deterministic replay.
+The work queue surfaces this as `RESEARCH_SOURCE_REFRESH`, and progress reports
+`SOURCE_REFRESH_PENDING` until the next queue snapshot shows the refresh
+resolved.
+
 ## Evidence work queue
 
 Before manually inspecting every research family, build the current evidence
