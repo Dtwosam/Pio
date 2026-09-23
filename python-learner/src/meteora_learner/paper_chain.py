@@ -416,7 +416,7 @@ def prepare_chain_valuation(
     event_hash = hashlib.sha256(
         f"{position_id}|{observed_at}".encode("utf-8")
     ).hexdigest()[:24]
-    prefix = f"paper-chain:{event_hash}:{position_id}"
+    prefix = f"paper-run:{event_hash}:{position_id}"
     raw = valuation.to_record()
 
     with storage.connect() as conn:
