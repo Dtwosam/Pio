@@ -14,6 +14,7 @@ from .storage import Storage, utc_now_iso
 class PaperChainBatchItem:
     position_id: str
     token_y_quote_per_atomic: float
+    quote_max_age_seconds: int = 300
     pool_safe: bool = True
     emergency_exit: bool = False
     estimated_exit_cost_quote: float = 0.0
@@ -24,6 +25,8 @@ class PaperChainBatchItem:
             raise ValueError("position_id is required")
         if self.token_y_quote_per_atomic <= 0:
             raise ValueError("token_y_quote_per_atomic must be positive")
+        if self.quote_max_age_seconds < 0:
+            raise ValueError("quote_max_age_seconds cannot be negative")
         if self.estimated_exit_cost_quote < 0:
             raise ValueError("estimated_exit_cost_quote cannot be negative")
         if self.rebalance_cost_quote is not None and self.rebalance_cost_quote < 0:
@@ -228,6 +231,7 @@ def run_chain_paper_batch(
                 observed_at=observed_at,
                 token_y_quote_per_atomic=item.token_y_quote_per_atomic,
                 pool_safe=item.pool_safe,
+                quote_max_age_seconds=item.quote_max_age_seconds,
                 estimated_exit_cost_quote=item.estimated_exit_cost_quote,
                 rebalance_cost_quote=item.rebalance_cost_quote,
                 emergency_exit=item.emergency_exit,
