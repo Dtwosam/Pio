@@ -20,7 +20,7 @@ from meteora_learner.wallet_flow import WALLET_FLOW_EVIDENCE_TYPE
 
 
 def save_pool(storage, pool, observed_at):
-    return storage.save_chain_pool_snapshot(
+    storage.save_chain_pool_snapshot(
         {
             "pool_address": pool,
             "active_bin_id": 0,
@@ -31,6 +31,20 @@ def save_pool(storage, pool, observed_at):
         },
         observed_at=observed_at,
     )
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM chain_pool_snapshots
+            WHERE pool_address = ?
+              AND observed_at = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (pool, observed_at),
+        ).fetchone()
+    assert row is not None
+    return int(row[0])
 
 
 def save_mint(storage, mint, observed_at):
