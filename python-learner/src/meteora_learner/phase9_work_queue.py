@@ -175,6 +175,21 @@ def build_phase9_work_queue(
     pools = _candidate_pools(storage)
     items: list[Phase9WorkItem] = []
 
+    if not bundle.storage_integrity_verified:
+        items.append(
+            Phase9WorkItem(
+                task_type="STORAGE_INTEGRITY",
+                scope="PHASE9_STORAGE",
+                reason=(
+                    "Phase 9 immutable source/evidence storage integrity "
+                    "must be restored before research can be ready"
+                ),
+                shell_command=(
+                    "pio phase9-storage-integrity --require-verified"
+                ),
+            )
+        )
+
     if not phase8_promoted:
         items.append(
             Phase9WorkItem(
