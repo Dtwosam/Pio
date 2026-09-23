@@ -264,6 +264,7 @@ def run_phase9_wallet_flow_capture(
     expand_owner_positions: ExpandOwnerPositions | None = None,
     discover_historical_activity: DiscoverHistoricalActivity | None = None,
     expand_closed_positions: bool = True,
+    enable_historical_activity: bool = True,
     historical_signature_limit: int = 25,
     owner_expansion_limit: int = 25,
     owner_position_max_pages: int = 3,
@@ -363,7 +364,8 @@ def run_phase9_wallet_flow_capture(
 
     items: list[Phase9WalletFlowCaptureItem] = []
     historical_scan_enabled = (
-        as_of is None
+        enable_historical_activity
+        and as_of is None
         and (
             discover_historical_activity is not None
             or production_capture_path
