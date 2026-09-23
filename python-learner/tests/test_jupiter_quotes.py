@@ -91,3 +91,44 @@ def test_jupiter_refresh_fails_mint_without_inserting_fallback(tmp_path):
 
     status = token_quote_status(storage, token_mint="y")
     assert status.available is False
+
+
+def test_jupiter_refresh_includes_external_reward_mint(tmp_path):
+    storage = seed(tmp_path)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE paper_counterfactual_positions
+            SET reward_mint_0 = 'reward'
+            WHERE position_id = 'pos'
+            """
+        )
+
+    requested = []
+
+    def fetch(mint):
+        requested.append(mint)
+        return JupiterTokenUSDQuote(
+            token_mint=mint,
+            symbol=mint.upper(),
+            decimals=6,
+            usd_price=1.0,
+            usd_per_atomic=0.000001,
+        )
+
+    report = refresh_open_paper_jupiter_quotes(
+        storage,
+        account_id="paper",
+        observed_at="2026-09-23T10:05:00+00:00",
+        fetch_quote=fetch,
+    )
+
+    assert report.mints_requested == 2
+    assert report.quotes_refreshed == 2
+    assert requested == ["reward", "y"]
+    assert token_quote_status(
+        storage,
+        token_mint="reward",
+        max_age_seconds=60,
+        as_of="2026-09-23T10:05:30+00:00",
+    ).fresh is True
