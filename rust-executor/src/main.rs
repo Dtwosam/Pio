@@ -26,6 +26,7 @@ mod transaction_events;
 mod transaction_guard;
 mod token_extensions;
 mod token_entry;
+mod token_exit;
 mod token_rebalance;
 mod wallet;
 mod wallet_guard;
@@ -52,6 +53,7 @@ fn usage() {
   meteora-executor execution-wallet-authorize <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-presign-prepare <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
   meteora-executor build-emergency-exit <REQUEST_JSON_OR_->
+  meteora-executor build-token-exit-from-chain <EXIT_REQUEST_JSON_OR_->
   meteora-executor wallet-status
   meteora-executor build-standard-spl-entry <ENTRY_REQUEST_JSON_OR_->
   meteora-executor build-standard-spl-entry-from-chain <ENTRY_REQUEST_JSON_OR_->
@@ -732,6 +734,44 @@ RPC_URL is accepted as a compatibility fallback",
             ) {
                 std::process::exit(2);
             }
+        }
+        "build-token-exit-from-chain" => {
+            let request_source = args
+                .next()
+                .context("EXIT_REQUEST_JSON_OR_- is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "build-token-exit-from-chain accepts exactly one argument"
+                );
+            }
+            let request_json = if request_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read token exit request JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&request_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read token exit request JSON: {request_source}"
+                        )
+                    })?
+            };
+            let request: token_exit::ChainResolvedTokenExitRequest =
+                serde_json::from_str(&request_json)
+                    .context("invalid token exit request JSON")?;
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let report = token_exit::build_token_exit_from_chain(
+                &rpc_url,
+                &request,
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
         }
         "build-emergency-exit" => {
             let request_source = args
