@@ -487,3 +487,106 @@ def persist_phase9_policy_authorization(
         qualified=report.authorization_ready,
         evidence=report.to_record(),
     )
+
+
+def audit_persisted_phase9_policy_authorization(
+    storage: Storage,
+) -> Phase9PolicyAuthorizationAudit:
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_POLICY_GATE_EVIDENCE_TYPE,
+        pool_address=PHASE9_POLICY_GATE_SCOPE,
+    )
+    if latest is None:
+        return Phase9PolicyAuthorizationAudit(
+            exists=False,
+            qualified=False,
+            boundary_valid=False,
+            criteria_valid=False,
+            current_authorization_ready=False,
+            persisted_matches_current=False,
+            current=False,
+            evidence_id=None,
+            reasons=(
+                "persisted Phase 9 policy authorization evidence is missing",
+            ),
+        )
+
+    evidence = latest["evidence"]
+    reasons: list[str] = []
+    qualified = bool(latest["qualified"])
+    boundary_valid = (
+        isinstance(evidence, dict)
+        and evidence.get("research_only") is True
+        and evidence.get("policy_actionable") is False
+        and evidence.get("execution_wired") is False
+    )
+    if not boundary_valid:
+        reasons.append(
+            "persisted authorization evidence violates the non-actionable boundary"
+        )
+    if not qualified:
+        reasons.append(
+            "latest persisted authorization evidence is not qualified"
+        )
+
+    criteria = None
+    if isinstance(evidence, dict):
+        criteria_raw = evidence.get("criteria")
+        if isinstance(criteria_raw, dict):
+            try:
+                criteria = Phase9PolicyAuthorizationCriteria(
+                    **criteria_raw
+                )
+                criteria.validate()
+            except (TypeError, ValueError):
+                criteria = None
+    criteria_valid = criteria is not None
+    if not criteria_valid:
+        reasons.append(
+            "persisted authorization criteria are invalid"
+        )
+
+    current_report = (
+        evaluate_phase9_policy_authorization(
+            storage,
+            criteria=criteria,
+        )
+        if criteria is not None
+        else None
+    )
+    current_ready = bool(
+        current_report is not None
+        and current_report.authorization_ready
+    )
+    if not current_ready:
+        reasons.append(
+            "current Phase 9 policy authorization gate no longer passes"
+        )
+
+    persisted_matches_current = False
+    if isinstance(evidence, dict) and current_report is not None:
+        persisted_normalized = json.loads(
+            json.dumps(evidence, sort_keys=True)
+        )
+        current_normalized = json.loads(
+            json.dumps(current_report.to_record(), sort_keys=True)
+        )
+        persisted_matches_current = (
+            persisted_normalized == current_normalized
+        )
+    if not persisted_matches_current:
+        reasons.append(
+            "persisted authorization evidence is stale versus current replay"
+        )
+
+    return Phase9PolicyAuthorizationAudit(
+        exists=True,
+        qualified=qualified,
+        boundary_valid=boundary_valid,
+        criteria_valid=criteria_valid,
+        current_authorization_ready=current_ready,
+        persisted_matches_current=persisted_matches_current,
+        current=not reasons,
+        evidence_id=int(latest["id"]),
+        reasons=tuple(reasons),
+    )
