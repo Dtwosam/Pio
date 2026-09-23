@@ -1,67 +1,63 @@
 # Data Pipeline
 
-Status: Phase 1 implementation complete; extended live collection validation pending.
+Status: implemented; extended live collection and calibration pending.
 
-## Goal
+## Data API
 
-Create reproducible API and on-chain time series before training any model.
+Pio stores:
+- protocol/pool observations
+- OHLCV
+- volume + protocol fees
+- exact raw responses
+- position PnL
+- position lifecycle history
 
-## Data API collection
+Position history preserves transaction signature + instruction index so API lifecycle rows can be joined to decoded Solana events.
 
-1. Fetch protocol metrics.
-2. Fetch paginated pool snapshots sorted by TVL.
-3. Save raw JSON before normalization.
-4. Save normalized pool snapshots.
-5. Fetch pool detail for configured pools.
-6. Fetch OHLCV and volume history with Meteora's current `timeframe`, `start_time`, and `end_time` parameters.
-7. Normalize candles and volume buckets.
-8. Preserve pool fees and protocol fees separately.
-9. Run freshness, duplicate, gap and OHLC consistency checks.
-10. Record endpoint failures without killing the entire run.
+## On-chain Rust collection
 
-Default history settings:
-- timeframe: 5m
-- lookback: 24 hours
-- stale threshold: 15 minutes
-
-Repeated runs build our own continuous history.
-
-## On-chain collection
-
-The Rust executor has CI-validated read-only commands for:
+Read-only commands collect:
 - LbPair state
-- active bin
-- nearby BinArray state
-- every bin in fetched arrays, including empty bins
-- raw Q64 bin price
-- bin X/Y inventory
-- liquidity supply
-- per-token fee checkpoints
-- token mint/program IDs
-- base/variable/total fee state
-- deposit-time total fee after volatility decay/reference update
-- protocol share and collect-fee mode
-- exact DynamicPosition state
-- per-bin position liquidity
-- position token amounts
-- pending fees and rewards
+- every fetched bin, including empty bins
+- Q64 price
+- X/Y inventory and liquidity supply
+- fee checkpoints
+- effective reward checkpoints
+- reward mints/rates/durations
+- token program IDs
+- deposit-time dynamic fee state
+- exact DynamicPosition balances, shares, pending fees and rewards
+- transaction event-CPI data
+- transaction fee/compute-unit receipts
+- requested add-liquidity bounds for common two-sided add variants
 
-Rust emits JSON. Python stores these snapshots with its own observation timestamp.
+Commands:
+- `inspect-pool`
+- `inspect-position`
+- `inspect-transaction-events`
 
-## Chain replay
+## Replay/reconciliation
 
-Repeated snapshots can be replayed as a small hypothetical standard-SPL LP.
+Chain replay:
+1. chooses an entry observation;
+2. allocates atomic X/Y using Meteora strategy rules;
+3. mints hypothetical per-bin shares;
+4. accounts for composition fees;
+5. attributes fee/reward checkpoint growth;
+6. marks ending inventory from real per-share bin state.
 
-The path:
-1. selects the earliest observation in the requested recent window as entry;
-2. distributes atomic X/Y using Meteora strategy rules;
-3. mints source-backed hypothetical per-bin liquidity shares;
-4. accounts for entry active-bin composition fees;
-5. rechecks counterfactual share size at every observation;
-6. attributes fee-checkpoint growth interval by interval;
-7. marks ending inventory from final real per-share bin state.
+Rebalance replay chains these segments across observed range exits without silently reinvesting fees.
 
-Paths fail closed on missing coverage, zero historical supply, oversized counterfactual share, or unsupported token programs.
+Real-position reconciliation compares Python amount/fee/reward math with DynamicPosition snapshots across consecutive eligible observations.
+
+## Calibration flows
+
+- `pio collect-position-history --position <POSITION>`
+- decode matching transaction signatures with Rust
+- `pio ingest-transaction-events`
+- `pio composition-labels --position <POSITION>`
+- `pio transaction-costs --position <POSITION>`
+- `pio add-execution --position <POSITION>`
 
 ## Main tables
 
@@ -73,34 +69,14 @@ Paths fail closed on missing coverage, zero historical supply, oversized counter
 - bin_liquidity_snapshots
 - chain_position_snapshots
 - position_bin_snapshots
+- position_event_history
+- chain_transaction_snapshots
+- chain_add_liquidity_requests
+- chain_transaction_events
 - data_quality_checks
 - collection_errors
 - collector_runs
 
-## API safety
+## Data rule
 
-Pio stays below Meteora's documented DLMM API rate limit by default and retries transport errors, HTTP 429 and HTTP 5xx responses with backoff. `Retry-After` is honored when supplied.
-
-## Data quality rule
-
-Suspect data is stored and marked; it is not silently promoted into model-training data.
-
-## CLI
-
-- `pio collect-once`
-- `pio protocol-metrics`
-- `pio data-status`
-- `pio ingest-chain-snapshot`
-- `pio ingest-position-snapshot`
-- `pio replay-chain`
-- `pio scan-chain`
-- `pio backtest-inventory`
-
-## Remaining validation
-
-- run extended live Data API collection
-- run repeated high-frequency Solana snapshots for selected pools
-- verify chain/API active-bin reconciliation
-- build real-position replay/reconciliation samples
-- measure snapshot gaps and counterfactual rejection rates
-- export clean training frames
+Suspect, legacy or unsupported data is preserved but marked/ineligible. It is not silently promoted into training labels.
