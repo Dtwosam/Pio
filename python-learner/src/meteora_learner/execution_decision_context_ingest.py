@@ -60,12 +60,19 @@ def _normalize(payload: Any) -> dict[str, Any]:
     if min_bin_id > max_bin_id:
         raise ValueError("min_bin_id cannot exceed max_bin_id")
 
+    status = _required_string(payload, "status")
+    if status not in {"CONFIRMED", "FAILED"}:
+        raise ValueError(
+            "immutable decision context ingestion requires terminal "
+            "CONFIRMED or FAILED status"
+        )
+
     signature_raw = payload.get("signature")
-    signature = None
-    if signature_raw is not None:
-        if not isinstance(signature_raw, str) or not signature_raw.strip():
-            raise ValueError("signature must be null or a non-empty string")
-        signature = signature_raw.strip()
+    if not isinstance(signature_raw, str) or not signature_raw.strip():
+        raise ValueError(
+            "terminal execution decision context requires a signature"
+        )
+    signature = signature_raw.strip()
 
     decimals = {
         name: _finite_decimal(payload, name)
@@ -90,7 +97,7 @@ def _normalize(payload: Any) -> dict[str, Any]:
         "mode": mode,
         "action": action,
         "pool_address": _required_string(payload, "pool_address"),
-        "status": _required_string(payload, "status"),
+        "status": status,
         "created_at_unix": _non_negative_int(payload, "created_at_unix"),
         "updated_at_unix": _non_negative_int(payload, "updated_at_unix"),
         "capital_quote": format(decimals["capital_quote"], "f"),
@@ -147,10 +154,6 @@ def _receipt_reconciles(conn: Any, context: dict[str, Any]) -> bool:
     if str(receipt[1]) != context["pool_address"]:
         raise ValueError(
             "decision context pool conflicts with execution receipt"
-        )
-    if context["signature"] is None:
-        raise ValueError(
-            "terminal receipt exists but decision context has no signature"
         )
     if str(receipt[2]) != context["signature"]:
         raise ValueError(
