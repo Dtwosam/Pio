@@ -270,12 +270,14 @@ def _legacy_valuation(
     position_id: str,
     observed_at: str,
     token_y_quote_per_atomic: float,
+    quote_max_age_seconds: int = 300,
 ) -> PaperChainValuation:
     value = prepare_paper_chain_valuation(
         storage,
         position_id=position_id,
         observed_at=observed_at,
         token_y_quote_per_atomic=token_y_quote_per_atomic,
+        reward_quote_max_age_seconds=quote_max_age_seconds,
     )
     binding = paper_chain_binding(storage, position_id=position_id)
     store = ResearchStore(storage.path)
@@ -342,12 +344,14 @@ def value_paper_position_from_chain(
     position_id: str,
     observed_at: str,
     token_y_quote_per_atomic: float,
+    quote_max_age_seconds: int = 300,
 ) -> PaperChainValuation:
     return _legacy_valuation(
         storage,
         position_id=position_id,
         observed_at=observed_at,
         token_y_quote_per_atomic=token_y_quote_per_atomic,
+        quote_max_age_seconds=quote_max_age_seconds,
     )
 
 
@@ -357,12 +361,14 @@ def prepare_chain_valuation(
     position_id: str,
     observed_at: str,
     token_y_quote_per_atomic: float,
+    quote_max_age_seconds: int = 300,
 ) -> PaperChainValuation:
     return value_paper_position_from_chain(
         storage,
         position_id=position_id,
         observed_at=observed_at,
         token_y_quote_per_atomic=token_y_quote_per_atomic,
+        quote_max_age_seconds=quote_max_age_seconds,
     )
 
 
@@ -373,6 +379,7 @@ def apply_chain_paper_observation(
     observed_at: str,
     token_y_quote_per_atomic: float,
     pool_safe: bool,
+    quote_max_age_seconds: int = 300,
     estimated_exit_cost_quote: float = 0.0,
     rebalance_cost_quote: float | None = None,
     emergency_exit: bool = False,
@@ -383,6 +390,7 @@ def apply_chain_paper_observation(
         position_id=position_id,
         observed_at=observed_at,
         token_y_quote_per_atomic=token_y_quote_per_atomic,
+        quote_max_age_seconds=quote_max_age_seconds,
     )
     binding = paper_chain_binding(storage, position_id=position_id)
     times = ResearchStore(storage.path).chain_observation_times(
@@ -404,6 +412,7 @@ def apply_chain_paper_observation(
         observed_at=observed_at,
         holding_observations=len(covered),
         token_y_quote_per_atomic=token_y_quote_per_atomic,
+        reward_quote_max_age_seconds=quote_max_age_seconds,
         pool_safe=pool_safe,
         emergency_exit=emergency_exit,
         estimated_exit_cost_quote=estimated_exit_cost_quote,
@@ -426,6 +435,7 @@ def apply_prepared_chain_valuation(
     observed_at: str,
     token_y_quote_per_atomic: float,
     pool_safe: bool,
+    quote_max_age_seconds: int = 300,
     estimated_exit_cost_quote: float = 0.0,
     rebalance_cost_quote: float | None = None,
     emergency_exit: bool = False,
@@ -437,6 +447,7 @@ def apply_prepared_chain_valuation(
         observed_at=observed_at,
         token_y_quote_per_atomic=token_y_quote_per_atomic,
         pool_safe=pool_safe,
+        quote_max_age_seconds=quote_max_age_seconds,
         estimated_exit_cost_quote=estimated_exit_cost_quote,
         rebalance_cost_quote=rebalance_cost_quote,
         emergency_exit=emergency_exit,
