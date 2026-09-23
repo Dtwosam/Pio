@@ -342,6 +342,7 @@ Built:
 - RPC-filtered read-only `PositionV2` discovery by pool plus bounded official-position-history collection for wallet-flow source coverage, with latest-lookback event/user counting, diversity-first ordering and explicit current-cohort scope
 - checksum-bound explicit research-input artifacts for hedge and portfolio assumptions, including a non-inventing template generator, strict validation, append-only persistence and a direct runner that binds candidate artifacts back to the exact input evidence ID/SHA
 - bounded manual Phase 9 source-capture pass that can refresh public API discovery, fill missing chain-pool coverage, take one fresh history sample per deficient pool, refresh mint state and collect bounded wallet-flow sources while remaining read-only and non-actionable
+- explicit chain-history sampling cadence guard plus optional hardened systemd source-capture timer (70-minute activation, 3,600-second per-pool minimum) so retries cannot inflate observation depth with near-duplicate snapshots
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
