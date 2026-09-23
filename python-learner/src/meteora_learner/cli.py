@@ -8,6 +8,7 @@ from .add_execution import build_add_execution_calibration
 from .baseline_policy import BaselinePolicyConfig
 from .baseline_walk_forward import walk_forward_baseline
 from .calibration_queue import build_calibration_work_queue
+from .capital_sizing import CapitalSizingConfig, size_position
 from .calibration_status import build_phase2_calibration_evidence
 from .chain_ingest import ingest_chain_snapshot
 from .chain_replay import replay_small_lp_history
@@ -80,6 +81,27 @@ def main() -> None:
     pool_screen.add_argument("--min-pool-age-hours", type=float, default=24.0)
     pool_screen.add_argument("--min-chain-observations", type=int, default=12)
     pool_screen.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
+
+    size_position_cmd = subparsers.add_parser(
+        "size-position",
+        help="Apply deterministic portfolio and drawdown capital caps",
+    )
+    size_position_cmd.add_argument("--equity", required=True, type=float)
+    size_position_cmd.add_argument("--cash", required=True, type=float)
+    size_position_cmd.add_argument("--deployed", required=True, type=float)
+    size_position_cmd.add_argument("--drawdown-bps", required=True, type=int)
+    size_position_cmd.add_argument("--requested", type=float)
+    size_position_cmd.add_argument("--max-position-bps", type=int, default=1000)
+    size_position_cmd.add_argument("--max-deployed-bps", type=int, default=7000)
+    size_position_cmd.add_argument("--reserve-bps", type=int, default=3000)
+    size_position_cmd.add_argument("--soft-drawdown-bps", type=int, default=500)
+    size_position_cmd.add_argument("--hard-drawdown-bps", type=int, default=1500)
+    size_position_cmd.add_argument(
+        "--drawdown-size-multiplier-bps",
+        type=int,
+        default=5000,
+    )
+    size_position_cmd.add_argument("--min-position", type=float, default=0.0)
 
     ingest = subparsers.add_parser(
         "ingest-chain-snapshot",
@@ -640,6 +662,26 @@ def main() -> None:
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
+        return
+
+    if args.command == "size-position":
+        result = size_position(
+            account_equity_quote=args.equity,
+            cash_quote=args.cash,
+            current_deployed_quote=args.deployed,
+            portfolio_drawdown_bps=args.drawdown_bps,
+            requested_quote=args.requested,
+            config=CapitalSizingConfig(
+                max_position_bps=args.max_position_bps,
+                max_total_deployed_bps=args.max_deployed_bps,
+                min_cash_reserve_bps=args.reserve_bps,
+                soft_drawdown_bps=args.soft_drawdown_bps,
+                hard_drawdown_bps=args.hard_drawdown_bps,
+                soft_drawdown_size_multiplier_bps=args.drawdown_size_multiplier_bps,
+                min_position_quote=args.min_position,
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "screen-pools":
