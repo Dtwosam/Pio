@@ -10,6 +10,7 @@ mod execution_receipt;
 mod execution_store;
 mod journaled_dry_run;
 mod models;
+mod phase5_gate;
 mod preflight;
 mod prestate_verifier;
 mod position_closure;
@@ -47,6 +48,7 @@ fn usage() {
   meteora-executor preflight-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor presign-preflight <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
+  meteora-executor phase5-promotion-gate <PIO_DATABASE>
   meteora-executor execution-decision-context <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-recovery <EXECUTION_DB> <DECISION_ID> [EXPIRY_GRACE_BLOCKS]
@@ -427,6 +429,23 @@ RPC_URL is accepted as a compatibility fallback",
                     &decision_id,
                 )?;
             println!("{}", serde_json::to_string_pretty(&context)?);
+        }
+        "phase5-promotion-gate" => {
+            let database_path = args
+                .next()
+                .context("PIO_DATABASE is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "phase5-promotion-gate accepts exactly one argument"
+                );
+            }
+            let report = phase5_gate::verify_phase5_promotion_database(
+                std::path::Path::new(&database_path),
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.accepted {
+                std::process::exit(2);
+            }
         }
         "execution-intent-status" => {
             let execution_db = args
