@@ -11,6 +11,7 @@ from .phase9_capture_plan import (
     Phase9ChainCaptureCriteria,
     build_phase9_chain_capture_plan,
 )
+from .phase9_history_plan import build_phase9_history_plan
 from .phase9_policy_authorization import (
     audit_persisted_phase9_policy_authorization,
     evaluate_phase9_policy_authorization,
@@ -420,21 +421,68 @@ def build_phase9_work_queue(
 
     if bundle.adaptive_multi_pool.qualified_records < 1:
         command = None
+        adaptive_reason = (
+            "at least three persisted chain-history pools are needed"
+        )
         if len(pools) >= 3:
-            command = (
-                "pio phase9-research-validate --pools "
-                + _q(",".join(pools[:3]))
-                + " --persist --require-qualified"
+            history_plan = build_phase9_history_plan(
+                storage,
+                rpc_url=rpc_url,
             )
+            if history_plan.plan_ready:
+                command = (
+                    "pio phase9-research-validate --pools "
+                    + _q(",".join(
+                        item.pool_address
+                        for item in history_plan.pools
+                    ))
+                    + " --persist --require-qualified"
+                )
+                adaptive_reason = (
+                    "qualified adaptive/regime multi-pool evidence is missing"
+                )
+            else:
+                deficits = tuple(
+                    (
+                        item.pool_address,
+                        item.additional_observations_needed,
+                    )
+                    for item in history_plan.pools
+                    if item.additional_observations_needed > 0
+                )
+                detail = ", ".join(
+                    f"{pool}:{needed}"
+                    for pool, needed in deficits
+                )
+                history_command = "pio phase9-chain-history-plan"
+                if rpc_url is not None:
+                    history_command += " --rpc-url " + _q(rpc_url)
+                history_command += " --require-ready"
+                items.append(
+                    Phase9WorkItem(
+                        task_type="CHAIN_HISTORY_DEPTH",
+                        scope="__MULTI_POOL__",
+                        reason=(
+                            "adaptive/regime research history is below the "
+                            "exact walk-forward requirement"
+                            + (
+                                f"; additional snapshots by pool: {detail}"
+                                if detail
+                                else ""
+                            )
+                        ),
+                        shell_command=history_command,
+                    )
+                )
+                adaptive_reason = (
+                    "exact chain-history depth must be satisfied before "
+                    "adaptive/regime research can run"
+                )
         items.append(
             Phase9WorkItem(
                 task_type="ADAPTIVE_MULTI_POOL",
                 scope="__MULTI_POOL__",
-                reason=(
-                    "qualified adaptive/regime multi-pool evidence is missing"
-                    if command is not None
-                    else "at least three persisted chain-history pools are needed"
-                ),
+                reason=adaptive_reason,
                 shell_command=command,
             )
         )
