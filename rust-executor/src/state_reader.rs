@@ -34,8 +34,26 @@ pub struct BinArraySnapshot {
 }
 
 #[derive(Debug, Serialize)]
+pub struct FeeStateSnapshot {
+    pub base_factor: u16,
+    pub filter_period: u16,
+    pub decay_period: u16,
+    pub reduction_factor: u16,
+    pub variable_fee_control: u32,
+    pub max_volatility_accumulator: u32,
+    pub base_fee_power_factor: u8,
+    pub volatility_accumulator: u32,
+    pub volatility_reference: u32,
+    pub index_reference: i32,
+    pub last_update_timestamp: i64,
+}
+
+#[derive(Debug, Serialize)]
 pub struct PoolChainSnapshot {
     pub pool_address: String,
+    pub capture_slot_start: u64,
+    pub capture_slot_end: u64,
+    pub clock_unix_timestamp: i64,
     pub active_bin_id: i32,
     pub bin_step: u16,
     pub token_x_mint: String,
@@ -53,6 +71,7 @@ pub struct PoolChainSnapshot {
     pub reward_rates: [String; 2],
     pub reward_duration_ends: [u64; 2],
     pub reward_last_update_times: [u64; 2],
+    pub fee_state: FeeStateSnapshot,
     pub bin_arrays: Vec<BinArraySnapshot>,
 }
 
@@ -176,6 +195,10 @@ pub async fn inspect_pool(
 
     let pool = Pubkey::from_str(pool_address).context("invalid pool address")?;
     let rpc = RpcClient::new(rpc_url.to_string());
+    let capture_slot_start = rpc
+        .get_slot()
+        .await
+        .context("failed to get snapshot start slot")?;
     let account = rpc
         .get_account(&pool)
         .await
@@ -287,8 +310,16 @@ pub async fn inspect_pool(
         });
     }
 
+    let capture_slot_end = rpc
+        .get_slot()
+        .await
+        .context("failed to get snapshot end slot")?;
+
     Ok(PoolChainSnapshot {
         pool_address: pool.to_string(),
+        capture_slot_start,
+        capture_slot_end,
+        clock_unix_timestamp: clock.unix_timestamp,
         active_bin_id: lb_pair.active_id,
         bin_step: lb_pair.bin_step,
         token_x_mint: lb_pair.token_x_mint.to_string(),
@@ -318,6 +349,19 @@ pub async fn inspect_pool(
             lb_pair.reward_infos[0].last_update_time,
             lb_pair.reward_infos[1].last_update_time,
         ],
+        fee_state: FeeStateSnapshot {
+            base_factor: lb_pair.parameters.base_factor,
+            filter_period: lb_pair.parameters.filter_period,
+            decay_period: lb_pair.parameters.decay_period,
+            reduction_factor: lb_pair.parameters.reduction_factor,
+            variable_fee_control: lb_pair.parameters.variable_fee_control,
+            max_volatility_accumulator: lb_pair.parameters.max_volatility_accumulator,
+            base_fee_power_factor: lb_pair.parameters.base_fee_power_factor,
+            volatility_accumulator: lb_pair.v_parameters.volatility_accumulator,
+            volatility_reference: lb_pair.v_parameters.volatility_reference,
+            index_reference: lb_pair.v_parameters.index_reference,
+            last_update_timestamp: lb_pair.v_parameters.last_update_timestamp,
+        },
         bin_arrays,
     })
 }
