@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from .cross_pool_research import CrossPoolResearchReport
-from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
+from .phase8_validation import audit_persisted_phase8_promotion
 from .storage import Storage
 
 
@@ -138,10 +138,8 @@ def research_portfolio_allocation(
             "duplicate pool_address candidates are not allowed"
         )
 
-    phase8_promoted = storage.phase_is_promoted(
-        PHASE8,
-        evidence_type=PHASE8_EVIDENCE_TYPE,
-    )
+    phase8_audit = audit_persisted_phase8_promotion(storage)
+    phase8_promoted = phase8_audit.current
     budget = _d(budget_quote)
     pool_cap = (
         budget
@@ -220,7 +218,7 @@ def research_portfolio_allocation(
     checks = (
         (
             phase8_promoted,
-            "Phase 8 must be persistently promoted before Phase 9 allocation research can qualify",
+            "Phase 8 promotion must still be current before Phase 9 allocation research can qualify",
         ),
         (
             len(allocation_items) >= criteria.min_positions,
@@ -239,6 +237,11 @@ def research_portfolio_allocation(
         ),
     )
     reasons.extend(message for passed, message in checks if not passed)
+    if not phase8_promoted:
+        reasons.extend(
+            f"Phase 8 currentness: {reason}"
+            for reason in phase8_audit.reasons
+        )
     qualified = not reasons
 
     if not phase8_promoted:
