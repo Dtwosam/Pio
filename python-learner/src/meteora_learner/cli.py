@@ -132,6 +132,13 @@ from .phase9_mint_capture import (
 from .phase9_position_discovery import (
     discover_pool_positions_with_rust,
 )
+from .phase9_pool_activity_discovery import (
+    discover_historical_pool_activity_with_rust,
+)
+from .phase9_pool_activity_scan_state import (
+    phase9_pool_activity_scan_state,
+    record_phase9_pool_activity_page,
+)
 from .phase9_wallet_flow_capture import (
     run_phase9_wallet_flow_capture,
 )
@@ -2253,6 +2260,33 @@ def main() -> None:
         default=120,
     )
 
+    phase9_pool_activity = subparsers.add_parser(
+        "phase9-pool-activity-discovery",
+        help="Discover bounded historical Meteora position/owner candidates from Solana signatures mentioning one pool",
+    )
+    phase9_pool_activity.add_argument("--pool", required=True)
+    phase9_pool_activity.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+    )
+    phase9_pool_activity.add_argument(
+        "--before-signature",
+        help="Optional explicit getSignaturesForAddress pagination cursor",
+    )
+    phase9_pool_activity.add_argument(
+        "--advance-backfill",
+        action="store_true",
+        help="Use and advance the persisted per-pool historical backfill cursor",
+    )
+    phase9_pool_activity.add_argument("--rust-manifest-path")
+    phase9_pool_activity.add_argument("--rust-binary-path")
+    phase9_pool_activity.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=300,
+    )
+
     phase9_wallet_capture = subparsers.add_parser(
         "phase9-wallet-flow-capture-run",
         help="Collect official Meteora histories for a bounded current-position cohort until wallet-flow source thresholds are met",
@@ -2287,6 +2321,17 @@ def main() -> None:
         "--max-positions-per-run",
         type=int,
         default=50,
+    )
+    phase9_wallet_capture.add_argument(
+        "--historical-signature-limit",
+        type=int,
+        default=25,
+        help="Maximum pool signatures per historical recent/backfill page",
+    )
+    phase9_wallet_capture.add_argument(
+        "--skip-historical-pool-activity",
+        action="store_true",
+        help="Disable live read-only pool-signature history discovery",
     )
     phase9_wallet_capture.add_argument(
         "--skip-owner-position-expansion",
@@ -5268,6 +5313,66 @@ def main() -> None:
         print(json.dumps(result.to_record(), indent=2))
         return
 
+    if args.command == "phase9-pool-activity-discovery":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        before = args.before_signature
+        state_before = phase9_pool_activity_scan_state(
+            storage,
+            pool_address=args.pool,
+        )
+        if args.advance_backfill:
+            if args.before_signature is not None:
+                raise ValueError(
+                    "--before-signature cannot be combined with "
+                    "--advance-backfill"
+                )
+            if state_before.backfill_exhausted:
+                print(json.dumps({
+                    "status": "BACKFILL_EXHAUSTED",
+                    "research_only": True,
+                    "read_only_capture": True,
+                    "policy_actionable": False,
+                    "execution_wired": False,
+                    "scan_state": state_before.to_record(),
+                }, indent=2))
+                return
+            before = (
+                state_before.backfill_before_signature
+                if state_before.pages_scanned > 0
+                else None
+            )
+
+        result = discover_historical_pool_activity_with_rust(
+            args.pool,
+            limit=args.limit,
+            before_signature=before,
+            rust_manifest_path=args.rust_manifest_path,
+            rust_binary_path=args.rust_binary_path,
+            timeout_seconds=args.timeout_seconds,
+        )
+        state_after = state_before
+        if args.advance_backfill:
+            state_after = record_phase9_pool_activity_page(
+                storage,
+                pool_address=args.pool,
+                next_before_signature=result.next_before_signature,
+                has_more=result.has_more,
+                signatures_scanned=result.signatures_scanned,
+                matching_transactions=result.matching_transactions,
+                positions_discovered=result.positions_found,
+            )
+        print(json.dumps({
+            "research_only": True,
+            "read_only_capture": True,
+            "policy_actionable": False,
+            "execution_wired": False,
+            "discovery": result.to_record(),
+            "scan_state_before": state_before.to_record(),
+            "scan_state_after": state_after.to_record(),
+        }, indent=2))
+        return
+
     if args.command == "phase9-wallet-flow-capture-run":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
@@ -5284,6 +5389,12 @@ def main() -> None:
             ),
             discovery_limit=args.discovery_limit,
             max_positions_per_run=args.max_positions_per_run,
+            enable_historical_activity=(
+                not args.skip_historical_pool_activity
+            ),
+            historical_signature_limit=(
+                args.historical_signature_limit
+            ),
             as_of=args.as_of,
             settings=settings,
             expand_closed_positions=(
