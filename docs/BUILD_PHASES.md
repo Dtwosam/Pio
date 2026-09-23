@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v1.2
+Status: v1.3
 
 ## Phase 0 — Foundation
 Status: complete.
@@ -171,14 +171,49 @@ Built:
 - stored paper evidence required for champion promotion
 
 Still needed:
-- external reward-token valuation beyond token X/Y rewards
 - long endurance/restart runs across many observations and positions
 - extended paper validation on real live observations
 - external alert delivery/integration around the implemented health metrics, if required by deployment
 
 ## Phase 6 — Rust Transaction Executor
+Status: guarded pre-sign execution infrastructure in progress; live signing/sending disabled.
 
-Wallet isolation, instruction building, simulation, signing, confirmation/retry, idempotency and emergency close.
+Built:
+- isolated Rust wallet loader using an absolute owner-only keypair file
+- symlink / broad-permission / inline-key fail-closed wallet handling
+- independent Rust proposal risk gate
+- serialized transaction decoder and RPC simulation
+- proposal-to-transaction binding for pool and fee payer
+- explicit program allowlists
+- action-bound instruction discriminator / data-prefix allowlists
+- instruction-count and static-account-count limits
+- fail-closed address-lookup-table policy
+- unsigned-transaction enforcement
+- durable execution-intent journal keyed by immutable decision ID
+- risk / transaction-policy / transaction-guard persistence
+- monotonic idempotent execution state transitions
+- simulation blocked until an accepted transaction guard is persisted
+- executor-wallet authorization bound to the guarded fee payer
+- signing state blocked until wallet authorization is persisted
+- restart-safe confirmation reconciliation for already-sent signatures
+- read-only Solana confirmation lookup with transaction-history search
+- unsigned standard-SPL Meteora RemoveAllLiquidity emergency-exit builder
+- chain-resolved emergency-exit account derivation and ownership validation
+- strict pinned RemoveAllLiquidity discriminator policy for EXIT actions
+- Phase 6 execution runbook and reproducible guard/request examples
+
+Still needed:
+- normal live entry instruction construction
+- normal live rebalance instruction construction
+- fee/reward claim and final position-account close sequence
+- Token-2022 transfer-hook / remaining-account execution support
+- exact recent-blockhash preparation and final pre-sign simulation
+- isolated transaction signer implementation
+- send/retry logic with ambiguous-outcome recovery and no duplicate execution
+- execution receipts reconciled into the Python account/learning layer
+- end-to-end controlled executor validation after Phase 5 promotion evidence exists
+
+Live signing and transaction sending remain unavailable.
 
 ## Phase 7 — Controlled Live Trading
 
