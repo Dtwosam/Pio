@@ -12,6 +12,10 @@ from .phase9_capture_plan import (
     build_phase9_chain_capture_plan,
 )
 from .phase9_history_plan import build_phase9_history_plan
+from .phase9_mint_capture import (
+    Phase9MintCaptureCriteria,
+    build_phase9_mint_capture_plan,
+)
 from .phase9_policy_authorization import (
     audit_persisted_phase9_policy_authorization,
     evaluate_phase9_policy_authorization,
@@ -305,6 +309,7 @@ def build_phase9_work_queue(
         Phase9ResearchBundleCriteria()
     ),
     rpc_url: str | None = None,
+    as_of: str | None = None,
 ) -> Phase9WorkQueue:
     phase8_audit = audit_persisted_phase8_promotion(storage)
     phase8_promoted = phase8_audit.current
@@ -497,61 +502,17 @@ def build_phase9_work_queue(
         value for value in pools if value not in qualified_mint
     ][:mint_needed]
     for pool in mint_candidate_pools:
-        required_mints = _latest_pool_mints(
+        mint_plan = build_phase9_mint_capture_plan(
             storage,
-            pool_address=pool,
+            criteria=Phase9MintCaptureCriteria(
+                target_pools=1,
+                max_snapshot_age_seconds=3600,
+                include_reward_mints=True,
+            ),
+            pool_addresses=(pool,),
+            as_of=as_of,
         )
-        missing_mints = [
-            mint
-            for mint in required_mints
-            if not _mint_snapshot_exists(
-                storage,
-                mint_address=mint,
-            )
-        ]
-        if missing_mints:
-            for mint in missing_mints:
-                inspect_command = (
-                    "meteora-executor inspect-mint "
-                    + _q(rpc_url)
-                    + " "
-                    + _q(mint)
-                    if rpc_url is not None
-                    else (
-                        "meteora-executor inspect-mint-env "
-                        + _q(mint)
-                    )
-                )
-                items.append(
-                    Phase9WorkItem(
-                        task_type="MINT_SNAPSHOT",
-                        scope=mint,
-                        reason=(
-                            f"pool {pool} requires authoritative mint state "
-                            "before mint-risk research can run"
-                        ),
-                        shell_command=(
-                            inspect_command
-                            + " | pio ingest-mint-snapshot --file -"
-                        ),
-                    )
-                )
-            continue
-
-        if required_mints:
-            items.append(
-                Phase9WorkItem(
-                    task_type="MINT_RISK",
-                    scope=pool,
-                    reason="qualified persisted mint-risk evidence is needed",
-                    shell_command=(
-                        "pio mint-risk-research --pool "
-                        + _q(pool)
-                        + " --persist --require-qualified"
-                    ),
-                )
-            )
-        else:
+        if not mint_plan.candidates:
             items.append(
                 Phase9WorkItem(
                     task_type="MINT_RISK",
@@ -563,6 +524,67 @@ def build_phase9_work_queue(
                     shell_command=None,
                 )
             )
+            continue
+
+        if mint_plan.captures_required:
+            details = "; ".join(
+                f"{candidate.mint_address}: {candidate.reason}"
+                for candidate in mint_plan.candidates
+                if candidate.capture_required
+            )
+            if as_of is not None:
+                capture_command = None
+                reason = (
+                    f"pool {pool} lacks mint snapshots valid at historical "
+                    f"cutoff {as_of}; authoritative state captured later "
+                    "cannot backfill that cutoff"
+                    + (f": {details}" if details else "")
+                )
+            else:
+                prefix = (
+                    "SOLANA_RPC_URL="
+                    + _q(rpc_url)
+                    + " "
+                    if rpc_url is not None
+                    else ""
+                )
+                capture_command = (
+                    prefix
+                    + "pio phase9-mint-capture-run "
+                    + "--target-pools 1 --pools "
+                    + _q(pool)
+                    + " --require-ready"
+                )
+                reason = (
+                    f"pool {pool} requires fresh authoritative mint "
+                    "snapshots before mint-risk research can run"
+                    + (f": {details}" if details else "")
+                )
+            items.append(
+                Phase9WorkItem(
+                    task_type="MINT_SNAPSHOT",
+                    scope=pool,
+                    reason=reason,
+                    shell_command=capture_command,
+                )
+            )
+            continue
+
+        risk_command = (
+            "pio mint-risk-research --pool "
+            + _q(pool)
+        )
+        if as_of is not None:
+            risk_command += " --as-of " + _q(as_of)
+        risk_command += " --persist --require-qualified"
+        items.append(
+            Phase9WorkItem(
+                task_type="MINT_RISK",
+                scope=pool,
+                reason="qualified persisted mint-risk evidence is needed",
+                shell_command=risk_command,
+            )
+        )
     if mint_needed > len(mint_candidate_pools):
         items.append(
             Phase9WorkItem(
@@ -654,43 +676,67 @@ def build_phase9_work_queue(
     )
     if mint_lineage_invalid:
         for pool in bundle.mint_risk.qualified_pools:
-            required_mints = _latest_pool_mints(
+            mint_plan = build_phase9_mint_capture_plan(
                 storage,
-                pool_address=pool,
+                criteria=Phase9MintCaptureCriteria(
+                    target_pools=1,
+                    max_snapshot_age_seconds=3600,
+                    include_reward_mints=True,
+                ),
+                pool_addresses=(pool,),
+                as_of=as_of,
             )
-            missing_mints = [
-                mint
-                for mint in required_mints
-                if not _mint_snapshot_exists(
-                    storage,
-                    mint_address=mint,
+            if mint_plan.captures_required:
+                details = "; ".join(
+                    f"{candidate.mint_address}: {candidate.reason}"
+                    for candidate in mint_plan.candidates
+                    if candidate.capture_required
                 )
-            ]
-            if missing_mints:
-                rpc = rpc_url if rpc_url is not None else "<RPC_URL>"
-                for mint in missing_mints:
-                    filename = f"mint-{mint}.json"
-                    items.append(
-                        Phase9WorkItem(
-                            task_type="MINT_SNAPSHOT_REPAIR",
-                            scope=mint,
-                            reason=(
-                                f"qualified mint-risk evidence for {pool} "
-                                "cannot resolve authoritative snapshot lineage"
-                            ),
-                            shell_command=(
-                                "meteora-executor inspect-mint "
-                                + _q(rpc)
-                                + " "
-                                + _q(mint)
-                                + " > "
-                                + _q(filename)
-                                + " && pio mint-snapshot-ingest --file "
-                                + _q(filename)
-                            ),
-                        )
+                if as_of is not None:
+                    command = None
+                    reason = (
+                        "qualified mint-risk lineage cannot be repaired at "
+                        f"historical cutoff {as_of} because required "
+                        "authoritative mint state is missing or stale"
+                        + (f": {details}" if details else "")
                     )
+                else:
+                    prefix = (
+                        "SOLANA_RPC_URL="
+                        + _q(rpc_url)
+                        + " "
+                        if rpc_url is not None
+                        else ""
+                    )
+                    command = (
+                        prefix
+                        + "pio phase9-mint-capture-run "
+                        + "--target-pools 1 --pools "
+                        + _q(pool)
+                        + " --require-ready"
+                    )
+                    reason = (
+                        f"qualified mint-risk evidence for {pool} needs "
+                        "fresh authoritative mint snapshots before lineage "
+                        "can be rebuilt"
+                        + (f": {details}" if details else "")
+                    )
+                items.append(
+                    Phase9WorkItem(
+                        task_type="MINT_SNAPSHOT_REPAIR",
+                        scope=pool,
+                        reason=reason,
+                        shell_command=command,
+                    )
+                )
             else:
+                command = (
+                    "pio mint-risk-research --pool "
+                    + _q(pool)
+                )
+                if as_of is not None:
+                    command += " --as-of " + _q(as_of)
+                command += " --persist --require-qualified"
                 items.append(
                     Phase9WorkItem(
                         task_type="MINT_RISK_REPAIR",
@@ -699,11 +745,7 @@ def build_phase9_work_queue(
                             "qualified mint-risk evidence is not bound to "
                             "valid authoritative snapshot IDs"
                         ),
-                        shell_command=(
-                            "pio mint-risk-research --pool "
-                            + _q(pool)
-                            + " --persist --require-qualified"
-                        ),
+                        shell_command=command,
                     )
                 )
 
