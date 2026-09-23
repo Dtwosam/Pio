@@ -17,6 +17,7 @@ pub struct ControlledLiveConfig {
     pub allowed_pool_addresses: Vec<String>,
     pub max_open_positions: usize,
     pub max_capital_quote_per_entry: f64,
+    pub max_daily_entry_capital_quote: f64,
     pub max_daily_drawdown_pct: f64,
     pub allow_rebalance: bool,
     pub allow_exit: bool,
@@ -39,6 +40,8 @@ pub struct ControlledLiveReport {
     pub pool_allowed: bool,
     pub capital_quote: f64,
     pub max_capital_quote_per_entry: f64,
+    pub daily_submitted_entry_capital_quote: f64,
+    pub max_daily_entry_capital_quote: f64,
     pub daily_drawdown_pct: f64,
     pub max_daily_drawdown_pct: f64,
 }
@@ -52,6 +55,20 @@ fn validate_config(config: &ControlledLiveConfig) -> Result<BTreeSet<Pubkey>> {
     {
         anyhow::bail!(
             "max_capital_quote_per_entry must be finite and positive"
+        );
+    }
+    if !config.max_daily_entry_capital_quote.is_finite()
+        || config.max_daily_entry_capital_quote <= 0.0
+    {
+        anyhow::bail!(
+            "max_daily_entry_capital_quote must be finite and positive"
+        );
+    }
+    if config.max_daily_entry_capital_quote
+        < config.max_capital_quote_per_entry
+    {
+        anyhow::bail!(
+            "max_daily_entry_capital_quote cannot be below the per-entry cap"
         );
     }
     if !config.max_daily_drawdown_pct.is_finite()
@@ -220,6 +237,9 @@ pub fn evaluate_controlled_live(
         capital_quote: proposal.capital_quote,
         max_capital_quote_per_entry:
             config.max_capital_quote_per_entry,
+        daily_submitted_entry_capital_quote: 0.0,
+        max_daily_entry_capital_quote:
+            config.max_daily_entry_capital_quote,
         daily_drawdown_pct: proposal.daily_drawdown_pct,
         max_daily_drawdown_pct: config.max_daily_drawdown_pct,
     })
@@ -274,6 +294,8 @@ pub fn evaluate_controlled_live_intent(
 
     let unresolved = execution_store
         .unresolved_live_entry_decision_ids(Some(decision_id))?;
+    let daily_submitted_entry_capital_quote = execution_store
+        .submitted_live_entry_capital_today(Some(decision_id))?;
     let reconciled = reconciled_open_decision_ids(database_path)?;
     let unresolved_entry_intents = unresolved
         .iter()
@@ -286,8 +308,18 @@ pub fn evaluate_controlled_live_intent(
 
     report.unresolved_entry_intents = unresolved_entry_intents;
     report.effective_open_positions = effective_open_positions;
+    report.daily_submitted_entry_capital_quote =
+        daily_submitted_entry_capital_quote;
 
     if report.accepted
+        && request.proposal.action == Action::Enter
+        && daily_submitted_entry_capital_quote
+            + request.proposal.capital_quote
+            > config.max_daily_entry_capital_quote
+    {
+        report.accepted = false;
+        report.reason = "daily_entry_capital_budget_exceeded".into();
+    } else if report.accepted
         && request.proposal.action == Action::Enter
         && effective_open_positions >= config.max_open_positions
     {
@@ -406,6 +438,7 @@ mod tests {
             allowed_pool_addresses: vec![pool.to_string()],
             max_open_positions: 1,
             max_capital_quote_per_entry: 50.0,
+            max_daily_entry_capital_quote: 100.0,
             max_daily_drawdown_pct: 2.0,
             allow_rebalance: true,
             allow_exit: true,
@@ -739,6 +772,138 @@ mod tests {
         .unwrap();
         assert_eq!(reconciled_report.unresolved_entry_intents, 0);
         assert_eq!(reconciled_report.effective_open_positions, 1);
+
+        let _ = std::fs::remove_file(pio_path);
+        let _ = std::fs::remove_file(execution_path);
+    }
+
+    #[test]
+    fn daily_submitted_capital_blocks_additional_entry() {
+        use crate::blockhash::PreparedUnsignedTransaction;
+        use crate::dry_run::DryRunExecutionRequest;
+        use crate::execution_guard::RiskCheckReport;
+        use crate::risk::RiskConfig;
+        use crate::simulation::SimulationReport;
+        use crate::transaction_guard::TransactionGuardReport;
+        use crate::wallet_guard::WalletAuthorizationReport;
+        use serde_json::json;
+
+        let pio_path = db_path();
+        seed(&pio_path, 0);
+        let execution_path = std::env::temp_dir().join(format!(
+            "pio-controlled-live-budget-{}.db",
+            Uuid::new_v4()
+        ));
+        let store = ExecutionIntentStore::open(&execution_path).unwrap();
+        let pool = Pubkey::new_unique();
+        let risk_config = RiskConfig {
+            max_capital_per_position_pct: 10.0,
+            max_total_deployed_pct: 50.0,
+            max_daily_drawdown_pct: 5.0,
+            min_expected_edge_pct: 0.0,
+            max_expected_downside_pct: 10.0,
+            max_data_age_seconds: 60,
+        };
+
+        let mut first = proposal(pool, Action::Enter);
+        first.capital_quote = 80.0;
+        let first_id = first.decision_id.to_string();
+        let first_request = DryRunExecutionRequest {
+            proposal: first.clone(),
+            transaction_base64: "tx-1".into(),
+        };
+        store.register(&first_request, &risk_config).unwrap();
+
+        let risk = RiskCheckReport {
+            decision_id: first.decision_id,
+            mode: Mode::Live,
+            action: Action::Enter,
+            accepted: true,
+            reason: "approved".into(),
+        };
+        let guard = TransactionGuardReport {
+            accepted: true,
+            reason: "approved".into(),
+            fee_payer: "payer".into(),
+            pool_account_present: true,
+            required_accounts_present: true,
+            instruction_count: 1,
+            static_account_count: 2,
+            required_signatures: 1,
+            signatures_all_default: true,
+            address_lookup_table_count: 0,
+            program_ids: vec!["program".into()],
+            instruction_fingerprints: vec![],
+        };
+        let simulation = SimulationReport {
+            succeeded: true,
+            rpc_context_slot: 1,
+            result: json!({"err": null}),
+        };
+        let wallet = WalletAuthorizationReport {
+            accepted: true,
+            reason: "approved".into(),
+            wallet_pubkey: "payer".into(),
+            transaction_fee_payer: "payer".into(),
+        };
+        store.record_risk(&first_id, &risk).unwrap();
+        store.record_transaction_guard(&first_id, &guard).unwrap();
+        store.record_simulation(&first_id, &simulation).unwrap();
+        store
+            .record_wallet_authorization(&first_id, &wallet)
+            .unwrap();
+        store
+            .record_final_presign(
+                &first_id,
+                &PreparedUnsignedTransaction {
+                    transaction_base64: "prepared".into(),
+                    recent_blockhash: "blockhash".into(),
+                    last_valid_block_height: 100,
+                    rpc_context_slot: 1,
+                    signatures_all_default: true,
+                },
+                &guard,
+                &wallet,
+                &simulation,
+            )
+            .unwrap();
+        store.begin_signing(&first_id).unwrap();
+
+        let mut second = proposal(pool, Action::Enter);
+        second.capital_quote = 25.0;
+        let second_id = second.decision_id.to_string();
+        store
+            .register(
+                &DryRunExecutionRequest {
+                    proposal: second,
+                    transaction_base64: "tx-2".into(),
+                },
+                &risk_config,
+            )
+            .unwrap();
+
+        let mut cfg = config(pool);
+        cfg.max_open_positions = 3;
+        cfg.max_capital_quote_per_entry = 100.0;
+        cfg.max_daily_entry_capital_quote = 100.0;
+
+        let report = evaluate_controlled_live_intent(
+            &pio_path,
+            &store,
+            &second_id,
+            &cfg,
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(
+            report.reason,
+            "daily_entry_capital_budget_exceeded"
+        );
+        assert_eq!(
+            report.daily_submitted_entry_capital_quote,
+            80.0
+        );
 
         let _ = std::fs::remove_file(pio_path);
         let _ = std::fs::remove_file(execution_path);
