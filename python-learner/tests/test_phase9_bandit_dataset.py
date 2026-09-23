@@ -190,6 +190,7 @@ def test_bandit_dataset_uses_common_pool_cutoff_and_deduplicates(
     assert first.output_file.startswith(str(tmp_path.resolve()))
     assert first.dataset_version.startswith("ML_ACTION_DATASET_V1:")
     assert first.dataset_sha256 == dataset.report.dataset_sha256
+    assert first.build_parameters["max_source_observations"] == 96
 
 
 def test_bandit_dataset_load_rebuilds_and_rejects_file_tamper(
@@ -384,3 +385,23 @@ def test_phase9_validation_replays_dataset_backed_bandit_lineage(
         ),
     )
     assert validation_module._bandit_lineage_valid(storage) is False
+
+
+def test_bandit_dataset_rejects_source_bound_smaller_than_replay_window(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    artifact = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(explicit_payload()),
+    )
+
+    with pytest.raises(ValueError, match="max_source_observations"):
+        build_phase9_bandit_dataset(
+            storage,
+            artifact=artifact,
+            cutoff="2026-09-23T14:00:00+00:00",
+            lookback_observations=12,
+            forward_observations=2,
+            max_source_observations=12,
+        )
