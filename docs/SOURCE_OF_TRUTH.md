@@ -362,3 +362,17 @@ Phase 9 research promotion is additionally bound to an immutable persisted
 research-bundle record. If newer component evidence appears, the prior bundle is
 stale and must be revalidated and persisted again before
 `PHASE9_PROMOTION_V1` can be written.
+
+
+Portfolio-allocation qualification is artifact-bound. The preferred Phase 9
+flow persists the exact multi-pool candidate corpus, source pool inputs,
+account-state assumptions and ranked comparison as immutable
+`PHASE9_PORTFOLIO_CANDIDATES_V1` evidence with a SHA-256. Qualified allocation
+evidence must reference that evidence ID/hash for Phase 9 bundle readiness.
+Free-form candidate files remain exploratory only.
+
+Contextual-bandit qualification is likewise lineage-bound: qualified Phase 9
+bundle evidence must resolve its dataset evidence ID back to a persisted
+`CONTINUOUS_RETRAIN_DATASET_V1` record and matching retraining cycle, dataset
+version, SHA-256 and cutoff. Merely supplying lineage-shaped JSON is
+insufficient.
