@@ -83,6 +83,8 @@ def run_phase9_source_capture(
     history_min_observation_interval_seconds: int = 3600,
     wallet_discovery_limit: int = 250,
     wallet_max_positions_per_run: int = 50,
+    wallet_enable_historical_activity: bool = True,
+    wallet_historical_signature_limit: int = 25,
     wallet_expand_closed_positions: bool = True,
     wallet_owner_expansion_limit: int = 25,
     wallet_owner_position_max_pages: int = 3,
@@ -99,6 +101,13 @@ def run_phase9_source_capture(
     if history_min_observation_interval_seconds < 0:
         raise ValueError(
             "history_min_observation_interval_seconds cannot be negative"
+        )
+    if (
+        wallet_historical_signature_limit < 1
+        or wallet_historical_signature_limit > 1_000
+    ):
+        raise ValueError(
+            "wallet_historical_signature_limit must be between 1 and 1000"
         )
     if wallet_owner_expansion_limit < 1:
         raise ValueError("wallet_owner_expansion_limit must be positive")
@@ -199,6 +208,12 @@ def run_phase9_source_capture(
                 criteria=WalletFlowCriteria(),
                 discovery_limit=wallet_discovery_limit,
                 max_positions_per_run=wallet_max_positions_per_run,
+                enable_historical_activity=(
+                    wallet_enable_historical_activity
+                ),
+                historical_signature_limit=(
+                    wallet_historical_signature_limit
+                ),
                 expand_closed_positions=wallet_expand_closed_positions,
                 owner_expansion_limit=wallet_owner_expansion_limit,
                 owner_position_max_pages=wallet_owner_position_max_pages,
