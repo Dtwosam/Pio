@@ -272,6 +272,25 @@ CREATE TABLE IF NOT EXISTS chain_add_liquidity_requests (
 CREATE INDEX IF NOT EXISTS idx_chain_add_request_signature
 ON chain_add_liquidity_requests(signature, instruction_index);
 
+CREATE TABLE IF NOT EXISTS composition_prestate_verifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    snapshot_observed_at TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    transaction_slot INTEGER NOT NULL,
+    capture_slot_start INTEGER NOT NULL,
+    capture_slot_end INTEGER NOT NULL,
+    eligible INTEGER NOT NULL,
+    reasons_json TEXT NOT NULL,
+    account_checks_json TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    UNIQUE(signature, snapshot_observed_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_composition_prestate_signature
+ON composition_prestate_verifications(signature, snapshot_observed_at);
+
 CREATE TABLE IF NOT EXISTS chain_transaction_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
@@ -1385,6 +1404,57 @@ class Storage:
                 rows,
             )
         return len(rows)
+
+    def save_composition_prestate_verification(
+        self,
+        payload: dict[str, Any],
+        *,
+        snapshot_observed_at: str,
+        pool_address: str,
+        observed_at: str | None = None,
+    ) -> int:
+        observed_at = observed_at or utc_now_iso()
+        reasons = payload.get("reasons") or []
+        account_checks = payload.get("account_checks") or []
+        if not isinstance(reasons, list):
+            raise ValueError("prestate verification reasons must be a list")
+        if not isinstance(account_checks, list):
+            raise ValueError("prestate verification account_checks must be a list")
+
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO composition_prestate_verifications(
+                    observed_at, signature, snapshot_observed_at, pool_address,
+                    transaction_slot, capture_slot_start, capture_slot_end,
+                    eligible, reasons_json, account_checks_json, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(signature, snapshot_observed_at) DO UPDATE SET
+                    observed_at=excluded.observed_at,
+                    pool_address=excluded.pool_address,
+                    transaction_slot=excluded.transaction_slot,
+                    capture_slot_start=excluded.capture_slot_start,
+                    capture_slot_end=excluded.capture_slot_end,
+                    eligible=excluded.eligible,
+                    reasons_json=excluded.reasons_json,
+                    account_checks_json=excluded.account_checks_json,
+                    raw_json=excluded.raw_json
+                """,
+                (
+                    observed_at,
+                    str(payload["signature"]),
+                    snapshot_observed_at,
+                    pool_address,
+                    int(payload["transaction_slot"]),
+                    int(payload["capture_slot_start"]),
+                    int(payload["capture_slot_end"]),
+                    int(bool(payload["eligible"])),
+                    json.dumps(reasons, separators=(",", ":")),
+                    json.dumps(account_checks, separators=(",", ":")),
+                    json.dumps(payload, separators=(",", ":")),
+                ),
+            )
+        return 1
 
     def save_quality_checks(
         self,
