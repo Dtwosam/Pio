@@ -1,5 +1,6 @@
 mod blockhash;
 mod confirmation;
+mod decision_context;
 mod dry_run;
 mod entry;
 mod emergency_exit;
@@ -41,6 +42,7 @@ fn usage() {
   meteora-executor preflight-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor presign-preflight <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
+  meteora-executor execution-decision-context <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-recovery <EXECUTION_DB> <DECISION_ID> [EXPIRY_GRACE_BLOCKS]
   meteora-executor execution-receipt <EXECUTION_DB> <DECISION_ID>
@@ -395,6 +397,27 @@ RPC_URL is accepted as a compatibility fallback",
             if !report.accepted {
                 std::process::exit(2);
             }
+        }
+        "execution-decision-context" => {
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
+            let decision_id = args
+                .next()
+                .context("DECISION_ID is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "execution-decision-context accepts exactly two arguments"
+                );
+            }
+            let store =
+                execution_store::ExecutionIntentStore::open(&execution_db)?;
+            let context =
+                decision_context::export_execution_decision_context(
+                    &store,
+                    &decision_id,
+                )?;
+            println!("{}", serde_json::to_string_pretty(&context)?);
         }
         "execution-intent-status" => {
             let execution_db = args
