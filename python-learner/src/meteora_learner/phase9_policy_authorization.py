@@ -123,6 +123,21 @@ class Phase9PolicyAuthorizationReport:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class Phase9PolicyAuthorizationAudit:
+    exists: bool
+    qualified: bool
+    boundary_valid: bool
+    criteria_valid: bool
+    current_authorization_ready: bool
+    persisted_matches_current: bool
+    current: bool
+    evidence_id: int | None
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
 def _criteria_strong_enough(
     shadow: Phase9ShadowCriteria,
     gate: Phase9PolicyAuthorizationCriteria,
