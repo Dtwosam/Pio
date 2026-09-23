@@ -21,7 +21,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 2: standard-SPL simulator implementation complete; real promotion evidence pending
 - Phase 3: deterministic policy + persisted validation/promotion workflow implemented; real promotion evidence pending
 - Phase 4: reproducible no-lookahead ML challenger workflow implemented; not promoted
-- Phase 5: unattended chain-driven PAPER scheduler + health/endurance evidence framework implemented; real endurance validation pending
+- Phase 5: implementation complete; persisted real PAPER promotion evidence pending
 - Default mode: PAPER
 - Live signing: not implemented
 
