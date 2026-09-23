@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Pio PAPER health every five minutes for account %i
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=5min
+AccuracySec=15s
+Persistent=true
+Unit=pio-paper-health@%i.service
+
+[Install]
+WantedBy=timers.target
