@@ -18,7 +18,9 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 0: complete
 - Phase 1: implemented; extended live validation pending
 - Phase 2: standard-SPL simulator implementation complete; real promotion evidence pending
-- Phase 3: deterministic research policy implemented; not promoted
+- Phase 3: deterministic research policy implemented; promotion evidence pending
+- Phase 4: experimental no-lookahead ML challenger pipeline implemented; not promoted
+- Phase 5: persistent paper ledger and automatic position-management cycle implemented; continuous live orchestration pending
 - Default mode: PAPER
 - Live signing: not implemented
 
@@ -61,6 +63,16 @@ pio phase3-plan --pool <POOL> --amount-x <ATOMIC_X> --amount-y <ATOMIC_Y> \
   --requested-quote <NOTIONAL> --equity <EQUITY> --cash <CASH> \
   --deployed <DEPLOYED> --drawdown-bps <BPS> \
   --network-cost-y-atomic <COST>
+
+pio paper-create-account --account paper --cash 10000
+pio paper-status --account paper
+pio paper-open --event-key <KEY> --account paper --position <ID> --pool <POOL> \
+  --policy-source DETERMINISTIC --strategy SPOT --min-bin <MIN> --max-bin <MAX> \
+  --capital <QUOTE>
+pio paper-observe --event-key-prefix <KEY> --position <ID> --active-bin <BIN> \
+  --holding-observations <N> --mark <QUOTE> --estimated-exit-cost <QUOTE> \
+  --rebalance-cost <QUOTE>
+pio paper-performance --account paper --policy-source DETERMINISTIC
 ```
 
 Real execution/calibration commands:
@@ -77,6 +89,8 @@ pio reconcile-composition --position <POSITION>
 The work queue emits concrete read-only Rust commands when an existing sample can be completed. If historical prestate cannot be proven, it says so instead of reconstructing it approximately.
 
 Phase 3 commands are research/policy tools. They do not build, sign or send live transactions. A pool must pass the fail-closed safety screen, a deterministic range/strategy must pass trailing replay, capital must fit sizing limits, and Phase 2 evidence must be promoted before the policy can authorize entry.
+
+ML v1 is research-only: it learns from all replay-valid candidate actions at each decision point, uses time-ordered holdout validation, compares challengers against the deterministic baseline, and cannot become champion without qualified paper evidence. Paper commands mutate only the local paper ledger; they never sign or send a Solana transaction.
 
 ## Rust read-only inspection
 
