@@ -772,9 +772,43 @@ def test_persisted_phase9_promotion_audit_is_current_after_persist(tmp_path):
     audit = audit_persisted_phase9_promotion(storage)
 
     assert audit.current is True
+    assert audit.history_exists is True
+    assert audit.current_row_matches_latest_history is True
     assert audit.persisted_matches_current is True
     assert audit.reasons == ()
 
+
+
+def test_phase9_promotion_audit_rejects_current_row_tampering(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(storage, report=bundle)
+    report = evaluate_phase9_promotion(storage)
+    assert report.promotion_ready is True
+    persist_phase9_promotion(storage, report=report)
+
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE phase_promotion_evidence
+            SET evidence_json = '{}'
+            WHERE phase_name = 'PHASE9'
+            """
+        )
+
+    audit = audit_persisted_phase9_promotion(storage)
+
+    assert audit.current is False
+    assert audit.history_exists is True
+    assert audit.current_row_matches_latest_history is False
+    assert any(
+        "differs from immutable history" in reason
+        for reason in audit.reasons
+    )
+    history = storage.phase_promotion_history("PHASE9")
+    assert len(history) == 1
+    assert history[0]["qualified"] is True
 
 def test_persisted_phase9_promotion_audit_detects_staleness(tmp_path):
     storage = Storage(tmp_path / "pio.db")
