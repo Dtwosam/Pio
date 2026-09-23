@@ -57,6 +57,38 @@ def save_mint_snapshot(storage, mint):
     )
 
 
+def seed_retraining_dataset_evidence(storage):
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO model_registry(
+                model_id, created_at, updated_at, model_family,
+                feature_version, dataset_version, status,
+                metrics_json
+            ) VALUES (
+                'champion', '2026-09-23T00:00:00+00:00',
+                '2026-09-23T00:00:00+00:00',
+                'TEST', 'TEST', 'dataset-v1', 'CHAMPION', '{}'
+            )
+            """
+        )
+    storage.save_model_live_evidence(
+        model_id="champion",
+        evidence_type="CONTINUOUS_RETRAIN_DATASET_V1",
+        status="BUILT",
+        evidence={
+            "cycle_id": "cycle-lineage",
+            "cutoff": "2026-09-23T12:00:00+00:00",
+            "target_dataset_version": "ML_ACTION_DATASET_V1:deadbeefdeadbeef",
+            "dataset": {
+                "dataset_sha256": "deadbeefdeadbeefdeadbeef",
+                "dataset_version": "ML_ACTION_DATASET_V1:deadbeefdeadbeef",
+            },
+            "output_file": "retrain.csv",
+        },
+    )
+
+
 def promote_phase8(storage):
     storage.save_phase_promotion_evidence(
         phase_name=PHASE8,
@@ -234,3 +266,19 @@ def test_work_queue_mint_snapshot_command_uses_requested_rpc(tmp_path):
     assert "https://rpc.example.invalid" in task.shell_command
     assert "inspect-mint" in task.shell_command
     assert "mint-snapshot-ingest" in task.shell_command
+
+
+def test_work_queue_prefers_cycle_bound_bandit_when_lineage_exists(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_retraining_dataset_evidence(storage)
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "CONTEXTUAL_BANDIT"
+    )
+    assert task.scope == "cycle-lineage"
+    assert task.shell_command is not None
+    assert "contextual-bandit-cycle-research" in task.shell_command
+    assert "--cycle-id cycle-lineage" in task.shell_command
