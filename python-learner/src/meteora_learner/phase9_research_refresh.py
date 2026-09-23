@@ -23,6 +23,12 @@ from .phase9_explicit_inputs import (
     load_phase9_explicit_inputs,
     run_phase9_explicit_research,
 )
+from .phase9_bandit_dataset import (
+    build_phase9_bandit_dataset,
+    evaluate_phase9_contextual_bandit_from_dataset,
+    persist_phase9_bandit_dataset,
+    persist_phase9_contextual_bandit_from_dataset,
+)
 from .portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
 )
@@ -766,7 +772,10 @@ def run_phase9_research_refresh(
                         )
                     )
 
-    # Contextual bandit uses only a checksum-bound retraining cycle dataset.
+    # Contextual bandit prefers an existing checksum-bound retraining-cycle
+    # dataset. If none exists, Phase 9 may derive a research-only action
+    # dataset from a validated explicit-input artifact plus persisted chain
+    # history. No labels or economic assumptions are synthesized.
     if replay.get("contextual_bandit", False):
         items.append(
             Phase9ResearchRefreshItem(
@@ -780,21 +789,7 @@ def run_phase9_research_refresh(
         )
     else:
         cycle_id = _latest_retraining_dataset_cycle(storage)
-        if cycle_id is None:
-            items.append(
-                Phase9ResearchRefreshItem(
-                    family="contextual_bandit",
-                    scope="DATASET_REQUIRED",
-                    status="SKIPPED_SOURCE_NOT_READY",
-                    research_qualified=None,
-                    persisted_evidence_id=None,
-                    reason=(
-                        "no valid checksum-bound continuous retraining "
-                        "dataset is available"
-                    ),
-                )
-            )
-        else:
+        if cycle_id is not None:
             try:
                 result = evaluate_cycle_contextual_bandit(
                     storage,
@@ -838,6 +833,116 @@ def run_phase9_research_refresh(
                         reason=f"{type(exc).__name__}: {str(exc)[:1000]}",
                     )
                 )
+        else:
+            explicit_audit = audit_phase9_explicit_inputs(storage)
+            if (
+                not explicit_audit.valid
+                or explicit_audit.evidence_id is None
+            ):
+                items.append(
+                    Phase9ResearchRefreshItem(
+                        family="contextual_bandit",
+                        scope="EXPLICIT_INPUT_ARTIFACT",
+                        status="SKIPPED_SOURCE_NOT_READY",
+                        research_qualified=None,
+                        persisted_evidence_id=None,
+                        reason=(
+                            "no retraining dataset exists and a valid "
+                            "explicit-input artifact is unavailable"
+                            + (
+                                ": " + "; ".join(
+                                    explicit_audit.reasons
+                                )
+                                if explicit_audit.reasons
+                                else ""
+                            )
+                        ),
+                    )
+                )
+            else:
+                try:
+                    artifact = load_phase9_explicit_inputs(
+                        storage,
+                        evidence_id=explicit_audit.evidence_id,
+                    )
+                    if artifact is None:
+                        raise ValueError(
+                            "validated explicit input artifact disappeared"
+                        )
+                    dataset_payload, dataset_bytes = (
+                        build_phase9_bandit_dataset(
+                            storage,
+                            artifact=artifact,
+                        )
+                    )
+                    dataset_artifact = persist_phase9_bandit_dataset(
+                        storage,
+                        payload=dataset_payload,
+                        raw_dataset=dataset_bytes,
+                    )
+                    result = (
+                        evaluate_phase9_contextual_bandit_from_dataset(
+                            storage,
+                            dataset_evidence_id=(
+                                dataset_artifact.evidence_id
+                            ),
+                        )
+                    )
+                    evidence = result.report.to_record()
+                    evidence["dataset_lineage"] = asdict(result.lineage)
+                    status, evidence_id = _persist_if_changed(
+                        storage,
+                        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+                        pool_address="__CONTEXTUAL_BANDIT__",
+                        evidence=evidence,
+                        persist=lambda: (
+                            persist_phase9_contextual_bandit_from_dataset(
+                                storage,
+                                result=result,
+                            )
+                        ),
+                    )
+                    items.append(
+                        Phase9ResearchRefreshItem(
+                            family="contextual_bandit",
+                            scope=str(dataset_artifact.evidence_id),
+                            status=status,
+                            research_qualified=(
+                                result.report.research_qualified
+                            ),
+                            persisted_evidence_id=evidence_id,
+                            reason=(
+                                "recomputed from a checksum-bound Phase 9 "
+                                "counterfactual dataset derived from "
+                                f"explicit input artifact {artifact.evidence_id}"
+                            ),
+                        )
+                    )
+                except ValueError as exc:
+                    items.append(
+                        Phase9ResearchRefreshItem(
+                            family="contextual_bandit",
+                            scope="PHASE9_BANDIT_DATASET",
+                            status="SKIPPED_SOURCE_NOT_READY",
+                            research_qualified=None,
+                            persisted_evidence_id=None,
+                            reason=str(exc)[:1000],
+                        )
+                    )
+                except Exception as exc:
+                    items.append(
+                        Phase9ResearchRefreshItem(
+                            family="contextual_bandit",
+                            scope="PHASE9_BANDIT_DATASET",
+                            status="FAILED",
+                            research_qualified=None,
+                            persisted_evidence_id=None,
+                            reason=(
+                                f"{type(exc).__name__}: "
+                                f"{str(exc)[:1000]}"
+                            ),
+                        )
+                    )
 
     bundle = evaluate_phase9_research_bundle(
         storage,
