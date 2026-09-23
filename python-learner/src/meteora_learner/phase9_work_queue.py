@@ -324,6 +324,42 @@ def build_phase9_work_queue(
             )
         )
 
+    adaptive_lineage_invalid = any(
+        "immutable chain snapshot IDs with matching source hashes"
+        in reason
+        for reason in bundle.reasons
+    )
+    if adaptive_lineage_invalid:
+        if pools:
+            joined = ",".join(pools)
+            items.append(
+                Phase9WorkItem(
+                    task_type="ADAPTIVE_MULTI_POOL_REPAIR",
+                    scope="__MULTI_POOL__",
+                    reason=(
+                        "qualified adaptive/regime evidence does not "
+                        "reproduce from its persisted chain snapshots"
+                    ),
+                    shell_command=(
+                        "pio phase9-research-validate --pools "
+                        + _q(joined)
+                        + " --persist"
+                    ),
+                )
+            )
+        else:
+            items.append(
+                Phase9WorkItem(
+                    task_type="ADAPTIVE_MULTI_POOL_REPAIR",
+                    scope="POOL_REQUIRED",
+                    reason=(
+                        "adaptive/regime lineage is invalid and no "
+                        "chain-observed pool corpus is available"
+                    ),
+                    shell_command=None,
+                )
+            )
+
     mint_lineage_invalid = any(
         "authoritative pool and mint snapshot IDs" in reason
         for reason in bundle.reasons
