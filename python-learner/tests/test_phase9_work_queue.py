@@ -57,6 +57,29 @@ def save_mint_snapshot(storage, mint):
     )
 
 
+def seed_portfolio_candidate_lineage(storage):
+    artifact_sha = "portfolio-deadbeef"
+    evidence_id = storage.save_advanced_edge_evidence(
+        edge_type="PHASE9_PORTFOLIO_CANDIDATES_V1",
+        pool_address="__PORTFOLIO_CANDIDATES__",
+        as_of="2026-09-23T12:00:00+00:00",
+        status="BUILT",
+        qualified=True,
+        evidence={
+            "artifact_sha256": artifact_sha,
+            "research_only": True,
+            "policy_actionable": False,
+            "source_inputs": [{"pool_address": "pool-a"}],
+            "assumptions": {"budget_context": "test"},
+            "comparison": {"candidates": [{"pool_address": "pool-a"}]},
+        },
+    )
+    return {
+        "candidate_evidence_id": evidence_id,
+        "candidate_evidence_sha256": artifact_sha,
+    }
+
+
 def seed_retraining_dataset_evidence(
     storage,
     *,
@@ -151,6 +174,7 @@ def evidence(storage, edge_type, pool, *, extra=None):
 
 def seed_ready(storage):
     promote_phase8(storage)
+    portfolio_lineage = seed_portfolio_candidate_lineage(storage)
     bandit_lineage = seed_retraining_dataset_evidence(
         storage,
         cycle_id="cycle",
@@ -169,6 +193,7 @@ def seed_ready(storage):
         storage,
         PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
         "__PORTFOLIO__",
+        extra={"candidate_lineage": portfolio_lineage},
     )
     evidence(storage, STATIC_HEDGE_EVIDENCE_TYPE, "pool-a")
     evidence(
