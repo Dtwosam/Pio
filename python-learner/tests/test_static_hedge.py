@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from meteora_learner.liquidity_math import Q64
 from meteora_learner.phase_promotion import (
     PHASE8,
@@ -18,7 +20,10 @@ def q64_ratio(numerator, denominator=100):
 
 
 def add_observation(storage, index, price_q64, pool="pool"):
-    observed_at = f"2026-09-23T{index:02d}:00:00+00:00"
+    observed_at = (
+        datetime(2026, 9, 23, tzinfo=timezone.utc)
+        + timedelta(hours=index)
+    ).isoformat()
     with storage.connect() as conn:
         conn.execute(
             """
