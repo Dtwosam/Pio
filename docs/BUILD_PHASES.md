@@ -313,6 +313,8 @@ Built:
 - persistent Phase 9 research-bundle readiness gate spanning adaptive/regime, mint risk, wallet flow, allocation, hedge and bandit evidence while remaining `policy_actionable=false`
 - persistent non-actionable Phase 9 promotion evidence requiring Phase 8 promotion and a current immutable ready research bundle; this milestone remains `research_only=true`
 - dependency-aware Phase 9 evidence work queue that stages authoritative mint snapshots before mint-risk research and surfaces artifact/assumption gaps without inventing inputs
+- immutable source-lineage verification across adaptive/regime chain snapshots, wallet-flow event windows, static-hedge pool/bin price paths, mint snapshots, portfolio candidate artifacts and contextual-bandit retraining datasets
+- deterministic source hashes for wallet-flow, adaptive/regime, static-hedge and portfolio-candidate evidence with forged/stale lineage tests and repair tasks
 - fail-closed range-cap and insufficient-history states
 - CLI research workflow with optional readiness exit status
 
