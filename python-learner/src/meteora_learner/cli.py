@@ -107,6 +107,7 @@ from .settings import Settings
 from .storage import Storage
 from .strategy import StrategyType
 from .transaction_event_ingest import ingest_transaction_events
+from .execution_receipt_ingest import ingest_execution_receipt
 from .transaction_costs import build_transaction_cost_report
 
 
@@ -992,6 +993,16 @@ def main() -> None:
         help="JSON file path, or - for stdin",
     )
 
+    ingest_execution_receipt_cmd = subparsers.add_parser(
+        "ingest-execution-receipt",
+        help="Ingest a terminal receipt emitted by Rust execution-receipt",
+    )
+    ingest_execution_receipt_cmd.add_argument(
+        "--file",
+        default="-",
+        help="JSON file path, or - for stdin",
+    )
+
     ingest_tx_events = subparsers.add_parser(
         "ingest-transaction-events",
         help="Ingest JSON emitted by Rust inspect-transaction-events",
@@ -1346,6 +1357,20 @@ def main() -> None:
                 payload = json.load(handle)
         result = ingest_chain_snapshot(Storage(settings.database_path), payload)
         print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "ingest-execution-receipt":
+        settings = Settings.from_env()
+        if args.file == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with open(args.file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        result = ingest_execution_receipt(
+            Storage(settings.database_path),
+            payload,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "ingest-transaction-events":
