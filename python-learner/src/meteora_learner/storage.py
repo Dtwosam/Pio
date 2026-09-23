@@ -480,6 +480,20 @@ CREATE TABLE IF NOT EXISTS live_position_events (
 CREATE INDEX IF NOT EXISTS idx_live_position_events_position_time
 ON live_position_events(position_address, event_time);
 
+CREATE TABLE IF NOT EXISTS live_position_closure_proofs (
+    decision_id TEXT PRIMARY KEY,
+    signature TEXT NOT NULL UNIQUE,
+    position_address TEXT NOT NULL,
+    receipt_slot INTEGER NOT NULL,
+    proof_slot INTEGER NOT NULL,
+    observed_at TEXT NOT NULL,
+    closed INTEGER NOT NULL CHECK(closed IN (0, 1)),
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_position_closure_position
+ON live_position_closure_proofs(position_address, proof_slot);
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
