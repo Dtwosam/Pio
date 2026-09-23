@@ -12,6 +12,9 @@ from .phase9_capture_plan import (
     build_phase9_chain_capture_plan,
 )
 from .phase9_history_plan import build_phase9_history_plan
+from .phase9_source_freshness import (
+    evaluate_phase9_source_freshness,
+)
 from .phase9_mint_capture import (
     Phase9MintCaptureCriteria,
     build_phase9_mint_capture_plan,
@@ -80,6 +83,7 @@ class Phase9WorkQueue:
     rollback_simulation_current: bool = False
     prewire_ready: bool = False
     prewire_manifest_current: bool = False
+    research_sources_current: bool = False
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -119,6 +123,7 @@ def _snapshot_state(queue: Phase9WorkQueue) -> dict[str, Any]:
         ),
         "prewire_ready": queue.prewire_ready,
         "prewire_manifest_current": queue.prewire_manifest_current,
+        "research_sources_current": queue.research_sources_current,
         "candidate_pools": list(queue.candidate_pools),
         "items": [
             {
@@ -350,11 +355,93 @@ def build_phase9_work_queue(
         criteria=criteria,
         current_report=promotion,
     )
+    source_freshness_report = evaluate_phase9_source_freshness(storage)
+    source_freshness = source_freshness_report.by_family()
+    required_source_ready = {
+        "adaptive_regime": (
+            not criteria.require_adaptive_multi_pool
+            or bundle.adaptive_multi_pool.qualified_records >= 1
+        ),
+        "mint_risk": (
+            bundle.mint_risk.qualified_records
+            >= criteria.min_mint_risk_pools
+        ),
+        "wallet_flow": (
+            bundle.wallet_flow.qualified_records
+            >= criteria.min_wallet_flow_pools
+        ),
+        "portfolio_allocation": (
+            not criteria.require_portfolio_allocation
+            or bundle.portfolio_allocation.qualified_records >= 1
+        ),
+        "static_hedge": (
+            bundle.static_hedge.qualified_records
+            >= criteria.min_static_hedge_pools
+        ),
+        "contextual_bandit": (
+            not criteria.require_contextual_bandit
+            or bundle.contextual_bandit.qualified_records >= 1
+        ),
+    }
+    research_sources_current = all(
+        required_source_ready[family]
+        and source_freshness.get(family, False)
+        for family in required_source_ready
+    )
     pools = _candidate_pools(
         storage,
         as_of=as_of,
     )
     items: list[Phase9WorkItem] = []
+    stale_source_families = tuple(
+        item.family
+        for item in source_freshness_report.families
+        if not item.current
+        and (
+            (
+                item.family == "adaptive_regime"
+                and bundle.adaptive_multi_pool.qualified_records > 0
+            )
+            or (
+                item.family == "mint_risk"
+                and bundle.mint_risk.qualified_records > 0
+            )
+            or (
+                item.family == "wallet_flow"
+                and bundle.wallet_flow.qualified_records > 0
+            )
+            or (
+                item.family == "portfolio_allocation"
+                and bundle.portfolio_allocation.qualified_records > 0
+            )
+            or (
+                item.family == "static_hedge"
+                and bundle.static_hedge.qualified_records > 0
+            )
+            or (
+                item.family == "contextual_bandit"
+                and bundle.contextual_bandit.qualified_records > 0
+            )
+        )
+    )
+    if stale_source_families:
+        detail = "; ".join(
+            item.reason
+            for item in source_freshness_report.families
+            if item.family in stale_source_families
+        )
+        items.append(
+            Phase9WorkItem(
+                task_type="RESEARCH_SOURCE_REFRESH",
+                scope=",".join(stale_source_families),
+                reason=(
+                    "persisted Phase 9 research remains replay-valid but "
+                    "newer source evidence is available: " + detail
+                ),
+                shell_command="pio phase9-research-refresh-run",
+            )
+        )
+
     phase9_current = promotion_audit.current
     policy_authorization_current = False
     controlled_validation_current = False
@@ -1494,6 +1581,7 @@ def build_phase9_work_queue(
         rollback_simulation_current=rollback_simulation_current,
         prewire_ready=prewire_ready,
         prewire_manifest_current=prewire_manifest_current,
+        research_sources_current=research_sources_current,
         candidate_pools=pools,
         items=tuple(items),
     )
