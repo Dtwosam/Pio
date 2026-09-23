@@ -1,6 +1,7 @@
 use crate::models::{Action, Mode, TradeProposal};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskConfig {
     pub max_capital_per_position_pct: f64,
     pub max_total_deployed_pct: f64,
@@ -10,13 +11,45 @@ pub struct RiskConfig {
     pub max_data_age_seconds: u64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "decision", content = "reason", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RiskDecision {
     Approve,
     Reject(String),
 }
 
+fn finite(values: &[f64]) -> bool {
+    values.iter().all(|value| value.is_finite())
+}
+
+fn valid_strategy(value: &str) -> bool {
+    matches!(value, "SPOT" | "CURVE" | "BID_ASK")
+}
+
+fn config_is_valid(cfg: &RiskConfig) -> bool {
+    finite(&[
+        cfg.max_capital_per_position_pct,
+        cfg.max_total_deployed_pct,
+        cfg.max_daily_drawdown_pct,
+        cfg.min_expected_edge_pct,
+        cfg.max_expected_downside_pct,
+    ]) && cfg.max_capital_per_position_pct > 0.0
+        && cfg.max_capital_per_position_pct <= 100.0
+        && cfg.max_total_deployed_pct > 0.0
+        && cfg.max_total_deployed_pct <= 100.0
+        && cfg.max_capital_per_position_pct <= cfg.max_total_deployed_pct
+        && cfg.max_daily_drawdown_pct >= 0.0
+        && cfg.max_daily_drawdown_pct <= 100.0
+        && cfg.min_expected_edge_pct >= 0.0
+        && cfg.max_expected_downside_pct >= 0.0
+        && cfg.max_data_age_seconds > 0
+}
+
 pub fn evaluate(proposal: &TradeProposal, cfg: &RiskConfig) -> RiskDecision {
+    if !config_is_valid(cfg) {
+        return RiskDecision::Reject("invalid_risk_config".into());
+    }
+
     // The executor never signs BACKTEST/PAPER proposals.
     if proposal.mode != Mode::Live {
         return RiskDecision::Reject("non_live_mode".into());
@@ -27,10 +60,26 @@ pub fn evaluate(proposal: &TradeProposal, cfg: &RiskConfig) -> RiskDecision {
         return RiskDecision::Reject("skip_has_no_execution".into());
     }
 
-    // Exits must remain available even when entry data is stale or a drawdown stop is active.
-    // Transaction simulation and wallet checks are enforced later in the execution pipeline.
+    if proposal.pool_address.trim().is_empty() {
+        return RiskDecision::Reject("missing_pool_address".into());
+    }
+
+    // EXIT remains available when entry/rebalance gates are blocked by stale
+    // market data, drawdown, or model economics. Transaction simulation and
+    // wallet/position ownership checks are enforced later in the pipeline.
     if proposal.action == Action::Exit {
         return RiskDecision::Approve;
+    }
+
+    if !finite(&[
+        proposal.capital_quote,
+        proposal.account_equity_quote,
+        proposal.portfolio_deployed_quote,
+        proposal.daily_drawdown_pct,
+        proposal.expected_net_return_pct,
+        proposal.expected_downside_pct,
+    ]) {
+        return RiskDecision::Reject("non_finite_numeric_input".into());
     }
 
     if proposal.data_age_seconds > cfg.max_data_age_seconds {
@@ -41,12 +90,28 @@ pub fn evaluate(proposal: &TradeProposal, cfg: &RiskConfig) -> RiskDecision {
         return RiskDecision::Reject("invalid_account_equity".into());
     }
 
-    if proposal.capital_quote < 0.0 || proposal.portfolio_deployed_quote < 0.0 {
+    if proposal.capital_quote <= 0.0 || proposal.portfolio_deployed_quote < 0.0 {
         return RiskDecision::Reject("invalid_capital_snapshot".into());
+    }
+
+    if proposal.daily_drawdown_pct < 0.0 {
+        return RiskDecision::Reject("invalid_drawdown_snapshot".into());
+    }
+
+    if proposal.expected_downside_pct < 0.0 {
+        return RiskDecision::Reject("invalid_expected_downside".into());
     }
 
     if proposal.daily_drawdown_pct >= cfg.max_daily_drawdown_pct {
         return RiskDecision::Reject("daily_drawdown_limit".into());
+    }
+
+    if proposal.min_bin_id > proposal.max_bin_id {
+        return RiskDecision::Reject("invalid_bin_range".into());
+    }
+
+    if !valid_strategy(proposal.strategy.as_str()) {
+        return RiskDecision::Reject("unsupported_strategy".into());
     }
 
     let position_pct = proposal.capital_quote / proposal.account_equity_quote * 100.0;
@@ -54,15 +119,20 @@ pub fn evaluate(proposal: &TradeProposal, cfg: &RiskConfig) -> RiskDecision {
         return RiskDecision::Reject("position_size_limit".into());
     }
 
+    let projected_deployed_quote = match proposal.action {
+        Action::Enter => proposal.portfolio_deployed_quote + proposal.capital_quote,
+        Action::Rebalance => {
+            if proposal.capital_quote > proposal.portfolio_deployed_quote + f64::EPSILON {
+                return RiskDecision::Reject("capital_exceeds_deployed_on_rebalance".into());
+            }
+            proposal.portfolio_deployed_quote
+        }
+        Action::Skip | Action::Exit => unreachable!(),
+    };
     let projected_deployed_pct =
-        (proposal.portfolio_deployed_quote + proposal.capital_quote) / proposal.account_equity_quote
-            * 100.0;
+        projected_deployed_quote / proposal.account_equity_quote * 100.0;
     if projected_deployed_pct > cfg.max_total_deployed_pct {
         return RiskDecision::Reject("portfolio_exposure_limit".into());
-    }
-
-    if proposal.min_bin_id > proposal.max_bin_id {
-        return RiskDecision::Reject("invalid_bin_range".into());
     }
 
     if proposal.expected_net_return_pct < cfg.min_expected_edge_pct {
@@ -146,6 +216,49 @@ mod tests {
         assert_eq!(
             evaluate(&p, &config()),
             RiskDecision::Reject("daily_drawdown_limit".into())
+        );
+    }
+
+    #[test]
+    fn rebalance_does_not_double_count_existing_position_capital() {
+        let mut cfg = config();
+        cfg.max_capital_per_position_pct = 15.0;
+        let mut p = proposal(Mode::Live, Action::Rebalance);
+        p.capital_quote = 100.0;
+        p.portfolio_deployed_quote = 190.0;
+        assert_eq!(evaluate(&p, &cfg), RiskDecision::Approve);
+    }
+
+    #[test]
+    fn rebalance_rejects_inconsistent_capital_snapshot() {
+        let mut cfg = config();
+        cfg.max_capital_per_position_pct = 20.0;
+        let mut p = proposal(Mode::Live, Action::Rebalance);
+        p.capital_quote = 150.0;
+        p.portfolio_deployed_quote = 100.0;
+        assert_eq!(
+            evaluate(&p, &cfg),
+            RiskDecision::Reject("capital_exceeds_deployed_on_rebalance".into())
+        );
+    }
+
+    #[test]
+    fn unsupported_strategy_fails_closed() {
+        let mut p = proposal(Mode::Live, Action::Enter);
+        p.strategy = "MAGIC".into();
+        assert_eq!(
+            evaluate(&p, &config()),
+            RiskDecision::Reject("unsupported_strategy".into())
+        );
+    }
+
+    #[test]
+    fn invalid_risk_config_fails_closed() {
+        let mut cfg = config();
+        cfg.max_total_deployed_pct = f64::NAN;
+        assert_eq!(
+            evaluate(&proposal(Mode::Live, Action::Enter), &cfg),
+            RiskDecision::Reject("invalid_risk_config".into())
         );
     }
 }
