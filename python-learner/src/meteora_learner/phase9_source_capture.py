@@ -173,8 +173,8 @@ def run_phase9_source_capture(
                 max_api_snapshot_age_seconds=(
                     api_ranking_max_age_seconds
                 ),
-            as_of=capture_as_of,
             ),
+            as_of=capture_as_of,
         )
         chain = run_phase9_chain_capture_batch(
             storage,
@@ -210,8 +210,8 @@ def run_phase9_source_capture(
                 max_api_snapshot_age_seconds=(
                     api_ranking_max_age_seconds
                 ),
-            as_of=capture_as_of,
             ),
+            as_of=capture_as_of,
         )
         cohort_record = cohort_after_chain.to_record()
         history = run_phase9_history_capture(
@@ -293,8 +293,11 @@ def run_phase9_source_capture(
             min_research_pools=chain_pool_target,
             target_pools=cohort_target_pools,
             max_sampling_pools=cohort_max_sampling_pools,
+            max_api_snapshot_age_seconds=(
+                api_ranking_max_age_seconds
+            ),
         ),
-    as_of=capture_as_of,
+        as_of=capture_as_of,
     )
     cohort_record = final_cohort.to_record()
     history_plan = (
