@@ -53,6 +53,7 @@ fn usage() {
   meteora-executor phase5-promotion-gate <PIO_DATABASE>
   meteora-executor phase6-readiness <PIO_DATABASE> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor controlled-live-check <PIO_DATABASE> <PROPOSAL_JSON_OR_-> <CONTROLLED_LIVE_CONFIG_JSON>
+  meteora-executor controlled-live-intent-check <PIO_DATABASE> <EXECUTION_DB> <DECISION_ID> <CONTROLLED_LIVE_CONFIG_JSON>
   meteora-executor execution-decision-context <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-recovery <EXECUTION_DB> <DECISION_ID> [EXPIRY_GRACE_BLOCKS]
@@ -433,6 +434,48 @@ RPC_URL is accepted as a compatibility fallback",
                     &decision_id,
                 )?;
             println!("{}", serde_json::to_string_pretty(&context)?);
+        }
+        "controlled-live-intent-check" => {
+            let database_path = args
+                .next()
+                .context("PIO_DATABASE is required")?;
+            let execution_db = args
+                .next()
+                .context("EXECUTION_DB is required")?;
+            let decision_id = args
+                .next()
+                .context("DECISION_ID is required")?;
+            let config_path = args
+                .next()
+                .context("CONTROLLED_LIVE_CONFIG_JSON is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "controlled-live-intent-check accepts exactly four arguments"
+                );
+            }
+            let config_json = std::fs::read_to_string(&config_path)
+                .with_context(|| {
+                    format!(
+                        "failed to read controlled-live config JSON: {config_path}"
+                    )
+                })?;
+            let config: controlled_live::ControlledLiveConfig =
+                serde_json::from_str(&config_json)
+                    .context("invalid controlled-live config JSON")?;
+            let store = execution_store::ExecutionIntentStore::open(
+                &execution_db,
+            )?;
+            let report =
+                controlled_live::evaluate_controlled_live_intent(
+                    std::path::Path::new(&database_path),
+                    &store,
+                    &decision_id,
+                    &config,
+                )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.accepted {
+                std::process::exit(2);
+            }
         }
         "controlled-live-check" => {
             let database_path = args
