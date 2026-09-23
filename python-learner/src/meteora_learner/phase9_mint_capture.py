@@ -182,12 +182,10 @@ def _selected_pools(
 ) -> tuple[str, ...]:
     requested = (
         tuple(
-            sorted(
-                {
-                    value.strip()
-                    for value in pool_addresses
-                    if value.strip()
-                }
+            dict.fromkeys(
+                value.strip()
+                for value in pool_addresses
+                if value.strip()
             )
         )
         if pool_addresses is not None
@@ -213,14 +211,17 @@ def _selected_pools(
             placeholders = ",".join("?" for _ in requested)
             rows = conn.execute(
                 f"""
-                SELECT pool_address, COUNT(*) AS observations
+                SELECT DISTINCT pool_address
                 FROM chain_pool_snapshots
                 WHERE pool_address IN ({placeholders})
-                GROUP BY pool_address
-                ORDER BY pool_address ASC
                 """,
                 requested,
             ).fetchall()
+            observed = {str(row[0]) for row in rows}
+            return tuple(
+                pool for pool in requested
+                if pool in observed
+            )[:limit]
     return tuple(str(row[0]) for row in rows[:limit])
 
 
