@@ -381,6 +381,20 @@ stale and must be revalidated and persisted again before
 `PHASE9_PROMOTION_V1` can be written.
 
 
+Phase 9 deterministic replay and Phase 9 source freshness are separate
+properties. Replay proves that a persisted research report still reproduces
+from the immutable source lineage it originally used. Source freshness asks
+whether genuinely newer persisted observations now exist for the same research
+scope. Newer source timestamps make the operational research corpus
+refresh-pending, but they do not rewrite or invalidate the historical evidence
+row. Later-inserted historical backfill with an older source timestamp does not
+make current evidence stale merely because its database ID is newer. Scheduled
+research maintenance must recompute a replay-valid family when its source
+watermark advances, using append-only persistence and the same non-actionable
+research boundary. Source freshness is visible in the work queue, progress and
+operational audit, but it does not by itself grant, revoke or configure LIVE
+policy authority.
+
 Phase 9 component qualification is source-lineage-bound, not merely
 self-declared in evidence JSON. Adaptive/regime evidence records exact
 `chain_pool_snapshots` IDs plus deterministic SHA-256 hashes of the active-bin
