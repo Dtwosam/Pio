@@ -5,6 +5,7 @@ import json
 import sys
 
 from .add_execution import build_add_execution_calibration
+from .calibration_queue import build_calibration_work_queue
 from .calibration_status import build_phase2_calibration_evidence
 from .chain_ingest import ingest_chain_snapshot
 from .chain_replay import replay_small_lp_history
@@ -110,6 +111,10 @@ def main() -> None:
     subparsers.add_parser(
         "phase2-evidence",
         help="Summarize exact real-data calibration evidence for Phase 2",
+    )
+    subparsers.add_parser(
+        "phase2-work-queue",
+        help="List actionable missing calibration work from the local database",
     )
 
     transaction_costs = subparsers.add_parser(
@@ -407,6 +412,14 @@ def main() -> None:
     if args.command == "phase2-evidence":
         settings = Settings.from_env()
         result = build_phase2_calibration_evidence(
+            str(settings.database_path),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase2-work-queue":
+        settings = Settings.from_env()
+        result = build_calibration_work_queue(
             str(settings.database_path),
         )
         print(json.dumps(result.to_record(), indent=2))
