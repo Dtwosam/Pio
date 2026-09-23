@@ -81,14 +81,15 @@ def audit_paper_ledger(
         if account is None:
             raise ValueError(f"unknown paper account: {account_id}")
 
-        cash_events = conn.execute(
+        cash_event_rows = conn.execute(
             """
-            SELECT COALESCE(SUM(CAST(cash_delta_quote AS REAL)), 0)
+            SELECT cash_delta_quote
             FROM paper_events
             WHERE account_id = ?
+            ORDER BY event_time ASC, id ASC
             """,
             (account_id,),
-        ).fetchone()
+        ).fetchall()
 
         position_rows = conn.execute(
             """
@@ -109,34 +110,49 @@ def audit_paper_ledger(
             status = str(row[1])
             reasons: list[str] = []
 
-            event_totals = conn.execute(
+            event_rows = conn.execute(
                 """
-                SELECT
-                    SUM(CASE WHEN event_type = 'ENTER' THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN event_type = 'EXIT' THEN 1 ELSE 0 END),
-                    COALESCE(SUM(CAST(fee_delta_quote AS REAL)), 0),
-                    COALESCE(SUM(CAST(reward_delta_quote AS REAL)), 0),
-                    COALESCE(SUM(
-                        CASE WHEN event_type = 'REBALANCE'
-                             THEN CAST(cost_quote AS REAL) ELSE 0 END
-                    ), 0),
-                    COALESCE(SUM(
-                        CASE WHEN event_type = 'EXIT'
-                             THEN CAST(cost_quote AS REAL) ELSE 0 END
-                    ), 0),
-                    COALESCE(SUM(
-                        CASE WHEN event_type = 'ENTER'
-                             THEN CAST(cost_quote AS REAL) ELSE 0 END
-                    ), 0),
-                    COALESCE(SUM(CAST(realized_pnl_quote AS REAL)), 0)
+                SELECT event_type, fee_delta_quote, reward_delta_quote,
+                       cost_quote, realized_pnl_quote
                 FROM paper_events
                 WHERE account_id = ? AND position_id = ?
+                ORDER BY event_time ASC, id ASC
                 """,
                 (account_id, position_id),
-            ).fetchone()
+            ).fetchall()
 
-            enter_count = int(event_totals[0] or 0)
-            exit_count = int(event_totals[1] or 0)
+            enter_count = sum(str(event[0]) == "ENTER" for event in event_rows)
+            exit_count = sum(str(event[0]) == "EXIT" for event in event_rows)
+            fee_total = sum((_d(event[1]) for event in event_rows), ZERO)
+            reward_total = sum((_d(event[2]) for event in event_rows), ZERO)
+            rebalance_cost = sum(
+                (
+                    _d(event[3])
+                    for event in event_rows
+                    if str(event[0]) == "REBALANCE"
+                ),
+                ZERO,
+            )
+            exit_cost = sum(
+                (
+                    _d(event[3])
+                    for event in event_rows
+                    if str(event[0]) == "EXIT"
+                ),
+                ZERO,
+            )
+            entry_cost = sum(
+                (
+                    _d(event[3])
+                    for event in event_rows
+                    if str(event[0]) == "ENTER"
+                ),
+                ZERO,
+            )
+            realized_total = sum(
+                (_d(event[4]) for event in event_rows),
+                ZERO,
+            )
             if enter_count != 1:
                 reasons.append(
                     f"ENTER event count {enter_count} != required 1"
@@ -149,11 +165,11 @@ def audit_paper_ledger(
                 )
 
             comparisons = (
-                ("entry_cost_quote", _d(row[2]), _d(event_totals[6])),
-                ("fee_income_quote", _d(row[4]), _d(event_totals[2])),
-                ("reward_income_quote", _d(row[5]), _d(event_totals[3])),
-                ("rebalance_cost_quote", _d(row[6]), _d(event_totals[4])),
-                ("exit_cost_quote", _d(row[7]), _d(event_totals[5])),
+                ("entry_cost_quote", _d(row[2]), entry_cost),
+                ("fee_income_quote", _d(row[4]), fee_total),
+                ("reward_income_quote", _d(row[5]), reward_total),
+                ("rebalance_cost_quote", _d(row[6]), rebalance_cost),
+                ("exit_cost_quote", _d(row[7]), exit_cost),
             )
             for name, stored, expected in comparisons:
                 if stored != expected:
@@ -167,11 +183,11 @@ def audit_paper_ledger(
                     reasons.append(
                         "closed position is missing realized_pnl_quote"
                     )
-                elif _d(realized) != _d(event_totals[7]):
+                elif _d(realized) != realized_total:
                     reasons.append(
                         "realized_pnl_quote stored "
                         f"{_d(realized)} != event-derived "
-                        f"{_d(event_totals[7])}"
+                        f"{realized_total}"
                     )
                 if _d(row[3]) != ZERO:
                     reasons.append(
@@ -204,7 +220,10 @@ def audit_paper_ledger(
 
     starting = _d(account[0])
     stored_cash = _d(account[1])
-    expected_cash = starting + _d(cash_events[0])
+    expected_cash = starting + sum(
+        (_d(row[0]) for row in cash_event_rows),
+        ZERO,
+    )
     cash_drift = stored_cash - expected_cash
     reasons: list[str] = []
     if cash_drift != ZERO:
