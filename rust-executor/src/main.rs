@@ -44,8 +44,12 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
         }
         "inspect-pool-env" => {
-            let rpc_url = std::env::var("RPC_URL")
-                .context("RPC_URL environment variable is required")?;
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                )?;
             let pool_address = args.next().context("POOL_ADDRESS is required")?;
             let array_radius: i32 = args
                 .next()
