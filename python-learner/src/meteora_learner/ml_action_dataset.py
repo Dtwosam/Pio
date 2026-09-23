@@ -97,6 +97,7 @@ def build_ml_action_dataset(
     near_liquidity_radius: int = 5,
     baseline_config: BaselinePolicyConfig | None = None,
     max_observed_at: str | None = None,
+    max_source_observations: int | None = None,
 ) -> MLActionDatasetReport:
     """
     Label every replay-valid candidate action at each no-lookahead decision point.
@@ -112,6 +113,14 @@ def build_ml_action_dataset(
         raise ValueError("near_liquidity_radius cannot be negative")
 
     forward_intervals = forward_observations - 1
+    if (
+        max_source_observations is not None
+        and max_source_observations
+        < lookback_observations + forward_intervals
+    ):
+        raise ValueError(
+            "max_source_observations must fit the lookback and forward window"
+        )
     if step_observations is None:
         step_observations = forward_intervals
     if step_observations < forward_intervals:
@@ -130,6 +139,8 @@ def build_ml_action_dataset(
             for value in times
             if _parse_time(value) <= cutoff
         ]
+    if max_source_observations is not None:
+        times = times[-max_source_observations:]
     if len(times) < lookback_observations + forward_intervals:
         raise ValueError("not enough chain observations for action dataset")
 
