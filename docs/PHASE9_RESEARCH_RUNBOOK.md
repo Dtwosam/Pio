@@ -279,6 +279,21 @@ A persisted Phase 9 research promotion does not alter the Rust executor,
 controlled-live authorization, deterministic/ML champion policy, position
 sizing, or submission gates.
 
+### Phase 9 promotion currentness
+
+A persisted `PHASE9_PROMOTION_V1` row is a historical milestone, not proof
+that the underlying research corpus is still current. `pio phase-status`
+reports both the persisted Phase 9 state and a `current` / `currentness`
+audit. The currentness audit re-evaluates the Phase 9 promotion gate and
+requires the persisted promotion report to exactly match the current,
+checksum-valid research-bundle identity.
+
+If newer component evidence appears, a source artifact changes, deterministic
+replay fails, or the research bundle is refreshed, the previous promotion
+becomes stale until the bundle and promotion are revalidated and persisted
+again.
+
+
 ## What remains after bundle readiness
 
 Phase 9 research-bundle readiness or research promotion does not authorize
