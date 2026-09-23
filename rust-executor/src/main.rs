@@ -9,6 +9,7 @@ mod risk;
 mod simulation;
 mod state_reader;
 mod transaction_events;
+mod wallet;
 
 use anyhow::{Context, Result};
 use std::io::Read;
@@ -22,6 +23,7 @@ fn usage() {
   meteora-executor risk-check <PROPOSAL_JSON_OR_-> <RISK_CONFIG_JSON>
   meteora-executor dry-run-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <EXECUTION_DB>
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
+  meteora-executor wallet-status
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
   meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>
   meteora-executor verify-prestate <RPC_URL> <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]"
@@ -182,6 +184,13 @@ RPC_URL is accepted as a compatibility fallback",
             )?;
             let record = store.load(&decision_id)?;
             println!("{}", serde_json::to_string_pretty(&record)?);
+        }
+        "wallet-status" => {
+            if args.next().is_some() {
+                anyhow::bail!("wallet-status accepts no arguments");
+            }
+            let status = wallet::inspect_executor_wallet_from_env()?;
+            println!("{}", serde_json::to_string_pretty(&status)?);
         }
         "simulate-transaction" => {
             let transaction_source = args
