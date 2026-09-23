@@ -7,6 +7,24 @@ import shlex
 from typing import Any
 
 from .phase8_validation import audit_persisted_phase8_promotion
+from .phase9_policy_authorization import (
+    audit_persisted_phase9_policy_authorization,
+    evaluate_phase9_policy_authorization,
+)
+from .phase9_policy_controlled_validation import (
+    PHASE9_POLICY_CONTROLLED_VALIDATION_EVIDENCE_TYPE,
+    PHASE9_POLICY_CONTROLLED_VALIDATION_SCOPE,
+    audit_persisted_phase9_policy_controlled_validation,
+    evaluate_phase9_policy_controlled_validation,
+)
+from .phase9_policy_rollout_simulation import (
+    audit_persisted_phase9_policy_rollout_simulation,
+)
+from .phase9_policy_rollback_simulation import (
+    audit_persisted_phase9_policy_rollback_simulation,
+)
+from .phase9_policy_prewire import evaluate_phase9_policy_prewire_audit
+from .phase9_shadow import evaluate_phase9_shadow
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
     audit_persisted_phase9_promotion,
@@ -32,6 +50,12 @@ class Phase9WorkQueue:
     phase8_promoted: bool
     research_bundle_ready: bool
     promotion_ready: bool
+    phase9_current: bool
+    policy_authorization_current: bool
+    controlled_validation_current: bool
+    rollout_simulation_current: bool
+    rollback_simulation_current: bool
+    prewire_ready: bool
     candidate_pools: tuple[str, ...]
     items: tuple[Phase9WorkItem, ...]
 
@@ -58,6 +82,20 @@ def _snapshot_state(queue: Phase9WorkQueue) -> dict[str, Any]:
         "phase8_promoted": queue.phase8_promoted,
         "research_bundle_ready": queue.research_bundle_ready,
         "promotion_ready": queue.promotion_ready,
+        "phase9_current": queue.phase9_current,
+        "policy_authorization_current": (
+            queue.policy_authorization_current
+        ),
+        "controlled_validation_current": (
+            queue.controlled_validation_current
+        ),
+        "rollout_simulation_current": (
+            queue.rollout_simulation_current
+        ),
+        "rollback_simulation_current": (
+            queue.rollback_simulation_current
+        ),
+        "prewire_ready": queue.prewire_ready,
         "candidate_pools": list(queue.candidate_pools),
         "items": [
             {
@@ -234,6 +272,22 @@ def _latest_retraining_dataset_cycle(
     return cycle_id
 
 
+def _latest_controlled_validation_cycle(
+    storage: Storage,
+) -> str | None:
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_POLICY_CONTROLLED_VALIDATION_EVIDENCE_TYPE,
+        pool_address=PHASE9_POLICY_CONTROLLED_VALIDATION_SCOPE,
+    )
+    if latest is None:
+        return None
+    evidence = latest.get("evidence")
+    if not isinstance(evidence, dict):
+        return None
+    cycle_id = str(evidence.get("cycle_id", "")).strip()
+    return cycle_id or None
+
+
 def build_phase9_work_queue(
     storage: Storage,
     *,
@@ -260,6 +314,12 @@ def build_phase9_work_queue(
     )
     pools = _candidate_pools(storage)
     items: list[Phase9WorkItem] = []
+    phase9_current = promotion_audit.current
+    policy_authorization_current = False
+    controlled_validation_current = False
+    rollout_simulation_current = False
+    rollback_simulation_current = False
+    prewire_ready = False
 
     if not bundle.storage_integrity_verified:
         items.append(
@@ -774,10 +834,252 @@ def build_phase9_work_queue(
             )
         )
 
+    if phase9_current:
+        authorization_audit = (
+            audit_persisted_phase9_policy_authorization(storage)
+        )
+        policy_authorization_current = authorization_audit.current
+
+        if not policy_authorization_current:
+            authorization = evaluate_phase9_policy_authorization(storage)
+            if authorization.authorization_ready:
+                items.append(
+                    Phase9WorkItem(
+                        task_type="PERSIST_POLICY_AUTHORIZATION",
+                        scope="PHASE9_POLICY_AUTHORIZATION",
+                        reason=(
+                            "current replay-verified shadow evidence passes "
+                            "the authorization gate but persisted authorization "
+                            "evidence is missing or stale"
+                        ),
+                        shell_command=(
+                            "pio phase9-policy-authorization-gate "
+                            "--persist --require-ready"
+                        ),
+                    )
+                )
+            else:
+                latest_cycle = _latest_retraining_dataset_cycle(storage)
+                candidate_report = None
+                if latest_cycle is not None:
+                    candidate_report = evaluate_phase9_shadow(
+                        storage,
+                        cycle_id=latest_cycle,
+                    )
+                if (
+                    latest_cycle is not None
+                    and candidate_report is not None
+                    and candidate_report.shadow_ready
+                ):
+                    items.append(
+                        Phase9WorkItem(
+                            task_type="PHASE9_SHADOW_VALIDATION",
+                            scope=latest_cycle,
+                            reason=(
+                                "authorization evidence is not ready; the "
+                                "latest checksum-bound retraining cycle can "
+                                "supply or refresh qualifying shadow evidence"
+                            ),
+                            shell_command=(
+                                "pio phase9-shadow-validate --cycle-id "
+                                + _q(latest_cycle)
+                                + " --persist --require-ready"
+                            ),
+                        )
+                    )
+                else:
+                    details = list(authorization.reasons)
+                    if candidate_report is not None:
+                        details.extend(candidate_report.reasons)
+                    items.append(
+                        Phase9WorkItem(
+                            task_type="POST_PROMOTION_SHADOW_REQUIRED",
+                            scope="FRESH_RETRAINING_CYCLE",
+                            reason=(
+                                "additional independent post-promotion shadow "
+                                "evidence is required"
+                                + (
+                                    ": " + "; ".join(dict.fromkeys(details))
+                                    if details
+                                    else ""
+                                )
+                            ),
+                            shell_command=None,
+                        )
+                    )
+
+        if policy_authorization_current:
+            controlled_audit = (
+                audit_persisted_phase9_policy_controlled_validation(
+                    storage,
+                )
+            )
+            controlled_validation_current = controlled_audit.current
+            if not controlled_validation_current:
+                controlled_cycle = _latest_controlled_validation_cycle(
+                    storage,
+                )
+                if controlled_cycle is None:
+                    controlled_cycle = _latest_retraining_dataset_cycle(
+                        storage,
+                    )
+                controlled_report = None
+                if controlled_cycle is not None:
+                    controlled_report = (
+                        evaluate_phase9_policy_controlled_validation(
+                            storage,
+                            cycle_id=controlled_cycle,
+                        )
+                    )
+                if (
+                    controlled_cycle is not None
+                    and controlled_report is not None
+                    and controlled_report.controlled_validation_ready
+                ):
+                    items.append(
+                        Phase9WorkItem(
+                            task_type="PERSIST_CONTROLLED_VALIDATION",
+                            scope=controlled_cycle,
+                            reason=(
+                                "a fresh independent holdout passes current "
+                                "controlled validation but persisted evidence "
+                                "is missing or stale"
+                            ),
+                            shell_command=(
+                                "pio phase9-policy-controlled-validate "
+                                "--cycle-id "
+                                + _q(controlled_cycle)
+                                + " --persist --require-ready"
+                            ),
+                        )
+                    )
+                else:
+                    details = (
+                        list(controlled_report.reasons)
+                        if controlled_report is not None
+                        else list(controlled_audit.reasons)
+                    )
+                    items.append(
+                        Phase9WorkItem(
+                            task_type="FRESH_CONTROLLED_HOLDOUT_REQUIRED",
+                            scope="FRESH_RETRAINING_CYCLE",
+                            reason=(
+                                "controlled validation requires a fresh "
+                                "checksum-bound cycle independent of the "
+                                "authorization corpus"
+                                + (
+                                    ": " + "; ".join(dict.fromkeys(details))
+                                    if details
+                                    else ""
+                                )
+                            ),
+                            shell_command=None,
+                        )
+                    )
+
+        if policy_authorization_current and controlled_validation_current:
+            rollout_audit = (
+                audit_persisted_phase9_policy_rollout_simulation(storage)
+            )
+            rollout_simulation_current = rollout_audit.current
+            if not rollout_simulation_current:
+                items.append(
+                    Phase9WorkItem(
+                        task_type="BOUNDED_ROLLOUT_SIMULATION",
+                        scope="ROLLOUT_ENVELOPE_JSON_REQUIRED",
+                        reason=(
+                            "a current disabled bounded-rollout simulation is "
+                            "required after policy-readiness evidence"
+                            + (
+                                ": " + "; ".join(rollout_audit.reasons)
+                                if rollout_audit.reasons
+                                else ""
+                            )
+                        ),
+                        shell_command=(
+                            "pio phase9-policy-rollout-simulate "
+                            "--file <ROLLOUT_ENVELOPE_JSON> "
+                            "--persist --require-ready"
+                        ),
+                    )
+                )
+
+        if rollout_simulation_current:
+            rollback_audit = (
+                audit_persisted_phase9_policy_rollback_simulation(storage)
+            )
+            rollback_simulation_current = rollback_audit.current
+            if not rollback_simulation_current:
+                items.append(
+                    Phase9WorkItem(
+                        task_type="ROLLBACK_SIMULATION",
+                        scope="ROLLBACK_METRICS_AND_CRITERIA_JSON_REQUIRED",
+                        reason=(
+                            "current explicit rollback simulation evidence is "
+                            "required for the bounded rollout"
+                            + (
+                                ": " + "; ".join(rollback_audit.reasons)
+                                if rollback_audit.reasons
+                                else ""
+                            )
+                        ),
+                        shell_command=(
+                            "pio phase9-policy-rollback-simulate "
+                            "--file <ROLLBACK_METRICS_AND_CRITERIA_JSON> "
+                            "--persist"
+                        ),
+                    )
+                )
+            elif rollback_audit.rollback_required is True:
+                items.append(
+                    Phase9WorkItem(
+                        task_type="ROLLBACK_REMEDIATION_REQUIRED",
+                        scope="PHASE9_POLICY_ROLLOUT",
+                        reason=(
+                            "current rollback simulation resolves to "
+                            "ROLLBACK_REQUIRED; no forward policy-wiring "
+                            "task is valid until the simulated breach is "
+                            "resolved and new evidence is persisted"
+                        ),
+                        shell_command=None,
+                    )
+                )
+            elif rollback_audit.status == "OBSERVATION_PENDING":
+                items.append(
+                    Phase9WorkItem(
+                        task_type="ROLLBACK_OBSERVATION_DEPTH",
+                        scope="ROLLBACK_METRICS_REQUIRED",
+                        reason=(
+                            "rollback simulation is current but minimum "
+                            "configured observation depth has not been met"
+                        ),
+                        shell_command=(
+                            "pio phase9-policy-rollback-simulate "
+                            "--file <UPDATED_ROLLBACK_METRICS_JSON> "
+                            "--persist"
+                        ),
+                    )
+                )
+
+        if (
+            policy_authorization_current
+            and controlled_validation_current
+            and rollout_simulation_current
+            and rollback_simulation_current
+        ):
+            prewire = evaluate_phase9_policy_prewire_audit(storage)
+            prewire_ready = prewire.ready
+
     return Phase9WorkQueue(
         phase8_promoted=phase8_promoted,
         research_bundle_ready=bundle.research_ready,
         promotion_ready=promotion.promotion_ready,
+        phase9_current=phase9_current,
+        policy_authorization_current=policy_authorization_current,
+        controlled_validation_current=controlled_validation_current,
+        rollout_simulation_current=rollout_simulation_current,
+        rollback_simulation_current=rollback_simulation_current,
+        prewire_ready=prewire_ready,
         candidate_pools=pools,
         items=tuple(items),
     )
