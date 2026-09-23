@@ -286,6 +286,8 @@ Built:
 - persisted live-monitor evidence and evidence-gated rollback to deterministic policy
 - persistent Phase 8 promotion evidence requiring Phase 7 promotion, completed continuous cycles, current-champion lineage and healthy live evidence
 - CLI workflows for retraining planning/build/train/walk-forward, challenger validation/promotion, live monitoring/rollback and Phase 8 validation
+- consolidated Phase 8 evidence status plus advisory ordered evidence planner spanning Phase 7 dependency, champion/cycle lineage, retraining triggers, live-label health and promotion currentness
+- checksum-bound current-champion retraining input artifacts with non-inventing pool templates and a direct dataset/cycle builder; explicit token amounts and network costs remain operator-supplied while model training/promotion stay separate stages
 
 Still needed:
 - real Phase 7 promotion evidence
