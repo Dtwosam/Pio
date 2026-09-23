@@ -68,6 +68,7 @@ from .phase9_validation import (
     persist_phase9_research_bundle,
 )
 from .phase9_replay_audit import evaluate_phase9_replay_audit
+from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import build_phase9_work_queue
 from .phase3_workflow import (
     Phase3ValidationInput,
@@ -1677,6 +1678,15 @@ def main() -> None:
     phase9_bundle.add_argument("--persist", action="store_true")
     phase9_bundle.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    phase9_storage_integrity = subparsers.add_parser(
+        "phase9-storage-integrity",
+        help="Verify immutable Phase 9 source, evidence and promotion-history storage",
+    )
+    phase9_storage_integrity.add_argument(
+        "--require-verified",
         action="store_true",
     )
 
@@ -3755,6 +3765,15 @@ def main() -> None:
             )
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.research_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-storage-integrity":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_storage_integrity(storage)
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_verified and not result.verified:
             raise SystemExit(2)
         return
 
