@@ -1,6 +1,7 @@
 import meteora_learner.phase9_operation_lease as lease_module
 from meteora_learner.phase9_operation_lease import (
     acquire_phase9_operation_lease,
+    phase9_operation_lease_status,
     release_phase9_operation_lease,
 )
 from meteora_learner.storage import Storage
@@ -112,3 +113,48 @@ def test_phase9_operation_lease_validates_inputs(tmp_path):
         assert "lease_seconds" in str(exc)
     else:
         raise AssertionError("expected invalid lease duration failure")
+
+
+def test_phase9_operation_lease_status_reports_idle_active_and_expired(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+
+    idle = phase9_operation_lease_status(
+        storage,
+        operation_key="phase9-research-maintenance",
+        as_of="2026-09-23T20:00:00+00:00",
+    )
+    assert idle.exists is False
+    assert idle.active is False
+    assert idle.expired is False
+    assert idle.remaining_seconds is None
+
+    acquire_phase9_operation_lease(
+        storage,
+        operation_key="phase9-research-maintenance",
+        lease_seconds=600,
+        owner_id="owner-a",
+        as_of="2026-09-23T20:00:00+00:00",
+    )
+
+    active = phase9_operation_lease_status(
+        storage,
+        operation_key="phase9-research-maintenance",
+        as_of="2026-09-23T20:05:00+00:00",
+    )
+    assert active.exists is True
+    assert active.active is True
+    assert active.expired is False
+    assert active.owner_id == "owner-a"
+    assert active.remaining_seconds == 300
+
+    expired = phase9_operation_lease_status(
+        storage,
+        operation_key="phase9-research-maintenance",
+        as_of="2026-09-23T20:11:00+00:00",
+    )
+    assert expired.exists is True
+    assert expired.active is False
+    assert expired.expired is True
+    assert expired.remaining_seconds == 0
