@@ -2406,6 +2406,16 @@ def main() -> None:
         default=50,
     )
     phase9_source_capture.add_argument(
+        "--wallet-historical-signature-limit",
+        type=int,
+        default=25,
+        help="Maximum pool signatures per live historical wallet-flow page",
+    )
+    phase9_source_capture.add_argument(
+        "--skip-wallet-historical-pool-activity",
+        action="store_true",
+    )
+    phase9_source_capture.add_argument(
         "--skip-wallet-owner-position-expansion",
         action="store_true",
     )
@@ -5457,6 +5467,21 @@ def main() -> None:
                 wallet_discovery_limit=args.wallet_discovery_limit,
                 wallet_max_positions_per_run=(
                     args.wallet_max_positions_per_run
+                ),
+                wallet_enable_historical_activity=(
+                    not args.skip_wallet_historical_pool_activity
+                ),
+                wallet_historical_signature_limit=(
+                    args.wallet_historical_signature_limit
+                ),
+                wallet_expand_closed_positions=(
+                    not args.skip_wallet_owner_position_expansion
+                ),
+                wallet_owner_expansion_limit=(
+                    args.wallet_owner_expansion_limit
+                ),
+                wallet_owner_position_max_pages=(
+                    args.wallet_owner_position_max_pages
                 ),
                 rust_manifest_path=args.rust_manifest_path,
                 rust_binary_path=args.rust_binary_path,
