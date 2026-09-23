@@ -14,6 +14,8 @@ class CompositionFeeResult:
     liquidity_share: int
     amount_x_into_bin: int
     amount_y_into_bin: int
+    credited_amount_x: int
+    credited_amount_y: int
     composition_fee_x: int
     composition_fee_y: int
     protocol_fee_x: int
@@ -85,6 +87,8 @@ def simulate_active_bin_composition_fee(
             liquidity_share=share,
             amount_x_into_bin=amount_x,
             amount_y_into_bin=amount_y,
+            credited_amount_x=amount_x,
+            credited_amount_y=amount_y,
             composition_fee_x=0,
             composition_fee_y=0,
             protocol_fee_x=0,
@@ -128,6 +132,8 @@ def simulate_active_bin_composition_fee(
         liquidity_share=share,
         amount_x_into_bin=amount_x_into_bin,
         amount_y_into_bin=amount_y_into_bin,
+        credited_amount_x=amount_x_into_bin - fee_x,
+        credited_amount_y=amount_y_into_bin - fee_y,
         composition_fee_x=fee_x,
         composition_fee_y=fee_y,
         protocol_fee_x=protocol_x,
