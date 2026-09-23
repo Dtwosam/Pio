@@ -522,3 +522,45 @@ current Phase 9 plus current shadow data. A formerly ready record becomes stale
 if Phase 9 is no longer current, a shadow dataset changes, replay no longer
 matches, or the aggregate thresholds no longer pass. Historical evidence stays
 append-only.
+
+
+## Controlled policy holdout validation
+
+Authorization evidence must survive a fresh holdout that did not contribute to
+the authorization gate itself. Run a checksum-bound cycle whose dataset cutoff
+is after the authorization evidence was created:
+
+```bash
+pio phase9-policy-controlled-validate \
+  --cycle-id <FRESH_HOLDOUT_CYCLE_ID> \
+  --persist \
+  --require-ready
+```
+
+The controlled validation requires:
+
+- the latest persisted authorization evidence to still pass its currentness
+  audit;
+- a cycle ID that was not counted by the authorization evidence;
+- a dataset SHA-256 that was not counted by the authorization evidence;
+- a dataset cutoff at least one second after the authorization evidence
+  creation timestamp;
+- a replay-qualified shadow report meeting the controlled thresholds (50
+  decisions, 3 pools, 2 selected arms, non-negative uplift and at most 250 bps
+  mean regret by default).
+
+Persisted `PHASE9_POLICY_CONTROLLED_VALIDATION_V1` evidence is deliberately
+`research_only=true`, `simulation_only=true`,
+`policy_actionable=false` and `execution_wired=false`. It cannot authorize
+an order or alter the Rust executor.
+
+Audit persisted controlled validation against current replay with:
+
+```bash
+pio phase9-policy-controlled-audit --require-current
+```
+
+A change to authorization currentness, holdout lineage or deterministic replay
+makes the controlled evidence stale without rewriting its historical row.
+Passing this stage still does not permit LIVE policy use; any future executor
+wiring needs a separately documented, bounded and reversible design.
