@@ -31,14 +31,17 @@ from .phase_promotion import (
     PHASE3,
     PHASE5,
     PHASE6,
+    PHASE7,
     persist_phase2_promotion,
     persist_phase5_promotion,
     persist_phase6_promotion,
+    persist_phase7_promotion,
     phase_promotion_state,
 )
 from .phase3_validation import Phase3PromotionCriteria
 from .phase5_validation import Phase5PromotionCriteria, evaluate_phase5_promotion
 from .phase6_validation import Phase6PromotionCriteria, evaluate_phase6_promotion
+from .phase7_validation import Phase7PromotionCriteria, evaluate_phase7_promotion
 from .phase3_workflow import (
     Phase3ValidationInput,
     validate_phase3_from_chain,
@@ -783,7 +786,7 @@ def main() -> None:
 
     subparsers.add_parser(
         "phase-status",
-        help="Print persisted Phase 2, Phase 3, Phase 5 and Phase 6 promotion state",
+        help="Print persisted Phase 2, Phase 3, Phase 5, Phase 6 and Phase 7 promotion state",
     )
 
     phase3_validate = subparsers.add_parser(
@@ -924,6 +927,38 @@ def main() -> None:
     )
     phase6_validate.add_argument("--persist-ready", action="store_true")
     phase6_validate.add_argument("--require-ready", action="store_true")
+
+    phase7_validate = subparsers.add_parser(
+        "phase7-validate",
+        help="Evaluate reconciled controlled-live evidence for Phase 7",
+    )
+    phase7_validate.add_argument(
+        "--min-closed-positions",
+        type=int,
+        default=3,
+    )
+    phase7_validate.add_argument(
+        "--min-distinct-pools",
+        type=int,
+        default=2,
+    )
+    phase7_validate.add_argument(
+        "--min-confirmed-receipts",
+        type=int,
+        default=6,
+    )
+    phase7_validate.add_argument(
+        "--max-failed-receipts",
+        type=int,
+        default=0,
+    )
+    phase7_validate.add_argument(
+        "--max-open-positions-at-validation",
+        type=int,
+        default=0,
+    )
+    phase7_validate.add_argument("--persist-ready", action="store_true")
+    phase7_validate.add_argument("--require-ready", action="store_true")
 
     ml_train = subparsers.add_parser(
         "ml-train-csv",
@@ -1817,6 +1852,10 @@ def main() -> None:
                 storage,
                 phase_name=PHASE6,
             ).__dict__,
+            "phase7": phase_promotion_state(
+                storage,
+                phase_name=PHASE7,
+            ).__dict__,
         }
         print(json.dumps(output, indent=2))
         return
@@ -1919,6 +1958,34 @@ def main() -> None:
         output = result.to_record()
         if args.persist_ready and result.promotion_ready:
             output["persisted"] = persist_phase6_promotion(
+                storage,
+                report=result,
+            ).__dict__
+        else:
+            output["persisted"] = None
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase7-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase7_promotion(
+            storage,
+            criteria=Phase7PromotionCriteria(
+                min_closed_positions=args.min_closed_positions,
+                min_distinct_pools=args.min_distinct_pools,
+                min_confirmed_receipts=args.min_confirmed_receipts,
+                max_failed_receipts=args.max_failed_receipts,
+                max_open_positions_at_validation=(
+                    args.max_open_positions_at_validation
+                ),
+            ),
+        )
+        output = result.to_record()
+        if args.persist_ready and result.promotion_ready:
+            output["persisted"] = persist_phase7_promotion(
                 storage,
                 report=result,
             ).__dict__
