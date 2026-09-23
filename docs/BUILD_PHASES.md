@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v1.0
+Status: v1.1
 
 ## Phase 0 — Foundation
 Status: complete.
@@ -141,15 +141,21 @@ Built:
 - prepared/applied chain valuation state for idempotent recovery
 - counterfactual atomic-state reset after paper rebalances
 - multi-position chain-valued paper runner
+- latest-chain grouping across pools with idempotent cycle IDs
+- fail-closed live pool safety derived from local normalized state
+- restart recovery after prepared valuation and partially-applied mark events
+- automatic account-level discovery of open chain-bound paper positions
+- stale-first capped portfolio scheduling
+- explicit token-Y quote-map requirement with missing-quote skips
 - paper cohort performance metrics
 - ML paper challenger versus deterministic baseline validation
 - stored paper evidence required for champion promotion
 
 Still needed:
-- unattended collector -> valuation -> decision -> paper-run scheduling
-- automatic binding of newly authorized Phase 3 plans into chain paper state
+- unattended collector -> portfolio-cycle scheduling
+- automatic atomic binding of newly authorized Phase 3 plans into chain paper state
 - general external quote source for non-X/Y reward tokens and non-stable quote assets
-- long restart/recovery integration runs across many observations and positions
+- long endurance/restart runs across many observations and positions
 - extended paper validation on real live observations
 
 ## Phase 6 — Rust Transaction Executor
