@@ -8,6 +8,15 @@ from .phase9_position_discovery import (
     Phase9PositionDiscoveryReport,
     discover_pool_positions_with_rust,
 )
+from .phase9_pool_activity_discovery import (
+    Phase9PoolActivityDiscoveryReport,
+    discover_historical_pool_activity_with_rust,
+)
+from .phase9_pool_activity_scan_state import (
+    Phase9PoolActivityScanState,
+    phase9_pool_activity_scan_state,
+    record_phase9_pool_activity_page,
+)
 from .position_history import collect_position_history
 from .settings import Settings
 from .storage import Storage
@@ -17,6 +26,10 @@ from .wallet_flow import WalletFlowCriteria
 DiscoverPositions = Callable[[str, int], Phase9PositionDiscoveryReport]
 CollectHistory = Callable[[str], int]
 ExpandOwnerPositions = Callable[[str, str], tuple[str, ...]]
+DiscoverHistoricalActivity = Callable[
+    [str, int, str | None],
+    Phase9PoolActivityDiscoveryReport,
+]
 
 
 @dataclass(frozen=True)
@@ -69,6 +82,13 @@ class Phase9WalletFlowCaptureReport:
     owners_expanded: int
     owner_expansion_failures: int
     expanded_positions_added: int
+    historical_scan_enabled: bool
+    historical_recent_signatures_scanned: int
+    historical_backfill_signatures_scanned: int
+    historical_matching_transactions: int
+    historical_positions_added: int
+    historical_scan_failures: int
+    historical_scan_state: Phase9PoolActivityScanState | None
     positions_attempted: int
     positions_refreshed: int
     positions_failed: int
@@ -242,7 +262,9 @@ def run_phase9_wallet_flow_capture(
     discover_positions: DiscoverPositions | None = None,
     collect_history: CollectHistory | None = None,
     expand_owner_positions: ExpandOwnerPositions | None = None,
+    discover_historical_activity: DiscoverHistoricalActivity | None = None,
     expand_closed_positions: bool = True,
+    historical_signature_limit: int = 25,
     owner_expansion_limit: int = 25,
     owner_position_max_pages: int = 3,
     rust_manifest_path: str | None = None,
@@ -255,6 +277,10 @@ def run_phase9_wallet_flow_capture(
         raise ValueError("discovery_limit must be between 1 and 5000")
     if max_positions_per_run < 1:
         raise ValueError("max_positions_per_run must be positive")
+    if historical_signature_limit < 1 or historical_signature_limit > 1_000:
+        raise ValueError(
+            "historical_signature_limit must be between 1 and 1000"
+        )
     if owner_expansion_limit < 1:
         raise ValueError("owner_expansion_limit must be positive")
     if owner_position_max_pages < 1:
@@ -284,12 +310,24 @@ def run_phase9_wallet_flow_capture(
             owners_expanded=0,
             owner_expansion_failures=0,
             expanded_positions_added=0,
+            historical_scan_enabled=False,
+            historical_recent_signatures_scanned=0,
+            historical_backfill_signatures_scanned=0,
+            historical_matching_transactions=0,
+            historical_positions_added=0,
+            historical_scan_failures=0,
+            historical_scan_state=None,
             positions_attempted=0,
             positions_refreshed=0,
             positions_failed=0,
             items=(),
             reasons=("wallet-flow source thresholds are already satisfied",),
         )
+
+    production_capture_path = (
+        discover_positions is None
+        and collect_history is None
+    )
 
     if discover_positions is None:
         def discover(pool: str, limit: int) -> Phase9PositionDiscoveryReport:
@@ -324,6 +362,20 @@ def run_phase9_wallet_flow_capture(
     }
 
     items: list[Phase9WalletFlowCaptureItem] = []
+    historical_scan_enabled = (
+        as_of is None
+        and (
+            discover_historical_activity is not None
+            or production_capture_path
+        )
+    )
+    historical_recent_signatures_scanned = 0
+    historical_backfill_signatures_scanned = 0
+    historical_matching_transactions = 0
+    historical_positions_added = 0
+    historical_scan_failures = 0
+    historical_errors: list[str] = []
+    historical_state: Phase9PoolActivityScanState | None = None
     refreshed = 0
     failed = 0
     owners_expanded = 0
@@ -406,6 +458,120 @@ def run_phase9_wallet_flow_capture(
                         f"{owner}: {type(exc).__name__}: {str(exc)[:500]}"
                     )
 
+        if historical_scan_enabled:
+            if discover_historical_activity is not None:
+                historical_discover = discover_historical_activity
+            else:
+                def historical_discover(
+                    pool: str,
+                    limit: int,
+                    before: str | None,
+                ) -> Phase9PoolActivityDiscoveryReport:
+                    return discover_historical_pool_activity_with_rust(
+                        pool,
+                        limit=limit,
+                        before_signature=before,
+                        rust_manifest_path=rust_manifest_path,
+                        rust_binary_path=rust_binary_path,
+                        timeout_seconds=max(timeout_seconds, 300),
+                    )
+
+            historical_state = phase9_pool_activity_scan_state(
+                storage,
+                pool_address=pool_address,
+            )
+
+            def add_historical_candidates(
+                page: Phase9PoolActivityDiscoveryReport,
+                *,
+                source: str,
+            ) -> None:
+                nonlocal historical_positions_added
+                if page.pool_address != pool_address:
+                    raise ValueError(
+                        "historical activity discovery returned a different pool"
+                    )
+                for value in page.positions:
+                    if value.position_address in candidate_map:
+                        continue
+                    candidate_map[value.position_address] = (
+                        _WalletFlowPositionCandidate(
+                            position_address=value.position_address,
+                            owner=value.owner,
+                            source=source,
+                        )
+                    )
+                    historical_positions_added += 1
+
+            try:
+                recent = historical_discover(
+                    pool_address,
+                    historical_signature_limit,
+                    None,
+                )
+                historical_recent_signatures_scanned = (
+                    recent.signatures_scanned
+                )
+                historical_matching_transactions += (
+                    recent.matching_transactions
+                )
+                add_historical_candidates(
+                    recent,
+                    source="ONCHAIN_HISTORICAL_RECENT",
+                )
+
+                if historical_state.pages_scanned == 0:
+                    historical_state = record_phase9_pool_activity_page(
+                        storage,
+                        pool_address=pool_address,
+                        next_before_signature=(
+                            recent.next_before_signature
+                        ),
+                        has_more=recent.has_more,
+                        signatures_scanned=recent.signatures_scanned,
+                        matching_transactions=(
+                            recent.matching_transactions
+                        ),
+                        positions_discovered=recent.positions_found,
+                    )
+                elif (
+                    not historical_state.backfill_exhausted
+                    and historical_state.backfill_before_signature
+                ):
+                    backfill = historical_discover(
+                        pool_address,
+                        historical_signature_limit,
+                        historical_state.backfill_before_signature,
+                    )
+                    historical_backfill_signatures_scanned = (
+                        backfill.signatures_scanned
+                    )
+                    historical_matching_transactions += (
+                        backfill.matching_transactions
+                    )
+                    add_historical_candidates(
+                        backfill,
+                        source="ONCHAIN_HISTORICAL_BACKFILL",
+                    )
+                    historical_state = record_phase9_pool_activity_page(
+                        storage,
+                        pool_address=pool_address,
+                        next_before_signature=(
+                            backfill.next_before_signature
+                        ),
+                        has_more=backfill.has_more,
+                        signatures_scanned=backfill.signatures_scanned,
+                        matching_transactions=(
+                            backfill.matching_transactions
+                        ),
+                        positions_discovered=backfill.positions_found,
+                    )
+            except Exception as exc:
+                historical_scan_failures += 1
+                historical_errors.append(
+                    f"{type(exc).__name__}: {str(exc)[:1000]}"
+                )
+
         candidates = _diversity_order(
             list(candidate_map.values()),
             existing_positions=existing_positions,
@@ -472,6 +638,11 @@ def run_phase9_wallet_flow_capture(
             f"{expansion_failures} owner position expansion(s) failed: "
             + "; ".join(expansion_errors)
         )
+    if historical_scan_failures:
+        reasons.append(
+            "historical pool-activity discovery failed: "
+            + "; ".join(historical_errors)
+        )
     if failed:
         reasons.append(
             f"{failed} position history collection(s) failed"
@@ -483,10 +654,10 @@ def run_phase9_wallet_flow_capture(
             f"unique users {after.unique_users}/{criteria.min_unique_users}"
         )
         reasons.append(
-            "the current-owner cohort, even after bounded status=all "
-            "position expansion when available, is not a complete historical "
-            "pool census; owners with no current on-chain position can still "
-            "be absent"
+            "the wallet-flow cohort remains bounded and may still be "
+            "incomplete even after current-owner status=all expansion and "
+            "read-only pool-signature backfill; RPC history retention and "
+            "configured page limits can omit older activity"
         )
 
     return Phase9WalletFlowCaptureReport(
@@ -495,9 +666,13 @@ def run_phase9_wallet_flow_capture(
         policy_actionable=False,
         execution_wired=False,
         source_scope=(
-            "CURRENT_OWNER_ALL_POSITION_COHORT"
-            if owners_expanded > 0
-            else "CURRENT_ONCHAIN_POSITION_COHORT"
+            "CURRENT_AND_HISTORICAL_POOL_ACTIVITY_COHORT"
+            if historical_positions_added > 0
+            else (
+                "CURRENT_OWNER_ALL_POSITION_COHORT"
+                if owners_expanded > 0
+                else "CURRENT_ONCHAIN_POSITION_COHORT"
+            )
         ),
         pool_address=pool_address,
         as_of=as_of,
@@ -510,6 +685,19 @@ def run_phase9_wallet_flow_capture(
         owners_expanded=owners_expanded,
         owner_expansion_failures=expansion_failures,
         expanded_positions_added=expanded_positions_added,
+        historical_scan_enabled=historical_scan_enabled,
+        historical_recent_signatures_scanned=(
+            historical_recent_signatures_scanned
+        ),
+        historical_backfill_signatures_scanned=(
+            historical_backfill_signatures_scanned
+        ),
+        historical_matching_transactions=(
+            historical_matching_transactions
+        ),
+        historical_positions_added=historical_positions_added,
+        historical_scan_failures=historical_scan_failures,
+        historical_scan_state=historical_state,
         positions_attempted=len(items),
         positions_refreshed=refreshed,
         positions_failed=failed,
