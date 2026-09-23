@@ -139,8 +139,7 @@ pio phase9-research-inputs-audit --require-valid
 pio phase9-explicit-research-run --persist --require-ready
 pio phase9-bandit-research-run --persist --require-qualified  # derives checksum-bound labels from explicit inputs + chain replay
 pio phase9-chain-history-plan --require-ready
-pio phase9-chain-history-run  # one fresh read-only snapshot per deficient pool
-pio phase9-work-queue --persist-snapshot  # research -> promotion -> policy-simulation blockers
+pio phase9-chain-history-run  # one fresh read-only snapshot per deficient pool\npio phase9-chain-history-run --continue-sampling-when-ready  # manual ongoing cadence sample after minimum depth\npio phase9-work-queue --persist-snapshot  # research -> promotion -> policy-simulation blockers
 pio phase9-progress --require-snapshot --require-integrity  # reports through PREWIRE_MANIFEST_CURRENT
 pio phase9-shadow-validate --cycle-id <POST_PROMOTION_CYCLE_ID> --persist --require-ready
 pio phase9-policy-authorization-gate --persist --require-ready
