@@ -2091,6 +2091,56 @@ def test_work_queue_surfaces_chain_capture_plan_from_api_discovery(
     assert "https://rpc.example.invalid" in task.shell_command
 
 
+def test_work_queue_requests_fresh_api_ranking_when_only_stale_rows_exist(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        work_queue_module,
+        "utc_now_iso",
+        lambda: "2026-09-23T20:00:00+00:00",
+    )
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_pool(
+            storage,
+            pool,
+            "2026-09-23T19:00:00+00:00",
+        )
+    with storage.connect() as conn:
+        for rank, pool in enumerate(
+            ("pool-a", "pool-b", "pool-c"),
+            start=1,
+        ):
+            conn.execute(
+                """
+                INSERT INTO pool_snapshots(
+                    observed_at, address, name, tvl,
+                    volume_24h, fees_24h, raw_json
+                ) VALUES (
+                    '2026-09-23T12:00:00+00:00',
+                    ?, ?, ?, 100, 1, '{}'
+                )
+                """,
+                (pool, pool, 1_000 - rank * 100),
+            )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "API_RANKING_REFRESH"
+    )
+    assert task.scope == "METEORA_POOLS"
+    assert task.shell_command == "pio collect-once"
+    assert "0/3" in task.reason
+    assert "stale ranking snapshot" in task.reason
+    assert not any(
+        item.task_type == "API_POOL_DISCOVERY"
+        for item in queue.items
+    )
+
+
 def test_work_queue_requests_api_pool_discovery_when_no_candidates_exist(
     tmp_path,
 ):
