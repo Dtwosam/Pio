@@ -293,6 +293,139 @@ def paper_position_snapshot(
     )
 
 
+def _open_paper_position_in_conn(
+    conn: Any,
+    *,
+    event_key: str,
+    account_id: str,
+    position_id: str,
+    pool_address: str,
+    policy_source: str,
+    strategy: str,
+    min_bin_id: int,
+    max_bin_id: int,
+    capital: Decimal,
+    cost: Decimal,
+    model_id: str | None,
+    event_time: str,
+) -> None:
+    if not position_id.strip() or not pool_address.strip():
+        raise ValueError("position_id and pool_address are required")
+    if not policy_source.strip() or not strategy.strip():
+        raise ValueError("policy_source and strategy are required")
+    allowed_sources = {"DETERMINISTIC", "ML_CHALLENGER", "ML_CHAMPION"}
+    if policy_source not in allowed_sources:
+        raise ValueError(
+            f"policy_source must be one of {sorted(allowed_sources)}"
+        )
+    if policy_source == "DETERMINISTIC" and model_id is not None:
+        raise ValueError("deterministic paper positions cannot specify model_id")
+    if policy_source in {"ML_CHALLENGER", "ML_CHAMPION"} and not model_id:
+        raise ValueError("ML paper positions require model_id")
+    if min_bin_id > max_bin_id:
+        raise ValueError("min_bin_id cannot exceed max_bin_id")
+    if capital <= 0:
+        raise ValueError("capital_quote must be positive")
+    if cost < 0:
+        raise ValueError("entry_cost_quote cannot be negative")
+
+    _ensure_event_unused(conn, event_key)
+    account = conn.execute(
+        "SELECT cash_quote FROM paper_accounts WHERE account_id = ?",
+        (account_id,),
+    ).fetchone()
+    if account is None:
+        raise ValueError(f"unknown paper account: {account_id}")
+    cash = _d(account[0])
+    debit = capital + cost
+    if cash < debit:
+        raise ValueError("insufficient paper cash for entry and cost")
+    if conn.execute(
+        "SELECT 1 FROM paper_positions WHERE position_id = ?",
+        (position_id,),
+    ).fetchone() is not None:
+        raise ValueError(f"paper position already exists: {position_id}")
+
+    if policy_source in {"ML_CHALLENGER", "ML_CHAMPION"}:
+        model = conn.execute(
+            "SELECT status FROM model_registry WHERE model_id = ?",
+            (model_id,),
+        ).fetchone()
+        if model is None:
+            raise ValueError(f"unknown ML model_id: {model_id}")
+        required_status = (
+            "PAPER_CHALLENGER"
+            if policy_source == "ML_CHALLENGER"
+            else "CHAMPION"
+        )
+        if str(model[0]) != required_status:
+            raise ValueError(
+                f"model {model_id} must be {required_status} "
+                f"for policy_source {policy_source}"
+            )
+
+    conn.execute(
+        """
+        UPDATE paper_accounts
+        SET cash_quote = ?, updated_at = ?
+        WHERE account_id = ?
+        """,
+        (_text(cash - debit), event_time, account_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO paper_positions(
+            position_id, account_id, pool_address, status,
+            policy_source, model_id, strategy, min_bin_id, max_bin_id,
+            opened_at, entry_capital_quote, entry_cost_quote,
+            current_mark_quote, fee_income_quote, reward_income_quote,
+            rebalance_cost_quote, exit_cost_quote, rebalances, raw_json
+        ) VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, '0', '0', '0', '0', 0, ?)
+        """,
+        (
+            position_id,
+            account_id,
+            pool_address,
+            policy_source,
+            model_id,
+            strategy,
+            min_bin_id,
+            max_bin_id,
+            event_time,
+            _text(capital),
+            _text(cost),
+            _text(capital),
+            json.dumps(
+                {
+                    "event_key": event_key,
+                    "policy_source": policy_source,
+                    "model_id": model_id,
+                },
+                separators=(",", ":"),
+            ),
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO paper_events(
+            event_key, account_id, position_id, event_time, event_type,
+            cash_delta_quote, position_mark_quote, cost_quote, raw_json
+        ) VALUES (?, ?, ?, ?, 'ENTER', ?, ?, ?, ?)
+        """,
+        (
+            event_key,
+            account_id,
+            position_id,
+            event_time,
+            _text(-debit),
+            _text(capital),
+            _text(cost),
+            "{}",
+        ),
+    )
+    _refresh_high_water(conn, account_id)
+
+
 def open_paper_position(
     storage: Storage,
     *,
@@ -309,129 +442,28 @@ def open_paper_position(
     model_id: str | None = None,
     event_time: str | None = None,
 ) -> PaperPositionSnapshot:
-    if not position_id.strip() or not pool_address.strip():
-        raise ValueError("position_id and pool_address are required")
-    if not policy_source.strip() or not strategy.strip():
-        raise ValueError("policy_source and strategy are required")
-    allowed_sources = {"DETERMINISTIC", "ML_CHALLENGER", "ML_CHAMPION"}
-    if policy_source not in allowed_sources:
-        raise ValueError(
-            f"policy_source must be one of {sorted(allowed_sources)}"
-        )
-    if policy_source == "DETERMINISTIC" and model_id is not None:
-        raise ValueError("deterministic paper positions cannot specify model_id")
-    if policy_source in {"ML_CHALLENGER", "ML_CHAMPION"} and not model_id:
-        raise ValueError("ML paper positions require model_id")
-    if min_bin_id > max_bin_id:
-        raise ValueError("min_bin_id cannot exceed max_bin_id")
-
     capital = _d(capital_quote)
     cost = _d(entry_cost_quote)
-    if capital <= 0:
-        raise ValueError("capital_quote must be positive")
-    if cost < 0:
-        raise ValueError("entry_cost_quote cannot be negative")
     event_time = event_time or utc_now_iso()
 
     with storage.connect() as conn:
-        _ensure_event_unused(conn, event_key)
-        account = conn.execute(
-            "SELECT cash_quote FROM paper_accounts WHERE account_id = ?",
-            (account_id,),
-        ).fetchone()
-        if account is None:
-            raise ValueError(f"unknown paper account: {account_id}")
-        cash = _d(account[0])
-        debit = capital + cost
-        if cash < debit:
-            raise ValueError("insufficient paper cash for entry and cost")
-        if conn.execute(
-            "SELECT 1 FROM paper_positions WHERE position_id = ?",
-            (position_id,),
-        ).fetchone() is not None:
-            raise ValueError(f"paper position already exists: {position_id}")
-
-        if policy_source in {"ML_CHALLENGER", "ML_CHAMPION"}:
-            model = conn.execute(
-                "SELECT status FROM model_registry WHERE model_id = ?",
-                (model_id,),
-            ).fetchone()
-            if model is None:
-                raise ValueError(f"unknown ML model_id: {model_id}")
-            required_status = (
-                "PAPER_CHALLENGER"
-                if policy_source == "ML_CHALLENGER"
-                else "CHAMPION"
-            )
-            if str(model[0]) != required_status:
-                raise ValueError(
-                    f"model {model_id} must be {required_status} "
-                    f"for policy_source {policy_source}"
-                )
-
-        conn.execute(
-            """
-            UPDATE paper_accounts
-            SET cash_quote = ?, updated_at = ?
-            WHERE account_id = ?
-            """,
-            (_text(cash - debit), event_time, account_id),
+        _open_paper_position_in_conn(
+            conn,
+            event_key=event_key,
+            account_id=account_id,
+            position_id=position_id,
+            pool_address=pool_address,
+            policy_source=policy_source,
+            strategy=strategy,
+            min_bin_id=min_bin_id,
+            max_bin_id=max_bin_id,
+            capital=capital,
+            cost=cost,
+            model_id=model_id,
+            event_time=event_time,
         )
-        conn.execute(
-            """
-            INSERT INTO paper_positions(
-                position_id, account_id, pool_address, status,
-                policy_source, model_id, strategy, min_bin_id, max_bin_id,
-                opened_at, entry_capital_quote, entry_cost_quote,
-                current_mark_quote, fee_income_quote, reward_income_quote,
-                rebalance_cost_quote, exit_cost_quote, rebalances, raw_json
-            ) VALUES (?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, '0', '0', '0', '0', 0, ?)
-            """,
-            (
-                position_id,
-                account_id,
-                pool_address,
-                policy_source,
-                model_id,
-                strategy,
-                min_bin_id,
-                max_bin_id,
-                event_time,
-                _text(capital),
-                _text(cost),
-                _text(capital),
-                json.dumps(
-                    {
-                        "event_key": event_key,
-                        "policy_source": policy_source,
-                        "model_id": model_id,
-                    },
-                    separators=(",", ":"),
-                ),
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO paper_events(
-                event_key, account_id, position_id, event_time, event_type,
-                cash_delta_quote, position_mark_quote, cost_quote, raw_json
-            ) VALUES (?, ?, ?, ?, 'ENTER', ?, ?, ?, ?)
-            """,
-            (
-                event_key,
-                account_id,
-                position_id,
-                event_time,
-                _text(-debit),
-                _text(capital),
-                _text(cost),
-                "{}",
-            ),
-        )
-        _refresh_high_water(conn, account_id)
 
     return paper_position_snapshot(storage, position_id=position_id)
-
 
 def mark_paper_position(
     storage: Storage,
