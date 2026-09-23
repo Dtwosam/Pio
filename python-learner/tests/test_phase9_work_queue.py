@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timedelta, timezone
 import sqlite3
 import meteora_learner.phase9_work_queue as work_queue_module
 from pathlib import Path
@@ -766,6 +767,7 @@ def test_work_queue_advances_to_mint_risk_after_snapshots(tmp_path):
     queue = build_phase9_work_queue(
         storage,
         rpc_url="https://rpc.example.invalid",
+        as_of="2026-09-23T13:00:00+00:00",
     )
 
     task_types = {item.task_type for item in queue.items}
@@ -802,10 +804,13 @@ def test_work_queue_mint_snapshot_command_uses_requested_rpc(tmp_path):
         if item.task_type == "MINT_SNAPSHOT"
     )
     assert task.shell_command is not None
-    assert "https://rpc.example.invalid" in task.shell_command
-    assert "inspect-mint" in task.shell_command
-    assert "ingest-mint-snapshot --file -" in task.shell_command
-    assert " > " not in task.shell_command
+    assert task.scope == "pool-a"
+    assert "SOLANA_RPC_URL=https://rpc.example.invalid" in task.shell_command
+    assert "phase9-mint-capture-run" in task.shell_command
+    assert "--target-pools 1" in task.shell_command
+    assert "--pools pool-a" in task.shell_command
+    assert "--require-ready" in task.shell_command
+    assert "inspect-mint" not in task.shell_command
 
 
 def test_work_queue_mint_snapshot_defaults_to_env_rpc(tmp_path):
@@ -830,9 +835,91 @@ def test_work_queue_mint_snapshot_defaults_to_env_rpc(tmp_path):
         if item.task_type == "MINT_SNAPSHOT"
     )
     assert task.shell_command is not None
-    assert "inspect-mint-env" in task.shell_command
+    assert task.scope == "pool-a"
+    assert "phase9-mint-capture-run" in task.shell_command
+    assert "--pools pool-a" in task.shell_command
+    assert "SOLANA_RPC_URL=" not in task.shell_command
     assert "<RPC_URL>" not in task.shell_command
-    assert "ingest-mint-snapshot --file -" in task.shell_command
+
+
+def test_work_queue_refreshes_stale_live_mint_snapshots(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    stale_at = (
+        datetime.now(timezone.utc) - timedelta(hours=2)
+    ).isoformat()
+    for mint in ("pool-a-x", "pool-a-y"):
+        storage.save_token_mint_snapshot(
+            {
+                "mint_address": mint,
+                "token_program": (
+                    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+                ),
+                "capture_slot_start": 1,
+                "capture_slot_end": 2,
+                "supply": "1000000",
+                "decimals": 6,
+                "is_initialized": True,
+                "mint_authority": None,
+                "freeze_authority": None,
+                "data_len": 82,
+                "token_2022_extension_data_len": 0,
+                "has_token_2022_extension_data": False,
+            },
+            observed_at=stale_at,
+        )
+
+    queue = build_phase9_work_queue(
+        storage,
+        criteria=Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=1,
+            min_wallet_flow_pools=1,
+            min_static_hedge_pools=1,
+        ),
+    )
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "MINT_SNAPSHOT"
+    )
+    assert task.scope == "pool-a"
+    assert task.shell_command is not None
+    assert "phase9-mint-capture-run" in task.shell_command
+    assert "exceeds 3600s" in task.reason
+
+
+def test_work_queue_refuses_historical_mint_backfill(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    save_mint_snapshot(storage, "pool-a-x")
+    save_mint_snapshot(storage, "pool-a-y")
+
+    queue = build_phase9_work_queue(
+        storage,
+        criteria=Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=1,
+            min_wallet_flow_pools=1,
+            min_static_hedge_pools=1,
+        ),
+        as_of="2026-09-23T13:00:01+00:00",
+    )
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "MINT_SNAPSHOT"
+    )
+    assert task.scope == "pool-a"
+    assert task.shell_command is None
+    assert "cannot backfill" in task.reason
+    assert "exceeds 3600s" in task.reason
 
 
 def test_work_queue_prefers_cycle_bound_bandit_when_lineage_exists(tmp_path):
