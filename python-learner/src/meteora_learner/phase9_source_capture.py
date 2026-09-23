@@ -83,6 +83,9 @@ def run_phase9_source_capture(
     history_min_observation_interval_seconds: int = 3600,
     wallet_discovery_limit: int = 250,
     wallet_max_positions_per_run: int = 50,
+    wallet_expand_closed_positions: bool = True,
+    wallet_owner_expansion_limit: int = 25,
+    wallet_owner_position_max_pages: int = 3,
     rust_manifest_path: str | Path | None = None,
     rust_binary_path: str | Path | None = None,
     timeout_seconds: int = 120,
@@ -97,6 +100,10 @@ def run_phase9_source_capture(
         raise ValueError(
             "history_min_observation_interval_seconds cannot be negative"
         )
+    if wallet_owner_expansion_limit < 1:
+        raise ValueError("wallet_owner_expansion_limit must be positive")
+    if wallet_owner_position_max_pages < 1:
+        raise ValueError("wallet_owner_position_max_pages must be positive")
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
 
@@ -192,6 +199,9 @@ def run_phase9_source_capture(
                 criteria=WalletFlowCriteria(),
                 discovery_limit=wallet_discovery_limit,
                 max_positions_per_run=wallet_max_positions_per_run,
+                expand_closed_positions=wallet_expand_closed_positions,
+                owner_expansion_limit=wallet_owner_expansion_limit,
+                owner_position_max_pages=wallet_owner_position_max_pages,
                 settings=current_settings,
                 rust_manifest_path=rust_manifest_path,
                 rust_binary_path=rust_binary_path,
