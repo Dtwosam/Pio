@@ -336,6 +336,7 @@ Built:
 - dependency-aware Phase 9 work queue and checksum-verified progress snapshots now continue past research promotion through shadow evidence, authorization, controlled holdout, bounded rollout, rollback simulation and pre-wiring readiness
 - immutable checksum-bound pre-wiring manifest binding the exact authorization, controlled-validation, rollout and rollback evidence IDs/hashes, with automatic staleness when any component advances
 - deterministic read-only chain-capture planner that converts API-discovered Meteora pools missing chain evidence into ranked `inspect-pool -> ingest-chain-snapshot` commands, with work-queue routing to discovery when no candidates exist
+- explicit manual Phase 9 chain-capture batch that reuses the hardened read-only Rust inspector, isolates per-pool failures, validates returned pool identity and only ingests local snapshots; it never signs or submits transactions
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
