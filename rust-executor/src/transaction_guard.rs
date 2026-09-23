@@ -17,6 +17,11 @@ pub struct ProgramInstructionPolicy {
 }
 
 
+fn default_require_proposal_pool_account() -> bool {
+    true
+}
+
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionGuardConfig {
     pub expected_fee_payer: String,
@@ -25,6 +30,10 @@ pub struct TransactionGuardConfig {
     pub max_static_accounts: usize,
     pub allow_address_lookup_tables: bool,
     pub require_unsigned: bool,
+    #[serde(default = "default_require_proposal_pool_account")]
+    pub require_proposal_pool_account: bool,
+    #[serde(default)]
+    pub required_account_pubkeys: Vec<String>,
     #[serde(default)]
     pub require_instruction_policy: bool,
     #[serde(default)]
@@ -45,6 +54,7 @@ pub struct TransactionGuardReport {
     pub reason: String,
     pub fee_payer: String,
     pub pool_account_present: bool,
+    pub required_accounts_present: bool,
     pub instruction_count: usize,
     pub static_account_count: usize,
     pub required_signatures: usize,
@@ -95,6 +105,7 @@ fn validate_config(
     Pubkey,
     BTreeSet<Pubkey>,
     BTreeMap<Pubkey, Vec<(Vec<Action>, Vec<u8>)>>,
+    BTreeSet<Pubkey>,
 )> {
     if config.max_instructions == 0 {
         anyhow::bail!("max_instructions must be positive");
@@ -112,6 +123,19 @@ fn validate_config(
         programs.insert(
             Pubkey::from_str(raw.trim())
                 .with_context(|| format!("invalid allowed program id: {raw}"))?,
+        );
+    }
+
+    let mut required_accounts = BTreeSet::new();
+    for raw in &config.required_account_pubkeys {
+        required_accounts.insert(
+            Pubkey::from_str(raw.trim())
+                .with_context(|| format!("invalid required account pubkey: {raw}"))?,
+        );
+    }
+    if !config.require_proposal_pool_account && required_accounts.is_empty() {
+        anyhow::bail!(
+            "disabling proposal-pool binding requires at least one explicit required account"
         );
     }
 
@@ -151,7 +175,7 @@ fn validate_config(
         }
     }
 
-    Ok((payer, programs, policies))
+    Ok((payer, programs, policies, required_accounts))
 }
 
 fn inspect_transaction(encoded: &str) -> Result<InspectedTransaction> {
@@ -227,13 +251,20 @@ pub fn check_transaction(
     encoded: &str,
     config: &TransactionGuardConfig,
 ) -> Result<TransactionGuardReport> {
-    let (expected_payer, allowed_programs, policies) =
-        validate_config(config)?;
+    let (
+        expected_payer,
+        allowed_programs,
+        policies,
+        required_accounts,
+    ) = validate_config(config)?;
     let pool = Pubkey::from_str(proposal.pool_address.trim())
         .context("proposal pool_address is not a valid Solana pubkey")?;
     let inspected = inspect_transaction(encoded)?;
 
     let pool_account_present = inspected.account_keys.contains(&pool);
+    let required_accounts_present = required_accounts
+        .iter()
+        .all(|account| inspected.account_keys.contains(account));
     let unique_program_ids: BTreeSet<Pubkey> = inspected
         .instructions
         .iter()
@@ -282,8 +313,10 @@ pub fn check_transaction(
         && !config.allow_address_lookup_tables
     {
         Some("address_lookup_tables_not_allowed")
-    } else if !pool_account_present {
+    } else if config.require_proposal_pool_account && !pool_account_present {
         Some("proposal_pool_not_in_transaction")
+    } else if !required_accounts_present {
+        Some("required_account_not_in_transaction")
     } else if unapproved_program {
         Some("transaction_uses_unapproved_program")
     } else if instruction_policy_failure {
@@ -299,6 +332,7 @@ pub fn check_transaction(
         reason: rejection.unwrap_or("approved").to_string(),
         fee_payer: inspected.fee_payer.to_string(),
         pool_account_present,
+        required_accounts_present,
         instruction_count: inspected.instructions.len(),
         static_account_count: inspected.account_keys.len(),
         required_signatures: inspected.required_signatures,
@@ -371,6 +405,8 @@ mod tests {
             max_static_accounts: 16,
             allow_address_lookup_tables: false,
             require_unsigned: true,
+            require_proposal_pool_account: true,
+            required_account_pubkeys: vec![],
             require_instruction_policy: true,
             instruction_policies: vec![ProgramInstructionPolicy {
                 program_id: program.to_string(),
@@ -514,6 +550,56 @@ mod tests {
         assert_eq!(
             report.reason,
             "transaction_instruction_not_allowed"
+        );
+    }
+
+    #[test]
+    fn explicit_required_account_can_replace_pool_binding() {
+        let payer = Pubkey::new_unique();
+        let proposal_pool = Pubkey::new_unique();
+        let target = Pubkey::new_unique();
+        let program = Pubkey::new_unique();
+        let encoded = encoded_transaction(
+            payer,
+            target,
+            program,
+            Signature::default(),
+            vec![1, 2, 3],
+        );
+        let mut cfg = config(payer, program);
+        cfg.require_proposal_pool_account = false;
+        cfg.required_account_pubkeys = vec![target.to_string()];
+
+        let report = check_transaction(
+            &proposal(proposal_pool),
+            &encoded,
+            &cfg,
+        )
+        .unwrap();
+
+        assert!(report.accepted);
+        assert!(!report.pool_account_present);
+        assert!(report.required_accounts_present);
+    }
+
+    #[test]
+    fn disabling_pool_binding_without_required_account_fails_config() {
+        let payer = Pubkey::new_unique();
+        let pool = Pubkey::new_unique();
+        let program = Pubkey::new_unique();
+        let encoded = encoded_transaction(
+            payer,
+            pool,
+            program,
+            Signature::default(),
+            vec![1, 2, 3],
+        );
+        let mut cfg = config(payer, program);
+        cfg.require_proposal_pool_account = false;
+        cfg.required_account_pubkeys.clear();
+
+        assert!(
+            check_transaction(&proposal(pool), &encoded, &cfg).is_err()
         );
     }
 
