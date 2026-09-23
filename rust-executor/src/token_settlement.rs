@@ -388,7 +388,8 @@ pub async fn build_token_settlement_from_chain(
                 reward_index as usize,
             )
             .await?;
-        reward_hook_total += reward_remaining.accounts.len();
+        let reward_hook_count = reward_remaining.accounts.len();
+        reward_hook_total += reward_hook_count;
 
         let mut reward_accounts =
             dlmm::client::accounts::ClaimReward2 {
@@ -423,11 +424,7 @@ pub async fn build_token_settlement_from_chain(
             mint: reward_mint.to_string(),
             token_program: reward_program.to_string(),
             is_token_2022: reward_program == token_2022,
-            transfer_hook_account_count: reward_hook_total
-                - reward_validations
-                    .iter()
-                    .map(|item| item.transfer_hook_account_count)
-                    .sum::<usize>(),
+            transfer_hook_account_count: reward_hook_count,
         });
     }
 
