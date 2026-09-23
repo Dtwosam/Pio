@@ -647,6 +647,7 @@ def test_work_queue_surfaces_concrete_missing_research(tmp_path):
     assert "ADAPTIVE_MULTI_POOL" in task_types
     assert "CHAIN_HISTORY_DEPTH" in task_types
     assert "MINT_SNAPSHOT" in task_types
+    assert "WALLET_FLOW_CAPTURE" in task_types
     assert "WALLET_FLOW" in task_types
     assert "STATIC_HEDGE" in task_types
     assert "PORTFOLIO_ALLOCATION" in task_types
@@ -694,6 +695,114 @@ def test_work_queue_releases_adaptive_research_after_exact_history_depth(
     assert adaptive.shell_command is not None
     assert "phase9-research-validate" in adaptive.shell_command
     assert "pool-a,pool-b,pool-c" in adaptive.shell_command
+
+
+def test_work_queue_blocks_wallet_flow_until_source_thresholds(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+
+    queue = build_phase9_work_queue(
+        storage,
+        criteria=Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=1,
+            min_wallet_flow_pools=1,
+            min_static_hedge_pools=1,
+        ),
+        rpc_url="https://rpc.example.invalid",
+    )
+
+    capture = next(
+        item for item in queue.items
+        if item.task_type == "WALLET_FLOW_CAPTURE"
+    )
+    research = next(
+        item for item in queue.items
+        if item.task_type == "WALLET_FLOW"
+        and item.scope == "pool-a"
+    )
+    assert capture.scope == "pool-a"
+    assert capture.shell_command is not None
+    assert (
+        "SOLANA_RPC_URL=https://rpc.example.invalid"
+        in capture.shell_command
+    )
+    assert "phase9-wallet-flow-capture-run" in capture.shell_command
+    assert "--pool pool-a" in capture.shell_command
+    assert "events 0/20" in capture.reason
+    assert "unique users 0/5" in capture.reason
+    assert research.shell_command is None
+    assert "blocked until real position-history" in research.reason
+
+
+def test_work_queue_unlocks_wallet_flow_after_real_source_thresholds(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    with storage.connect() as conn:
+        for user_index in range(5):
+            for event_index in range(4):
+                value = user_index * 10 + event_index
+                conn.execute(
+                    """
+                    INSERT INTO position_event_history(
+                        observed_at, position_address, signature, ix_index,
+                        event_type, block_time, slot, pool_address,
+                        user_address, token_x, token_y,
+                        amount_x, amount_y, amount_x_usd, amount_y_usd,
+                        total_usd, created_at, raw_json
+                    ) VALUES (
+                        ?, ?, ?, 0, 'ADD_LIQUIDITY', ?, ?, ?,
+                        ?, 'X', 'Y', '1', '1', '1', '1',
+                        '2', ?, '{}'
+                    )
+                    """,
+                    (
+                        "2026-09-23T13:00:00+00:00",
+                        f"position-{user_index}",
+                        f"sig-{value}",
+                        1_795_000_000 + value,
+                        1000 + value,
+                        "pool-a",
+                        f"user-{user_index}",
+                        f"2026-09-23T12:00:{value:02d}+00:00",
+                    ),
+                )
+
+    queue = build_phase9_work_queue(
+        storage,
+        criteria=Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=1,
+            min_wallet_flow_pools=1,
+            min_static_hedge_pools=1,
+        ),
+        as_of="2026-09-23T13:00:00+00:00",
+    )
+
+    assert not any(
+        item.task_type == "WALLET_FLOW_CAPTURE"
+        for item in queue.items
+    )
+    research = next(
+        item for item in queue.items
+        if item.task_type == "WALLET_FLOW"
+        and item.scope == "pool-a"
+    )
+    assert research.shell_command is not None
+    assert "wallet-flow-research --pool pool-a" in research.shell_command
+    assert "--as-of 2026-09-23T13:00:00+00:00" in (
+        research.shell_command
+    )
 
 
 def test_work_queue_requests_bundle_refresh_after_new_evidence(tmp_path):
