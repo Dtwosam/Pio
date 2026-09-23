@@ -804,7 +804,8 @@ def test_work_queue_mint_snapshot_command_uses_requested_rpc(tmp_path):
     assert task.shell_command is not None
     assert "https://rpc.example.invalid" in task.shell_command
     assert "inspect-mint" in task.shell_command
-    assert "mint-snapshot-ingest" in task.shell_command
+    assert "ingest-mint-snapshot --file -" in task.shell_command
+    assert " > " not in task.shell_command
 
 
 def test_work_queue_prefers_cycle_bound_bandit_when_lineage_exists(tmp_path):
