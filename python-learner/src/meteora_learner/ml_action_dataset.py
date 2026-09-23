@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from .baseline_policy import (
@@ -67,6 +68,13 @@ def _survival_ratio(
     ) / len(active_ids)
 
 
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("ML dataset timestamps require timezone")
+    return parsed.astimezone(timezone.utc)
+
+
 def build_ml_action_dataset(
     database_path: str,
     *,
@@ -88,6 +96,7 @@ def build_ml_action_dataset(
     favor_x_in_active_bin: bool = False,
     near_liquidity_radius: int = 5,
     baseline_config: BaselinePolicyConfig | None = None,
+    max_observed_at: str | None = None,
 ) -> MLActionDatasetReport:
     """
     Label every replay-valid candidate action at each no-lookahead decision point.
@@ -114,6 +123,13 @@ def build_ml_action_dataset(
         limit=None,
         ascending=True,
     )
+    if max_observed_at is not None:
+        cutoff = _parse_time(max_observed_at)
+        times = [
+            value
+            for value in times
+            if _parse_time(value) <= cutoff
+        ]
     if len(times) < lookback_observations + forward_intervals:
         raise ValueError("not enough chain observations for action dataset")
 
