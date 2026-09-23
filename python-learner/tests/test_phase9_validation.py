@@ -399,3 +399,34 @@ def test_phase9_promotion_refuses_live_policy_authority(tmp_path):
         raise AssertionError(
             "expected non-research Phase 9 promotion refusal"
         )
+
+
+def test_forged_bandit_dataset_lineage_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    forged["dataset_lineage"] = {
+        **forged["dataset_lineage"],
+        "dataset_evidence_id": 999999,
+    }
+    storage.save_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+        as_of="2026-09-23T12:01:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "checksum-verified retraining dataset lineage" in reason
+        for reason in report.reasons
+    )
