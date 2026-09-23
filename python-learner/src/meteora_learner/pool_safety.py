@@ -96,7 +96,7 @@ def screen_pool_universe(
     as_of: str | None = None,
 ) -> PoolSafetyReport:
     store = ResearchStore(database_path)
-    pools = store.latest_pool_snapshots()
+    pools = store.latest_pool_snapshots(as_of=as_of)
     if not pools:
         raise ValueError("no normalized pool snapshots available")
 
@@ -198,7 +198,10 @@ def screen_pool_universe(
                     f"{config.max_dynamic_fee_pct:.6f}%"
                 )
 
-        chain = store.latest_chain_pool_snapshot(address)
+        chain = store.latest_chain_pool_snapshot(
+            address,
+            as_of=as_of,
+        )
         standard_spl: bool | None = None
         if chain is not None:
             x_program = chain.get("token_x_program")
@@ -214,7 +217,10 @@ def screen_pool_universe(
             elif not standard_spl:
                 reasons.append("pool is not standard-SPL on both sides")
 
-        chain_observations = store.chain_observation_count(address)
+        chain_observations = store.chain_observation_count(
+            address,
+            as_of=as_of,
+        )
         if chain_observations < config.min_chain_observations:
             reasons.append(
                 f"chain observations {chain_observations} < required "
