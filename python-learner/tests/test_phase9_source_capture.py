@@ -183,6 +183,64 @@ def test_source_capture_isolates_family_failure_and_recomputes_readiness(
     assert any("wallet-flow capture failed" in value for value in report.errors)
 
 
+def test_source_capture_forwards_history_observation_interval(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    settings = Settings(database_path=storage.path)
+    seen = {}
+
+    monkeypatch.setattr(
+        source_module,
+        "collect_once",
+        lambda settings: SimpleNamespace(run_id="api"),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_chain_capture_batch",
+        lambda *args, **kwargs: DummyRecord(target_met=True),
+    )
+
+    def fake_history(*args, **kwargs):
+        seen["interval"] = kwargs["min_observation_interval_seconds"]
+        return DummyRecord(history_ready_after=False)
+
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_history_capture",
+        fake_history,
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_mint_capture",
+        lambda *args, **kwargs: DummyRecord(inputs_ready_after=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "_top_chain_pools",
+        lambda storage, limit: (),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_history_plan",
+        lambda storage: SimpleNamespace(plan_ready=False),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_mint_capture_plan",
+        lambda *args, **kwargs: SimpleNamespace(inputs_ready=True),
+    )
+
+    run_phase9_source_capture(
+        storage,
+        settings=settings,
+        history_min_observation_interval_seconds=5400,
+    )
+
+    assert seen["interval"] == 5400
+
+
 def test_source_capture_can_skip_api_refresh(monkeypatch, tmp_path):
     storage = Storage(tmp_path / "pio.db")
     settings = Settings(database_path=storage.path)
