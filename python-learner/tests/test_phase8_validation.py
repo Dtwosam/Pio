@@ -211,3 +211,60 @@ def test_phase8_requires_live_pool_diversity(tmp_path):
     assert report.live_champion is not None
     assert report.live_champion.status == "INSUFFICIENT_EVIDENCE"
     assert report.live_champion.distinct_pools == 1
+
+
+def test_phase8_promotion_audit_stays_current_with_more_healthy_labels(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_phase7(storage)
+    seed_champion(storage, with_cycle=True)
+    add_live_label(storage, 0)
+
+    report = evaluate_phase8_promotion(
+        storage,
+        criteria=criteria(),
+    )
+    assert report.promotion_ready is True
+    persist_phase8_promotion(storage, report=report)
+
+    add_live_label(storage, 1)
+
+    audit = audit_persisted_phase8_promotion(storage)
+
+    assert audit.current is True
+    assert audit.current_promotion_ready is True
+    assert audit.champion_lineage_matches is True
+    assert audit.reasons == ()
+
+
+def test_phase8_promotion_audit_fails_after_champion_rollback(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_phase7(storage)
+    seed_champion(storage, with_cycle=True)
+    add_live_label(storage, 0)
+
+    report = evaluate_phase8_promotion(
+        storage,
+        criteria=criteria(),
+    )
+    assert report.promotion_ready is True
+    persist_phase8_promotion(storage, report=report)
+
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE model_registry
+            SET status = 'ROLLED_BACK'
+            WHERE model_id = 'champion'
+            """
+        )
+
+    audit = audit_persisted_phase8_promotion(storage)
+
+    assert audit.current is False
+    assert audit.current_promotion_ready is False
+    assert any(
+        "current Phase 8 promotion gate no longer passes" in reason
+        for reason in audit.reasons
+    )
