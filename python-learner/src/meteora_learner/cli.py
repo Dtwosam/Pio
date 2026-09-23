@@ -68,6 +68,7 @@ from .paper_latest import (
 )
 from .paper_portfolio import run_portfolio_live_paper_cycle
 from .paper_entry_workflow import build_and_open_bound_phase3_paper_entry
+from .paper_chain_collection import build_paper_chain_collection_queue
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -193,6 +194,14 @@ def main() -> None:
         type=int,
         default=0,
     )
+
+    paper_chain_queue = subparsers.add_parser(
+        "paper-chain-work-queue",
+        help="Emit read-only Rust inspect-pool tasks for missing/stale open-paper chain state",
+    )
+    paper_chain_queue.add_argument("--account")
+    paper_chain_queue.add_argument("--max-age-seconds", type=int, default=300)
+    paper_chain_queue.add_argument("--array-radius", type=int, default=1)
 
     paper_phase3_open = subparsers.add_parser(
         "paper-open-phase3",
@@ -1465,6 +1474,17 @@ def main() -> None:
             model_id=args.model_id,
         )
         print(json.dumps(record.__dict__, indent=2))
+        return
+
+    if args.command == "paper-chain-work-queue":
+        settings = Settings.from_env()
+        result = build_paper_chain_collection_queue(
+            Storage(settings.database_path),
+            account_id=args.account,
+            max_age_seconds=args.max_age_seconds,
+            array_radius=args.array_radius,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "paper-open-phase3":
