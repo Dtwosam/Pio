@@ -33,6 +33,10 @@ from meteora_learner.mint_risk import (
     persist_pool_mint_risk,
     research_pool_mint_risk,
 )
+from meteora_learner.phase9_explicit_inputs import (
+    parse_phase9_explicit_inputs,
+    persist_phase9_explicit_inputs,
+)
 from meteora_learner.phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
     Phase9ResearchCriteria,
@@ -109,6 +113,79 @@ def save_mint_snapshot(storage, mint):
             "has_token_2022_extension_data": False,
         },
         observed_at="2026-09-23T12:00:00+00:00",
+    )
+
+
+def seed_explicit_inputs(storage):
+    payload = {
+        "static_hedges": [
+            {
+                "pool_address": "pool-a",
+                "amount_x": 100,
+                "amount_y": 100,
+                "instrument": {
+                    "instrument_id": "SOL-PERP",
+                    "venue": "TEST",
+                    "available_liquidity_y_atomic": 1_000_000,
+                    "max_liquidity_share_bps": 1000,
+                    "max_leverage": 1.0,
+                    "funding_bps_per_holding_window": 0.0,
+                },
+                "criteria": {
+                    "observation_limit": 96,
+                    "holding_observations": 6,
+                    "hedge_fraction": 1.0,
+                    "hedge_round_trip_cost_bps": 10.0,
+                    "min_windows": 20,
+                    "min_mean_abs_return_reduction_bps": 0.0,
+                    "min_worst_loss_improvement_bps": 0.0,
+                    "max_mean_return_drag_bps": 100.0,
+                },
+                "as_of": None,
+            }
+        ],
+        "pool_inputs": [
+            {
+                "pool_address": "pool-a",
+                "amount_x": 100,
+                "amount_y": 100,
+                "requested_quote": 100.0,
+                "network_cost_y_atomic": 1000,
+            },
+            {
+                "pool_address": "pool-b",
+                "amount_x": 100,
+                "amount_y": 100,
+                "requested_quote": 100.0,
+                "network_cost_y_atomic": 1000,
+            },
+        ],
+        "portfolio": {
+            "account_equity_quote": 1000.0,
+            "cash_quote": 1000.0,
+            "current_deployed_quote": 0.0,
+            "portfolio_drawdown_bps": 0,
+            "observation_limit": 12,
+            "half_widths": [0, 1, 2, 5, 10],
+            "center_offsets": [0],
+            "strategies": ["SPOT", "CURVE", "BID_ASK"],
+            "max_share_bps": 500,
+            "favor_x_in_active_bin": False,
+            "budget_quote": 200.0,
+            "allocation_criteria": {
+                "max_positions": 3,
+                "min_positions": 2,
+                "max_pool_allocation_bps": 5000,
+                "min_range_survival_ratio": 0.75,
+                "min_excess_vs_hold_bps": 0,
+                "min_position_quote": 10.0,
+                "min_budget_utilization_rate": 0.75,
+            },
+        },
+    }
+    return persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(payload),
     )
 
 
@@ -649,8 +726,7 @@ def test_work_queue_surfaces_concrete_missing_research(tmp_path):
     assert "MINT_SNAPSHOT" in task_types
     assert "WALLET_FLOW_CAPTURE" in task_types
     assert "WALLET_FLOW" in task_types
-    assert "STATIC_HEDGE" in task_types
-    assert "PORTFOLIO_ALLOCATION" in task_types
+    assert "EXPLICIT_RESEARCH_INPUTS" in task_types
     assert "CONTEXTUAL_BANDIT" in task_types
     history = next(
         item for item in queue.items
@@ -667,7 +743,46 @@ def test_work_queue_surfaces_concrete_missing_research(tmp_path):
     assert "pool-c:42" in history.reason
     assert adaptive.shell_command is None
     assert "exact chain-history depth" in adaptive.reason
+    explicit = next(
+        item for item in queue.items
+        if item.task_type == "EXPLICIT_RESEARCH_INPUTS"
+    )
+    assert explicit.shell_command is not None
+    assert "phase9-research-input-template" in explicit.shell_command
+    assert "phase9-research-inputs.json" in explicit.shell_command
+    assert "fill every null economic field" in explicit.reason
     assert queue.candidate_pools == ("pool-a", "pool-b", "pool-c")
+
+
+def test_work_queue_runs_checksum_bound_explicit_inputs_when_available(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_pool(
+            storage,
+            pool,
+            "2026-09-23T12:00:00+00:00",
+        )
+    artifact = seed_explicit_inputs(storage)
+
+    queue = build_phase9_work_queue(storage)
+
+    assert not any(
+        item.task_type == "EXPLICIT_RESEARCH_INPUTS"
+        for item in queue.items
+    )
+    task = next(
+        item for item in queue.items
+        if item.task_type == "EXPLICIT_RESEARCH_RUN"
+    )
+    assert task.scope == str(artifact.evidence_id)
+    assert task.shell_command is not None
+    assert (
+        f"--input-evidence-id {artifact.evidence_id}"
+        in task.shell_command
+    )
+    assert "--persist --require-ready" in task.shell_command
 
 
 def test_work_queue_releases_adaptive_research_after_exact_history_depth(
