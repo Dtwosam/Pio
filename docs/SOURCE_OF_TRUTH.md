@@ -348,7 +348,7 @@ Wallet-flow research remains descriptive. It requires minimum event/user
 coverage and rejects highly concentrated activity before the evidence can be
 research-qualified. Source readiness must be measured over the same bounded latest-event window used by the research evaluator, never lifetime totals. A read-only on-chain `PositionV2` scan may identify a bounded current-position cohort for official position-history collection, but that cohort must be labeled as incomplete with respect to historical/closed positions and may not itself be treated as qualification. Missing users/events are never synthesized. Portfolio allocation research is likewise non-actionable:
 it caps per-pool concentration, number of positions and minimum budget
-utilization. None of these Phase 9 outputs may alter LIVE policy without a
+utilization. Static-hedge and portfolio economic assumptions must never be synthesized by orchestration. They may be supplied only through an explicit validated input set whose normalized bytes are checksum-bound and append-only. Generated templates may provide established methodological defaults, but token amounts, quote notionals, network costs, hedge identity/venue/liquidity/funding/trading cost, account state, drawdown and allocation budget must remain unset until explicitly provided. Candidate artifacts produced from that input set must record the source input evidence ID and SHA-256. None of these Phase 9 outputs may alter LIVE policy without a
 separate future promotion boundary.
 
 
