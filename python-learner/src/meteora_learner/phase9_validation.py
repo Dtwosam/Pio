@@ -859,6 +859,18 @@ def evaluate_phase9_research_bundle(
     )
 
 
+def phase9_research_bundle_sha256(
+    payload: dict[str, Any],
+) -> str:
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def persist_phase9_research_bundle(
     storage: Storage,
     *,
@@ -868,13 +880,18 @@ def persist_phase9_research_bundle(
         raise ValueError(
             "Phase 9 research bundle must remain non-actionable"
         )
+    payload = report.to_record()
+    evidence = {
+        **payload,
+        "bundle_sha256": phase9_research_bundle_sha256(payload),
+    }
     return storage.save_advanced_edge_evidence(
         edge_type=PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
         pool_address="__PHASE9_RESEARCH__",
         as_of=None,
         status=report.status,
         qualified=report.research_ready,
-        evidence=report.to_record(),
+        evidence=evidence,
     )
 
 
@@ -885,6 +902,9 @@ class Phase9PromotionReport:
     policy_actionable: bool
     research_bundle: Phase9ResearchBundleReport
     research_bundle_evidence_id: int | None
+    research_bundle_sha256: str
+    persisted_bundle_sha256: str | None
+    persisted_bundle_hash_valid: bool
     persisted_bundle_matches_current: bool
     promotion_ready: bool
     reasons: tuple[str, ...]
@@ -913,29 +933,33 @@ def evaluate_phase9_promotion(
         if latest_bundle is not None
         else None
     )
+    current = json.loads(
+        json.dumps(bundle.to_record(), sort_keys=True)
+    )
+    current_bundle_sha256 = phase9_research_bundle_sha256(current)
+    persisted_bundle_sha256: str | None = None
+    persisted_bundle_hash_valid = False
     persisted_matches_current = False
     if latest_bundle is not None:
         persisted = latest_bundle["evidence"]
-        current = json.loads(
-            json.dumps(bundle.to_record(), sort_keys=True)
+        persisted_bundle_sha256 = str(
+            persisted.get("bundle_sha256", "")
+        ).strip() or None
+        persisted_payload = {
+            key: persisted.get(key)
+            for key in current
+        }
+        persisted_recomputed_sha = phase9_research_bundle_sha256(
+            persisted_payload
         )
-        persisted_matches_current = all(
-            persisted.get(key) == current.get(key)
-            for key in (
-                "phase8_promoted",
-                "research_only",
-                "policy_actionable",
-                "status",
-                "criteria",
-                "adaptive_multi_pool",
-                "mint_risk",
-                "wallet_flow",
-                "portfolio_allocation",
-                "static_hedge",
-                "contextual_bandit",
-                "research_ready",
-                "reasons",
-            )
+        persisted_bundle_hash_valid = (
+            persisted_bundle_sha256 is not None
+            and persisted_bundle_sha256 == persisted_recomputed_sha
+        )
+        persisted_matches_current = (
+            persisted_bundle_hash_valid
+            and persisted_bundle_sha256 == current_bundle_sha256
+            and persisted_payload == current
         )
 
     reasons: list[str] = []
@@ -965,6 +989,10 @@ def evaluate_phase9_promotion(
         reasons.append(
             "persisted Phase 9 research bundle is not qualified"
         )
+    elif not persisted_bundle_hash_valid:
+        reasons.append(
+            "persisted Phase 9 research bundle checksum is invalid"
+        )
     elif not persisted_matches_current:
         reasons.append(
             "persisted Phase 9 research bundle is stale versus current evidence"
@@ -976,6 +1004,9 @@ def evaluate_phase9_promotion(
         policy_actionable=False,
         research_bundle=bundle,
         research_bundle_evidence_id=bundle_evidence_id,
+        research_bundle_sha256=current_bundle_sha256,
+        persisted_bundle_sha256=persisted_bundle_sha256,
+        persisted_bundle_hash_valid=persisted_bundle_hash_valid,
         persisted_bundle_matches_current=persisted_matches_current,
         promotion_ready=not reasons,
         reasons=tuple(reasons),
