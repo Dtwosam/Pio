@@ -52,6 +52,19 @@ def current_phase9_sources(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def ready_phase9_pool_cohort(monkeypatch):
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_pool_cohort",
+        lambda storage: SimpleNamespace(
+            research_ready=True,
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            reasons=(),
+        ),
+    )
+
+
 @dataclass
 class DummyLineage:
     cycle_id: str
@@ -870,3 +883,84 @@ def test_research_refresh_recomputes_replay_verified_adaptive_when_source_advanc
     assert adaptive.persisted_evidence_id == 501
     assert calls == ["adaptive"]
     assert "source freshness: test source advanced" in adaptive.reason
+
+
+def test_research_refresh_uses_ranked_history_ready_pool_cohort(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seen = {}
+
+    monkeypatch.setattr(
+        refresh_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: SimpleNamespace(current=True),
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "_replay_statuses",
+        lambda *args, **kwargs: {
+            "adaptive_regime": False,
+            "mint_risk": True,
+            "wallet_flow": True,
+            "portfolio_allocation": True,
+            "static_hedge": True,
+            "contextual_bandit": True,
+        },
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_pool_cohort",
+        lambda storage: SimpleNamespace(
+            research_ready=True,
+            research_pools=(
+                "pool-a",
+                "pool-b",
+                "pool-c",
+                "pool-f",
+            ),
+            reasons=(),
+        ),
+    )
+
+    def evaluate(*args, **kwargs):
+        seen["pools"] = kwargs["pool_addresses"]
+        return DummyReport("adaptive-ranked")
+
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_research",
+        evaluate,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "persist_phase9_research",
+        lambda *args, **kwargs: 601,
+    )
+    monkeypatch.setattr(
+        refresh_module,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: bundle(
+            ready=False,
+            adaptive=1,
+            mint=2,
+            wallet=2,
+            bandit=1,
+        ),
+    )
+
+    report = run_phase9_research_refresh(storage)
+
+    assert seen["pools"] == (
+        "pool-a",
+        "pool-b",
+        "pool-c",
+        "pool-f",
+    )
+    item = next(
+        item for item in report.items
+        if item.family == "adaptive_regime"
+    )
+    assert item.status == "PERSISTED"
+    assert "ranked history-ready" in item.reason
