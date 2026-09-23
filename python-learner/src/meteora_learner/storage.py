@@ -446,6 +446,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_model_registry_one_champion
 ON model_registry(status)
 WHERE status = 'CHAMPION';
 
+CREATE TABLE IF NOT EXISTS phase_promotion_evidence (
+    phase_name TEXT PRIMARY KEY,
+    promoted_at TEXT NOT NULL,
+    evidence_type TEXT NOT NULL,
+    qualified INTEGER NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS model_offline_evidence (
     model_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
@@ -1773,6 +1781,62 @@ class Storage:
                 raise ValueError(
                     f"model {model_id} is not in expected status {expected_status}"
                 )
+
+    def save_phase_promotion_evidence(
+        self,
+        *,
+        phase_name: str,
+        evidence_type: str,
+        qualified: bool,
+        evidence: dict[str, Any],
+    ) -> None:
+        if not phase_name.strip():
+            raise ValueError("phase_name is required")
+        if not evidence_type.strip():
+            raise ValueError("evidence_type is required")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO phase_promotion_evidence(
+                    phase_name, promoted_at, evidence_type,
+                    qualified, evidence_json
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(phase_name) DO UPDATE SET
+                    promoted_at=excluded.promoted_at,
+                    evidence_type=excluded.evidence_type,
+                    qualified=excluded.qualified,
+                    evidence_json=excluded.evidence_json
+                """,
+                (
+                    phase_name,
+                    utc_now_iso(),
+                    evidence_type,
+                    int(bool(qualified)),
+                    json.dumps(evidence, separators=(",", ":")),
+                ),
+            )
+
+    def phase_is_promoted(
+        self,
+        phase_name: str,
+        *,
+        evidence_type: str | None = None,
+    ) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT evidence_type, qualified
+                FROM phase_promotion_evidence
+                WHERE phase_name = ?
+                LIMIT 1
+                """,
+                (phase_name,),
+            ).fetchone()
+        if row is None or not bool(row[1]):
+            return False
+        if evidence_type is not None and str(row[0]) != evidence_type:
+            return False
+        return True
 
     def save_model_offline_evidence(
         self,
