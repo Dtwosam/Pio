@@ -2069,7 +2069,7 @@ def main() -> None:
 
     phase9_work_queue = subparsers.add_parser(
         "phase9-work-queue",
-        help="Show concrete missing Phase 9 research evidence tasks",
+        help="Show the next concrete missing Phase 9 research, promotion and future-policy simulation evidence tasks",
     )
     phase9_work_queue.add_argument(
         "--min-mint-risk-pools",
