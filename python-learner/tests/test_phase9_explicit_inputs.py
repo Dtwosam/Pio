@@ -653,3 +653,58 @@ def test_explicit_research_can_run_portfolio_without_static_hedge(
     assert report.static_hedge_reports == ()
     assert report.portfolio_allocation is not None
     assert report.explicit_research_ready is False
+
+
+def test_portfolio_source_watermarks_bind_decision_snapshot(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    for observed_at in (
+        "2026-09-23T10:00:00+00:00",
+        "2026-09-23T11:00:00+00:00",
+    ):
+        storage.save_chain_pool_snapshot(
+            {
+                "pool_address": "pool-a",
+                "active_bin_id": 0,
+                "bin_step": 25,
+                "token_x_mint": "x",
+                "token_y_mint": "y",
+                "bin_arrays": [],
+            },
+            observed_at=observed_at,
+        )
+    with storage.connect() as conn:
+        expected = int(
+            conn.execute(
+                """
+                SELECT id
+                FROM chain_pool_snapshots
+                WHERE pool_address = 'pool-a'
+                  AND observed_at = '2026-09-23T10:00:00+00:00'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()[0]
+        )
+
+    watermarks = inputs_module._portfolio_source_watermarks(
+        storage,
+        source_inputs=[{"pool_address": "pool-a"}],
+        comparison_result=SimpleNamespace(
+            plans=(
+                SimpleNamespace(
+                    pool_address="pool-a",
+                    decision_observed_at=(
+                        "2026-09-23T10:00:00+00:00"
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert watermarks == [
+        {
+            "pool_address": "pool-a",
+            "snapshot_id": expected,
+            "observed_at": "2026-09-23T10:00:00+00:00",
+        }
+    ]
