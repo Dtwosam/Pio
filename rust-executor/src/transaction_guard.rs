@@ -1,4 +1,4 @@
-use crate::models::TradeProposal;
+use crate::models::{Action, TradeProposal};
 use crate::simulation::decode_transaction_base64;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use std::str::FromStr;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProgramInstructionPolicy {
     pub program_id: String,
+    pub allowed_actions: Vec<Action>,
     pub allowed_data_prefixes_hex: Vec<String>,
 }
 
@@ -93,7 +94,7 @@ fn validate_config(
 ) -> Result<(
     Pubkey,
     BTreeSet<Pubkey>,
-    BTreeMap<Pubkey, Vec<Vec<u8>>>,
+    BTreeMap<Pubkey, Vec<(Vec<Action>, Vec<u8>)>>,
 )> {
     if config.max_instructions == 0 {
         anyhow::bail!("max_instructions must be positive");
@@ -114,7 +115,10 @@ fn validate_config(
         );
     }
 
-    let mut policies: BTreeMap<Pubkey, Vec<Vec<u8>>> = BTreeMap::new();
+    let mut policies: BTreeMap<
+        Pubkey,
+        Vec<(Vec<Action>, Vec<u8>)>,
+    > = BTreeMap::new();
     for policy in &config.instruction_policies {
         let program = Pubkey::from_str(policy.program_id.trim())
             .with_context(|| {
@@ -128,6 +132,11 @@ fn validate_config(
                 "instruction policy program {program} is not in allowed_program_ids"
             );
         }
+        if policy.allowed_actions.is_empty() {
+            anyhow::bail!(
+                "instruction policy for {program} has no allowed actions"
+            );
+        }
         if policy.allowed_data_prefixes_hex.is_empty() {
             anyhow::bail!(
                 "instruction policy for {program} has no allowed data prefixes"
@@ -135,7 +144,10 @@ fn validate_config(
         }
         let entry = policies.entry(program).or_default();
         for prefix in &policy.allowed_data_prefixes_hex {
-            entry.push(decode_hex(prefix)?);
+            entry.push((
+                policy.allowed_actions.clone(),
+                decode_hex(prefix)?,
+            ));
         }
     }
 
@@ -247,8 +259,9 @@ pub fn check_transaction(
     let instruction_policy_failure = inspected.instructions.iter().any(
         |instruction| {
             match policies.get(&instruction.program_id) {
-                Some(prefixes) => !prefixes.iter().any(|prefix| {
-                    instruction.data.starts_with(prefix)
+                Some(rules) => !rules.iter().any(|(actions, prefix)| {
+                    actions.contains(&proposal.action)
+                        && instruction.data.starts_with(prefix)
                 }),
                 None => config.require_instruction_policy,
             }
@@ -361,6 +374,7 @@ mod tests {
             require_instruction_policy: true,
             instruction_policies: vec![ProgramInstructionPolicy {
                 program_id: program.to_string(),
+                allowed_actions: vec![Action::Enter],
                 allowed_data_prefixes_hex: vec!["0102".into()],
             }],
         }
@@ -462,6 +476,35 @@ mod tests {
 
         let report = check_transaction(
             &proposal(pool),
+            &encoded,
+            &config(payer, program),
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(
+            report.reason,
+            "transaction_instruction_not_allowed"
+        );
+    }
+
+    #[test]
+    fn wrong_action_for_instruction_policy_is_rejected() {
+        let payer = Pubkey::new_unique();
+        let pool = Pubkey::new_unique();
+        let program = Pubkey::new_unique();
+        let encoded = encoded_transaction(
+            payer,
+            pool,
+            program,
+            Signature::default(),
+            vec![1, 2, 3],
+        );
+        let mut p = proposal(pool);
+        p.action = Action::Exit;
+
+        let report = check_transaction(
+            &p,
             &encoded,
             &config(payer, program),
         )
