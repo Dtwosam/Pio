@@ -139,6 +139,7 @@ from .phase9_source_capture import run_phase9_source_capture
 from .phase9_research_refresh import run_phase9_research_refresh
 from .phase9_operation_lease import (
     acquire_phase9_operation_lease,
+    phase9_operation_lease_status,
     release_phase9_operation_lease,
 )
 from .phase9_explicit_inputs import (
@@ -2383,6 +2384,15 @@ def main() -> None:
         type=int,
         default=1800,
         help="SQLite lease duration preventing overlapping source-capture runs",
+    )
+
+    phase9_maintenance_status = subparsers.add_parser(
+        "phase9-maintenance-status",
+        help="Show the shared Phase 9 source/research maintenance lease without mutating it",
+    )
+    phase9_maintenance_status.add_argument(
+        "--as-of",
+        help="Optional timezone-aware evaluation time for deterministic lease inspection",
     )
 
     phase9_research_refresh = subparsers.add_parser(
@@ -5255,6 +5265,17 @@ def main() -> None:
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.source_after.ready:
             raise SystemExit(2)
+        return
+
+    if args.command == "phase9-maintenance-status":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = phase9_operation_lease_status(
+            storage,
+            operation_key="phase9-research-maintenance",
+            as_of=args.as_of,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "phase9-source-capture-run":
