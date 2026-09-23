@@ -12,6 +12,7 @@ from .phase9_history_plan import build_phase9_history_plan
 from .phase9_pool_cohort import (
     Phase9PoolCohortCriteria,
     evaluate_phase9_pool_cohort,
+    select_phase9_cohort_source_pools,
 )
 from .phase9_mint_capture import (
     Phase9MintCaptureCriteria,
@@ -55,25 +56,16 @@ class Phase9SourceCaptureReport:
 def _cohort_source_pools(
     storage: Storage,
     *,
-    sampling_pools: tuple[str, ...],
+    cohort,
     limit: int,
 ) -> tuple[str, ...]:
-    if limit < 1:
-        return ()
-    selected: list[str] = []
-    for pool in sampling_pools:
-        value = str(pool).strip()
-        if value and value not in selected:
-            selected.append(value)
-        if len(selected) >= limit:
-            return tuple(selected)
-
-    for pool in _top_chain_pools(storage, limit=max(limit, 8)):
-        if pool not in selected:
-            selected.append(pool)
-        if len(selected) >= limit:
-            break
-    return tuple(selected)
+    if not getattr(cohort, "sampling_pools", ()):
+        return _top_chain_pools(storage, limit=limit)
+    return select_phase9_cohort_source_pools(
+        storage,
+        cohort=cohort,
+        limit=limit,
+    )
 
 
 def _top_chain_pools(
@@ -260,12 +252,12 @@ def run_phase9_source_capture(
 
     mint_pools = _cohort_source_pools(
         storage,
-        sampling_pools=cohort_after_chain.sampling_pools,
+        cohort=cohort_after_chain,
         limit=criteria.min_mint_risk_pools,
     )
     wallet_pools = _cohort_source_pools(
         storage,
-        sampling_pools=cohort_after_chain.sampling_pools,
+        cohort=cohort_after_chain,
         limit=criteria.min_wallet_flow_pools,
     )
 
@@ -342,7 +334,7 @@ def run_phase9_source_capture(
     )
     final_mint_pools = _cohort_source_pools(
         storage,
-        sampling_pools=final_cohort.sampling_pools,
+        cohort=final_cohort,
         limit=criteria.min_mint_risk_pools,
     )
     mint_plan = build_phase9_mint_capture_plan(
