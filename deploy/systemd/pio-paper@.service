@@ -1,0 +1,16 @@
+[Unit]
+Description=Pio PAPER scheduler for account %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/pio paper-scheduler-run --account %i --interval-seconds 300 --lease-seconds 900 $PIO_PAPER_SCHEDULER_EXTRA_ARGS
+TimeoutStartSec=12min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pio/data
