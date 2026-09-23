@@ -123,6 +123,11 @@ from .live_position_outcome import build_live_position_outcome
 from .live_position_valuation import value_live_position_outcome
 from .live_learning_label import build_live_learning_label
 from .live_execution_audit import audit_live_execution_ledger
+from .continuous_learning import (
+    ContinuousLearningCriteria,
+    build_continuous_learning_plan,
+    persist_continuous_learning_plan,
+)
 from .live_champion_monitor import (
     LiveChampionCriteria,
     evaluate_live_champion,
@@ -1001,6 +1006,34 @@ def main() -> None:
         help="Move an offline-qualified model into PAPER_CHALLENGER state",
     )
     ml_start_paper.add_argument("--model-id", required=True)
+
+    ml_retrain_plan = subparsers.add_parser(
+        "ml-retrain-plan",
+        help="Plan a new challenger from fresh chain/live evidence",
+    )
+    ml_retrain_plan.add_argument(
+        "--min-new-chain-observations",
+        type=int,
+        default=500,
+    )
+    ml_retrain_plan.add_argument(
+        "--min-new-chain-pools",
+        type=int,
+        default=3,
+    )
+    ml_retrain_plan.add_argument(
+        "--min-new-live-labels",
+        type=int,
+        default=5,
+    )
+    ml_retrain_plan.add_argument(
+        "--max-champion-age-days",
+        type=float,
+        default=14.0,
+    )
+    ml_retrain_plan.add_argument("--as-of")
+    ml_retrain_plan.add_argument("--persist", action="store_true")
+    ml_retrain_plan.add_argument("--require-due", action="store_true")
 
     ml_live_monitor = subparsers.add_parser(
         "ml-live-monitor",
@@ -2112,6 +2145,35 @@ def main() -> None:
             model_id=args.model_id,
         )
         print(json.dumps(record.__dict__, indent=2))
+        return
+
+    if args.command == "ml-retrain-plan":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_continuous_learning_plan(
+            storage,
+            criteria=ContinuousLearningCriteria(
+                min_new_chain_observations=(
+                    args.min_new_chain_observations
+                ),
+                min_new_chain_pools=args.min_new_chain_pools,
+                min_new_live_labels=args.min_new_live_labels,
+                max_champion_age_days=args.max_champion_age_days,
+            ),
+            as_of=args.as_of,
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_continuous_learning_plan(
+                    storage,
+                    plan=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_due and not result.retrain_due:
+            raise SystemExit(2)
         return
 
     if args.command == "ml-live-monitor":
