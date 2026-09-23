@@ -1321,6 +1321,11 @@ def test_work_queue_reports_prewire_ready_when_chain_is_current(
         "evaluate_phase9_policy_prewire_audit",
         lambda storage: DummyPrewire(ready=True),
     )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_prewire_manifest",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
 
     queue = build_phase9_work_queue(storage)
 
@@ -1334,6 +1339,7 @@ def test_work_queue_reports_prewire_ready_when_chain_is_current(
         "ROLLBACK_SIMULATION",
         "ROLLBACK_REMEDIATION_REQUIRED",
         "ROLLBACK_OBSERVATION_DEPTH",
+        "PERSIST_PREWIRE_MANIFEST",
     }
     assert queue.phase9_current is True
     assert queue.policy_authorization_current is True
@@ -1341,7 +1347,66 @@ def test_work_queue_reports_prewire_ready_when_chain_is_current(
     assert queue.rollout_simulation_current is True
     assert queue.rollback_simulation_current is True
     assert queue.prewire_ready is True
+    assert queue.prewire_manifest_current is True
     assert not any(
         item.task_type in policy_tasks
         for item in queue.items
+    )
+
+
+def test_work_queue_persists_manifest_after_prewire_ready(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_controlled_validation",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_rollout_simulation",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_rollback_simulation",
+        lambda storage: DummyPolicyAudit(
+            current=True,
+            rollback_required=False,
+            status="NO_ROLLBACK_TRIGGER",
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_policy_prewire_audit",
+        lambda storage: DummyPrewire(ready=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_prewire_manifest",
+        lambda storage: DummyPolicyAudit(
+            current=False,
+            reasons=("pre-wiring manifest is missing",),
+        ),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "PERSIST_PREWIRE_MANIFEST"
+    )
+    assert queue.prewire_ready is True
+    assert queue.prewire_manifest_current is False
+    assert task.shell_command == (
+        "pio phase9-policy-manifest --persist --require-ready"
     )
