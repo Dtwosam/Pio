@@ -6,16 +6,21 @@ import hashlib
 from pathlib import Path
 from typing import Any, Sequence
 
+import pandas as pd
+
 from .continuous_learning import ContinuousLearningCriteria
+from .ml_workflow import train_save_register_ml_v1
+from .retraining_cycle import (
+    RetrainingCycle,
+    active_retraining_cycle,
+    attach_retraining_challenger,
+    retraining_cycle,
+    start_retraining_cycle,
+)
 from .ml_retraining_dataset import (
     MLRetrainPoolSpec,
     MultiPoolMLDatasetReport,
     build_multi_pool_ml_action_dataset,
-)
-from .retraining_cycle import (
-    RetrainingCycle,
-    active_retraining_cycle,
-    start_retraining_cycle,
 )
 from .storage import Storage
 
@@ -35,6 +40,108 @@ class RetrainingDatasetCycleResult:
             "dataset": self.dataset.to_record(),
             "output_file": self.output_file,
         }
+
+
+@dataclass(frozen=True)
+class RetrainingTrainResult:
+    cycle: RetrainingCycle
+    model_id: str
+    dataset_version: str
+    artifact_path: str
+    metadata_path: str
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _dataset_version_from_file(path: Path) -> str:
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return f"ML_ACTION_DATASET_V1:{digest[:16]}"
+
+
+def train_retraining_cycle_challenger(
+    storage: Storage,
+    *,
+    cycle_id: str,
+    dataset_file: str | Path,
+    model_id: str,
+    artifact_directory: str | Path,
+    split_fraction: float = 0.8,
+    min_rows: int = 50,
+) -> RetrainingTrainResult:
+    cycle = retraining_cycle(storage, cycle_id=cycle_id)
+    if cycle.status != "PLANNED" or cycle.challenger_model_id is not None:
+        raise ValueError(
+            "cycle-aware training requires an unattached PLANNED cycle"
+        )
+    if storage.model_registry_entry(model_id) is not None:
+        raise ValueError(f"model_id already exists: {model_id}")
+
+    dataset_path = Path(dataset_file)
+    if not dataset_path.is_file():
+        raise ValueError(f"dataset file does not exist: {dataset_path}")
+    observed_version = _dataset_version_from_file(dataset_path)
+    if observed_version != cycle.target_dataset_version:
+        raise ValueError(
+            "dataset file checksum/version does not match retraining cycle"
+        )
+
+    frame = pd.read_csv(dataset_path)
+    if "decision_observed_at" not in frame.columns:
+        raise ValueError(
+            "retraining dataset is missing decision_observed_at"
+        )
+    times = pd.to_datetime(
+        frame["decision_observed_at"],
+        utc=True,
+        errors="coerce",
+    )
+    if times.isna().any():
+        raise ValueError(
+            "retraining dataset contains invalid decision timestamps"
+        )
+    cutoff = pd.Timestamp(cycle.plan_as_of)
+    if (times > cutoff).any():
+        raise ValueError(
+            "retraining dataset contains decisions after cycle cutoff"
+        )
+    if "forward_end_observed_at" in frame.columns:
+        forward_times = pd.to_datetime(
+            frame["forward_end_observed_at"],
+            utc=True,
+            errors="coerce",
+        )
+        if forward_times.isna().any():
+            raise ValueError(
+                "retraining dataset contains invalid forward timestamps"
+            )
+        if (forward_times > cutoff).any():
+            raise ValueError(
+                "retraining dataset contains forward labels after cycle cutoff"
+            )
+
+    result = train_save_register_ml_v1(
+        storage,
+        frame,
+        model_id=model_id,
+        dataset_version=cycle.target_dataset_version,
+        artifact_directory=artifact_directory,
+        split_fraction=split_fraction,
+        min_rows=min_rows,
+        notes=f"continuous retraining cycle {cycle_id}",
+    )
+    attached = attach_retraining_challenger(
+        storage,
+        cycle_id=cycle_id,
+        model_id=model_id,
+    )
+    return RetrainingTrainResult(
+        cycle=attached,
+        model_id=model_id,
+        dataset_version=cycle.target_dataset_version,
+        artifact_path=str(result.artifact.artifact_path),
+        metadata_path=str(result.artifact.metadata_path),
+    )
 
 
 def start_retraining_cycle_with_dataset(
