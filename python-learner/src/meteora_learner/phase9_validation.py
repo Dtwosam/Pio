@@ -149,6 +149,7 @@ def _bandit_lineage_valid(storage: Storage) -> bool:
     lineage = row["evidence"].get("dataset_lineage")
     if not isinstance(lineage, dict):
         return False
+
     required = (
         "cycle_id",
         "champion_model_id",
@@ -158,9 +159,68 @@ def _bandit_lineage_valid(storage: Storage) -> bool:
         "cutoff",
         "output_file",
     )
-    return all(
-        lineage.get(field) not in (None, "")
-        for field in required
+    if any(lineage.get(field) in (None, "") for field in required):
+        return False
+
+    try:
+        evidence_id = int(lineage["dataset_evidence_id"])
+    except (TypeError, ValueError):
+        return False
+
+    with storage.connect() as conn:
+        evidence_row = conn.execute(
+            """
+            SELECT model_id, evidence_type, status, evidence_json
+            FROM model_live_evidence
+            WHERE id = ?
+            """,
+            (evidence_id,),
+        ).fetchone()
+        cycle_row = conn.execute(
+            """
+            SELECT champion_model_id, plan_as_of,
+                   target_dataset_version
+            FROM continuous_learning_cycles
+            WHERE cycle_id = ?
+            """,
+            (str(lineage["cycle_id"]),),
+        ).fetchone()
+
+    if evidence_row is None or cycle_row is None:
+        return False
+    if str(evidence_row[0]) != str(lineage["champion_model_id"]):
+        return False
+    if str(evidence_row[1]) != "CONTINUOUS_RETRAIN_DATASET_V1":
+        return False
+    if str(evidence_row[2]) != "BUILT":
+        return False
+
+    try:
+        payload = json.loads(str(evidence_row[3]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    dataset = payload.get("dataset")
+    if not isinstance(dataset, dict):
+        return False
+
+    return (
+        str(payload.get("cycle_id", ""))
+        == str(lineage["cycle_id"])
+        and str(payload.get("cutoff", ""))
+        == str(lineage["cutoff"])
+        and str(payload.get("target_dataset_version", ""))
+        == str(lineage["dataset_version"])
+        and str(payload.get("output_file", ""))
+        == str(lineage["output_file"])
+        and str(dataset.get("dataset_version", ""))
+        == str(lineage["dataset_version"])
+        and str(dataset.get("dataset_sha256", ""))
+        == str(lineage["dataset_sha256"])
+        and str(cycle_row[0])
+        == str(lineage["champion_model_id"])
+        and str(cycle_row[1]) == str(lineage["cutoff"])
+        and str(cycle_row[2])
+        == str(lineage["dataset_version"])
     )
 
 
