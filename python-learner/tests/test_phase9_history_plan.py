@@ -202,3 +202,44 @@ def test_history_plan_excludes_chain_snapshots_after_as_of(tmp_path):
     assert plan.pools[0].required_observations == 43
     assert plan.pools[0].additional_observations_needed == 38
     assert plan.plan_ready is False
+
+
+def test_history_plan_preserves_explicit_cohort_order_and_depth(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_chain_observations(storage, "pool-a", 43)
+    save_chain_observations(storage, "pool-b", 10)
+    save_chain_observations(storage, "pool-c", 43)
+    save_chain_observations(storage, "pool-d", 5)
+
+    plan = build_phase9_history_plan(
+        storage,
+        pool_addresses=("pool-d", "pool-a", "pool-c", "pool-b"),
+    )
+
+    assert [item.pool_address for item in plan.pools] == [
+        "pool-d",
+        "pool-a",
+        "pool-c",
+        "pool-b",
+    ]
+    assert [item.observations for item in plan.pools] == [5, 43, 43, 10]
+    assert plan.pools_history_ready == 2
+    assert plan.plan_ready is False
+
+
+def test_history_plan_explicit_cohort_can_be_ready_with_extra_shallow_pool(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_chain_observations(storage, pool, 43)
+    save_chain_observations(storage, "pool-d", 1)
+
+    plan = build_phase9_history_plan(
+        storage,
+        pool_addresses=("pool-a", "pool-b", "pool-c", "pool-d"),
+    )
+
+    assert plan.pools_selected == 4
+    assert plan.pools_history_ready == 3
+    assert plan.plan_ready is True
