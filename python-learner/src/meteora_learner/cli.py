@@ -2368,6 +2368,10 @@ def main() -> None:
         default=16,
     )
     phase9_history_plan.add_argument(
+        "--as-of",
+        help="Optional historical cutoff; only chain observations at or before this time count toward history depth",
+    )
+    phase9_history_plan.add_argument(
         "--rpc-url",
         help="Optional Solana RPC URL inserted into emitted read-only one-snapshot capture commands",
     )
@@ -2520,7 +2524,7 @@ def main() -> None:
     )
     phase9_work_queue.add_argument(
         "--as-of",
-        help="Optional historical cutoff for reproducible evidence planning; missing/stale authoritative state cannot be backfilled after this cutoff",
+        help="Optional source cutoff for chain, mint and wallet evidence tasks; later state cannot backfill gaps at this cutoff",
     )
     phase9_work_queue.add_argument(
         "--persist-snapshot",
@@ -5175,6 +5179,7 @@ def main() -> None:
             executor_bin=args.executor_bin,
             rpc_url=args.rpc_url,
             bin_array_radius=args.bin_array_radius,
+            as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.plan_ready:
