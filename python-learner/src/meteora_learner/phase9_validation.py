@@ -14,7 +14,10 @@ from .portfolio_allocation import (
 )
 from .static_hedge import STATIC_HEDGE_EVIDENCE_TYPE
 from .storage import Storage
-from .wallet_flow import WALLET_FLOW_EVIDENCE_TYPE
+from .wallet_flow import (
+    WALLET_FLOW_EVIDENCE_TYPE,
+    wallet_flow_source_sha256,
+)
 
 
 PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE = "PHASE9_RESEARCH_BUNDLE_V1"
@@ -24,6 +27,7 @@ PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE = "PHASE9_RESEARCH_BUNDLE_V1"
 class Phase9ResearchBundleCriteria:
     min_mint_risk_pools: int = 2
     min_wallet_flow_pools: int = 2
+    require_wallet_flow_lineage: bool = True
     require_mint_snapshot_lineage: bool = True
     min_static_hedge_pools: int = 1
     require_adaptive_multi_pool: bool = True
@@ -197,6 +201,80 @@ def _mint_lineage_valid(storage: Storage) -> bool:
                     return False
                 if str(mint_row[1]) != str(item.get("observed_at", "")):
                     return False
+    return True
+
+
+def _wallet_flow_lineage_valid(storage: Storage) -> bool:
+    rows = _latest_by_pool(
+        storage,
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+    )
+    qualified = [row for row in rows if row["qualified"]]
+    if not qualified:
+        return False
+
+    with storage.connect() as conn:
+        for row in qualified:
+            evidence = row["evidence"]
+            raw_ids = evidence.get("source_event_ids")
+            expected_sha = str(
+                evidence.get("source_event_sha256", "")
+            ).strip()
+            if (
+                not isinstance(raw_ids, list)
+                or not raw_ids
+                or not expected_sha
+            ):
+                return False
+            try:
+                event_ids = [int(value) for value in raw_ids]
+            except (TypeError, ValueError):
+                return False
+            if len(event_ids) != len(set(event_ids)):
+                return False
+
+            records: list[dict[str, Any]] = []
+            for event_id in event_ids:
+                source = conn.execute(
+                    """
+                    SELECT id, created_at, user_address, event_type,
+                           total_usd, signature, ix_index,
+                           position_address, pool_address
+                    FROM position_event_history
+                    WHERE id = ?
+                    """,
+                    (event_id,),
+                ).fetchone()
+                if source is None:
+                    return False
+                if str(source[8]) != str(row["pool_address"]):
+                    return False
+                if (
+                    row["as_of"] is not None
+                    and conn.execute(
+                        """
+                        SELECT julianday(?) <= julianday(?)
+                        """,
+                        (str(source[1]), str(row["as_of"])),
+                    ).fetchone()[0]
+                    != 1
+                ):
+                    return False
+                records.append(
+                    {
+                        "id": int(source[0]),
+                        "created_at": str(source[1]),
+                        "user_address": str(source[2]),
+                        "event_type": str(source[3]),
+                        "total_usd": str(source[4]),
+                        "signature": str(source[5]),
+                        "ix_index": int(source[6]),
+                        "position_address": str(source[7]),
+                    }
+                )
+
+            if wallet_flow_source_sha256(records) != expected_sha:
+                return False
     return True
 
 
@@ -411,6 +489,15 @@ def evaluate_phase9_research_bundle(
         reasons.append(
             f"qualified wallet-flow pools {wallet.qualified_records} are below "
             f"{criteria.min_wallet_flow_pools}"
+        )
+    if (
+        criteria.require_wallet_flow_lineage
+        and wallet.qualified_records >= criteria.min_wallet_flow_pools
+        and not _wallet_flow_lineage_valid(storage)
+    ):
+        reasons.append(
+            "qualified wallet-flow evidence must resolve to immutable "
+            "position-event IDs with matching source hash"
         )
     if (
         criteria.require_portfolio_allocation
