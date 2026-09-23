@@ -212,12 +212,18 @@ Built:
 - chain-resolved rebalance position ownership, pool/token and bin-array validation
 - isolated deterministic one-signer transaction signer bound to persisted final-presign evidence
 - idempotent internal submission coordinator that persists SENT/signature before RPC submission and retries only the same signed transaction
+- expiry-aware SENT recovery that blocks blind resubmission after last-valid block height
+- chain-resolved standard-SPL fee/reward settlement and final ClosePosition2 builder
+- confirmed RPC proof that final position account closure occurred after settlement
+- receipt-driven immutable live atomic wallet-effect ledger
+- receipt-driven live position lifecycle state for ENTER / REBALANCE / liquidity-removal EXIT / final CLOSE
+- immutable CLOSED-position atomic outcome evidence including linked network fees
+- fail-closed live execution ledger integrity audit
 - Phase 6 execution runbook and reproducible guard/request examples
 
 Still needed:
-- fee/reward claim and final position-account close sequence
 - Token-2022 transfer-hook / remaining-account execution support
-- receipt-driven live account/PnL mutation and learning-label reconciliation
+- quote-valued live PnL / learning-label valuation from immutable atomic outcomes
 - end-to-end controlled executor validation after Phase 5 promotion evidence exists
 
 Live signing and transaction sending remain unavailable.
