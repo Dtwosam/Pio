@@ -135,6 +135,7 @@ from .phase9_position_discovery import (
 from .phase9_wallet_flow_capture import (
     run_phase9_wallet_flow_capture,
 )
+from .phase9_source_capture import run_phase9_source_capture
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
@@ -2285,6 +2286,56 @@ def main() -> None:
     )
     phase9_wallet_capture.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    phase9_source_capture = subparsers.add_parser(
+        "phase9-source-capture-run",
+        help="Run one bounded read-only Phase 9 source-acquisition pass without executing research or policy",
+    )
+    phase9_source_capture.add_argument(
+        "--skip-api-refresh",
+        action="store_true",
+    )
+    phase9_source_capture.add_argument(
+        "--chain-pool-target",
+        type=int,
+        default=3,
+    )
+    phase9_source_capture.add_argument(
+        "--chain-max-candidates",
+        type=int,
+        default=8,
+    )
+    phase9_source_capture.add_argument(
+        "--bin-array-radius",
+        type=int,
+        default=1,
+    )
+    phase9_source_capture.add_argument(
+        "--mint-max-snapshot-age-seconds",
+        type=int,
+        default=3600,
+    )
+    phase9_source_capture.add_argument(
+        "--wallet-discovery-limit",
+        type=int,
+        default=250,
+    )
+    phase9_source_capture.add_argument(
+        "--wallet-max-positions-per-run",
+        type=int,
+        default=50,
+    )
+    phase9_source_capture.add_argument("--rust-manifest-path")
+    phase9_source_capture.add_argument("--rust-binary-path")
+    phase9_source_capture.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=120,
+    )
+    phase9_source_capture.add_argument(
+        "--require-automatic-ready",
         action="store_true",
     )
 
@@ -5105,6 +5156,35 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.source_after.ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-source-capture-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = run_phase9_source_capture(
+            storage,
+            settings=settings,
+            refresh_api=not args.skip_api_refresh,
+            chain_pool_target=args.chain_pool_target,
+            chain_max_candidates=args.chain_max_candidates,
+            bin_array_radius=args.bin_array_radius,
+            mint_max_snapshot_age_seconds=(
+                args.mint_max_snapshot_age_seconds
+            ),
+            wallet_discovery_limit=args.wallet_discovery_limit,
+            wallet_max_positions_per_run=(
+                args.wallet_max_positions_per_run
+            ),
+            rust_manifest_path=args.rust_manifest_path,
+            rust_binary_path=args.rust_binary_path,
+            timeout_seconds=args.timeout_seconds,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if (
+            args.require_automatic_ready
+            and not result.automatic_source_ready
+        ):
             raise SystemExit(2)
         return
 
