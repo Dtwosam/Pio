@@ -86,6 +86,11 @@ def test_revoked_standard_spl_mints_qualify(tmp_path):
     assert report.policy_actionable is False
     assert report.mints_required == 2
     assert report.mints_accepted == 2
+    assert report.pool_snapshot_id > 0
+    assert all(
+        item.mint_snapshot_id is not None
+        for item in report.assessments
+    )
 
     evidence_id = persist_pool_mint_risk(storage, report=report)
     assert evidence_id > 0
@@ -176,6 +181,16 @@ def test_no_lookahead_uses_snapshot_at_or_before_cutoff(tmp_path):
     x = next(item for item in report.assessments if item.mint_address == "x")
     assert x.accepted is True
     assert x.observed_at == "2026-09-23T10:00:00+00:00"
+    with storage.connect() as conn:
+        expected_id = conn.execute(
+            """
+            SELECT id
+            FROM token_mint_snapshots
+            WHERE mint_address = 'x'
+              AND observed_at = '2026-09-23T10:00:00+00:00'
+            """
+        ).fetchone()[0]
+    assert x.mint_snapshot_id == expected_id
 
 
 def test_phase8_is_required_for_qualification(tmp_path):
@@ -192,3 +207,34 @@ def test_phase8_is_required_for_qualification(tmp_path):
 
     assert report.research_qualified is False
     assert report.status == "RESEARCH_ONLY_PHASE8_BLOCKED"
+
+
+def test_persisted_mint_risk_keeps_source_snapshot_ids(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_phase8(storage)
+    seed_pool(storage)
+    save_mint(storage, mint="x")
+    save_mint(storage, mint="y")
+
+    report = research_pool_mint_risk(
+        storage,
+        pool_address="pool",
+        as_of="2026-09-23T10:10:00+00:00",
+    )
+    persist_pool_mint_risk(storage, report=report)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type="PHASE9_MINT_RISK_V1",
+        pool_address="pool",
+    )
+
+    assert latest is not None
+    assert latest["evidence"]["pool_snapshot_id"] == (
+        report.pool_snapshot_id
+    )
+    observed_ids = {
+        item["mint_snapshot_id"]
+        for item in latest["evidence"]["assessments"]
+    }
+    assert observed_ids == {
+        item.mint_snapshot_id for item in report.assessments
+    }
