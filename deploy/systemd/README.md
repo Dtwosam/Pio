@@ -86,3 +86,37 @@ cd /opt/pio/python-learner
 The service runs `phase9-work-queue --persist-snapshot` once per hour. It
 does not execute the emitted work-queue commands and does not require or store
 an RPC URL. Persisted snapshots are append-only and omit shell commands.
+
+
+## Phase 9 read-only source accumulation
+
+To accumulate real Phase 9 source observations without manually invoking each
+capture pass, enable:
+
+```bash
+sudo systemctl enable --now pio-phase9-source-capture.timer
+```
+
+Inspect it with:
+
+```bash
+sudo systemctl status pio-phase9-source-capture.timer
+journalctl -u pio-phase9-source-capture.service
+```
+
+The timer activates every 70 minutes. The service runs
+`phase9-source-capture-run --history-min-observation-interval-seconds 3600`.
+That combination enforces at least one hour between persisted history
+observations for the same pool while leaving margin for RPC/API execution
+time. A too-soon run skips the history sample instead of inflating evidence
+depth.
+
+The service receives `SOLANA_RPC_URL` only through `/etc/pio/pio.env`.
+It uses the read-only Rust inspection paths and official public-data
+collection, writes only local research state under `/opt/pio/data`, and has
+no wallet key, signing, submission, LIVE-policy or `live-submit` capability.
+
+Optional bounded source-capture arguments can be supplied with
+`PIO_PHASE9_SOURCE_CAPTURE_EXTRA_ARGS` in `/etc/pio/pio.env`. Do not use
+that variable to reduce the history interval below the research cadence chosen
+for the experiment.
