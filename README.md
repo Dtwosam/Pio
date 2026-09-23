@@ -135,6 +135,7 @@ pio phase9-research-input-template --pools <POOL_A,POOL_B,POOL_C> > phase9-resea
 pio phase9-research-inputs-ingest --file phase9-research-inputs.json
 pio phase9-research-inputs-audit --require-valid
 pio phase9-explicit-research-run --persist --require-ready
+pio phase9-bandit-research-run --persist --require-qualified  # derives checksum-bound labels from explicit inputs + chain replay
 pio phase9-chain-history-plan --require-ready
 pio phase9-chain-history-run  # one fresh read-only snapshot per deficient pool
 pio phase9-work-queue --persist-snapshot  # research -> promotion -> policy-simulation blockers
