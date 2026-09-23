@@ -14,10 +14,13 @@ class LiveExecutionLedgerAudit:
     live_positions: int
     closed_positions: int
     atomic_outcomes: int
+    valued_outcomes: int
     unprocessed_receipt_decisions: tuple[str, ...]
     unapplied_position_effect_decisions: tuple[str, ...]
     closure_without_position_event: tuple[str, ...]
     closed_positions_missing_outcome: tuple[str, ...]
+    valued_outcomes_missing_evidence: tuple[str, ...]
+    orphan_valuation_positions: tuple[str, ...]
     clean: bool
 
     def to_record(self) -> dict[str, Any]:
@@ -66,8 +69,15 @@ def audit_live_execution_ledger(
         ).fetchall()
         outcomes = conn.execute(
             """
-            SELECT position_address
+            SELECT position_address, label_status
             FROM live_position_outcomes
+            ORDER BY position_address
+            """
+        ).fetchall()
+        valuations = conn.execute(
+            """
+            SELECT position_address
+            FROM live_position_valuations
             ORDER BY position_address
             """
         ).fetchall()
@@ -80,6 +90,10 @@ def audit_live_execution_ledger(
     closure_map = {str(row[0]): str(row[1]) for row in closures}
     event_ids = {str(row[0]) for row in position_events}
     outcome_positions = {str(row[0]) for row in outcomes}
+    valued_positions = {
+        str(row[0]) for row in outcomes if str(row[1]) == "VALUED"
+    }
+    valuation_positions = {str(row[0]) for row in valuations}
 
     unprocessed = tuple(
         sorted(
@@ -114,11 +128,20 @@ def audit_live_execution_ledger(
         )
     )
 
+    valued_missing_evidence = tuple(
+        sorted(valued_positions - valuation_positions)
+    )
+    orphan_valuations = tuple(
+        sorted(valuation_positions - valued_positions)
+    )
+
     clean = not (
         unprocessed
         or unapplied_effects
         or closure_without_event
         or missing_outcome
+        or valued_missing_evidence
+        or orphan_valuations
     )
 
     return LiveExecutionLedgerAudit(
@@ -128,9 +151,12 @@ def audit_live_execution_ledger(
         live_positions=len(positions),
         closed_positions=len(closed_positions),
         atomic_outcomes=len(outcomes),
+        valued_outcomes=len(valued_positions),
         unprocessed_receipt_decisions=unprocessed,
         unapplied_position_effect_decisions=unapplied_effects,
         closure_without_position_event=closure_without_event,
         closed_positions_missing_outcome=missing_outcome,
+        valued_outcomes_missing_evidence=valued_missing_evidence,
+        orphan_valuation_positions=orphan_valuations,
         clean=clean,
     )
