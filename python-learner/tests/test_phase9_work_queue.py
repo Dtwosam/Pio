@@ -34,6 +34,8 @@ from meteora_learner.mint_risk import (
     research_pool_mint_risk,
 )
 from meteora_learner.phase9_explicit_inputs import (
+    PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+    PHASE9_EXPLICIT_INPUTS_SCOPE,
     parse_phase9_explicit_inputs,
     persist_phase9_explicit_inputs,
 )
@@ -783,6 +785,50 @@ def test_work_queue_runs_checksum_bound_explicit_inputs_when_available(
         in task.shell_command
     )
     assert "--persist --require-ready" in task.shell_command
+
+
+def test_work_queue_repairs_invalid_explicit_input_artifact(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_pool(
+            storage,
+            pool,
+            "2026-09-23T12:00:00+00:00",
+        )
+    artifact = seed_explicit_inputs(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+        pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+        pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
+        as_of=None,
+        status="INPUTS_VALIDATED",
+        qualified=False,
+        evidence={
+            "artifact_sha256": "0" * 64,
+            "inputs": latest["evidence"]["inputs"],
+        },
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    assert not any(
+        item.task_type == "EXPLICIT_RESEARCH_RUN"
+        and item.scope == str(artifact.evidence_id)
+        for item in queue.items
+    )
+    repair = next(
+        item for item in queue.items
+        if item.task_type == "EXPLICIT_RESEARCH_INPUTS"
+    )
+    assert repair.shell_command is not None
+    assert "phase9-research-input-template" in repair.shell_command
+    assert "latest input artifact is invalid" in repair.reason
+    assert "SHA-256 does not match" in repair.reason
 
 
 def test_work_queue_releases_adaptive_research_after_exact_history_depth(
