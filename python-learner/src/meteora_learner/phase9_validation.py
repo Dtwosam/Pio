@@ -262,3 +262,57 @@ def persist_phase9_research_bundle(
         qualified=report.research_ready,
         evidence=report.to_record(),
     )
+
+
+@dataclass(frozen=True)
+class Phase9PromotionReport:
+    phase8_promoted: bool
+    research_only: bool
+    policy_actionable: bool
+    research_bundle: Phase9ResearchBundleReport
+    promotion_ready: bool
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def evaluate_phase9_promotion(
+    storage: Storage,
+    *,
+    criteria: Phase9ResearchBundleCriteria = (
+        Phase9ResearchBundleCriteria()
+    ),
+) -> Phase9PromotionReport:
+    bundle = evaluate_phase9_research_bundle(
+        storage,
+        criteria=criteria,
+    )
+    reasons: list[str] = []
+
+    if not bundle.phase8_promoted:
+        reasons.append(
+            "Phase 8 must be persistently promoted before Phase 9"
+        )
+    if not bundle.research_ready:
+        reasons.extend(
+            f"research bundle: {reason}"
+            for reason in bundle.reasons
+        )
+    if not bundle.research_only:
+        reasons.append(
+            "Phase 9 bundle must remain research_only"
+        )
+    if bundle.policy_actionable:
+        reasons.append(
+            "Phase 9 promotion cannot grant live-policy authority"
+        )
+
+    return Phase9PromotionReport(
+        phase8_promoted=bundle.phase8_promoted,
+        research_only=True,
+        policy_actionable=False,
+        research_bundle=bundle,
+        promotion_ready=not reasons,
+        reasons=tuple(reasons),
+    )
