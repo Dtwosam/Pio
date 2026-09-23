@@ -9,7 +9,7 @@ from .phase9_capture_plan import (
     Phase9ChainCaptureCriteria,
     build_phase9_chain_capture_plan,
 )
-from .storage import Storage
+from .storage import Storage, utc_now_iso
 
 
 InspectPool = Callable[[str, int], dict[str, Any]]
@@ -62,16 +62,19 @@ def run_phase9_chain_capture_batch(
     ingest_observed_at: str | None = None,
     preferred_pool_addresses: Sequence[str] | None = None,
     max_preferred_candidates: int | None = None,
+    api_ranking_as_of: str | None = None,
 ) -> Phase9ChainCaptureBatchReport:
     criteria.validate()
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
 
+    ranking_as_of = api_ranking_as_of or utc_now_iso()
     plan = build_phase9_chain_capture_plan(
         storage,
         criteria=criteria,
         preferred_pool_addresses=preferred_pool_addresses,
         max_preferred_candidates=max_preferred_candidates,
+        as_of=ranking_as_of,
     )
     before = plan.current_chain_pool_count
 
@@ -137,6 +140,7 @@ def run_phase9_chain_capture_batch(
         criteria=criteria,
         preferred_pool_addresses=preferred_pool_addresses,
         max_preferred_candidates=max_preferred_candidates,
+        as_of=ranking_as_of,
     )
     after = refreshed.current_chain_pool_count
     target_met = after >= criteria.target_chain_pools
