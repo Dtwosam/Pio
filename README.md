@@ -116,7 +116,7 @@ pio ml-offline-evaluate-csv --file <DATASET_CSV> --model-id <MODEL>
 pio ml-start-paper --model-id <MODEL>
 pio ml-model-status --model-id <MODEL>
 
-# Phase 9 research-only evidence
+pio phase8-evidence-status\npio phase8-evidence-plan\npio phase8-retrain-input-template > phase8-retrain-inputs.json\npio phase8-retrain-inputs-ingest --file phase8-retrain-inputs.json\npio phase8-retrain-inputs-audit --require-valid\npio phase8-retrain-build-run\n\n# Phase 9 research-only evidence
 pio phase9-work-queue --rpc-url <RPC_URL>
 pio phase9-storage-integrity --require-verified
 pio phase9-replay-audit --require-verified
