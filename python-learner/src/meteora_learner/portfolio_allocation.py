@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from decimal import Decimal
+import hashlib
+import json
 from typing import Any
 
 from .cross_pool_research import CrossPoolResearchReport
@@ -11,6 +13,7 @@ from .storage import Storage
 
 BPS = Decimal(10_000)
 PORTFOLIO_ALLOCATION_EVIDENCE_TYPE = "PHASE9_PORTFOLIO_ALLOCATION_V1"
+PORTFOLIO_CANDIDATE_EVIDENCE_TYPE = "PHASE9_PORTFOLIO_CANDIDATES_V1"
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,7 @@ class PortfolioAllocationReport:
     research_qualified: bool
     reasons: tuple[str, ...]
     allocations: tuple[PortfolioAllocationItem, ...]
+    candidate_lineage: dict[str, Any] | None = None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -121,6 +125,7 @@ def research_portfolio_allocation(
     comparison: CrossPoolResearchReport,
     budget_quote: float,
     criteria: PortfolioAllocationCriteria = PortfolioAllocationCriteria(),
+    candidate_lineage: dict[str, Any] | None = None,
 ) -> PortfolioAllocationReport:
     if budget_quote <= 0:
         raise ValueError("budget_quote must be positive")
@@ -261,7 +266,43 @@ def research_portfolio_allocation(
         research_qualified=qualified,
         reasons=tuple(reasons),
         allocations=tuple(allocation_items),
+        candidate_lineage=candidate_lineage,
     )
+
+
+def persist_portfolio_candidate_research(
+    storage: Storage,
+    *,
+    comparison: CrossPoolResearchReport,
+    source_inputs: list[dict[str, Any]],
+    assumptions: dict[str, Any],
+) -> tuple[int, str]:
+    payload = {
+        "research_only": True,
+        "policy_actionable": False,
+        "source_inputs": source_inputs,
+        "assumptions": assumptions,
+        "comparison": comparison.to_record(),
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    evidence = {
+        "artifact_sha256": digest,
+        **payload,
+    }
+    evidence_id = storage.save_advanced_edge_evidence(
+        edge_type=PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO_CANDIDATES__",
+        as_of=None,
+        status="BUILT",
+        qualified=bool(comparison.candidates),
+        evidence=evidence,
+    )
+    return evidence_id, digest
 
 
 def persist_portfolio_allocation_research(
