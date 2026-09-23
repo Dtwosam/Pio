@@ -93,6 +93,15 @@ CREATE TABLE IF NOT EXISTS chain_pool_snapshots (
     deposit_total_fee_rate TEXT,
     protocol_share_bps INTEGER,
     collect_fee_mode INTEGER,
+    supports_limit_order INTEGER,
+    reward_mint_0 TEXT,
+    reward_mint_1 TEXT,
+    reward_rate_0 TEXT,
+    reward_rate_1 TEXT,
+    reward_duration_end_0 INTEGER,
+    reward_duration_end_1 INTEGER,
+    reward_last_update_time_0 INTEGER,
+    reward_last_update_time_1 INTEGER,
     raw_json TEXT NOT NULL
 );
 
@@ -110,7 +119,9 @@ CREATE TABLE IF NOT EXISTS bin_liquidity_snapshots (
     amount_y TEXT NOT NULL,
     liquidity_supply TEXT NOT NULL,
     fee_amount_x_per_token_stored TEXT NOT NULL,
-    fee_amount_y_per_token_stored TEXT NOT NULL
+    fee_amount_y_per_token_stored TEXT NOT NULL,
+    reward_per_token_stored_0 TEXT NOT NULL DEFAULT '0',
+    reward_per_token_stored_1 TEXT NOT NULL DEFAULT '0'
 );
 
 CREATE INDEX IF NOT EXISTS idx_bin_liquidity_pool_time
@@ -151,6 +162,8 @@ CREATE TABLE IF NOT EXISTS position_bin_snapshots (
     bin_liquidity TEXT NOT NULL,
     bin_fee_x_per_token_stored TEXT NOT NULL DEFAULT '0',
     bin_fee_y_per_token_stored TEXT NOT NULL DEFAULT '0',
+    bin_reward_per_token_stored_0 TEXT NOT NULL DEFAULT '0',
+    bin_reward_per_token_stored_1 TEXT NOT NULL DEFAULT '0',
     position_liquidity TEXT NOT NULL,
     position_x_amount TEXT NOT NULL,
     position_y_amount TEXT NOT NULL,
@@ -262,11 +275,15 @@ VOLUME_BUCKET_EXTRA_COLUMNS = {
 
 BIN_LIQUIDITY_EXTRA_COLUMNS = {
     "price": "TEXT NOT NULL DEFAULT '0'",
+    "reward_per_token_stored_0": "TEXT NOT NULL DEFAULT '0'",
+    "reward_per_token_stored_1": "TEXT NOT NULL DEFAULT '0'",
 }
 
 POSITION_BIN_EXTRA_COLUMNS = {
     "bin_fee_x_per_token_stored": "TEXT NOT NULL DEFAULT '0'",
     "bin_fee_y_per_token_stored": "TEXT NOT NULL DEFAULT '0'",
+    "bin_reward_per_token_stored_0": "TEXT NOT NULL DEFAULT '0'",
+    "bin_reward_per_token_stored_1": "TEXT NOT NULL DEFAULT '0'",
 }
 
 CHAIN_POOL_EXTRA_COLUMNS = {
@@ -278,6 +295,15 @@ CHAIN_POOL_EXTRA_COLUMNS = {
     "deposit_total_fee_rate": "TEXT",
     "protocol_share_bps": "INTEGER",
     "collect_fee_mode": "INTEGER",
+    "supports_limit_order": "INTEGER",
+    "reward_mint_0": "TEXT",
+    "reward_mint_1": "TEXT",
+    "reward_rate_0": "TEXT",
+    "reward_rate_1": "TEXT",
+    "reward_duration_end_0": "INTEGER",
+    "reward_duration_end_1": "INTEGER",
+    "reward_last_update_time_0": "INTEGER",
+    "reward_last_update_time_1": "INTEGER",
 }
 
 POOL_SNAPSHOT_EXTRA_COLUMNS = {
@@ -586,6 +612,21 @@ class Storage:
         deposit_total_fee_rate = snapshot.get("deposit_total_fee_rate")
         protocol_share_bps = snapshot.get("protocol_share_bps")
         collect_fee_mode = snapshot.get("collect_fee_mode")
+        supports_limit_order = snapshot.get("supports_limit_order")
+        reward_mints = snapshot.get("reward_mints") or [None, None]
+        reward_rates = snapshot.get("reward_rates") or [None, None]
+        reward_duration_ends = snapshot.get("reward_duration_ends") or [None, None]
+        reward_last_update_times = snapshot.get("reward_last_update_times") or [None, None]
+        if not all(
+            isinstance(values, list) and len(values) == 2
+            for values in (
+                reward_mints,
+                reward_rates,
+                reward_duration_ends,
+                reward_last_update_times,
+            )
+        ):
+            raise ValueError("reward metadata arrays must contain exactly two values")
         bin_arrays = snapshot.get("bin_arrays")
         if not isinstance(bin_arrays, list):
             raise ValueError("bin_arrays must be a list")
@@ -615,6 +656,8 @@ class Storage:
                         str(bin_row["liquidity_supply"]),
                         str(bin_row["fee_amount_x_per_token_stored"]),
                         str(bin_row["fee_amount_y_per_token_stored"]),
+                        str((bin_row.get("reward_per_token_stored") or ["0", "0"])[0]),
+                        str((bin_row.get("reward_per_token_stored") or ["0", "0"])[1]),
                     )
                 )
 
@@ -625,8 +668,13 @@ class Storage:
                     observed_at, pool_address, active_bin_id, bin_step,
                     token_x_mint, token_y_mint, token_x_program, token_y_program,
                     base_fee_rate, variable_fee_rate, total_fee_rate,
-                    deposit_total_fee_rate, protocol_share_bps, collect_fee_mode, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    deposit_total_fee_rate, protocol_share_bps, collect_fee_mode,
+                    supports_limit_order, reward_mint_0, reward_mint_1,
+                    reward_rate_0, reward_rate_1,
+                    reward_duration_end_0, reward_duration_end_1,
+                    reward_last_update_time_0, reward_last_update_time_1,
+                    raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observed_at,
@@ -643,6 +691,15 @@ class Storage:
                     str(deposit_total_fee_rate) if deposit_total_fee_rate is not None else None,
                     int(protocol_share_bps) if protocol_share_bps is not None else None,
                     int(collect_fee_mode) if collect_fee_mode is not None else None,
+                    int(bool(supports_limit_order)) if supports_limit_order is not None else None,
+                    str(reward_mints[0]) if reward_mints[0] is not None else None,
+                    str(reward_mints[1]) if reward_mints[1] is not None else None,
+                    str(reward_rates[0]) if reward_rates[0] is not None else None,
+                    str(reward_rates[1]) if reward_rates[1] is not None else None,
+                    int(reward_duration_ends[0]) if reward_duration_ends[0] is not None else None,
+                    int(reward_duration_ends[1]) if reward_duration_ends[1] is not None else None,
+                    int(reward_last_update_times[0]) if reward_last_update_times[0] is not None else None,
+                    int(reward_last_update_times[1]) if reward_last_update_times[1] is not None else None,
                     json.dumps(snapshot, separators=(",", ":")),
                 ),
             )
@@ -652,8 +709,9 @@ class Storage:
                     INSERT INTO bin_liquidity_snapshots(
                         observed_at, pool_address, bin_array_index, bin_id, price,
                         amount_x, amount_y, liquidity_supply,
-                        fee_amount_x_per_token_stored, fee_amount_y_per_token_stored
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        fee_amount_x_per_token_stored, fee_amount_y_per_token_stored,
+                        reward_per_token_stored_0, reward_per_token_stored_1
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     bin_rows,
                 )
@@ -690,6 +748,8 @@ class Storage:
                     str(row["bin_liquidity"]),
                     str(row.get("bin_fee_x_per_token_stored", "0")),
                     str(row.get("bin_fee_y_per_token_stored", "0")),
+                    str((row.get("bin_reward_per_token_stored") or ["0", "0"])[0]),
+                    str((row.get("bin_reward_per_token_stored") or ["0", "0"])[1]),
                     str(row["position_liquidity"]),
                     str(row["position_x_amount"]),
                     str(row["position_y_amount"]),
@@ -737,10 +797,11 @@ class Storage:
                         observed_at, position_address, bin_id, price,
                         bin_x_amount, bin_y_amount, bin_liquidity,
                         bin_fee_x_per_token_stored, bin_fee_y_per_token_stored,
+                        bin_reward_per_token_stored_0, bin_reward_per_token_stored_1,
                         position_liquidity, position_x_amount, position_y_amount,
                         position_fee_x_amount, position_fee_y_amount,
                         reward_one, reward_two
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     bin_rows,
                 )
