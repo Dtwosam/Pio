@@ -62,6 +62,10 @@ from .paper_live import (
     apply_live_chain_paper_observation,
     run_live_chain_paper_batch,
 )
+from .paper_latest import (
+    LatestPaperCycleItem,
+    run_latest_live_paper_cycle,
+)
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -380,6 +384,32 @@ def main() -> None:
     paper_live_observe.add_argument("--min-pool-age-hours", type=float, default=24.0)
     paper_live_observe.add_argument("--min-chain-observations", type=int, default=12)
     paper_live_observe.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
+
+    paper_live_latest = subparsers.add_parser(
+        "paper-live-latest-run",
+        help="Run paper positions at each pool's latest stored chain observation",
+    )
+    paper_live_latest.add_argument("--cycle-id", required=True)
+    paper_live_latest.add_argument(
+        "--file",
+        required=True,
+        help="JSON array with position_id and token_y_quote_per_atomic",
+    )
+    paper_live_latest.add_argument("--retry-failed", action="store_true")
+    paper_live_latest.add_argument("--stop-loss-bps", type=int, default=500)
+    paper_live_latest.add_argument("--take-profit-bps", type=int)
+    paper_live_latest.add_argument("--max-rebalances", type=int, default=3)
+    paper_live_latest.add_argument("--max-holding-observations", type=int)
+    paper_live_latest.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
+    paper_live_latest.add_argument("--min-tvl-usd", type=float, default=50000.0)
+    paper_live_latest.add_argument("--min-volume-24h-usd", type=float, default=10000.0)
+    paper_live_latest.add_argument("--min-pool-age-hours", type=float, default=24.0)
+    paper_live_latest.add_argument("--min-chain-observations", type=int, default=12)
+    paper_live_latest.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
 
     paper_live_run = subparsers.add_parser(
         "paper-live-run",
@@ -1569,6 +1599,50 @@ def main() -> None:
                     args.proactive_rebalance_buffer_bins
                 ),
             ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-live-latest-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        with open(args.file, "r", encoding="utf-8") as handle:
+            raw_items = json.load(handle)
+        if not isinstance(raw_items, list):
+            raise ValueError("paper-live-latest-run file must contain a JSON array")
+        items = tuple(
+            LatestPaperCycleItem(
+                position_id=str(item["position_id"]),
+                token_y_quote_per_atomic=float(
+                    item["token_y_quote_per_atomic"]
+                ),
+                emergency_exit=bool(item.get("emergency_exit", False)),
+                estimated_exit_cost_quote=float(
+                    item.get("estimated_exit_cost_quote", 0.0)
+                ),
+                rebalance_cost_quote=(
+                    float(item["rebalance_cost_quote"])
+                    if item.get("rebalance_cost_quote") is not None
+                    else None
+                ),
+            )
+            for item in raw_items
+        )
+        result = run_latest_live_paper_cycle(
+            storage,
+            cycle_id=args.cycle_id,
+            items=items,
+            safety_config=_pool_safety_config_from_args(args),
+            management_config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+            retry_failed=args.retry_failed,
         )
         print(json.dumps(result.to_record(), indent=2))
         return
