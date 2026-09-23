@@ -861,3 +861,46 @@ def test_forged_static_hedge_lineage_blocks_bundle(tmp_path):
         "pool/bin price-path IDs" in reason
         for reason in report.reasons
     )
+
+
+def test_tampered_portfolio_candidate_payload_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest_allocation = storage.latest_advanced_edge_evidence(
+        edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO__",
+    )
+    assert latest_allocation is not None
+    lineage = latest_allocation["evidence"]["candidate_lineage"]
+    evidence_id = int(lineage["candidate_evidence_id"])
+
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT evidence_json
+            FROM advanced_edge_evidence
+            WHERE id = ?
+            """,
+            (evidence_id,),
+        ).fetchone()
+        assert row is not None
+        import json
+
+        payload = json.loads(str(row[0]))
+        payload["source_inputs"] = [{"pool_address": "tampered"}]
+        conn.execute(
+            """
+            UPDATE advanced_edge_evidence
+            SET evidence_json = ?
+            WHERE id = ?
+            """,
+            (json.dumps(payload, sort_keys=True), evidence_id),
+        )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "immutable candidate-artifact lineage" in reason
+        for reason in report.reasons
+    )
