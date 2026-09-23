@@ -147,6 +147,7 @@ from .settings import Settings
 from .storage import Storage
 from .strategy import StrategyType
 from .static_hedge import (
+    HedgeInstrumentAssumptions,
     StaticHedgeCriteria,
     persist_static_hedge_research,
     research_static_inventory_hedge,
@@ -1250,6 +1251,28 @@ def main() -> None:
         "--hedge-fraction",
         type=float,
         default=1.0,
+    )
+    static_hedge.add_argument("--hedge-instrument-id", required=True)
+    static_hedge.add_argument("--hedge-venue", required=True)
+    static_hedge.add_argument(
+        "--hedge-available-liquidity-y-atomic",
+        type=float,
+        required=True,
+    )
+    static_hedge.add_argument(
+        "--hedge-max-liquidity-share-bps",
+        type=int,
+        default=1000,
+    )
+    static_hedge.add_argument(
+        "--hedge-max-leverage",
+        type=float,
+        default=1.0,
+    )
+    static_hedge.add_argument(
+        "--hedge-funding-bps-per-window",
+        type=float,
+        default=0.0,
     )
     static_hedge.add_argument(
         "--hedge-round-trip-cost-bps",
@@ -3041,6 +3064,20 @@ def main() -> None:
             pool_address=args.pool,
             amount_x=args.amount_x,
             amount_y=args.amount_y,
+            instrument=HedgeInstrumentAssumptions(
+                instrument_id=args.hedge_instrument_id,
+                venue=args.hedge_venue,
+                available_liquidity_y_atomic=(
+                    args.hedge_available_liquidity_y_atomic
+                ),
+                max_liquidity_share_bps=(
+                    args.hedge_max_liquidity_share_bps
+                ),
+                max_leverage=args.hedge_max_leverage,
+                funding_bps_per_holding_window=(
+                    args.hedge_funding_bps_per_window
+                ),
+            ),
             criteria=StaticHedgeCriteria(
                 observation_limit=args.observation_limit,
                 holding_observations=args.holding_observations,
