@@ -192,3 +192,79 @@ def test_phase3_plan_uses_persisted_phase2_promotion(tmp_path):
     assert plan.entry_gate is not None
     assert plan.entry_gate.phase2_ready is True
     assert plan.entry_gate.proposal is not None
+
+
+def test_phase3_exact_observation_window_binds_safety_cutoff(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed(storage)
+    safety, baseline, sizing = configs()
+
+    # Later state is deliberately unsafe. Exact historical replay must not
+    # leak either the future API metadata or future token-program state.
+    storage.save_pool_snapshot(
+        {
+            "address": "pool",
+            "name": "X-Y",
+            "tvl": 1,
+            "volume_24h": 1,
+            "fees_24h": 0,
+            "current_price": 1.0,
+            "bin_step": 25,
+            "active_bin_id": 0,
+            "token_x": {"symbol": "X", "decimals": 6},
+            "token_y": {"symbol": "Y", "decimals": 6},
+            "dynamic_fee_pct": 99.0,
+            "is_blacklisted": True,
+            "created_at": 1790035200,
+        },
+        observed_at="2026-09-23T01:00:00+00:00",
+    )
+    storage.save_chain_pool_snapshot(
+        {
+            "pool_address": "pool",
+            "active_bin_id": 0,
+            "bin_step": 25,
+            "token_x_mint": "x",
+            "token_y_mint": "y",
+            "token_x_program": "future-unsupported",
+            "token_y_program": "future-unsupported",
+            "base_fee_rate": "0",
+            "variable_fee_rate": "0",
+            "total_fee_rate": "0",
+            "deposit_total_fee_rate": "0",
+            "protocol_share_bps": 0,
+            "collect_fee_mode": 0,
+            "bin_arrays": [],
+        },
+        observed_at="2026-09-23T01:00:00+00:00",
+    )
+
+    plan = build_phase3_research_plan(
+        str(storage.path),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=10,
+        requested_quote=100,
+        account_equity_quote=1000,
+        cash_quote=1000,
+        current_deployed_quote=0,
+        portfolio_drawdown_bps=0,
+        phase2_gate=None,
+        safety_config=safety,
+        baseline_config=baseline,
+        sizing_config=sizing,
+        observation_times=(
+            "2026-09-23T00:00:00+00:00",
+            "2026-09-23T00:05:00+00:00",
+        ),
+        half_widths=(0,),
+        strategies=(StrategyType.SPOT,),
+    )
+
+    assert plan.status == "RESEARCH_READY_PHASE2_BLOCKED"
+    assert plan.pool_safety is not None
+    assert plan.pool_safety.accepted is True
+    assert plan.pool_safety.chain_observations == 2
+    assert plan.scan is not None
+    assert plan.scan.observation_count == 2
+    assert plan.scan.decision_observed_at == "2026-09-23T00:05:00+00:00"
