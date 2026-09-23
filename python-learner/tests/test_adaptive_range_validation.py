@@ -95,6 +95,8 @@ def test_walk_forward_adaptive_range_can_beat_fixed_width(tmp_path):
     assert report.survival_uplift_vs_fixed >= 0.25
     assert report.mean_width_multiple_vs_fixed <= 5.0
     assert report.policy_actionable is False
+    assert len(report.source_snapshot_ids) == 24
+    assert len(report.source_snapshot_sha256) == 64
 
 
 def test_walk_forward_is_unchanged_by_future_snapshots(tmp_path):
