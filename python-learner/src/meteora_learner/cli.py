@@ -76,7 +76,7 @@ from .paper_scheduler import (
     paper_scheduler_state,
     run_scheduled_paper_tick,
 )
-from .paper_health import build_paper_health
+from .paper_health import build_paper_health, render_paper_health_prometheus
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -242,6 +242,11 @@ def main() -> None:
     paper_health.add_argument("--max-quote-age-seconds", type=int, default=300)
     paper_health.add_argument("--max-consecutive-failures", type=int, default=2)
     paper_health.add_argument("--array-radius", type=int, default=1)
+    paper_health.add_argument(
+        "--format",
+        choices=["json", "prometheus"],
+        default="json",
+    )
     paper_health.add_argument("--require-healthy", action="store_true")
 
     paper_scheduler_status = subparsers.add_parser(
@@ -1642,7 +1647,10 @@ def main() -> None:
             max_consecutive_failures=args.max_consecutive_failures,
             array_radius=args.array_radius,
         )
-        print(json.dumps(result.to_record(), indent=2))
+        if args.format == "prometheus":
+            print(render_paper_health_prometheus(result), end="")
+        else:
+            print(json.dumps(result.to_record(), indent=2))
         if args.require_healthy and result.status not in {"HEALTHY", "IDLE"}:
             raise SystemExit(2)
         return
