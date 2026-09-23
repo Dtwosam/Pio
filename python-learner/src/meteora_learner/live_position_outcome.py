@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 from typing import Any
 
@@ -176,19 +176,35 @@ def build_live_position_outcome(
 
         existing = conn.execute(
             """
-            SELECT raw_json
+            SELECT label_status, raw_json
             FROM live_position_outcomes
             WHERE position_address = ?
             """,
             (position_address,),
         ).fetchone()
         if existing is not None:
-            if str(existing[0]) != canonical:
+            label_status = str(existing[0])
+            if label_status not in {"ATOMIC_ONLY", "VALUED"}:
+                raise ValueError("stored live outcome has invalid label_status")
+            try:
+                stored = json.loads(str(existing[1]))
+            except json.JSONDecodeError as exc:
                 raise ValueError(
-                    "position already has a different immutable live outcome"
-                )
+                    "stored live outcome raw_json is invalid"
+                ) from exc
+            expected = outcome.to_record()
+            for key, value in expected.items():
+                if key == "label_status":
+                    continue
+                if stored.get(key) != value:
+                    raise ValueError(
+                        "position already has a different immutable live outcome"
+                    )
             return LivePositionOutcomeBuildResult(
-                outcome=outcome,
+                outcome=replace(
+                    outcome,
+                    label_status=label_status,
+                ),
                 reused_existing=True,
             )
 
