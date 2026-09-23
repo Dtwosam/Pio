@@ -29,7 +29,10 @@ from .portfolio_allocation import (
 )
 from .static_hedge import (
     STATIC_HEDGE_EVIDENCE_TYPE,
+    HedgeInstrumentAssumptions,
+    StaticHedgeCriteria,
     StaticHedgeSourceObservation,
+    research_static_inventory_hedge,
     static_hedge_source_sha256,
 )
 from .storage import Storage
@@ -610,6 +613,42 @@ def _static_hedge_lineage_valid(
                 observations.append(observation)
 
             if static_hedge_source_sha256(observations) != expected_sha:
+                return False
+            try:
+                instrument_raw = evidence.get("instrument")
+                criteria_raw = evidence.get("criteria")
+                if (
+                    not isinstance(instrument_raw, dict)
+                    or not isinstance(criteria_raw, dict)
+                ):
+                    return False
+                replay = research_static_inventory_hedge(
+                    storage,
+                    pool_address=str(row["pool_address"]),
+                    amount_x=int(evidence["amount_x"]),
+                    amount_y=int(evidence["amount_y"]),
+                    instrument=HedgeInstrumentAssumptions(
+                        **instrument_raw
+                    ),
+                    criteria=StaticHedgeCriteria(
+                        **criteria_raw
+                    ),
+                    as_of=(
+                        str(evidence["as_of"])
+                        if evidence.get("as_of") is not None
+                        else None
+                    ),
+                )
+            except (KeyError, TypeError, ValueError):
+                return False
+
+            persisted_normalized = json.loads(
+                json.dumps(evidence, sort_keys=True)
+            )
+            replay_normalized = json.loads(
+                json.dumps(replay.to_record(), sort_keys=True)
+            )
+            if persisted_normalized != replay_normalized:
                 return False
     return True
 
