@@ -434,4 +434,4 @@ and deterministic replay must pass the controlled thresholds. Persisted
 `research_only=true`, `simulation_only=true`,
 `policy_actionable=false` and `execution_wired=false`, with its own
 currentness audit. Passing this boundary is validation evidence only and still
-does not grant LIVE policy authority.
+does not grant LIVE policy authority. A consolidated policy-readiness audit may report ready only when both the persisted authorization evidence and the fresh controlled holdout remain current under deterministic replay; that audit is also non-actionable and execution-disconnected.
