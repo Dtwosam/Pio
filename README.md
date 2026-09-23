@@ -13,6 +13,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - docs/PHASE2_VALIDATION_RUNBOOK.md
 - docs/PHASE3_POLICY.md
 - docs/PHASE5_VALIDATION_RUNBOOK.md
+- docs/PHASE6_EXECUTION_RUNBOOK.md
 
 ## Current status
 
@@ -22,6 +23,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 3: deterministic policy + persisted validation/promotion workflow implemented; real promotion evidence pending
 - Phase 4: reproducible no-lookahead ML challenger workflow implemented; not promoted
 - Phase 5: implementation complete; persisted real PAPER promotion evidence pending
+- Phase 6: guarded Rust pre-sign execution infrastructure in progress; signing/sending disabled
 - Default mode: PAPER
 - Live signing: not implemented
 
@@ -125,6 +127,15 @@ The work queue emits concrete read-only Rust commands when an existing sample ca
 Phase 3 commands are research/policy tools. They do not build, sign or send live transactions. A pool must pass the fail-closed safety screen, a deterministic range/strategy must pass trailing replay, capital must fit sizing limits, and Phase 2 evidence must be promoted before the policy can authorize entry.
 
 ML v1 is research-only: it learns from all replay-valid candidate actions at each decision point, uses time-ordered holdout validation, compares challengers against the deterministic baseline, and cannot become champion without qualified paper evidence. Paper commands mutate only the local paper ledger; they never sign or send a Solana transaction. The portfolio runner discovers eligible open chain-bound positions, requires explicit token-Y quote inputs, skips stale/unpriced positions, and uses idempotent latest-chain cycles with restart recovery. `paper-open-phase3` derives account risk state from the ledger and atomically opens plus chain-binds a persistently promoted deterministic plan.
+
+## Rust execution preflight
+
+Phase 6 currently stops before signing/sending. The Rust executor can enforce
+risk, transaction/account/instruction policy, simulation, isolated-wallet
+authorization, durable restart state, confirmation reconciliation for an
+already-sent signature, and chain-resolved unsigned emergency-exit building.
+
+See `docs/PHASE6_EXECUTION_RUNBOOK.md`.
 
 ## Rust read-only inspection
 
