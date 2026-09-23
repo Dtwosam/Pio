@@ -332,6 +332,14 @@ def test_phase9_progress_exposes_ranked_pool_cohort_freshness(
         "pool-c",
     }
     assert report.pool_cohort.research_ready is True
+    assert report.pool_cohort.max_history_samples_remaining == 0
+    by_pool = {
+        item.pool_address: item
+        for item in report.pool_cohort.pools
+    }
+    assert by_pool["pool-a"].chain_observations == 43
+    assert by_pool["pool-a"].observations_remaining == 0
+    assert by_pool["pool-c"].history_ready is True
     assert any(
         "stale API pool ranking snapshot" in reason
         for reason in report.pool_cohort.reasons
