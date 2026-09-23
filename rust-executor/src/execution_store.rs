@@ -762,6 +762,30 @@ impl ExecutionIntentStore {
         )
     }
 
+    pub fn load_request(
+        &self,
+        decision_id: &str,
+    ) -> Result<DryRunExecutionRequest> {
+        let conn = self.connection()?;
+        let raw: String = conn
+            .query_row(
+                "SELECT request_json FROM execution_intents WHERE decision_id = ?",
+                params![decision_id],
+                |row| row.get(0),
+            )
+            .with_context(|| {
+                format!("unknown execution decision_id: {decision_id}")
+            })?;
+        let envelope: serde_json::Value =
+            serde_json::from_str(&raw)
+                .context("execution request_json is invalid JSON")?;
+        let request = envelope
+            .get("request")
+            .context("execution request_json is missing request")?;
+        serde_json::from_value(request.clone())
+            .context("execution request_json contains invalid request")
+    }
+
     pub fn load(&self, decision_id: &str) -> Result<ExecutionIntentRecord> {
         let conn = self.connection()?;
         let mut stmt = conn.prepare(
