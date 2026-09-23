@@ -14,6 +14,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - docs/PHASE3_POLICY.md
 - docs/PHASE5_VALIDATION_RUNBOOK.md
 - docs/PHASE6_EXECUTION_RUNBOOK.md
+- docs/PHASE7_CONTROLLED_LIVE_RUNBOOK.md
 
 ## Current status
 
