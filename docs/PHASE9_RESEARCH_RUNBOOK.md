@@ -211,6 +211,27 @@ The work queue emits lineage-repair tasks when reproducible source evidence
 exists. It does not invent missing hedge assumptions or authoritative chain
 inputs.
 
+## Deterministic replay requirements
+
+Immutable source IDs and hashes are necessary but not sufficient. A qualified
+Phase 9 report must also reproduce its derived metrics from the stored source
+corpus:
+
+- adaptive/regime evidence is rerun through the original multi-pool evaluator
+  with its persisted research, adaptive, validation and regime criteria;
+- mint-risk evidence is rerun against the exact content-hashed pool/mint
+  snapshots with its original criteria and cutoff;
+- wallet-flow evidence is rerun against the exact hashed event window;
+- static-hedge evidence is rerun with the original token amounts, instrument
+  assumptions, criteria and price-path cutoff;
+- portfolio allocation reconstructs the immutable cross-pool candidate report
+  and reruns allocation with the stored budget and criteria;
+- contextual-bandit evidence re-hashes the retraining CSV bytes and reruns the
+  cycle-bound bandit using the persisted criteria.
+
+The normalized replayed report must equal the persisted qualified evidence.
+Source-correct but metric-forged evidence therefore fails closed.
+
 ## Research-bundle gate
 
 After the individual research families have persisted qualified evidence:
