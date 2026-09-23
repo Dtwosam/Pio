@@ -192,6 +192,36 @@ ON position_event_history(position_address, block_time, ix_index);
 CREATE INDEX IF NOT EXISTS idx_position_event_history_signature
 ON position_event_history(signature, ix_index);
 
+CREATE TABLE IF NOT EXISTS chain_transaction_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    event_index INTEGER NOT NULL,
+    parent_ix_index INTEGER NOT NULL,
+    slot INTEGER NOT NULL,
+    block_time INTEGER,
+    event_type TEXT NOT NULL,
+    lb_pair TEXT,
+    from_address TEXT,
+    position_address TEXT,
+    active_bin_id INTEGER,
+    bin_id INTEGER,
+    amount_x TEXT,
+    amount_y TEXT,
+    token_x_fee_amount TEXT,
+    token_y_fee_amount TEXT,
+    protocol_token_x_fee_amount TEXT,
+    protocol_token_y_fee_amount TEXT,
+    raw_json TEXT NOT NULL,
+    UNIQUE(signature, event_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chain_tx_event_signature_parent
+ON chain_transaction_events(signature, parent_ix_index);
+
+CREATE INDEX IF NOT EXISTS idx_chain_tx_event_position
+ON chain_transaction_events(position_address, signature);
+
 CREATE TABLE IF NOT EXISTS data_quality_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checked_at TEXT NOT NULL,
@@ -771,6 +801,134 @@ class Storage:
             )
         return len(rows)
 
+    def save_chain_transaction_events(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        observed_at: str | None = None,
+    ) -> int:
+        observed_at = observed_at or utc_now_iso()
+        signature = str(snapshot["signature"])
+        slot = int(snapshot["slot"])
+        block_time_raw = snapshot.get("block_time")
+        block_time = int(block_time_raw) if block_time_raw is not None else None
+        events = snapshot.get("events")
+        if not isinstance(events, list):
+            raise ValueError("transaction events must be a list")
+
+        rows: list[tuple[Any, ...]] = []
+        for item in events:
+            if not isinstance(item, dict):
+                raise ValueError("transaction event entry must be an object")
+            event_index = int(item["event_index"])
+            parent_ix_index = int(item["parent_ix_index"])
+            event = item.get("event")
+            if not isinstance(event, dict):
+                raise ValueError("transaction event payload must be an object")
+            event_type = str(event["event_type"])
+            payload = event.get("event")
+            if not isinstance(payload, dict):
+                raise ValueError("decoded transaction event body must be an object")
+
+            common = {
+                "lb_pair": None,
+                "from_address": payload.get("from"),
+                "position_address": None,
+                "active_bin_id": None,
+                "bin_id": None,
+                "amount_x": None,
+                "amount_y": None,
+                "token_x_fee_amount": None,
+                "token_y_fee_amount": None,
+                "protocol_token_x_fee_amount": None,
+                "protocol_token_y_fee_amount": None,
+            }
+
+            if event_type == "AddLiquidity":
+                common.update(
+                    {
+                        "lb_pair": payload.get("lb_pair"),
+                        "position_address": payload.get("position"),
+                        "active_bin_id": int(payload["active_bin_id"]),
+                        "amount_x": str(payload["amount_x"]),
+                        "amount_y": str(payload["amount_y"]),
+                    }
+                )
+            elif event_type == "CompositionFee":
+                common.update(
+                    {
+                        "bin_id": int(payload["bin_id"]),
+                        "token_x_fee_amount": str(payload["token_x_fee_amount"]),
+                        "token_y_fee_amount": str(payload["token_y_fee_amount"]),
+                        "protocol_token_x_fee_amount": str(
+                            payload["protocol_token_x_fee_amount"]
+                        ),
+                        "protocol_token_y_fee_amount": str(
+                            payload["protocol_token_y_fee_amount"]
+                        ),
+                    }
+                )
+            else:
+                raise ValueError(f"unsupported decoded event type: {event_type}")
+
+            rows.append(
+                (
+                    observed_at,
+                    signature,
+                    event_index,
+                    parent_ix_index,
+                    slot,
+                    block_time,
+                    event_type,
+                    common["lb_pair"],
+                    common["from_address"],
+                    common["position_address"],
+                    common["active_bin_id"],
+                    common["bin_id"],
+                    common["amount_x"],
+                    common["amount_y"],
+                    common["token_x_fee_amount"],
+                    common["token_y_fee_amount"],
+                    common["protocol_token_x_fee_amount"],
+                    common["protocol_token_y_fee_amount"],
+                    json.dumps(item, separators=(",", ":")),
+                )
+            )
+
+        with self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO chain_transaction_events(
+                    observed_at, signature, event_index, parent_ix_index,
+                    slot, block_time, event_type, lb_pair, from_address,
+                    position_address, active_bin_id, bin_id, amount_x, amount_y,
+                    token_x_fee_amount, token_y_fee_amount,
+                    protocol_token_x_fee_amount, protocol_token_y_fee_amount,
+                    raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(signature, event_index) DO UPDATE SET
+                    observed_at=excluded.observed_at,
+                    parent_ix_index=excluded.parent_ix_index,
+                    slot=excluded.slot,
+                    block_time=excluded.block_time,
+                    event_type=excluded.event_type,
+                    lb_pair=excluded.lb_pair,
+                    from_address=excluded.from_address,
+                    position_address=excluded.position_address,
+                    active_bin_id=excluded.active_bin_id,
+                    bin_id=excluded.bin_id,
+                    amount_x=excluded.amount_x,
+                    amount_y=excluded.amount_y,
+                    token_x_fee_amount=excluded.token_x_fee_amount,
+                    token_y_fee_amount=excluded.token_y_fee_amount,
+                    protocol_token_x_fee_amount=excluded.protocol_token_x_fee_amount,
+                    protocol_token_y_fee_amount=excluded.protocol_token_y_fee_amount,
+                    raw_json=excluded.raw_json
+                """,
+                rows,
+            )
+        return len(rows)
+
     def save_quality_checks(
         self,
         entity_type: str,
@@ -877,6 +1035,9 @@ class Storage:
             position_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT position_address) FROM position_event_history"
             ).fetchone()
+            chain_tx_events = conn.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT signature) FROM chain_transaction_events"
+            ).fetchone()
             failures = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_checks WHERE status = 'FAIL'"
             ).fetchone()[0]
@@ -902,6 +1063,8 @@ class Storage:
             "position_bin_snapshots": position_bins,
             "position_event_history": position_events[0],
             "position_event_position_count": position_events[1],
+            "chain_transaction_events": chain_tx_events[0],
+            "chain_transaction_count": chain_tx_events[1],
             "quality_failures": failures,
             "collection_errors": errors,
         }
