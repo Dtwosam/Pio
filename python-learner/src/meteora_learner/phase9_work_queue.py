@@ -7,6 +7,7 @@ from typing import Any
 
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
+    audit_persisted_phase9_promotion,
     evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
 )
@@ -162,6 +163,10 @@ def build_phase9_work_queue(
         criteria=criteria,
     )
     promotion = evaluate_phase9_promotion(
+        storage,
+        criteria=criteria,
+    )
+    promotion_audit = audit_persisted_phase9_promotion(
         storage,
         criteria=criteria,
     )
@@ -632,13 +637,14 @@ def build_phase9_work_queue(
                 )
             )
 
-    if promotion.promotion_ready:
+    if promotion.promotion_ready and not promotion_audit.current:
         items.append(
             Phase9WorkItem(
                 task_type="PERSIST_PHASE9_PROMOTION",
                 scope="PHASE9",
                 reason=(
-                    "all non-actionable research promotion gates pass"
+                    "all non-actionable research promotion gates pass and "
+                    "persisted Phase 9 promotion is missing or stale"
                 ),
                 shell_command=(
                     "pio phase9-validate "
