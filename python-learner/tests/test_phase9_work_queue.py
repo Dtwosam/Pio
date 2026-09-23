@@ -1330,12 +1330,50 @@ def test_work_queue_repairs_invalid_static_hedge_lineage(tmp_path):
 
     task = next(
         item for item in queue.items
-        if item.task_type == "STATIC_HEDGE_REPAIR"
-        and item.scope == "pool-a"
+        if item.task_type == "EXPLICIT_RESEARCH_INPUTS_REPAIR"
     )
-    assert task.shell_command is None
-    assert "original explicit instrument" in task.reason
+    assert task.scope == "USER_ASSUMPTIONS_REQUIRED"
+    assert task.shell_command is not None
+    assert "phase9-research-input-template" in task.shell_command
+    assert "static hedge" in task.reason
+    assert "invalid lineage" in task.reason
 
+
+
+def test_work_queue_repairs_invalid_static_hedge_from_explicit_artifact(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    artifact = seed_explicit_inputs(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+    )
+    forged = dict(latest["evidence"])
+    forged["source_path_sha256"] = "0" * 64
+    storage.save_advanced_edge_evidence(
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:09:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "EXPLICIT_RESEARCH_REPAIR"
+    )
+    assert task.scope == str(artifact.evidence_id)
+    assert task.shell_command is not None
+    assert (
+        f"--input-evidence-id {artifact.evidence_id}"
+        in task.shell_command
+    )
+    assert "--persist --require-ready" in task.shell_command
 
 
 def test_work_queue_surfaces_storage_integrity_first(tmp_path):
