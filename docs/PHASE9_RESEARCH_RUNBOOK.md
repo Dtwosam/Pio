@@ -868,6 +868,56 @@ flow. `wallet-flow-research` still applies the configured user-concentration
 check, Phase 8 currentness, immutable source lineage and deterministic replay
 requirements before evidence can enter the Phase 9 bundle.
 
+### Explicit hedge and portfolio assumptions
+
+Static hedge and portfolio research cannot safely infer the market/capital
+assumptions that determine their economics. Those values now move through one
+checksum-bound input artifact instead of shell placeholders.
+
+Generate a template from the current research pools:
+
+```bash
+pio phase9-research-input-template \
+  --pools <POOL_A,POOL_B,POOL_C> \
+  > phase9-research-inputs.json
+```
+
+The template pre-fills only methodological defaults already defined in code.
+It intentionally leaves external economic inputs null, including token amounts,
+hedge instrument/venue, available hedge liquidity, funding, round-trip cost,
+equal requested quote, per-pool network cost, account equity/cash/deployed
+state, drawdown and allocation budget. The template is not valid until those
+values are explicitly supplied.
+
+Validate and persist the completed assumptions:
+
+```bash
+pio phase9-research-inputs-ingest \
+  --file phase9-research-inputs.json
+```
+
+The normalized input set is stored append-only as
+`PHASE9_EXPLICIT_RESEARCH_INPUTS_V1` with a deterministic SHA-256 and the
+hard boundary `research_only=true`, `policy_actionable=false`,
+`execution_wired=false`.
+
+Run the research directly from the persisted artifact:
+
+```bash
+pio phase9-explicit-research-run --persist --require-ready
+```
+
+This replays static-hedge research from the exact instrument/cost assumptions,
+builds the multi-pool comparison from the exact account/pool inputs, persists
+the portfolio candidate artifact, binds that candidate artifact back to the
+explicit-input evidence ID/SHA, then evaluates and persists portfolio
+allocation. No input file is reinterpreted after persistence.
+
+When hedge or allocation evidence is missing, `phase9-work-queue` now emits
+`EXPLICIT_RESEARCH_INPUTS` if no artifact exists, or
+`EXPLICIT_RESEARCH_RUN` with the exact evidence ID once a valid artifact has
+been persisted.
+
 ### Exact adaptive/regime history depth
 
 Distinct pool coverage is only the first requirement. Phase 9 adaptive
