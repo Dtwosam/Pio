@@ -1009,6 +1009,11 @@ def main() -> None:
         default=10,
     )
     phase8_validate.add_argument(
+        "--min-live-pools",
+        type=int,
+        default=2,
+    )
+    phase8_validate.add_argument(
         "--max-realized-drawdown-bps",
         type=int,
         default=2000,
@@ -1344,6 +1349,7 @@ def main() -> None:
     )
     ml_live_monitor.add_argument("--model-id")
     ml_live_monitor.add_argument("--min-live-labels", type=int, default=10)
+    ml_live_monitor.add_argument("--min-live-pools", type=int, default=2)
     ml_live_monitor.add_argument(
         "--max-drawdown-bps",
         type=int,
@@ -2733,6 +2739,7 @@ def main() -> None:
             model_id=args.model_id,
             criteria=LiveChampionCriteria(
                 min_live_labels=args.min_live_labels,
+                min_live_pools=args.min_live_pools,
                 max_realized_drawdown_bps=args.max_drawdown_bps,
                 max_single_loss_bps=args.max_single_loss_bps,
                 min_win_rate=args.min_win_rate,
