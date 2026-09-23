@@ -16,6 +16,14 @@ from .wallet_flow import WalletFlowCriteria
 
 DiscoverPositions = Callable[[str, int], Phase9PositionDiscoveryReport]
 CollectHistory = Callable[[str], int]
+ExpandOwnerPositions = Callable[[str, str], tuple[str, ...]]
+
+
+@dataclass(frozen=True)
+class _WalletFlowPositionCandidate:
+    position_address: str
+    owner: str
+    source: str
 
 
 @dataclass(frozen=True)
@@ -34,6 +42,7 @@ class Phase9WalletFlowSourceState:
 class Phase9WalletFlowCaptureItem:
     position_address: str
     owner: str
+    source: str
     status: str
     events_received: int | None
     error: str | None
@@ -57,6 +66,9 @@ class Phase9WalletFlowCaptureReport:
     positions_returned: int
     discovery_truncated: bool
     discovery_unique_owners: int
+    owners_expanded: int
+    owner_expansion_failures: int
+    expanded_positions_added: int
     positions_attempted: int
     positions_refreshed: int
     positions_failed: int
@@ -177,6 +189,47 @@ def _existing_source_members(
     )
 
 
+def _diversity_order(
+    candidates: list[_WalletFlowPositionCandidate],
+    *,
+    existing_positions: set[str],
+    existing_users: set[str],
+) -> list[_WalletFlowPositionCandidate]:
+    grouped: dict[str, list[_WalletFlowPositionCandidate]] = {}
+    for candidate in candidates:
+        grouped.setdefault(candidate.owner, []).append(candidate)
+
+    for owner in grouped:
+        grouped[owner].sort(
+            key=lambda item: (
+                item.position_address in existing_positions,
+                0 if item.source == "ONCHAIN_CURRENT" else 1,
+                item.position_address,
+            )
+        )
+
+    owners = sorted(
+        grouped,
+        key=lambda owner: (
+            owner in existing_users,
+            owner,
+        ),
+    )
+    ordered: list[_WalletFlowPositionCandidate] = []
+    offset = 0
+    while True:
+        added = False
+        for owner in owners:
+            values = grouped[owner]
+            if offset < len(values):
+                ordered.append(values[offset])
+                added = True
+        if not added:
+            break
+        offset += 1
+    return ordered
+
+
 def run_phase9_wallet_flow_capture(
     storage: Storage,
     *,
@@ -188,6 +241,10 @@ def run_phase9_wallet_flow_capture(
     settings: Settings | None = None,
     discover_positions: DiscoverPositions | None = None,
     collect_history: CollectHistory | None = None,
+    expand_owner_positions: ExpandOwnerPositions | None = None,
+    expand_closed_positions: bool = True,
+    owner_expansion_limit: int = 25,
+    owner_position_max_pages: int = 3,
     rust_manifest_path: str | None = None,
     rust_binary_path: str | None = None,
     timeout_seconds: int = 120,
@@ -198,6 +255,10 @@ def run_phase9_wallet_flow_capture(
         raise ValueError("discovery_limit must be between 1 and 5000")
     if max_positions_per_run < 1:
         raise ValueError("max_positions_per_run must be positive")
+    if owner_expansion_limit < 1:
+        raise ValueError("owner_expansion_limit must be positive")
+    if owner_position_max_pages < 1:
+        raise ValueError("owner_position_max_pages must be positive")
 
     before = wallet_flow_source_state(
         storage,
@@ -220,6 +281,9 @@ def run_phase9_wallet_flow_capture(
             positions_returned=0,
             discovery_truncated=False,
             discovery_unique_owners=0,
+            owners_expanded=0,
+            owner_expansion_failures=0,
+            expanded_positions_added=0,
             positions_attempted=0,
             positions_refreshed=0,
             positions_failed=0,
@@ -249,28 +313,41 @@ def run_phase9_wallet_flow_capture(
         criteria=criteria,
         as_of=as_of,
     )
-    candidates = sorted(
-        discovery.positions,
-        key=lambda item: (
-            item.owner in existing_users,
-            item.position_address in existing_positions,
-            item.owner,
-            item.position_address,
-        ),
-    )[:max_positions_per_run]
+
+    candidate_map: dict[str, _WalletFlowPositionCandidate] = {
+        item.position_address: _WalletFlowPositionCandidate(
+            position_address=item.position_address,
+            owner=item.owner,
+            source="ONCHAIN_CURRENT",
+        )
+        for item in discovery.positions
+    }
 
     items: list[Phase9WalletFlowCaptureItem] = []
     refreshed = 0
     failed = 0
+    owners_expanded = 0
+    expansion_failures = 0
+    expanded_positions_added = 0
+    expansion_errors: list[str] = []
 
     api: MeteoraDataAPI | None = None
-    if collect_history is None:
+    needs_api = (
+        collect_history is None
+        or (
+            expand_closed_positions
+            and expand_owner_positions is None
+            and collect_history is None
+        )
+    )
+    if needs_api:
         current_settings = settings or Settings.from_env()
         api = MeteoraDataAPI(
             base_url=current_settings.meteora_data_api,
             requests_per_second=current_settings.requests_per_second,
         )
 
+    if collect_history is None:
         def fetch(position: str) -> int:
             assert api is not None
             return collect_position_history(
@@ -281,7 +358,60 @@ def run_phase9_wallet_flow_capture(
     else:
         fetch = collect_history
 
+    can_expand = (
+        expand_closed_positions
+        and (
+            expand_owner_positions is not None
+            or api is not None
+        )
+    )
+    if expand_owner_positions is not None:
+        expand = expand_owner_positions
+    else:
+        def expand(pool: str, owner: str) -> tuple[str, ...]:
+            assert api is not None
+            return api.pool_position_addresses(
+                pool,
+                user=owner,
+                max_pages=owner_position_max_pages,
+                page_size=100,
+            )
+
     try:
+        if can_expand:
+            owners = sorted(
+                {item.owner for item in discovery.positions},
+                key=lambda owner: (
+                    owner in existing_users,
+                    owner,
+                ),
+            )[:owner_expansion_limit]
+            for owner in owners:
+                try:
+                    addresses = expand(pool_address, owner)
+                    owners_expanded += 1
+                    for address in addresses:
+                        value = str(address).strip()
+                        if not value or value in candidate_map:
+                            continue
+                        candidate_map[value] = _WalletFlowPositionCandidate(
+                            position_address=value,
+                            owner=owner,
+                            source="API_OWNER_ALL",
+                        )
+                        expanded_positions_added += 1
+                except Exception as exc:
+                    expansion_failures += 1
+                    expansion_errors.append(
+                        f"{owner}: {type(exc).__name__}: {str(exc)[:500]}"
+                    )
+
+        candidates = _diversity_order(
+            list(candidate_map.values()),
+            existing_positions=existing_positions,
+            existing_users=existing_users,
+        )[:max_positions_per_run]
+
         for candidate in candidates:
             current = wallet_flow_source_state(
                 storage,
@@ -298,6 +428,7 @@ def run_phase9_wallet_flow_capture(
                     Phase9WalletFlowCaptureItem(
                         position_address=candidate.position_address,
                         owner=candidate.owner,
+                        source=candidate.source,
                         status="REFRESHED",
                         events_received=events_received,
                         error=None,
@@ -309,6 +440,7 @@ def run_phase9_wallet_flow_capture(
                     Phase9WalletFlowCaptureItem(
                         position_address=candidate.position_address,
                         owner=candidate.owner,
+                        source=candidate.source,
                         status="FAILED",
                         events_received=None,
                         error=str(exc)[:2000],
@@ -335,6 +467,11 @@ def run_phase9_wallet_flow_capture(
             "no current on-chain PositionV2 accounts were discovered "
             "for the pool"
         )
+    if expansion_failures:
+        reasons.append(
+            f"{expansion_failures} owner position expansion(s) failed: "
+            + "; ".join(expansion_errors)
+        )
     if failed:
         reasons.append(
             f"{failed} position history collection(s) failed"
@@ -346,8 +483,10 @@ def run_phase9_wallet_flow_capture(
             f"unique users {after.unique_users}/{criteria.min_unique_users}"
         )
         reasons.append(
-            "the current-position cohort is not a complete historical "
-            "pool census; additional known/closed positions may be required"
+            "the current-owner cohort, even after bounded status=all "
+            "position expansion when available, is not a complete historical "
+            "pool census; owners with no current on-chain position can still "
+            "be absent"
         )
 
     return Phase9WalletFlowCaptureReport(
@@ -355,7 +494,11 @@ def run_phase9_wallet_flow_capture(
         read_only_capture=True,
         policy_actionable=False,
         execution_wired=False,
-        source_scope="CURRENT_ONCHAIN_POSITION_COHORT",
+        source_scope=(
+            "CURRENT_OWNER_ALL_POSITION_COHORT"
+            if owners_expanded > 0
+            else "CURRENT_ONCHAIN_POSITION_COHORT"
+        ),
         pool_address=pool_address,
         as_of=as_of,
         source_before=before,
@@ -364,6 +507,9 @@ def run_phase9_wallet_flow_capture(
         positions_returned=discovery.positions_returned,
         discovery_truncated=discovery.truncated,
         discovery_unique_owners=discovery.unique_owners,
+        owners_expanded=owners_expanded,
+        owner_expansion_failures=expansion_failures,
+        expanded_positions_added=expanded_positions_added,
         positions_attempted=len(items),
         positions_refreshed=refreshed,
         positions_failed=failed,
