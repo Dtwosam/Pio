@@ -273,6 +273,27 @@ CREATE TABLE IF NOT EXISTS chain_add_liquidity_requests (
 CREATE INDEX IF NOT EXISTS idx_chain_add_request_signature
 ON chain_add_liquidity_requests(signature, instruction_index);
 
+CREATE TABLE IF NOT EXISTS chain_rebalance_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    instruction_index INTEGER NOT NULL,
+    observed_active_id INTEGER NOT NULL,
+    max_active_bin_slippage INTEGER NOT NULL,
+    should_claim_fee INTEGER NOT NULL,
+    should_claim_reward INTEGER NOT NULL,
+    min_withdraw_x_amount TEXT NOT NULL,
+    max_deposit_x_amount TEXT NOT NULL,
+    min_withdraw_y_amount TEXT NOT NULL,
+    max_deposit_y_amount TEXT NOT NULL,
+    shrink_mode INTEGER NOT NULL,
+    raw_json TEXT NOT NULL,
+    UNIQUE(signature, instruction_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chain_rebalance_request_signature
+ON chain_rebalance_requests(signature, instruction_index);
+
 CREATE TABLE IF NOT EXISTS composition_prestate_verifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
@@ -1114,6 +1135,9 @@ class Storage:
         add_requests = snapshot.get("add_requests") or []
         if not isinstance(add_requests, list):
             raise ValueError("add_requests must be a list")
+        rebalance_requests = snapshot.get("rebalance_requests") or []
+        if not isinstance(rebalance_requests, list):
+            raise ValueError("rebalance_requests must be a list")
         events = snapshot.get("events")
         if not isinstance(events, list):
             raise ValueError("transaction events must be a list")
@@ -1364,6 +1388,54 @@ class Storage:
                     request_rows,
                 )
 
+            rebalance_rows = []
+            for request in rebalance_requests:
+                if not isinstance(request, dict):
+                    raise ValueError("rebalance request entry must be an object")
+                rebalance_rows.append(
+                    (
+                        observed_at,
+                        signature,
+                        int(request["instruction_index"]),
+                        int(request["observed_active_id"]),
+                        int(request["max_active_bin_slippage"]),
+                        int(bool(request["should_claim_fee"])),
+                        int(bool(request["should_claim_reward"])),
+                        str(request["min_withdraw_x_amount"]),
+                        str(request["max_deposit_x_amount"]),
+                        str(request["min_withdraw_y_amount"]),
+                        str(request["max_deposit_y_amount"]),
+                        int(request["shrink_mode"]),
+                        json.dumps(request, separators=(",", ":")),
+                    )
+                )
+            if rebalance_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO chain_rebalance_requests(
+                        observed_at, signature, instruction_index,
+                        observed_active_id, max_active_bin_slippage,
+                        should_claim_fee, should_claim_reward,
+                        min_withdraw_x_amount, max_deposit_x_amount,
+                        min_withdraw_y_amount, max_deposit_y_amount,
+                        shrink_mode, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(signature, instruction_index) DO UPDATE SET
+                        observed_at=excluded.observed_at,
+                        observed_active_id=excluded.observed_active_id,
+                        max_active_bin_slippage=excluded.max_active_bin_slippage,
+                        should_claim_fee=excluded.should_claim_fee,
+                        should_claim_reward=excluded.should_claim_reward,
+                        min_withdraw_x_amount=excluded.min_withdraw_x_amount,
+                        max_deposit_x_amount=excluded.max_deposit_x_amount,
+                        min_withdraw_y_amount=excluded.min_withdraw_y_amount,
+                        max_deposit_y_amount=excluded.max_deposit_y_amount,
+                        shrink_mode=excluded.shrink_mode,
+                        raw_json=excluded.raw_json
+                    """,
+                    rebalance_rows,
+                )
+
             conn.executemany(
                 """
                 INSERT INTO chain_transaction_events(
@@ -1582,6 +1654,9 @@ class Storage:
             add_requests = conn.execute(
                 "SELECT COUNT(*) FROM chain_add_liquidity_requests"
             ).fetchone()[0]
+            rebalance_requests = conn.execute(
+                "SELECT COUNT(*) FROM chain_rebalance_requests"
+            ).fetchone()[0]
             failures = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_checks WHERE status = 'FAIL'"
             ).fetchone()[0]
@@ -1612,6 +1687,7 @@ class Storage:
             "chain_transaction_snapshots": chain_tx_snapshots[0],
             "transaction_fee_samples": chain_tx_snapshots[1] or 0,
             "chain_add_liquidity_requests": add_requests,
+            "chain_rebalance_requests": rebalance_requests,
             "quality_failures": failures,
             "collection_errors": errors,
         }
