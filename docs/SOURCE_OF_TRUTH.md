@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Source of Truth
 
-Status: v0.6
+Status: v0.7
 Date: 2026-09-23
 
 ## 1. Mission
@@ -186,6 +186,16 @@ Phase 5 completion is evidence-driven. Scheduler lease acquisition, overlap, sta
 
 Phase 5 promotion is persisted only after Phase 3 is persistently promoted, the stricter multi-day endurance gate passes, multiple positions and pools have real applied chain valuations, a minimum closed-position sample exists, and a decimal-exact audit reconciles stored PAPER account/position state back to the immutable PAPER event ledger. The persisted Phase 5 record stores the criteria and evidence used. Missing evidence keeps Phase 5 unpromoted even when all implementation code exists.
 
+### Phase 6 execution boundary
+
+A `LIVE` proposal is not executable merely because the strategy emitted it. The Rust executor independently applies proposal risk limits, binds the serialized transaction to the proposal pool and configured fee payer, restricts programs, binds instruction discriminators/data prefixes to the proposal action, enforces transaction-size/account constraints, rejects disallowed lookup-table usage or signed input, and simulates only after the transaction guard is persisted.
+
+Execution intents are durable and keyed by immutable decision ID. Reusing an ID with different proposal, risk configuration or transaction policy fails closed. Risk state is monotonic. Simulation requires a persisted accepted transaction guard. Entering signing state additionally requires persisted authorization proving the isolated executor wallet is the guarded transaction fee payer.
+
+The first instruction-construction primitive is a standard-SPL emergency exposure exit using Meteora `RemoveAllLiquidity`. Its public path resolves the pool, reserves, mints, bin arrays, bitmap extension and position owner from Solana state; callers supply only the position, executor-owned token destinations and executor wallet. Token-2022 execution remains blocked. This primitive removes liquidity but intentionally does not claim fees/rewards or close the position account.
+
+Confirmation reconciliation for an already-sent signature is read-only and restart-safe: pending remains `SENT`, success becomes `CONFIRMED`, and chain failure becomes terminal `FAILED`. No current public executor command signs or sends a transaction. Live signing/sending remains disabled until the remaining Phase 6 construction, blockhash, signer, retry and receipt-reconciliation work is implemented and validated.
+
 ## 7. Decision flow
 
 1. Discover pools.
@@ -203,6 +213,7 @@ Phase 5 promotion is persisted only after Phase 3 is persistently promoted, the 
 
 These rules override the ML model:
 - no trade with stale or incomplete market data
+- no transaction when proposal-to-transaction account/program/action binding fails
 - no transaction when simulation fails
 - no trade above configured capital-per-position limit
 - no trade above configured portfolio exposure limit
@@ -210,6 +221,7 @@ These rules override the ML model:
 - stop opening new positions after max daily drawdown is hit
 - exit/reduce according to emergency rules when pool liquidity collapses or data becomes unreliable
 - private keys never enter the ML service, logs, database or source code
+- signing state requires persisted authorization of the isolated executor wallet
 - live execution can be disabled independently of data collection and model training
 
 ## 9. Modes
