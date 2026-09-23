@@ -458,6 +458,27 @@ def build_phase9_work_queue(
             )
         )
 
+
+    hedge_lineage_invalid = any(
+        "pool/bin price-path IDs" in reason
+        for reason in bundle.reasons
+    )
+    if hedge_lineage_invalid:
+        for pool in bundle.static_hedge.qualified_pools:
+            items.append(
+                Phase9WorkItem(
+                    task_type="STATIC_HEDGE_REPAIR",
+                    scope=pool,
+                    reason=(
+                        "qualified static-hedge evidence is not bound to "
+                        "valid immutable pool/bin price-path lineage; rerun "
+                        "the hedge study with the original explicit instrument "
+                        "and cost assumptions"
+                    ),
+                    shell_command=None,
+                )
+            )
+
     if (
         criteria.require_portfolio_allocation
         and bundle.portfolio_allocation.qualified_records < 1
