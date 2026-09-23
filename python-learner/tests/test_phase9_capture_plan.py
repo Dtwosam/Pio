@@ -82,6 +82,7 @@ def test_capture_plan_ranks_missing_api_pools_deterministically(tmp_path):
     )
 
     assert plan.plan_ready is True
+    assert plan.capture_required is True
     assert plan.current_chain_pool_count == 1
     assert plan.additional_chain_pools_needed == 2
     assert [item.pool_address for item in plan.candidates] == [
@@ -159,7 +160,8 @@ def test_capture_plan_is_complete_when_chain_pool_target_is_met(tmp_path):
 
     plan = build_phase9_chain_capture_plan(storage)
 
-    assert plan.plan_ready is False
+    assert plan.plan_ready is True
+    assert plan.capture_required is False
     assert plan.additional_chain_pools_needed == 0
     assert plan.candidates == ()
     assert any(
