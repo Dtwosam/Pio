@@ -3,6 +3,7 @@ mod execution_guard;
 mod models;
 mod prestate_verifier;
 mod risk;
+mod simulation;
 mod state_reader;
 mod transaction_events;
 
@@ -16,6 +17,7 @@ fn usage() {
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
   meteora-executor risk-check <PROPOSAL_JSON_OR_-> <RISK_CONFIG_JSON>
+  meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
   meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>
   meteora-executor verify-prestate <RPC_URL> <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]"
     );
@@ -105,6 +107,42 @@ RPC_URL is accepted as a compatibility fallback",
             let snapshot =
                 state_reader::inspect_position(&rpc_url, &position_address).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "simulate-transaction" => {
+            let transaction_source = args
+                .next()
+                .context("TRANSACTION_BASE64_FILE_OR_- is required")?;
+            if args.next().is_some() {
+                anyhow::bail!("simulate-transaction accepts exactly one argument");
+            }
+            let encoded = if transaction_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read transaction base64 from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&transaction_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read transaction base64 file: {transaction_source}"
+                        )
+                    })?
+            };
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let report = simulation::simulate_base64_transaction(
+                &rpc_url,
+                &encoded,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.succeeded {
+                std::process::exit(2);
+            }
         }
         "inspect-transaction-events" => {
             let rpc_url = args.next().context("RPC_URL is required")?;
