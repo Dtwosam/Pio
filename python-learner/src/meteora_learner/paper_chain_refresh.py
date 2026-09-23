@@ -50,6 +50,7 @@ def inspect_pool_with_rust(
     *,
     rust_manifest_path: str | Path | None = None,
     timeout_seconds: int = 120,
+    ingest_observed_at: str | None = None,
 ) -> dict[str, Any]:
     if not pool_address.strip():
         raise ValueError("pool_address is required")
@@ -158,7 +159,11 @@ def refresh_paper_chain_state(
                 raise ValueError(
                     "Rust inspector returned a different pool_address"
                 )
-            result = ingest_chain_snapshot(storage, payload)
+            result = ingest_chain_snapshot(
+                storage,
+                payload,
+                observed_at=ingest_observed_at,
+            )
             refreshed += 1
             items.append(
                 PaperChainRefreshItem(
