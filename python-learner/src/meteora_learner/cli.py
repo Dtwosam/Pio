@@ -5262,7 +5262,7 @@ def main() -> None:
         storage = Storage(settings.database_path)
         lease = acquire_phase9_operation_lease(
             storage,
-            operation_key="phase9-source-capture",
+            operation_key="phase9-research-maintenance",
             lease_seconds=args.lease_seconds,
         )
         if not lease.acquired:
@@ -5310,7 +5310,7 @@ def main() -> None:
         finally:
             release_phase9_operation_lease(
                 storage,
-                operation_key="phase9-source-capture",
+                operation_key="phase9-research-maintenance",
                 owner_id=lease.owner_id,
             )
         return
@@ -5320,7 +5320,7 @@ def main() -> None:
         storage = Storage(settings.database_path)
         lease = acquire_phase9_operation_lease(
             storage,
-            operation_key="phase9-research-refresh",
+            operation_key="phase9-research-maintenance",
             lease_seconds=args.lease_seconds,
         )
         if not lease.acquired:
@@ -5360,7 +5360,7 @@ def main() -> None:
         finally:
             release_phase9_operation_lease(
                 storage,
-                operation_key="phase9-research-refresh",
+                operation_key="phase9-research-maintenance",
                 owner_id=lease.owner_id,
             )
         return
