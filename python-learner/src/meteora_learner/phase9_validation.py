@@ -302,6 +302,49 @@ def _adaptive_snapshot_lineage_valid(
             )
             if replay_record != evidence:
                 return False
+        evidence = row["evidence"]
+        try:
+            pool_addresses = [
+                str(item["pool_address"])
+                for item in evidence["pools"]
+            ]
+            replay = evaluate_phase9_research(
+                storage,
+                pool_addresses=pool_addresses,
+                criteria=Phase9ResearchCriteria(
+                    **evidence["criteria"]
+                ),
+                adaptive_criteria=AdaptiveRangeCriteria(
+                    **evidence["adaptive_criteria"]
+                ),
+                adaptive_validation_criteria=(
+                    AdaptiveRangeValidationCriteria(
+                        **evidence[
+                            "adaptive_validation_criteria"
+                        ]
+                    )
+                ),
+                regime_criteria=DLMMRegimeCriteria(
+                    **evidence["regime_criteria"]
+                ),
+                as_of=(
+                    str(evidence["as_of"])
+                    if evidence.get("as_of") is not None
+                    else None
+                ),
+            )
+        except (KeyError, TypeError, ValueError):
+            return False
+
+        persisted_normalized = json.loads(
+            json.dumps(evidence, sort_keys=True)
+        )
+        replay_normalized = json.loads(
+            json.dumps(replay.to_record(), sort_keys=True)
+        )
+        if persisted_normalized != replay_normalized:
+            return False
+
     return True
 
 
