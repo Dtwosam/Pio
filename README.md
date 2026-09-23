@@ -96,6 +96,8 @@ pio paper-scheduler-run --account paper --interval-seconds 300 --lease-seconds 9
 pio paper-scheduler-status --account paper
 pio paper-health --account paper --require-healthy
 pio paper-endurance-report --account paper --require-passing
+pio paper-audit --account paper --require-passing
+pio phase5-validate --account paper --require-ready
 
 # Persisted promotion / ML workflow
 pio phase-status
