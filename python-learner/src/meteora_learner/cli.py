@@ -2277,6 +2277,21 @@ def main() -> None:
         type=int,
         default=50,
     )
+    phase9_wallet_capture.add_argument(
+        "--skip-owner-position-expansion",
+        action="store_true",
+        help="Use only current on-chain PositionV2 addresses instead of expanding each current owner through Meteora status=all position PnL",
+    )
+    phase9_wallet_capture.add_argument(
+        "--owner-expansion-limit",
+        type=int,
+        default=25,
+    )
+    phase9_wallet_capture.add_argument(
+        "--owner-position-max-pages",
+        type=int,
+        default=3,
+    )
     phase9_wallet_capture.add_argument("--as-of")
     phase9_wallet_capture.add_argument("--rust-manifest-path")
     phase9_wallet_capture.add_argument("--rust-binary-path")
@@ -2333,6 +2348,20 @@ def main() -> None:
         "--wallet-max-positions-per-run",
         type=int,
         default=50,
+    )
+    phase9_source_capture.add_argument(
+        "--skip-wallet-owner-position-expansion",
+        action="store_true",
+    )
+    phase9_source_capture.add_argument(
+        "--wallet-owner-expansion-limit",
+        type=int,
+        default=25,
+    )
+    phase9_source_capture.add_argument(
+        "--wallet-owner-position-max-pages",
+        type=int,
+        default=3,
     )
     phase9_source_capture.add_argument("--rust-manifest-path")
     phase9_source_capture.add_argument("--rust-binary-path")
@@ -5198,6 +5227,11 @@ def main() -> None:
             max_positions_per_run=args.max_positions_per_run,
             as_of=args.as_of,
             settings=settings,
+            expand_closed_positions=(
+                not args.skip_owner_position_expansion
+            ),
+            owner_expansion_limit=args.owner_expansion_limit,
+            owner_position_max_pages=args.owner_position_max_pages,
             rust_manifest_path=args.rust_manifest_path,
             rust_binary_path=args.rust_binary_path,
             timeout_seconds=args.timeout_seconds,
@@ -5226,6 +5260,15 @@ def main() -> None:
             wallet_discovery_limit=args.wallet_discovery_limit,
             wallet_max_positions_per_run=(
                 args.wallet_max_positions_per_run
+            ),
+            wallet_expand_closed_positions=(
+                not args.skip_wallet_owner_position_expansion
+            ),
+            wallet_owner_expansion_limit=(
+                args.wallet_owner_expansion_limit
+            ),
+            wallet_owner_position_max_pages=(
+                args.wallet_owner_position_max_pages
             ),
             rust_manifest_path=args.rust_manifest_path,
             rust_binary_path=args.rust_binary_path,
