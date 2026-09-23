@@ -9,6 +9,7 @@ from .phase8_evidence_status import (
     evaluate_phase8_evidence_status,
 )
 from .phase8_validation import Phase8PromotionCriteria
+from .phase8_retrain_inputs import audit_phase8_retrain_inputs
 from .storage import Storage, utc_now_iso
 
 
@@ -244,22 +245,54 @@ def build_phase8_evidence_plan(
         and not status.promotion_ready
     ):
         if status.retrain_due:
-            items.append(
-                _item(
-                    40,
-                    "RETRAIN_DATASET_INPUTS_REQUIRED",
-                    status.champion_model_id,
-                    (
-                        "continuous retraining is due. Starting the cycle "
-                        "requires explicit per-pool amount_x, amount_y and "
-                        "network_cost_y_atomic inputs plus an output dataset "
-                        "path; these values must not be invented"
-                    ),
-                    shell_command=(
-                        "pio ml-retrain-plan --persist --require-due"
-                    ),
+            retrain_inputs = audit_phase8_retrain_inputs(storage)
+            if retrain_inputs.valid and retrain_inputs.evidence_id is not None:
+                items.append(
+                    _item(
+                        40,
+                        "RETRAIN_DATASET_BUILD_READY",
+                        str(retrain_inputs.evidence_id),
+                        (
+                            "continuous retraining is due and valid "
+                            "champion-bound retraining inputs are available. "
+                            "The checksum-bound dataset/cycle can be built "
+                            "without inventing pool economics; model training "
+                            "and promotion remain separate operator stages"
+                        ),
+                        operator_required=False,
+                        shell_command=(
+                            "pio phase8-retrain-build-run "
+                            "--input-evidence-id "
+                            + str(retrain_inputs.evidence_id)
+                        ),
+                    )
                 )
-            )
+            else:
+                detail = (
+                    "; ".join(retrain_inputs.reasons)
+                    if retrain_inputs.reasons
+                    else "valid retraining inputs are unavailable"
+                )
+                items.append(
+                    _item(
+                        40,
+                        "RETRAIN_DATASET_INPUTS_REQUIRED",
+                        status.champion_model_id,
+                        (
+                            "continuous retraining is due, but explicit "
+                            "per-pool amount_x, amount_y and "
+                            "network_cost_y_atomic inputs are not ready. "
+                            "Generate the template and fill every null "
+                            "economic field; these values must not be "
+                            "invented. "
+                            + detail
+                        ),
+                        shell_command=(
+                            "pio phase8-retrain-input-template "
+                            "> phase8-retrain-inputs.json"
+                        ),
+                    )
+                )
         elif status.retrain_status == "WAITING_CHAIN_EVIDENCE":
             chain_remaining = max(
                 0,
