@@ -78,6 +78,7 @@ from .paper_scheduler import (
 )
 from .paper_health import build_paper_health, render_paper_health_prometheus
 from .paper_endurance import PaperEnduranceCriteria, build_paper_endurance_report
+from .paper_audit import audit_paper_ledger
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -249,6 +250,13 @@ def main() -> None:
         default="json",
     )
     paper_health.add_argument("--require-healthy", action="store_true")
+
+    paper_audit = subparsers.add_parser(
+        "paper-audit",
+        help="Reconcile PAPER account/position state against the event ledger",
+    )
+    paper_audit.add_argument("--account", required=True)
+    paper_audit.add_argument("--require-passing", action="store_true")
 
     paper_endurance = subparsers.add_parser(
         "paper-endurance-report",
@@ -1685,6 +1693,17 @@ def main() -> None:
         else:
             print(json.dumps(result.to_record(), indent=2))
         if args.require_healthy and result.status not in {"HEALTHY", "IDLE"}:
+            raise SystemExit(2)
+        return
+
+    if args.command == "paper-audit":
+        settings = Settings.from_env()
+        result = audit_paper_ledger(
+            Storage(settings.database_path),
+            account_id=args.account,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_passing and not result.passing:
             raise SystemExit(2)
         return
 
