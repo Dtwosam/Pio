@@ -18,6 +18,7 @@ from .mint_risk import (
 )
 from .phase8_validation import audit_persisted_phase8_promotion
 from .phase9_history_plan import build_phase9_history_plan
+from .phase9_pool_cohort import evaluate_phase9_pool_cohort
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     load_phase9_explicit_inputs,
@@ -357,10 +358,23 @@ def run_phase9_research_refresh(
         )
     else:
         try:
-            history = build_phase9_history_plan(storage)
-            if not history.plan_ready:
-                detail = "; ".join(history.reasons) or (
-                    "chain-history depth is below the exact requirement"
+            cohort = evaluate_phase9_pool_cohort(storage)
+            history = (
+                build_phase9_history_plan(
+                    storage,
+                    pool_addresses=cohort.research_pools,
+                )
+                if cohort.research_pools
+                else build_phase9_history_plan(storage)
+            )
+            if not cohort.research_ready or not history.plan_ready:
+                detail_parts = [
+                    *cohort.reasons,
+                    *history.reasons,
+                ]
+                detail = "; ".join(dict.fromkeys(detail_parts)) or (
+                    "ranked Phase 9 research cohort is below the exact "
+                    "chain-history requirement"
                 )
                 items.append(
                     Phase9ResearchRefreshItem(
@@ -373,9 +387,7 @@ def run_phase9_research_refresh(
                     )
                 )
             else:
-                pools = tuple(
-                    item.pool_address for item in history.pools
-                )
+                pools = cohort.research_pools
                 report = evaluate_phase9_research(
                     storage,
                     pool_addresses=pools,
@@ -398,7 +410,9 @@ def run_phase9_research_refresh(
                         research_qualified=report.research_qualified,
                         persisted_evidence_id=evidence_id,
                         reason=(
-                            "recomputed from persisted chain-history sources"
+                            "recomputed from the ranked history-ready "
+                            "Phase 9 pool cohort using persisted chain-history "
+                            "sources"
                             + (
                                 "; source freshness: "
                                 + source_freshness_reasons.get(
