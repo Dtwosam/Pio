@@ -651,4 +651,56 @@ mod tests {
         assert!(!report.accepted);
         assert_eq!(report.reason, "transaction_already_signed");
     }
+    #[test]
+    fn checked_in_phase6_policy_is_action_strict() {
+        let raw = include_str!(
+            "../../contracts/examples/transaction_guard.phase6.example.json"
+        );
+        let cfg: TransactionGuardConfig = serde_json::from_str(raw).unwrap();
+        assert!(cfg.require_instruction_policy);
+        assert!(cfg.require_proposal_pool_account);
+        assert!(cfg.require_unsigned);
+        assert!(!cfg.allow_address_lookup_tables);
+
+        let prefixes_for = |action: Action| {
+            let mut prefixes = cfg
+                .instruction_policies
+                .iter()
+                .filter(|policy| policy.allowed_actions.contains(&action))
+                .flat_map(|policy| {
+                    policy.allowed_data_prefixes_hex.iter().cloned()
+                })
+                .collect::<Vec<_>>();
+            prefixes.sort();
+            prefixes
+        };
+
+        let mut enter = vec![
+            "2f9de2b40cf02147".to_string(),
+            "235613b94ed44bd3".to_string(),
+            "2e527d92558de499".to_string(),
+            "0703967f94283dc8".to_string(),
+            "03dd95da6f8d76d5".to_string(),
+        ];
+        enter.sort();
+        assert_eq!(prefixes_for(Action::Enter), enter);
+
+        let mut rebalance = vec![
+            "235613b94ed44bd3".to_string(),
+            "5c04b0c177b95309".to_string(),
+        ];
+        rebalance.sort();
+        assert_eq!(prefixes_for(Action::Rebalance), rebalance);
+
+        let mut exit = vec![
+            "0a333d2370691855".to_string(),
+            "e6d7527ff165e392".to_string(),
+            "70bf65ab1c907fbb".to_string(),
+            "be037f77b2579db7".to_string(),
+            "ae5a2373ba2893e2".to_string(),
+        ];
+        exit.sort();
+        assert_eq!(prefixes_for(Action::Exit), exit);
+    }
+
 }
