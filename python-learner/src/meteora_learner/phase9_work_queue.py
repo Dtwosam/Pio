@@ -16,7 +16,10 @@ from .phase9_mint_capture import (
     Phase9MintCaptureCriteria,
     build_phase9_mint_capture_plan,
 )
-from .phase9_explicit_inputs import load_phase9_explicit_inputs
+from .phase9_explicit_inputs import (
+    audit_phase9_explicit_inputs,
+    load_phase9_explicit_inputs,
+)
 from .phase9_wallet_flow_capture import wallet_flow_source_state
 from .wallet_flow import WalletFlowCriteria
 from .phase9_policy_authorization import (
@@ -877,7 +880,16 @@ def build_phase9_work_queue(
         and bundle.portfolio_allocation.qualified_records < 1
     )
     if explicit_static_needed or explicit_allocation_needed:
-        explicit_artifact = load_phase9_explicit_inputs(storage)
+        explicit_audit = audit_phase9_explicit_inputs(storage)
+        explicit_artifact = (
+            load_phase9_explicit_inputs(
+                storage,
+                evidence_id=explicit_audit.evidence_id,
+            )
+            if explicit_audit.valid
+            and explicit_audit.evidence_id is not None
+            else None
+        )
         missing_families = []
         if explicit_static_needed:
             missing_families.append("static hedge")
@@ -897,9 +909,17 @@ def build_phase9_work_queue(
                     scope="USER_ASSUMPTIONS_REQUIRED",
                     reason=(
                         " and ".join(missing_families)
-                        + " require explicit economic assumptions. Generate "
-                        "the template, fill every null economic field, then "
-                        "persist it with pio phase9-research-inputs-ingest "
+                        + " require explicit economic assumptions. "
+                        + (
+                            "The latest input artifact is invalid: "
+                            + "; ".join(explicit_audit.reasons)
+                            + ". "
+                            if explicit_audit.exists
+                            else ""
+                        )
+                        + "Generate the template, fill every null economic "
+                        "field, then persist it with "
+                        "pio phase9-research-inputs-ingest "
                         "--file phase9-research-inputs.json"
                     ),
                     shell_command=template_command,
