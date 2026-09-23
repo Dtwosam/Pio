@@ -81,7 +81,10 @@ class ResearchStore:
                 SELECT observed_at, pool_address, active_bin_id, bin_step,
                        token_x_mint, token_y_mint, token_x_program, token_y_program,
                        base_fee_rate, variable_fee_rate, total_fee_rate, deposit_total_fee_rate,
-                       protocol_share_bps, collect_fee_mode
+                       protocol_share_bps, collect_fee_mode, supports_limit_order,
+                       reward_mint_0, reward_mint_1, reward_rate_0, reward_rate_1,
+                       reward_duration_end_0, reward_duration_end_1,
+                       reward_last_update_time_0, reward_last_update_time_1
                 FROM chain_pool_snapshots
                 WHERE pool_address = ?
                 ORDER BY observed_at DESC, id DESC
@@ -138,7 +141,9 @@ class ResearchStore:
                 SELECT observed_at, pool_address, bin_array_index, bin_id, price,
                        amount_x, amount_y, liquidity_supply,
                        fee_amount_x_per_token_stored,
-                       fee_amount_y_per_token_stored
+                       fee_amount_y_per_token_stored,
+                       reward_per_token_stored_0,
+                       reward_per_token_stored_1
                 FROM bin_liquidity_snapshots
                 WHERE pool_address = ? AND observed_at = ?
                 ORDER BY bin_id ASC
@@ -188,6 +193,7 @@ class ResearchStore:
                 SELECT observed_at, position_address, bin_id, price,
                        bin_x_amount, bin_y_amount, bin_liquidity,
                        bin_fee_x_per_token_stored, bin_fee_y_per_token_stored,
+                       bin_reward_per_token_stored_0, bin_reward_per_token_stored_1,
                        position_liquidity, position_x_amount, position_y_amount,
                        position_fee_x_amount, position_fee_y_amount,
                        reward_one, reward_two
@@ -213,7 +219,10 @@ class ResearchStore:
                 SELECT observed_at, pool_address, active_bin_id, bin_step,
                        token_x_mint, token_y_mint, token_x_program, token_y_program,
                        base_fee_rate, variable_fee_rate, total_fee_rate, deposit_total_fee_rate,
-                       protocol_share_bps, collect_fee_mode
+                       protocol_share_bps, collect_fee_mode, supports_limit_order,
+                       reward_mint_0, reward_mint_1, reward_rate_0, reward_rate_1,
+                       reward_duration_end_0, reward_duration_end_1,
+                       reward_last_update_time_0, reward_last_update_time_1
                 FROM chain_pool_snapshots
                 WHERE pool_address = ? AND observed_at = ?
                 ORDER BY id DESC
