@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+User=pio
+Group=pio
 WorkingDirectory=/opt/pio
 EnvironmentFile=/etc/pio/pio.env
 ExecStart=/opt/pio/python-learner/.venv/bin/pio paper-scheduler-run --account %i --interval-seconds 300 --lease-seconds 900 $PIO_PAPER_SCHEDULER_EXTRA_ARGS
