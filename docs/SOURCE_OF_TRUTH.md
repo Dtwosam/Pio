@@ -412,3 +412,16 @@ bundle evidence must resolve its dataset evidence ID back to a persisted
 `CONTINUOUS_RETRAIN_DATASET_V1` record and matching retraining cycle, dataset
 version, SHA-256 and cutoff. Merely supplying lineage-shaped JSON is
 insufficient.
+
+
+Post-promotion Phase 9 shadow validation is a separate research-only boundary.
+A shadow corpus must come from a newer checksum-bound retraining cycle whose
+cutoff is after the persisted Phase 9 promotion. The future-policy
+authorization evidence gate counts only unique deterministic-replay-verified
+shadow cycles with independent dataset hashes/cutoffs and sufficient aggregate
+validation depth. Both shadow and authorization evidence remain
+`research_only=true`, `policy_actionable=false`; authorization evidence
+also carries `execution_wired=false`. Persisted authorization evidence has a
+currentness audit and is considered stale whenever current deterministic replay
+no longer exactly matches it. No current LIVE executor or policy path consumes
+Phase 9 authorization evidence.
