@@ -121,3 +121,14 @@ def test_terminal_context_requires_signature(tmp_path):
             storage,
             context(signature=None),
         )
+
+
+def test_receipt_status_conflict_fails_closed(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    insert_receipt(storage)
+
+    with pytest.raises(ValueError, match="status conflicts"):
+        ingest_execution_decision_context(
+            storage,
+            context(status="FAILED"),
+        )
