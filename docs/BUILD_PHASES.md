@@ -246,9 +246,9 @@ Built:
 - disabled-by-default live kill switch
 - EXIT remains independently allowed for risk reduction when entry/rebalance are disabled
 - reproducible disabled example configuration
+- internal submission coordinator requires controlled-live authorization bound to the same decision ID, action, pool and Phase 5 evidence
 
 Still needed:
-- bind controlled-live authorization into the internal submission coordinator
 - explicit Phase 6 controlled validation evidence
 - public live execution command only after promotion/validation gates are satisfied
 - first small-capital controlled-live run with full receipt/ledger reconciliation
