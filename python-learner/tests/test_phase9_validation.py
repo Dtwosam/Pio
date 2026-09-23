@@ -553,3 +553,37 @@ def test_forged_portfolio_candidate_lineage_blocks_bundle(tmp_path):
         "immutable candidate-artifact lineage" in reason
         for reason in report.reasons
     )
+
+
+def test_forged_mint_snapshot_lineage_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    forged["assessments"] = [
+        {
+            **item,
+            "mint_snapshot_id": 999999,
+        }
+        for item in forged["assessments"]
+    ]
+    storage.save_advanced_edge_evidence(
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:03:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "authoritative pool and mint snapshot IDs" in reason
+        for reason in report.reasons
+    )
