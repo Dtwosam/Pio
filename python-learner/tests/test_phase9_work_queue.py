@@ -41,6 +41,7 @@ from meteora_learner.phase9_work_queue import build_phase9_work_queue
 from meteora_learner.phase_promotion import (
     PHASE8,
     PHASE8_EVIDENCE_TYPE,
+    persist_phase9_promotion,
 )
 from meteora_learner.portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
@@ -613,6 +614,26 @@ def test_work_queue_surfaces_promotion_when_bundle_is_current(tmp_path):
     assert queue.research_bundle_ready is True
     assert queue.promotion_ready is True
 
+
+
+def test_work_queue_suppresses_current_phase9_promotion_task(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(storage, report=bundle)
+    from meteora_learner.phase9_validation import evaluate_phase9_promotion
+
+    report = evaluate_phase9_promotion(storage)
+    assert report.promotion_ready is True
+    persist_phase9_promotion(storage, report=report)
+
+    queue = build_phase9_work_queue(storage)
+
+    assert queue.promotion_ready is True
+    assert not any(
+        item.task_type == "PERSIST_PHASE9_PROMOTION"
+        for item in queue.items
+    )
 
 def test_work_queue_advances_to_mint_risk_after_snapshots(tmp_path):
     storage = Storage(tmp_path / "pio.db")
