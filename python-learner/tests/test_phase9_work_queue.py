@@ -51,8 +51,10 @@ from meteora_learner.portfolio_allocation import (
 )
 from meteora_learner.static_hedge import (
     STATIC_HEDGE_EVIDENCE_TYPE,
-    StaticHedgeSourceObservation,
-    static_hedge_source_sha256,
+    HedgeInstrumentAssumptions,
+    StaticHedgeCriteria,
+    persist_static_hedge_research,
+    research_static_inventory_hedge,
 )
 from meteora_learner.storage import Storage
 from meteora_learner.wallet_flow import (
@@ -456,63 +458,64 @@ def seed_adaptive_multi_pool_lineage(storage, pools):
 
 def seed_static_hedge_lineage(storage, pool):
     with storage.connect() as conn:
-        pool_row = conn.execute(
+        rows = conn.execute(
             """
-            SELECT id, observed_at, active_bin_id
+            SELECT observed_at, active_bin_id
             FROM chain_pool_snapshots
             WHERE pool_address = ?
-            ORDER BY id DESC
-            LIMIT 1
+            ORDER BY julianday(observed_at) ASC, id ASC
             """,
             (pool,),
-        ).fetchone()
-        assert pool_row is not None
-        observed_at = str(pool_row[1])
-        active_bin_id = int(pool_row[2])
-        cursor = conn.execute(
-            """
-            INSERT INTO bin_liquidity_snapshots(
-                observed_at, pool_address, bin_array_index,
-                bin_id, price, amount_x, amount_y,
-                liquidity_supply, fee_amount_x_per_token_stored,
-                fee_amount_y_per_token_stored
-            ) VALUES (?, ?, 0, ?, ?, '1', '1', '1', '0', '0')
-            """,
-            (observed_at, pool, active_bin_id, str(1 << 64)),
-        )
-        bin_snapshot_id = int(cursor.lastrowid)
+        ).fetchall()
+        assert rows
+        for index, row in enumerate(rows):
+            observed_at = str(row[0])
+            active_bin_id = int(row[1])
+            conn.execute(
+                """
+                INSERT INTO bin_liquidity_snapshots(
+                    observed_at, pool_address, bin_array_index,
+                    bin_id, price, amount_x, amount_y,
+                    liquidity_supply, fee_amount_x_per_token_stored,
+                    fee_amount_y_per_token_stored
+                ) VALUES (?, ?, 0, ?, ?, '1', '1', '1', '0', '0')
+                """,
+                (
+                    observed_at,
+                    pool,
+                    active_bin_id,
+                    str((1 << 64) + index * (1 << 58)),
+                ),
+            )
 
-    observation = StaticHedgeSourceObservation(
-        pool_snapshot_id=int(pool_row[0]),
-        bin_liquidity_snapshot_id=bin_snapshot_id,
-        pool_address=pool,
-        observed_at=observed_at,
-        active_bin_id=active_bin_id,
-        price_q64=1 << 64,
-    )
-    evidence(
+    report = research_static_inventory_hedge(
         storage,
-        STATIC_HEDGE_EVIDENCE_TYPE,
-        pool,
-        extra={
-            "as_of": observed_at,
-            "source_observations": [
-                {
-                    "pool_snapshot_id": observation.pool_snapshot_id,
-                    "bin_liquidity_snapshot_id": (
-                        observation.bin_liquidity_snapshot_id
-                    ),
-                    "pool_address": observation.pool_address,
-                    "observed_at": observation.observed_at,
-                    "active_bin_id": observation.active_bin_id,
-                    "price_q64": observation.price_q64,
-                }
-            ],
-            "source_path_sha256": static_hedge_source_sha256(
-                [observation]
-            ),
-        },
+        pool_address=pool,
+        amount_x=100,
+        amount_y=100,
+        instrument=HedgeInstrumentAssumptions(
+            instrument_id=f"hedge-{pool}",
+            venue="TEST",
+            available_liquidity_y_atomic=1_000_000,
+            max_liquidity_share_bps=10_000,
+            max_leverage=1.0,
+            funding_bps_per_holding_window=0.0,
+        ),
+        criteria=StaticHedgeCriteria(
+            observation_limit=10,
+            holding_observations=1,
+            hedge_fraction=1.0,
+            hedge_round_trip_cost_bps=0.0,
+            min_windows=1,
+            min_mean_abs_return_reduction_bps=0.0,
+            min_worst_loss_improvement_bps=0.0,
+            max_mean_return_drag_bps=10_000.0,
+        ),
+        as_of="2026-09-23T12:00:00+00:00",
     )
+    assert report.research_qualified is True
+    persist_static_hedge_research(storage, report=report)
+
 
 def seed_ready(storage):
     promote_phase8(storage)
