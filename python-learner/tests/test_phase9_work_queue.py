@@ -22,7 +22,11 @@ from meteora_learner.phase_promotion import (
 from meteora_learner.portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
 )
-from meteora_learner.static_hedge import STATIC_HEDGE_EVIDENCE_TYPE
+from meteora_learner.static_hedge import (
+    STATIC_HEDGE_EVIDENCE_TYPE,
+    StaticHedgeSourceObservation,
+    static_hedge_source_sha256,
+)
 from meteora_learner.storage import Storage
 from meteora_learner.wallet_flow import (
     WALLET_FLOW_EVIDENCE_TYPE,
@@ -349,6 +353,66 @@ def seed_adaptive_multi_pool_lineage(storage, pools):
     )
 
 
+def seed_static_hedge_lineage(storage, pool):
+    with storage.connect() as conn:
+        pool_row = conn.execute(
+            """
+            SELECT id, observed_at, active_bin_id
+            FROM chain_pool_snapshots
+            WHERE pool_address = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (pool,),
+        ).fetchone()
+        assert pool_row is not None
+        observed_at = str(pool_row[1])
+        active_bin_id = int(pool_row[2])
+        cursor = conn.execute(
+            """
+            INSERT INTO bin_liquidity_snapshots(
+                observed_at, pool_address, bin_array_index,
+                bin_id, price, amount_x, amount_y,
+                liquidity_supply, fee_amount_x_per_token_stored,
+                fee_amount_y_per_token_stored
+            ) VALUES (?, ?, 0, ?, ?, '1', '1', '1', '0', '0')
+            """,
+            (observed_at, pool, active_bin_id, str(1 << 64)),
+        )
+        bin_snapshot_id = int(cursor.lastrowid)
+
+    observation = StaticHedgeSourceObservation(
+        pool_snapshot_id=int(pool_row[0]),
+        bin_liquidity_snapshot_id=bin_snapshot_id,
+        pool_address=pool,
+        observed_at=observed_at,
+        active_bin_id=active_bin_id,
+        price_q64=1 << 64,
+    )
+    evidence(
+        storage,
+        STATIC_HEDGE_EVIDENCE_TYPE,
+        pool,
+        extra={
+            "as_of": observed_at,
+            "source_observations": [
+                {
+                    "pool_snapshot_id": observation.pool_snapshot_id,
+                    "bin_liquidity_snapshot_id": (
+                        observation.bin_liquidity_snapshot_id
+                    ),
+                    "pool_address": observation.pool_address,
+                    "observed_at": observation.observed_at,
+                    "active_bin_id": observation.active_bin_id,
+                    "price_q64": observation.price_q64,
+                }
+            ],
+            "source_path_sha256": static_hedge_source_sha256(
+                [observation]
+            ),
+        },
+    )
+
 def seed_ready(storage):
     promote_phase8(storage)
     portfolio_lineage = seed_portfolio_candidate_lineage(storage)
@@ -371,7 +435,7 @@ def seed_ready(storage):
         "__PORTFOLIO__",
         extra={"candidate_lineage": portfolio_lineage},
     )
-    evidence(storage, STATIC_HEDGE_EVIDENCE_TYPE, "pool-a")
+    seed_static_hedge_lineage(storage, "pool-a")
     evidence(
         storage,
         CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
@@ -613,3 +677,33 @@ def test_work_queue_repairs_invalid_adaptive_lineage(tmp_path):
     assert task.scope == "__MULTI_POOL__"
     assert task.shell_command is not None
     assert "phase9-research-validate" in task.shell_command
+
+
+def test_work_queue_repairs_invalid_static_hedge_lineage(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    forged["source_path_sha256"] = "0" * 64
+    storage.save_advanced_edge_evidence(
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:09:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "STATIC_HEDGE_REPAIR"
+        and item.scope == "pool-a"
+    )
+    assert task.shell_command is None
+    assert "original explicit instrument" in task.reason
