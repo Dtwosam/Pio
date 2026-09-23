@@ -901,6 +901,14 @@ The normalized input set is stored append-only as
 hard boundary `research_only=true`, `policy_actionable=false`,
 `execution_wired=false`.
 
+Audit the latest artifact before execution with:
+
+```bash
+pio phase9-research-inputs-audit --require-valid
+```
+
+The audit fails closed on a missing/mismatched SHA, invalid normalized inputs, a boundary violation, the wrong status, or any input artifact incorrectly marked as qualified research. The work queue uses the same audit and routes invalid latest artifacts back to template/ingest repair rather than executing them.
+
 Run the research directly from the persisted artifact:
 
 ```bash
