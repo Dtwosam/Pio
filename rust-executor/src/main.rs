@@ -13,6 +13,7 @@ mod prestate_verifier;
 mod presign;
 mod risk;
 mod simulation;
+mod signer;
 mod state_reader;
 mod transaction_events;
 mod transaction_guard;
