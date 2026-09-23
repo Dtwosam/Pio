@@ -612,9 +612,9 @@ def seed_static_hedge_lineage(storage, pool):
 
 
 def seed_ready(storage):
-    portfolio_lineage = seed_portfolio_candidate_lineage(storage)
     seed_bandit_dataset_lineage(storage)
     promote_phase8(storage)
+    portfolio_lineage = seed_portfolio_candidate_lineage(storage)
     for pool in ("pool-a", "pool-b"):
         seed_mint_risk_lineage(storage, pool)
         seed_wallet_flow_lineage(storage, pool)
