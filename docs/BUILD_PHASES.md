@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v1.1
+Status: v1.2
 
 ## Phase 0 — Foundation
 Status: complete.
@@ -121,7 +121,7 @@ Still needed:
 - retraining cadence and drift monitoring for Phase 8
 
 ## Phase 5 — Live Paper Trader
-Status: chain-driven paper accounting and management implemented; unattended live orchestration/validation pending.
+Status: unattended chain-driven PAPER orchestration implemented; extended live validation pending.
 
 Built:
 - persistent paper accounts
@@ -150,15 +150,25 @@ Built:
 - ledger-derived Phase 3 paper entry workflow
 - atomic paper position + ENTER event + counterfactual chain binding
 - preflight counterfactual validation before capital debit
+- focused Data API refresh for pools behind open positions
+- read-only Rust refresh for missing/stale chain snapshots
+- persisted token quote registry with freshness checks
+- optional Jupiter USD-per-atomic token-Y quote refresh
+- idempotent end-to-end paper ticks
+- durable per-account scheduler lease and health state
+- deterministic time-bucket tick IDs for cron/systemd retries
+- stale RUNNING tick recovery after expired scheduler leases
+- prebuilt Rust executor support for hardened unattended refresh
+- unprivileged systemd service/timer deployment templates
 - paper cohort performance metrics
 - ML paper challenger versus deterministic baseline validation
 - stored paper evidence required for champion promotion
 
 Still needed:
-- unattended collector -> portfolio-cycle scheduling
-- general external quote source for non-X/Y reward tokens and non-stable quote assets
+- external reward-token valuation beyond token X/Y rewards
 - long endurance/restart runs across many observations and positions
 - extended paper validation on real live observations
+- operational alerting/metrics around scheduler failures and stale dependencies
 
 ## Phase 6 — Rust Transaction Executor
 
