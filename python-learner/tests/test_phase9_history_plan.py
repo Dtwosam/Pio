@@ -165,3 +165,40 @@ def test_history_plan_reports_missing_chain_pool_diversity(tmp_path):
         "chain-observed pools 2 are below 3" in reason
         for reason in plan.reasons
     )
+
+
+def test_history_plan_excludes_chain_snapshots_after_as_of(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_chain_observations(storage, "pool-a", 5)
+    for index in range(50):
+        storage.save_chain_pool_snapshot(
+            {
+                "pool_address": "pool-a",
+                "active_bin_id": index % 4,
+                "bin_step": 25,
+                "token_x_mint": "pool-a-x",
+                "token_y_mint": "pool-a-y",
+                "bin_arrays": [],
+            },
+            observed_at=(
+                f"2026-09-23T14:{index // 60:02d}:"
+                f"{index % 60:02d}+00:00"
+            ),
+        )
+
+    plan = build_phase9_history_plan(
+        storage,
+        research_criteria=Phase9ResearchCriteria(
+            min_pools=1,
+            min_qualified_pools=1,
+            min_qualified_pool_rate=1.0,
+        ),
+        as_of="2026-09-23T13:00:00+00:00",
+    )
+
+    assert plan.as_of == "2026-09-23T13:00:00+00:00"
+    assert plan.chain_pools_seen == 1
+    assert plan.pools[0].observations == 5
+    assert plan.pools[0].required_observations == 43
+    assert plan.pools[0].additional_observations_needed == 38
+    assert plan.plan_ready is False
