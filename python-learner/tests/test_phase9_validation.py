@@ -38,8 +38,10 @@ from meteora_learner.portfolio_allocation import (
 )
 from meteora_learner.static_hedge import (
     STATIC_HEDGE_EVIDENCE_TYPE,
-    StaticHedgeSourceObservation,
-    static_hedge_source_sha256,
+    HedgeInstrumentAssumptions,
+    StaticHedgeCriteria,
+    persist_static_hedge_research,
+    research_static_inventory_hedge,
 )
 from meteora_learner.storage import Storage
 from meteora_learner.wallet_flow import (
@@ -359,70 +361,86 @@ def seed_adaptive_multi_pool_lineage(storage, pools):
     )
 
 def seed_static_hedge_lineage(storage, pool):
+    observations = (
+        ("2026-09-23T10:00:00+00:00", 1 << 64),
+        ("2026-09-23T11:00:00+00:00", 1 << 64),
+        ("2026-09-23T12:00:00+00:00", 1 << 64),
+    )
     with storage.connect() as conn:
-        pool_row = conn.execute(
+        existing = conn.execute(
             """
             SELECT id, observed_at, active_bin_id
             FROM chain_pool_snapshots
             WHERE pool_address = ?
-            ORDER BY id DESC
-            LIMIT 1
             """,
             (pool,),
-        ).fetchone()
-        assert pool_row is not None
-        pool_snapshot_id = int(pool_row[0])
-        observed_at = str(pool_row[1])
-        active_bin_id = int(pool_row[2])
-        cursor = conn.execute(
-            """
-            INSERT INTO bin_liquidity_snapshots(
-                observed_at, pool_address, bin_array_index,
-                bin_id, price, amount_x, amount_y,
-                liquidity_supply, fee_amount_x_per_token_stored,
-                fee_amount_y_per_token_stored
-            ) VALUES (?, ?, 0, ?, ?, '1', '1', '1', '0', '0')
-            """,
-            (
-                observed_at,
-                pool,
-                active_bin_id,
-                str(1 << 64),
-            ),
-        )
-        bin_snapshot_id = int(cursor.lastrowid)
-
-    observation = StaticHedgeSourceObservation(
-        pool_snapshot_id=pool_snapshot_id,
-        bin_liquidity_snapshot_id=bin_snapshot_id,
-        pool_address=pool,
-        observed_at=observed_at,
-        active_bin_id=active_bin_id,
-        price_q64=1 << 64,
-    )
-    evidence(
-        storage,
-        STATIC_HEDGE_EVIDENCE_TYPE,
-        pool,
-        extra={
-            "as_of": observed_at,
-            "source_observations": [
-                {
-                    "pool_snapshot_id": observation.pool_snapshot_id,
-                    "bin_liquidity_snapshot_id": (
-                        observation.bin_liquidity_snapshot_id
+        ).fetchall()
+        existing_times = {str(row[1]) for row in existing}
+        for observed_at, price in observations:
+            if observed_at not in existing_times:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO chain_pool_snapshots(
+                        observed_at, pool_address, active_bin_id,
+                        bin_step, token_x_mint, token_y_mint,
+                        token_x_program, token_y_program, raw_json
+                    ) VALUES (
+                        ?, ?, 0, 25, ?, ?, ?, ?, '{}'
+                    )
+                    """,
+                    (
+                        observed_at,
+                        pool,
+                        f"{pool}-x",
+                        f"{pool}-y",
+                        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
                     ),
-                    "pool_address": observation.pool_address,
-                    "observed_at": observation.observed_at,
-                    "active_bin_id": observation.active_bin_id,
-                    "price_q64": observation.price_q64,
-                }
-            ],
-            "source_path_sha256": static_hedge_source_sha256(
-                [observation]
-            ),
-        },
+                )
+                assert cursor.lastrowid is not None
+
+            conn.execute(
+                """
+                INSERT INTO bin_liquidity_snapshots(
+                    observed_at, pool_address, bin_array_index,
+                    bin_id, price, amount_x, amount_y,
+                    liquidity_supply, fee_amount_x_per_token_stored,
+                    fee_amount_y_per_token_stored
+                ) VALUES (
+                    ?, ?, 0, 0, ?, '1', '1', '1', '0', '0'
+                )
+                """,
+                (observed_at, pool, str(price)),
+            )
+
+    report = research_static_inventory_hedge(
+        storage,
+        pool_address=pool,
+        amount_x=100,
+        amount_y=100,
+        instrument=HedgeInstrumentAssumptions(
+            instrument_id=f"hedge-{pool}",
+            venue="TEST",
+            available_liquidity_y_atomic=1_000_000,
+            max_liquidity_share_bps=10_000,
+            max_leverage=1.0,
+            funding_bps_per_holding_window=0.0,
+        ),
+        criteria=StaticHedgeCriteria(
+            observation_limit=3,
+            holding_observations=1,
+            hedge_fraction=1.0,
+            hedge_round_trip_cost_bps=0.0,
+            min_windows=1,
+            min_mean_abs_return_reduction_bps=0.0,
+            min_worst_loss_improvement_bps=0.0,
+            max_mean_return_drag_bps=100.0,
+        ),
+        as_of="2026-09-23T12:00:00+00:00",
     )
+    assert report.research_qualified is True
+    persist_static_hedge_research(storage, report=report)
+
 
 def seed_ready(storage):
     promote_phase8(storage)
@@ -1001,6 +1019,37 @@ def test_forged_static_hedge_lineage_blocks_bundle(tmp_path):
         for reason in report.reasons
     )
 
+
+
+def test_tampered_static_hedge_assumptions_block_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+    )
+    assert latest is not None
+    tampered = dict(latest["evidence"])
+    tampered["instrument"] = {
+        **tampered["instrument"],
+        "funding_bps_per_holding_window": 500.0,
+    }
+    storage.save_advanced_edge_evidence(
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:09:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=tampered,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "pool/bin price-path IDs" in reason
+        for reason in report.reasons
+    )
 
 def test_tampered_portfolio_candidate_payload_blocks_bundle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
