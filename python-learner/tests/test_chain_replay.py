@@ -77,6 +77,9 @@ def test_small_lp_replay_marks_inventory_and_diluted_fees(tmp_path):
     assert result.replay_fidelity == "SMALL_LP_CHAIN_PATH_V2"
     assert result.observation_count == 2
     assert len(result.intervals) == 1
+    assert result.reward_one == 0
+    assert result.reward_two == 0
+    assert result.reward_fidelity == "UNAVAILABLE_LEGACY_SNAPSHOT"
 
 
 def test_replay_rejects_position_large_enough_to_distort_history(tmp_path):
@@ -417,3 +420,160 @@ def test_multi_snapshot_replay_rejects_historical_zero_supply(tmp_path):
         assert "zero supply" in str(exc)
     else:
         raise AssertionError("expected zero-supply path to fail closed")
+
+
+
+def save_reward_snapshot(
+    storage,
+    observed_at,
+    *,
+    reward_checkpoint,
+    reward_mint="reward-mint",
+    supports_limit_order=False,
+):
+    storage.save_chain_pool_snapshot(
+        {
+            "pool_address": "pool",
+            "active_bin_id": 0,
+            "bin_step": 25,
+            "token_x_mint": "x",
+            "token_y_mint": "y",
+            "token_x_program": STANDARD_SPL_TOKEN_PROGRAM,
+            "token_y_program": STANDARD_SPL_TOKEN_PROGRAM,
+            "base_fee_rate": "0",
+            "variable_fee_rate": "0",
+            "total_fee_rate": "0",
+            "deposit_total_fee_rate": "0",
+            "protocol_share_bps": 0,
+            "collect_fee_mode": 0,
+            "supports_limit_order": supports_limit_order,
+            "reward_mints": [
+                reward_mint,
+                "11111111111111111111111111111111",
+            ],
+            "reward_rates": ["0", "0"],
+            "reward_duration_ends": [0, 0],
+            "reward_last_update_times": [0, 0],
+            "bin_arrays": [
+                {
+                    "address": "array",
+                    "index": 0,
+                    "lower_bin_id": 0,
+                    "upper_bin_id": 0,
+                    "bins": [
+                        {
+                            "bin_id": 0,
+                            "price": str(Q64),
+                            "amount_x": "0",
+                            "amount_y": "100",
+                            "liquidity_supply": str(100 * Q64),
+                            "fee_amount_x_per_token_stored": "0",
+                            "fee_amount_y_per_token_stored": "0",
+                            "reward_per_token_stored": [
+                                str(reward_checkpoint),
+                                "0",
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+        observed_at=observed_at,
+    )
+
+
+def test_chain_replay_attributes_reward_checkpoint_growth(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_reward_snapshot(
+        storage,
+        "2026-09-22T00:00:00+00:00",
+        reward_checkpoint=0,
+    )
+    save_reward_snapshot(
+        storage,
+        "2026-09-22T00:05:00+00:00",
+        reward_checkpoint=100 * Q64,
+    )
+
+    result = replay_latest_small_lp_interval(
+        str(db),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=1,
+        min_bin_id=0,
+        max_bin_id=0,
+        strategy=StrategyType.SPOT,
+        max_share_bps=200,
+    )
+
+    assert result.reward_one == 99
+    assert result.reward_two == 0
+    assert result.intervals[0].reward_one == 99
+    assert result.bins[0].reward_one == 99
+    assert result.reward_mint_0 == "reward-mint"
+    assert result.reward_fidelity == "ONCHAIN_EFFECTIVE_REWARD_CHECKPOINT_V1"
+
+
+def test_chain_replay_rejects_reward_campaign_change(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_reward_snapshot(
+        storage,
+        "2026-09-22T00:00:00+00:00",
+        reward_checkpoint=0,
+        reward_mint="reward-a",
+    )
+    save_reward_snapshot(
+        storage,
+        "2026-09-22T00:05:00+00:00",
+        reward_checkpoint=Q64,
+        reward_mint="reward-b",
+    )
+
+    try:
+        replay_latest_small_lp_interval(
+            str(db),
+            pool_address="pool",
+            amount_x=0,
+            amount_y=1,
+            min_bin_id=0,
+            max_bin_id=0,
+            strategy=StrategyType.SPOT,
+        )
+    except ValueError as exc:
+        assert "reward mint changed" in str(exc)
+    else:
+        raise AssertionError("expected reward campaign change to fail closed")
+
+
+def test_chain_replay_marks_rewards_not_applicable_for_limit_order_pool(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_reward_snapshot(
+        storage,
+        "2026-09-22T00:00:00+00:00",
+        reward_checkpoint=0,
+        supports_limit_order=True,
+    )
+    save_reward_snapshot(
+        storage,
+        "2026-09-22T00:05:00+00:00",
+        reward_checkpoint=0,
+        supports_limit_order=True,
+    )
+
+    result = replay_latest_small_lp_interval(
+        str(db),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=1,
+        min_bin_id=0,
+        max_bin_id=0,
+        strategy=StrategyType.SPOT,
+        max_share_bps=200,
+    )
+
+    assert result.reward_one == 0
+    assert result.reward_two == 0
+    assert result.reward_fidelity == "NOT_APPLICABLE_LIMIT_ORDER_POOL"
