@@ -77,6 +77,7 @@ from .paper_scheduler import (
     run_scheduled_paper_tick,
 )
 from .paper_health import build_paper_health, render_paper_health_prometheus
+from .paper_endurance import PaperEnduranceCriteria, build_paper_endurance_report
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -248,6 +249,38 @@ def main() -> None:
         default="json",
     )
     paper_health.add_argument("--require-healthy", action="store_true")
+
+    paper_endurance = subparsers.add_parser(
+        "paper-endurance-report",
+        help="Evaluate accumulated PAPER endurance and restart evidence",
+    )
+    paper_endurance.add_argument("--account", required=True)
+    paper_endurance.add_argument("--min-runtime-hours", type=float, default=24.0)
+    paper_endurance.add_argument("--min-terminal-ticks", type=int, default=100)
+    paper_endurance.add_argument("--min-success-rate-pct", type=float, default=95.0)
+    paper_endurance.add_argument(
+        "--max-dependency-blocked-pct",
+        type=float,
+        default=10.0,
+    )
+    paper_endurance.add_argument("--max-consecutive-failures", type=int, default=2)
+    paper_endurance.add_argument("--max-stale-running-ticks", type=int, default=0)
+    paper_endurance.add_argument(
+        "--stale-running-after-seconds",
+        type=int,
+        default=900,
+    )
+    paper_endurance.add_argument(
+        "--min-applied-chain-valuations",
+        type=int,
+        default=24,
+    )
+    paper_endurance.add_argument(
+        "--min-distinct-positions-valued",
+        type=int,
+        default=1,
+    )
+    paper_endurance.add_argument("--require-passing", action="store_true")
 
     paper_scheduler_status = subparsers.add_parser(
         "paper-scheduler-status",
@@ -1652,6 +1685,32 @@ def main() -> None:
         else:
             print(json.dumps(result.to_record(), indent=2))
         if args.require_healthy and result.status not in {"HEALTHY", "IDLE"}:
+            raise SystemExit(2)
+        return
+
+    if args.command == "paper-endurance-report":
+        settings = Settings.from_env()
+        result = build_paper_endurance_report(
+            Storage(settings.database_path),
+            account_id=args.account,
+            criteria=PaperEnduranceCriteria(
+                min_runtime_hours=args.min_runtime_hours,
+                min_terminal_ticks=args.min_terminal_ticks,
+                min_success_rate_pct=args.min_success_rate_pct,
+                max_dependency_blocked_pct=args.max_dependency_blocked_pct,
+                max_consecutive_failures=args.max_consecutive_failures,
+                max_stale_running_ticks=args.max_stale_running_ticks,
+                stale_running_after_seconds=args.stale_running_after_seconds,
+                min_applied_chain_valuations=(
+                    args.min_applied_chain_valuations
+                ),
+                min_distinct_positions_valued=(
+                    args.min_distinct_positions_valued
+                ),
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_passing and not result.passing:
             raise SystemExit(2)
         return
 
