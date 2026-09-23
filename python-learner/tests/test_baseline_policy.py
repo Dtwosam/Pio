@@ -128,6 +128,7 @@ def test_baseline_selects_cost_adjusted_trailing_candidate_but_blocks_action(tmp
     scan = ChainScanResult(
         pool_address="pool",
         entry_active_bin_id=0,
+        decision_active_bin_id=0,
         observation_count=2,
         attempted=2,
         accepted=2,
@@ -154,7 +155,10 @@ def test_baseline_selects_cost_adjusted_trailing_candidate_but_blocks_action(tmp
 
     assert result.research_choice is not None
     assert result.research_choice.half_width == 2
-    assert result.actionable_choice is None
+    assert result.research_proposal is not None
+    assert result.research_proposal.min_bin_id == -2
+    assert result.research_proposal.max_bin_id == 2
+    assert result.actionable_proposal is None
     assert result.phase2_ready is False
 
 
@@ -164,6 +168,7 @@ def test_baseline_becomes_actionable_only_after_phase2_gate(tmp_path):
     scan = ChainScanResult(
         pool_address="pool",
         entry_active_bin_id=0,
+        decision_active_bin_id=0,
         observation_count=2,
         attempted=1,
         accepted=1,
@@ -181,8 +186,8 @@ def test_baseline_becomes_actionable_only_after_phase2_gate(tmp_path):
         ),
     )
 
-    assert result.actionable_choice is not None
-    assert result.actionable_choice.half_width == 2
+    assert result.actionable_proposal is not None
+    assert result.actionable_proposal.half_width == 2
 
 
 def test_baseline_rejects_unvalued_reward_income(tmp_path):
@@ -191,6 +196,7 @@ def test_baseline_rejects_unvalued_reward_income(tmp_path):
     scan = ChainScanResult(
         pool_address="pool",
         entry_active_bin_id=0,
+        decision_active_bin_id=0,
         observation_count=2,
         attempted=1,
         accepted=1,
@@ -218,6 +224,7 @@ def test_baseline_requires_network_cost_valuation(tmp_path):
     scan = ChainScanResult(
         pool_address="pool",
         entry_active_bin_id=0,
+        decision_active_bin_id=0,
         observation_count=2,
         attempted=1,
         accepted=1,
