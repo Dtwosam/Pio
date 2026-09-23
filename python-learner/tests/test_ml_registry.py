@@ -70,12 +70,13 @@ def test_model_registry_enforces_staged_promotion(tmp_path):
         model_id="model-a",
         new_status=PAPER_CHALLENGER,
     ).status == PAPER_CHALLENGER
-    assert transition_model(
-        storage,
-        model_id="model-a",
-        new_status=CHAMPION,
-    ).status == CHAMPION
-    assert current_champion(storage).model_id == "model-a"
+    with pytest.raises(ValueError, match="qualified paper validation"):
+        transition_model(
+            storage,
+            model_id="model-a",
+            new_status=CHAMPION,
+        )
+    assert current_champion(storage) is None
 
 
 def test_registry_blocks_second_champion_until_first_is_rolled_back(tmp_path):
@@ -100,7 +101,8 @@ def test_registry_blocks_second_champion_until_first_is_rolled_back(tmp_path):
             new_status=PAPER_CHALLENGER,
         )
 
-    transition_model(storage, model_id="model-a", new_status=CHAMPION)
+    with pytest.raises(ValueError, match="qualified paper validation"):
+        transition_model(storage, model_id="model-a", new_status=CHAMPION)
 
-    with pytest.raises(ValueError, match="champion already exists"):
+    with pytest.raises(ValueError, match="qualified paper validation"):
         transition_model(storage, model_id="model-b", new_status=CHAMPION)
