@@ -385,8 +385,10 @@ the hedge path plus a deterministic path hash. Mint-risk evidence must resolve
 to authoritative persisted pool/mint snapshot IDs. Portfolio candidate
 artifact hashes are recomputed from the persisted source inputs, assumptions
 and ranked comparison rather than trusting stored SHA labels. Contextual-bandit
-evidence must resolve to the persisted retraining dataset/cycle lineage and
-matching checksum. Any missing, forged, stale or mismatched lineage fails the
+evidence must resolve either to persisted retraining-cycle dataset lineage or
+to a persisted `PHASE9_BANDIT_DATASET_V1` artifact derived from a valid
+explicit-input artifact plus persisted no-lookahead chain replay. Both paths
+must preserve dataset version, cutoff, file identity and checksum. Any missing, forged, stale or mismatched lineage fails the
 Phase 9 bundle closed. Qualified Phase 9 metrics are replay-verified as well:
 each deterministic research family is rerun from its persisted immutable
 sources, original cutoff and original criteria/assumptions, and the normalized
@@ -403,9 +405,13 @@ The current phase-promotion pointer may be refreshed after revalidation, but
 every promotion write is also copied into immutable
 `phase_promotion_evidence_history` so prior promotion states remain auditable.
 
-Checksum-bound contextual-bandit retraining datasets must use an absolute,
-regular, non-symlink file path. The stored bytes are re-hashed during replay,
-so path indirection or file replacement cannot silently preserve qualification.
+Checksum-bound contextual-bandit dataset files must use an absolute, regular,
+non-symlink file path. The stored bytes are re-hashed during replay, so path
+indirection or file replacement cannot silently preserve qualification.
+Phase 9-derived bandit datasets use the latest common source cutoff across the
+explicit pools and are bounded to the latest 96 observations per pool. Their
+bytes and metadata must also deterministically rebuild from the exact persisted
+explicit-input evidence ID/SHA and chain history at that cutoff.
 
 Portfolio-allocation qualification is artifact-bound. The preferred Phase 9
 flow persists the exact multi-pool candidate corpus, source pool inputs,
@@ -414,13 +420,22 @@ account-state assumptions and ranked comparison as immutable
 evidence must reference that evidence ID/hash for Phase 9 bundle readiness.
 Free-form candidate files remain exploratory only.
 
-Contextual-bandit qualification is likewise lineage-bound: qualified Phase 9
-A persisted Phase 9 research promotion is considered current only when its stored promotion report still exactly matches the presently replay-verified, checksum-valid research bundle. The generic promotion row remains historical evidence; operational status must distinguish row existence from currentness. New component evidence, source tampering, replay mismatch or bundle refresh makes the previous Phase 9 promotion stale until it is revalidated and re-persisted. This currentness check remains research-only and grants no LIVE-policy authority.
+Contextual-bandit qualification is likewise lineage-bound. Qualified Phase 9
+bandit evidence must resolve its dataset evidence ID either to a persisted
+`CONTINUOUS_RETRAIN_DATASET_V1` record with matching retraining cycle, or to
+a persisted `PHASE9_BANDIT_DATASET_V1` record with matching explicit-input
+evidence. In both cases the dataset version, SHA-256 and cutoff must reproduce;
+merely supplying lineage-shaped JSON is insufficient. Arbitrary fixed CSVs
+remain exploratory and cannot satisfy bundle lineage.
 
-bundle evidence must resolve its dataset evidence ID back to a persisted
-`CONTINUOUS_RETRAIN_DATASET_V1` record and matching retraining cycle, dataset
-version, SHA-256 and cutoff. Merely supplying lineage-shaped JSON is
-insufficient.
+A persisted Phase 9 research promotion is considered current only when its
+stored promotion report still exactly matches the presently replay-verified,
+checksum-valid research bundle. The generic promotion row remains historical
+evidence; operational status must distinguish row existence from currentness.
+New component evidence, source tampering, replay mismatch or bundle refresh
+makes the previous Phase 9 promotion stale until it is revalidated and
+re-persisted. This currentness check remains research-only and grants no
+LIVE-policy authority.
 
 
 Post-promotion Phase 9 shadow validation is a separate research-only boundary.
