@@ -11,6 +11,7 @@ mod execution_receipt;
 mod execution_store;
 mod journaled_dry_run;
 mod models;
+mod mint_reader;
 mod phase5_gate;
 mod phase6_readiness;
 mod phase6_gate;
@@ -46,6 +47,7 @@ fn usage() {
   meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
+  meteora-executor inspect-mint <RPC_URL> <MINT_ADDRESS>
   meteora-executor verify-position-closed <RPC_URL> <POSITION_ADDRESS>
   meteora-executor risk-check <PROPOSAL_JSON_OR_-> <RISK_CONFIG_JSON>
   meteora-executor dry-run-execution <REQUEST_JSON_OR_-> <RISK_CONFIG_JSON> <TRANSACTION_GUARD_CONFIG_JSON> <EXECUTION_DB>
@@ -185,6 +187,20 @@ RPC_URL is accepted as a compatibility fallback",
             let position_address = args.next().context("POSITION_ADDRESS is required")?;
             let snapshot =
                 state_reader::inspect_position(&rpc_url, &position_address).await?;
+            println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "inspect-mint" => {
+            let rpc_url = args.next().context("RPC_URL is required")?;
+            let mint_address = args
+                .next()
+                .context("MINT_ADDRESS is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "inspect-mint accepts exactly two arguments"
+                );
+            }
+            let snapshot =
+                mint_reader::inspect_mint(&rpc_url, &mint_address).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
         }
         "dry-run-execution" => {
