@@ -1,3 +1,4 @@
+import meteora_learner.phase9_progress as progress_module
 from meteora_learner.phase9_progress import evaluate_phase9_progress
 from meteora_learner.phase9_pool_activity_scan_state import (
     record_phase9_pool_activity_page,
@@ -261,6 +262,80 @@ def test_phase9_progress_exposes_wallet_activity_scan_without_snapshots(
     assert second.backfill_exhausted is False
     assert second.backfill_before_signature == "sig-b"
     assert second.positions_discovered == 3
+
+
+def test_phase9_progress_exposes_ranked_pool_cohort_freshness(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        progress_module,
+        "utc_now_iso",
+        lambda: "2026-09-23T20:00:00+00:00",
+    )
+    with storage.connect() as conn:
+        for rank, pool in enumerate(
+            ("pool-a", "pool-b", "pool-c"),
+            start=1,
+        ):
+            conn.execute(
+                """
+                INSERT INTO pool_snapshots(
+                    observed_at, address, name, tvl,
+                    volume_24h, fees_24h, raw_json
+                ) VALUES (?, ?, ?, ?, 100, 1, '{}')
+                """,
+                (
+                    (
+                        "2026-09-23T19:30:00+00:00"
+                        if pool != "pool-c"
+                        else "2026-09-23T12:00:00+00:00"
+                    ),
+                    pool,
+                    pool,
+                    1_000 - rank * 100,
+                ),
+            )
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        for index in range(43):
+            storage.save_chain_pool_snapshot(
+                {
+                    "pool_address": pool,
+                    "active_bin_id": index % 3,
+                    "bin_step": 25,
+                    "token_x_mint": f"{pool}-x",
+                    "token_y_mint": f"{pool}-y",
+                    "bin_arrays": [],
+                },
+                observed_at=(
+                    "2026-09-23T"
+                    f"{index // 60:02d}:{index % 60:02d}:00+00:00"
+                ),
+            )
+
+    report = evaluate_phase9_progress(storage)
+
+    assert report.status == "NO_SNAPSHOTS"
+    assert report.pool_cohort.api_ranking_as_of == (
+        "2026-09-23T20:00:00+00:00"
+    )
+    assert report.pool_cohort.fresh_api_pools == 2
+    assert report.pool_cohort.stale_api_pools_excluded == 1
+    assert report.pool_cohort.desired_pools[:2] == (
+        "pool-a",
+        "pool-b",
+    )
+    assert set(report.pool_cohort.research_pools) == {
+        "pool-a",
+        "pool-b",
+        "pool-c",
+    }
+    assert report.pool_cohort.research_ready is True
+    assert any(
+        "stale API pool ranking snapshot" in reason
+        for reason in report.pool_cohort.reasons
+    )
 
 
 def test_phase9_progress_reports_source_refresh_pending(tmp_path):
