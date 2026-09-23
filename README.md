@@ -83,6 +83,9 @@ pio paper-chain-value --position <ID> --observed-at <TIME> \
 pio paper-chain-observe --position <ID> --observed-at <TIME> \
   --token-y-quote-per-atomic <QUOTE_RATE> --rebalance-cost <QUOTE>
 pio paper-chain-run --run-id <RUN> --observed-at <TIME> --file <ITEMS_JSON>
+pio paper-live-latest-run --cycle-id <CYCLE> --file <ITEMS_JSON>
+pio paper-portfolio-run --account paper --cycle-id <CYCLE> \
+  --quotes-file <TOKEN_Y_QUOTES_JSON> --max-positions <N>
 
 # Persisted promotion / ML workflow
 pio phase-status
@@ -109,7 +112,7 @@ The work queue emits concrete read-only Rust commands when an existing sample ca
 
 Phase 3 commands are research/policy tools. They do not build, sign or send live transactions. A pool must pass the fail-closed safety screen, a deterministic range/strategy must pass trailing replay, capital must fit sizing limits, and Phase 2 evidence must be promoted before the policy can authorize entry.
 
-ML v1 is research-only: it learns from all replay-valid candidate actions at each decision point, uses time-ordered holdout validation, compares challengers against the deterministic baseline, and cannot become champion without qualified paper evidence. Paper commands mutate only the local paper ledger; they never sign or send a Solana transaction.
+ML v1 is research-only: it learns from all replay-valid candidate actions at each decision point, uses time-ordered holdout validation, compares challengers against the deterministic baseline, and cannot become champion without qualified paper evidence. Paper commands mutate only the local paper ledger; they never sign or send a Solana transaction. The portfolio runner discovers eligible open chain-bound positions, requires explicit token-Y quote inputs, skips stale/unpriced positions, and uses idempotent latest-chain cycles with restart recovery.
 
 ## Rust read-only inspection
 
