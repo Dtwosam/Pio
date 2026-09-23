@@ -17,6 +17,7 @@ from .paper_account import (
     close_paper_position,
     paper_account_snapshot,
     paper_position_snapshot,
+    rebalance_paper_position,
 )
 from .paper_policy import evaluate_paper_position_policy
 from .paper_cycle import apply_paper_observation
@@ -225,6 +226,8 @@ def initialize_paper_counterfactual(
 
     payload = {
         "bins": state_bins,
+        "idle_x_atomic": deposit.idle_x,
+        "idle_y_atomic": deposit.idle_y,
         "max_observed_share_bps": max_share,
     }
     with storage.connect() as conn:
@@ -403,11 +406,6 @@ def prepare_paper_chain_valuation(
     position = paper_position_snapshot(storage, position_id=position_id)
     if position.status != "OPEN":
         raise ValueError("paper position must be open")
-    if position.rebalances != 0:
-        raise ValueError(
-            "paper v1 chain valuation fails closed after a rebalance"
-        )
-
     base = _counterfactual_row(storage, position_id=position_id)
     if token_y_quote_per_atomic is None:
         quote_rate = _d(base["capital_quote"]) / _d(base["entry_value_y_atomic"])
@@ -470,8 +468,12 @@ def prepare_paper_chain_valuation(
         raise ValueError("active bin is not covered at valuation time")
     price_q64 = int(str(active_row["price"]))
 
-    inventory_x = int(str(base["idle_x_atomic"]))
-    inventory_y = int(str(base["idle_y_atomic"]))
+    inventory_x = int(
+        str(previous.get("idle_x_atomic", base["idle_x_atomic"]))
+    )
+    inventory_y = int(
+        str(previous.get("idle_y_atomic", base["idle_y_atomic"]))
+    )
     fee_x = 0
     fee_y = 0
     reward_one = 0
@@ -586,6 +588,28 @@ def prepare_paper_chain_valuation(
 
     next_state = {
         "bins": next_bins,
+        "idle_x_atomic": inventory_x - sum(
+            amounts_from_liquidity_share(
+                liquidity_share=int(state["liquidity_share"]),
+                bin_amount_x=int(str(by_id[int(state["bin_id"])]["amount_x"])),
+                bin_amount_y=int(str(by_id[int(state["bin_id"])]["amount_y"])),
+                liquidity_supply=int(
+                    str(by_id[int(state["bin_id"])]["liquidity_supply"])
+                ),
+            )[0]
+            for state in previous["bins"]
+        ),
+        "idle_y_atomic": inventory_y - sum(
+            amounts_from_liquidity_share(
+                liquidity_share=int(state["liquidity_share"]),
+                bin_amount_x=int(str(by_id[int(state["bin_id"])]["amount_x"])),
+                bin_amount_y=int(str(by_id[int(state["bin_id"])]["amount_y"])),
+                liquidity_supply=int(
+                    str(by_id[int(state["bin_id"])]["liquidity_supply"])
+                ),
+            )[1]
+            for state in previous["bins"]
+        ),
         "max_observed_share_bps": max_share,
     }
     valuation = {
@@ -640,6 +664,106 @@ def prepare_paper_chain_valuation(
     return _valuation_from_row(row)
 
 
+def _counterfactual_state_for_range(
+    storage: Storage,
+    *,
+    position_id: str,
+    observed_at: str,
+    amount_x: int,
+    amount_y: int,
+    min_bin_id: int,
+    max_bin_id: int,
+    strategy: str,
+) -> dict[str, Any]:
+    base = _counterfactual_row(storage, position_id=position_id)
+    store = ResearchStore(storage.path)
+    pool = store.chain_pool_snapshot_at(str(base["pool_address"]), observed_at)
+    if pool is None:
+        raise ValueError("rebalance chain pool snapshot is missing")
+    _validate_pool(pool)
+    rows = store.load_bin_liquidity(
+        str(base["pool_address"]),
+        observed_at=observed_at,
+    )
+    if not rows:
+        raise ValueError("rebalance bin state is missing")
+    prices = {
+        int(row["bin_id"]): int(str(row["price"]))
+        for row in rows
+    }
+    deposit = distribute_standard_spl_deposit(
+        active_id=int(pool["active_bin_id"]),
+        min_bin_id=min_bin_id,
+        max_bin_id=max_bin_id,
+        amount_x=amount_x,
+        amount_y=amount_y,
+        strategy=strategy,
+        prices_q64=prices,
+        favor_x_in_active_bin=bool(base["favor_x_active"]),
+    )
+    projected = project_deposit_shares(deposit, rows)
+    if not projected.bins:
+        raise ValueError("rebalance creates no paper liquidity")
+
+    by_id = {int(row["bin_id"]): row for row in rows}
+    state_bins: list[dict[str, Any]] = []
+    max_share = 0
+    for item in projected.bins:
+        row = by_id[item.bin_id]
+        supply = int(str(row["liquidity_supply"]))
+        if supply <= 0:
+            raise ValueError(
+                f"rebalance target bin {item.bin_id} has non-positive real supply"
+            )
+        share_bps = _share_bps(item.liquidity_share_minted, supply)
+        max_share = max(max_share, share_bps)
+        if share_bps > int(base["max_share_bps"]):
+            raise ValueError(
+                f"counterfactual share {share_bps} bps exceeds "
+                f"{base['max_share_bps']} bps limit after rebalance"
+            )
+        state_bins.append(
+            _state_row(
+                row=row,
+                share=item.liquidity_share_minted,
+            )
+        )
+
+    return {
+        "bins": state_bins,
+        "idle_x_atomic": deposit.idle_x,
+        "idle_y_atomic": deposit.idle_y,
+        "max_observed_share_bps": max_share,
+        "rebalance_reset": True,
+        "reset_observed_at": observed_at,
+    }
+
+
+def _event_exists(storage: Storage, event_key: str) -> bool:
+    with storage.connect() as conn:
+        return conn.execute(
+            """
+            SELECT 1
+            FROM paper_events
+            WHERE event_key = ?
+            LIMIT 1
+            """,
+            (event_key,),
+        ).fetchone() is not None
+
+
+def _recenter_same_width(
+    *,
+    active_bin_id: int,
+    min_bin_id: int,
+    max_bin_id: int,
+) -> tuple[int, int]:
+    width = max_bin_id - min_bin_id
+    left = width // 2
+    new_min = active_bin_id - left
+    return new_min, new_min + width
+
+
 def _mark_event_exists(storage: Storage, prefix: str) -> bool:
     with storage.connect() as conn:
         return conn.execute(
@@ -662,6 +786,7 @@ def apply_paper_chain_valuation(
     pool_safe: bool = True,
     emergency_exit: bool = False,
     estimated_exit_cost_quote: float = 0.0,
+    rebalance_cost_quote: float | None = None,
     config: PositionManagementConfig = PositionManagementConfig(),
 ) -> AppliedPaperChainValuation:
     valuation = prepare_paper_chain_valuation(
@@ -694,9 +819,24 @@ def apply_paper_chain_valuation(
             account_equity_quote=account.account_equity_quote,
         )
 
+    reset_state: dict[str, Any] | None = None
     if recovered:
         position = paper_position_snapshot(storage, position_id=position_id)
-        if position.status == "OPEN":
+        if _event_exists(storage, f"{prefix}:exit") or position.status != "OPEN":
+            action = "EXIT_RECOVERED"
+        elif _event_exists(storage, f"{prefix}:rebalance"):
+            reset_state = _counterfactual_state_for_range(
+                storage,
+                position_id=position_id,
+                observed_at=observed_at,
+                amount_x=valuation.inventory_x_atomic,
+                amount_y=valuation.inventory_y_atomic,
+                min_bin_id=position.min_bin_id,
+                max_bin_id=position.max_bin_id,
+                strategy=position.strategy,
+            )
+            action = "REBALANCE_RECOVERED"
+        else:
             policy = evaluate_paper_position_policy(
                 storage,
                 position_id=position_id,
@@ -718,11 +858,41 @@ def apply_paper_chain_valuation(
                 )
                 action = "EXIT_RECOVERED"
             elif policy.decision.action == "REBALANCE":
-                action = "REBALANCE_PENDING_COST"
+                if rebalance_cost_quote is None:
+                    action = "REBALANCE_PENDING_COST"
+                else:
+                    new_min, new_max = _recenter_same_width(
+                        active_bin_id=valuation.active_bin_id,
+                        min_bin_id=position.min_bin_id,
+                        max_bin_id=position.max_bin_id,
+                    )
+                    rebalance_paper_position(
+                        storage,
+                        event_key=f"{prefix}:rebalance",
+                        position_id=position_id,
+                        new_min_bin_id=new_min,
+                        new_max_bin_id=new_max,
+                        new_mark_quote=valuation.mark_quote,
+                        rebalance_cost_quote=rebalance_cost_quote,
+                        event_time=observed_at,
+                    )
+                    position = paper_position_snapshot(
+                        storage,
+                        position_id=position_id,
+                    )
+                    reset_state = _counterfactual_state_for_range(
+                        storage,
+                        position_id=position_id,
+                        observed_at=observed_at,
+                        amount_x=valuation.inventory_x_atomic,
+                        amount_y=valuation.inventory_y_atomic,
+                        min_bin_id=position.min_bin_id,
+                        max_bin_id=position.max_bin_id,
+                        strategy=position.strategy,
+                    )
+                    action = "REBALANCE_RECOVERED"
             else:
                 action = "HOLD_RECOVERED"
-        else:
-            action = "EXIT_RECOVERED"
     else:
         result = apply_paper_observation(
             storage,
@@ -736,21 +906,46 @@ def apply_paper_chain_valuation(
             pool_safe=pool_safe,
             emergency_exit=emergency_exit,
             estimated_exit_cost_quote=estimated_exit_cost_quote,
-            rebalance_cost_quote=None,
+            rebalance_cost_quote=rebalance_cost_quote,
             event_time=observed_at,
             config=config,
         )
         action = result.executed_action
+        if action == "REBALANCE":
+            reset_state = _counterfactual_state_for_range(
+                storage,
+                position_id=position_id,
+                observed_at=observed_at,
+                amount_x=valuation.inventory_x_atomic,
+                amount_y=valuation.inventory_y_atomic,
+                min_bin_id=result.position_after.min_bin_id,
+                max_bin_id=result.position_after.max_bin_id,
+                strategy=result.position_after.strategy,
+            )
 
     with storage.connect() as conn:
-        conn.execute(
-            """
-            UPDATE paper_chain_valuations
-            SET status = 'APPLIED'
-            WHERE position_id = ? AND observed_at = ?
-            """,
-            (position_id, observed_at),
-        )
+        if reset_state is None:
+            conn.execute(
+                """
+                UPDATE paper_chain_valuations
+                SET status = 'APPLIED'
+                WHERE position_id = ? AND observed_at = ?
+                """,
+                (position_id, observed_at),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE paper_chain_valuations
+                SET status = 'APPLIED', next_state_json = ?
+                WHERE position_id = ? AND observed_at = ?
+                """,
+                (
+                    json.dumps(reset_state, separators=(",", ":")),
+                    position_id,
+                    observed_at,
+                ),
+            )
 
     position = paper_position_snapshot(storage, position_id=position_id)
     account = paper_account_snapshot(storage, account_id=position.account_id)
