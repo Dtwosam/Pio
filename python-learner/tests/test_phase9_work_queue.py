@@ -2048,9 +2048,15 @@ def test_work_queue_historical_history_deficit_has_no_capture_command(
 
 
 def test_work_queue_surfaces_chain_capture_plan_from_api_discovery(
+    monkeypatch,
     tmp_path,
 ):
     storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        work_queue_module,
+        "utc_now_iso",
+        lambda: "2026-09-23T13:00:00+00:00",
+    )
     with storage.connect() as conn:
         for rank, pool in enumerate(("pool-a", "pool-b", "pool-c"), start=1):
             conn.execute(
