@@ -42,6 +42,7 @@ pub struct LiquidityAddRequest {
     pub min_bin_id: Option<i32>,
     pub max_bin_id: Option<i32>,
     pub strategy_variant: Option<u8>,
+    pub strategy_favor_x: Option<bool>,
     pub explicit_distribution: Vec<ExplicitBinDistribution>,
     pub weighted_distribution: Vec<WeightedBinDistribution>,
 }
@@ -90,6 +91,7 @@ fn decode_add_request(data: &[u8], instruction_index: usize) -> Option<Liquidity
     let mut min_bin_id = None;
     let mut max_bin_id = None;
     let mut strategy_variant = None;
+    let mut strategy_favor_x = None;
     let mut explicit_distribution = Vec::new();
     let mut weighted_distribution = Vec::new();
 
@@ -123,6 +125,7 @@ fn decode_add_request(data: &[u8], instruction_index: usize) -> Option<Liquidity
             min_bin_id = Some(read_i32_at(data, 32)?);
             max_bin_id = Some(read_i32_at(data, 36)?);
             strategy_variant = data.get(40).copied();
+            strategy_favor_x = data.get(41).map(|value| *value == 1);
             if discriminator == ADD_BY_STRATEGY_IX {
                 "add_liquidity_by_strategy"
             } else {
@@ -159,6 +162,7 @@ fn decode_add_request(data: &[u8], instruction_index: usize) -> Option<Liquidity
         min_bin_id,
         max_bin_id,
         strategy_variant,
+        strategy_favor_x,
         explicit_distribution,
         weighted_distribution,
     })
@@ -372,6 +376,7 @@ mod tests {
         assert_eq!(request.min_bin_id, Some(0));
         assert_eq!(request.max_bin_id, Some(0));
         assert_eq!(request.strategy_variant, Some(0));
+        assert_eq!(request.strategy_favor_x, Some(false));
     }
 
     #[test]
