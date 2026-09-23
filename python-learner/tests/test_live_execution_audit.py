@@ -286,3 +286,85 @@ def test_live_ledger_audit_flags_orphan_valuation(tmp_path):
 
     assert report.clean is False
     assert report.orphan_valuation_positions == ("position",)
+
+
+def test_live_ledger_audit_flags_valued_position_missing_learning_label(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO live_position_outcomes(
+                position_address, pool_address,
+                opened_decision_id, closed_decision_id,
+                execution_count,
+                token_x_wallet_delta_atomic,
+                token_y_wallet_delta_atomic,
+                composition_fee_x_atomic,
+                composition_fee_y_atomic,
+                earned_fee_x_atomic, earned_fee_y_atomic,
+                reward_one_atomic, reward_two_atomic,
+                network_fee_lamports, label_status,
+                created_at, raw_json
+            ) VALUES (
+                'position', 'pool', 'enter', 'settle', 1,
+                '0', '0', '0', '0', '0', '0', '0', '0',
+                0, 'VALUED', 't', '{}'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO live_position_valuations(
+                position_address, pool_address,
+                opened_decision_id, closed_decision_id,
+                quote_unit, valued_execution_count,
+                principal_cashflow_quote, composition_cost_quote,
+                fee_income_quote, reward_income_quote,
+                network_cost_quote, realized_pnl_quote,
+                entry_outflow_quote, realized_return_bps,
+                max_age_seconds, created_at,
+                quote_evidence_json, raw_json
+            ) VALUES (
+                'position', 'pool', 'enter', 'settle',
+                'ACCOUNT_QUOTE', 1,
+                '0', '0', '0', '0', '0', '1',
+                '10', 1000, 300, 't', '[]', '{}'
+            )
+            """
+        )
+
+    report = audit_live_execution_ledger(storage)
+
+    assert report.clean is False
+    assert report.valued_outcomes_missing_evidence == ()
+    assert report.valued_positions_missing_learning_label == ("position",)
+
+
+def test_live_ledger_audit_flags_orphan_learning_label(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO live_learning_labels(
+                position_address, decision_id, pool_address,
+                model_version, strategy,
+                min_bin_id, max_bin_id, range_width_bins,
+                proposed_capital_quote,
+                expected_net_return_pct, expected_downside_pct,
+                realized_pnl_quote, realized_return_bps,
+                prediction_error_bps, target_positive_return,
+                quote_unit, opened_signature, closed_decision_id,
+                created_at, raw_json
+            ) VALUES (
+                'position', 'enter', 'pool', 'model', 'SPOT',
+                -1, 1, 3, '10', '1', '1',
+                '1', 1000, 900, 1,
+                'ACCOUNT_QUOTE', 'sig', 'settle', 't', '{}'
+            )
+            """
+        )
+
+    report = audit_live_execution_ledger(storage)
+
+    assert report.clean is False
+    assert report.orphan_learning_label_positions == ("position",)
