@@ -11,6 +11,7 @@ fn usage() {
     eprintln!(
         "Usage:
   meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
+  meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
   meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>
   meteora-executor verify-prestate <RPC_URL> <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]"
@@ -30,6 +31,21 @@ async fn main() -> Result<()> {
     match command.as_str() {
         "inspect-pool" => {
             let rpc_url = args.next().context("RPC_URL is required")?;
+            let pool_address = args.next().context("POOL_ADDRESS is required")?;
+            let array_radius: i32 = args
+                .next()
+                .as_deref()
+                .unwrap_or("1")
+                .parse()
+                .context("ARRAY_RADIUS must be an integer")?;
+
+            let snapshot =
+                state_reader::inspect_pool(&rpc_url, &pool_address, array_radius).await?;
+            println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "inspect-pool-env" => {
+            let rpc_url = std::env::var("RPC_URL")
+                .context("RPC_URL environment variable is required")?;
             let pool_address = args.next().context("POOL_ADDRESS is required")?;
             let array_radius: i32 = args
                 .next()
