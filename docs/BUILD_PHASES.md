@@ -147,6 +147,7 @@ Built:
 - automatic account-level discovery of open chain-bound paper positions
 - stale-first capped portfolio scheduling
 - explicit token-Y quote-map requirement with missing-quote skips
+- fresh persisted external reward-token quote valuation with no-lookahead lookup and fail-closed missing/stale handling
 - ledger-derived Phase 3 paper entry workflow
 - atomic paper position + ENTER event + counterfactual chain binding
 - preflight counterfactual validation before capital debit
