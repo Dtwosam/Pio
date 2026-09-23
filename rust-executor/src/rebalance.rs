@@ -135,13 +135,13 @@ fn require_account<'a>(
     account.as_ref().with_context(|| format!("{name} account is missing"))
 }
 
-fn validate_standard_token_account(
+fn standard_token_balance(
     name: &str,
     account: &solana_sdk::account::Account,
     expected_mint: &Pubkey,
     expected_owner: &Pubkey,
     token_program: &Pubkey,
-) -> Result<()> {
+) -> Result<u64> {
     if account.owner != *token_program {
         anyhow::bail!("{name} is not owned by the standard SPL Token program");
     }
@@ -164,7 +164,76 @@ fn validate_standard_token_account(
     if owner != *expected_owner {
         anyhow::bail!("{name} token-account owner does not match sender");
     }
-    Ok(())
+    if account.data.len() < 72 {
+        anyhow::bail!("{name} token account data is too short for amount");
+    }
+    Ok(u64::from_le_bytes(
+        account.data[64..72]
+            .try_into()
+            .context("invalid token-account amount bytes")?,
+    ))
+}
+
+fn validate_narrow_rebalance_contract(
+    active_id: i32,
+    should_claim_fee: bool,
+    should_claim_reward: bool,
+    shrink_mode: u8,
+    removes: &[RebalanceRemovePlan],
+    adds: &[RebalanceAddPlan],
+) -> Result<(i32, i32)> {
+    if should_claim_fee || should_claim_reward {
+        anyhow::bail!(
+            "live rebalance does not support fee or reward harvesting yet"
+        );
+    }
+    if shrink_mode != 0 {
+        anyhow::bail!(
+            "live rebalance currently requires ShrinkBoth mode"
+        );
+    }
+    if removes.len() != 1 {
+        anyhow::bail!(
+            "live rebalance requires exactly one full old-range removal"
+        );
+    }
+    let remove = &removes[0];
+    if remove.bps != 10_000
+        || remove.min_bin_id.is_none()
+        || remove.max_bin_id.is_none()
+    {
+        anyhow::bail!(
+            "live rebalance requires one explicit 10000-bps old-range removal"
+        );
+    }
+    if adds.len() != 1 {
+        anyhow::bail!(
+            "live rebalance requires exactly one new-range deposit"
+        );
+    }
+    let add = &adds[0];
+    if add.bit_flag > 0b1111 {
+        anyhow::bail!("rebalance add bit_flag uses unsupported bits");
+    }
+    let new_min = active_id
+        .checked_add(add.min_delta_id)
+        .context("rebalance new minimum bin overflow")?;
+    let new_max = active_id
+        .checked_add(add.max_delta_id)
+        .context("rebalance new maximum bin overflow")?;
+    if new_min > new_max {
+        anyhow::bail!("rebalance new minimum bin exceeds maximum bin");
+    }
+    let width = new_max
+        .checked_sub(new_min)
+        .and_then(|value| value.checked_add(1))
+        .context("rebalance new range width overflow")?;
+    if width <= 0 || width > 70 {
+        anyhow::bail!(
+            "live rebalance new range width {width} exceeds supported range 1..=70"
+        );
+    }
+    Ok((new_min, new_max))
 }
 
 fn touched_bin_array_indexes(
@@ -252,6 +321,23 @@ pub fn build_standard_spl_rebalance_from_chain(
         );
     }
 
+    let (_new_min, _new_max) = validate_narrow_rebalance_contract(
+        lb_pair.active_id,
+        request.should_claim_fee,
+        request.should_claim_reward,
+        request.shrink_mode,
+        &request.removes,
+        &request.adds,
+    )?;
+    let remove = &request.removes[0];
+    if remove.min_bin_id != Some(position.lower_bin_id)
+        || remove.max_bin_id != Some(position.upper_bin_id)
+    {
+        anyhow::bail!(
+            "rebalance removal range must exactly match the chain position range"
+        );
+    }
+
     let bin_array_indexes = touched_bin_array_indexes(
         lb_pair.active_id,
         &request.removes,
@@ -285,20 +371,32 @@ pub fn build_standard_spl_rebalance_from_chain(
         anyhow::bail!("unexpected rebalance account fetch result");
     }
 
-    validate_standard_token_account(
+    let balance_x = standard_token_balance(
         "user_token_x",
         require_account("user_token_x", &accounts[0])?,
         &lb_pair.token_x_mint,
         &sender,
         &token_program,
     )?;
-    validate_standard_token_account(
+    let balance_y = standard_token_balance(
         "user_token_y",
         require_account("user_token_y", &accounts[1])?,
         &lb_pair.token_y_mint,
         &sender,
         &token_program,
     )?;
+    if balance_x < request.max_deposit_x_amount {
+        anyhow::bail!(
+            "user_token_x balance {balance_x} is below max deposit {}",
+            request.max_deposit_x_amount
+        );
+    }
+    if balance_y < request.max_deposit_y_amount {
+        anyhow::bail!(
+            "user_token_y balance {balance_y} is below max deposit {}",
+            request.max_deposit_y_amount
+        );
+    }
     if require_account("reserve_x", &accounts[2])?.owner != token_program
         || require_account("reserve_y", &accounts[3])?.owner != token_program
     {
@@ -383,6 +481,14 @@ pub fn build_standard_spl_rebalance(
     let memo_program = Pubkey::from_str(MEMO_PROGRAM)
         .context("hard-coded memo program id is invalid")?;
 
+    let (_new_min, _new_max) = validate_narrow_rebalance_contract(
+        request.active_id,
+        request.should_claim_fee,
+        request.should_claim_reward,
+        request.shrink_mode,
+        &request.removes,
+        &request.adds,
+    )?;
     let bin_array_indexes = touched_bin_array_indexes(
         request.active_id,
         &request.removes,
@@ -675,4 +781,48 @@ mod tests {
         }];
         assert!(build_standard_spl_rebalance(&request).is_err());
     }
+    #[test]
+    fn claims_are_blocked_in_live_rebalance() {
+        let mut request = request();
+        request.should_claim_fee = true;
+        assert!(build_standard_spl_rebalance(&request).is_err());
+
+        let mut request = request();
+        request.should_claim_reward = true;
+        assert!(build_standard_spl_rebalance(&request).is_err());
+    }
+
+    #[test]
+    fn partial_or_ambiguous_remove_plan_is_blocked() {
+        let mut request = request();
+        request.removes[0].bps = 9_999;
+        assert!(build_standard_spl_rebalance(&request).is_err());
+
+        let mut request = request();
+        request.removes[0].min_bin_id = None;
+        assert!(build_standard_spl_rebalance(&request).is_err());
+    }
+
+    #[test]
+    fn multiple_add_ranges_are_blocked() {
+        let mut request = request();
+        request.adds.push(request.adds[0].clone());
+        assert!(build_standard_spl_rebalance(&request).is_err());
+    }
+
+    #[test]
+    fn overly_wide_new_range_is_blocked() {
+        let mut request = request();
+        request.adds[0].min_delta_id = -35;
+        request.adds[0].max_delta_id = 35;
+        assert!(build_standard_spl_rebalance(&request).is_err());
+    }
+
+    #[test]
+    fn unsupported_bit_flag_is_blocked() {
+        let mut request = request();
+        request.adds[0].bit_flag = 0b1_0000;
+        assert!(build_standard_spl_rebalance(&request).is_err());
+    }
+
 }
