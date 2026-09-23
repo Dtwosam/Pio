@@ -360,6 +360,8 @@ def build_phase9_work_queue(
     source_freshness_report = evaluate_phase9_source_freshness(
         storage,
         as_of=source_freshness_as_of,
+        required_mint_pools=criteria.min_mint_risk_pools,
+        required_wallet_pools=criteria.min_wallet_flow_pools,
     )
     source_freshness = source_freshness_report.by_family()
     required_source_ready = {
