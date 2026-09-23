@@ -110,6 +110,9 @@ from .phase9_policy_rollback_simulation import (
 from .phase9_policy_prewire import (
     evaluate_phase9_policy_prewire_audit,
 )
+from .phase9_policy_status import (
+    evaluate_phase9_policy_status,
+)
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
     build_phase9_work_queue,
@@ -3430,6 +3433,7 @@ def main() -> None:
             if phase9_state.promoted
             else None
         )
+        phase9_policy_status = evaluate_phase9_policy_status(storage)
         output = {
             "phase2": phase_promotion_state(
                 storage,
@@ -3477,6 +3481,9 @@ def main() -> None:
                     phase9_currentness.to_record()
                     if phase9_currentness is not None
                     else None
+                ),
+                "future_policy_simulation": (
+                    phase9_policy_status.to_record()
                 ),
             },
         }
