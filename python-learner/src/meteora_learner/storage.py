@@ -435,6 +435,49 @@ CREATE TABLE IF NOT EXISTS paper_events (
 CREATE INDEX IF NOT EXISTS idx_paper_events_account_time
 ON paper_events(account_id, event_time, id);
 
+CREATE TABLE IF NOT EXISTS paper_counterfactual_positions (
+    position_id TEXT PRIMARY KEY,
+    pool_address TEXT NOT NULL,
+    entry_observed_at TEXT NOT NULL,
+    amount_x_atomic TEXT NOT NULL,
+    amount_y_atomic TEXT NOT NULL,
+    idle_x_atomic TEXT NOT NULL,
+    idle_y_atomic TEXT NOT NULL,
+    entry_price_q64 TEXT NOT NULL,
+    entry_value_y_atomic TEXT NOT NULL,
+    capital_quote TEXT NOT NULL,
+    max_share_bps INTEGER NOT NULL,
+    favor_x_active INTEGER NOT NULL,
+    token_x_mint TEXT NOT NULL,
+    token_y_mint TEXT NOT NULL,
+    reward_mint_0 TEXT,
+    reward_mint_1 TEXT,
+    initial_state_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_chain_valuations (
+    position_id TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    event_key_prefix TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL CHECK(status IN ('PREPARED', 'APPLIED')),
+    active_bin_id INTEGER NOT NULL,
+    mark_quote TEXT NOT NULL,
+    fee_delta_quote TEXT NOT NULL,
+    reward_delta_quote TEXT NOT NULL,
+    inventory_x_atomic TEXT NOT NULL,
+    inventory_y_atomic TEXT NOT NULL,
+    fee_x_atomic TEXT NOT NULL,
+    fee_y_atomic TEXT NOT NULL,
+    reward_one_atomic TEXT NOT NULL,
+    reward_two_atomic TEXT NOT NULL,
+    next_state_json TEXT NOT NULL,
+    valuation_json TEXT NOT NULL,
+    PRIMARY KEY(position_id, observed_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_chain_valuations_status
+ON paper_chain_valuations(position_id, status, observed_at);
+
 CREATE TABLE IF NOT EXISTS paper_runs (
     run_id TEXT PRIMARY KEY,
     observed_at TEXT NOT NULL,
