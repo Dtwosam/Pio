@@ -9,6 +9,10 @@ from .phase9_chain_capture import run_phase9_chain_capture_batch
 from .phase9_capture_plan import Phase9ChainCaptureCriteria
 from .phase9_history_capture import run_phase9_history_capture
 from .phase9_history_plan import build_phase9_history_plan
+from .phase9_pool_cohort import (
+    Phase9PoolCohortCriteria,
+    evaluate_phase9_pool_cohort,
+)
 from .phase9_mint_capture import (
     Phase9MintCaptureCriteria,
     build_phase9_mint_capture_plan,
@@ -35,6 +39,7 @@ class Phase9SourceCaptureReport:
     history_capture: dict[str, Any] | None
     mint_capture: dict[str, Any] | None
     wallet_flow_captures: tuple[dict[str, Any], ...]
+    pool_cohort: dict[str, Any] | None
     selected_wallet_pools: tuple[str, ...]
     chain_history_ready: bool
     mint_inputs_ready: bool
@@ -78,6 +83,9 @@ def run_phase9_source_capture(
     refresh_api: bool = True,
     chain_pool_target: int = 3,
     chain_max_candidates: int = 8,
+    cohort_target_pools: int = 5,
+    cohort_max_sampling_pools: int = 8,
+    cohort_new_pools_per_run: int = 1,
     bin_array_radius: int = 1,
     mint_max_snapshot_age_seconds: int = 3600,
     history_min_observation_interval_seconds: int = 3600,
@@ -96,6 +104,16 @@ def run_phase9_source_capture(
         raise ValueError("chain_pool_target must be at least 3")
     if chain_max_candidates < 1:
         raise ValueError("chain_max_candidates must be positive")
+    if cohort_target_pools < chain_pool_target:
+        raise ValueError(
+            "cohort_target_pools cannot be below chain_pool_target"
+        )
+    if cohort_max_sampling_pools < cohort_target_pools:
+        raise ValueError(
+            "cohort_max_sampling_pools cannot be below cohort_target_pools"
+        )
+    if cohort_new_pools_per_run < 1:
+        raise ValueError("cohort_new_pools_per_run must be positive")
     if bin_array_radius < 0:
         raise ValueError("bin_array_radius cannot be negative")
     if history_min_observation_interval_seconds < 0:
@@ -128,6 +146,7 @@ def run_phase9_source_capture(
     history_record = None
     mint_record = None
     wallet_records: list[dict[str, Any]] = []
+    cohort_record = None
 
     if refresh_api:
         try:
@@ -139,6 +158,14 @@ def run_phase9_source_capture(
             )
 
     try:
+        cohort_before = evaluate_phase9_pool_cohort(
+            storage,
+            criteria=Phase9PoolCohortCriteria(
+                min_research_pools=chain_pool_target,
+                target_pools=cohort_target_pools,
+                max_sampling_pools=cohort_max_sampling_pools,
+            ),
+        )
         chain = run_phase9_chain_capture_batch(
             storage,
             criteria=Phase9ChainCaptureCriteria(
@@ -149,6 +176,8 @@ def run_phase9_source_capture(
             rust_manifest_path=rust_manifest_path,
             rust_binary_path=rust_binary_path,
             timeout_seconds=timeout_seconds,
+            preferred_pool_addresses=cohort_before.desired_pools,
+            max_preferred_candidates=cohort_new_pools_per_run,
         )
         chain_record = chain.to_record()
     except Exception as exc:
@@ -158,6 +187,15 @@ def run_phase9_source_capture(
         )
 
     try:
+        cohort_after_chain = evaluate_phase9_pool_cohort(
+            storage,
+            criteria=Phase9PoolCohortCriteria(
+                min_research_pools=chain_pool_target,
+                target_pools=cohort_target_pools,
+                max_sampling_pools=cohort_max_sampling_pools,
+            ),
+        )
+        cohort_record = cohort_after_chain.to_record()
         history = run_phase9_history_capture(
             storage,
             bin_array_radius=bin_array_radius,
@@ -168,6 +206,7 @@ def run_phase9_source_capture(
                 history_min_observation_interval_seconds
             ),
             continue_sampling_when_ready=True,
+            pool_addresses=cohort_after_chain.sampling_pools,
         )
         history_record = history.to_record()
     except Exception as exc:
@@ -230,7 +269,19 @@ def run_phase9_source_capture(
                 f"{type(exc).__name__}: {str(exc)[:1000]}"
             )
 
-    history_plan = build_phase9_history_plan(storage)
+    final_cohort = evaluate_phase9_pool_cohort(
+        storage,
+        criteria=Phase9PoolCohortCriteria(
+            min_research_pools=chain_pool_target,
+            target_pools=cohort_target_pools,
+            max_sampling_pools=cohort_max_sampling_pools,
+        ),
+    )
+    cohort_record = final_cohort.to_record()
+    history_plan = build_phase9_history_plan(
+        storage,
+        pool_addresses=final_cohort.research_pools,
+    )
     mint_plan = build_phase9_mint_capture_plan(
         storage,
         criteria=Phase9MintCaptureCriteria(
@@ -264,6 +315,7 @@ def run_phase9_source_capture(
         history_capture=history_record,
         mint_capture=mint_record,
         wallet_flow_captures=tuple(wallet_records),
+        pool_cohort=cohort_record,
         selected_wallet_pools=wallet_pools,
         chain_history_ready=history_plan.plan_ready,
         mint_inputs_ready=mint_plan.inputs_ready,
