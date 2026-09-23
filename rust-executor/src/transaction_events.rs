@@ -19,7 +19,6 @@ pub struct TransactionEventRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExplicitBinDistribution {
     pub bin_id: i32,
     pub distribution_x: u16,
