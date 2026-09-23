@@ -47,6 +47,7 @@ class LivePaperChainResult:
 class LivePaperChainBatchItem:
     position_id: str
     token_y_quote_per_atomic: float
+    quote_max_age_seconds: int = 300
     emergency_exit: bool = False
     estimated_exit_cost_quote: float = 0.0
     rebalance_cost_quote: float | None = None
@@ -56,6 +57,8 @@ class LivePaperChainBatchItem:
             raise ValueError("position_id is required")
         if self.token_y_quote_per_atomic <= 0:
             raise ValueError("token_y_quote_per_atomic must be positive")
+        if self.quote_max_age_seconds < 0:
+            raise ValueError("quote_max_age_seconds cannot be negative")
         if self.estimated_exit_cost_quote < 0:
             raise ValueError("estimated_exit_cost_quote cannot be negative")
         if self.rebalance_cost_quote is not None and self.rebalance_cost_quote < 0:
@@ -143,6 +146,7 @@ def apply_live_chain_paper_observation(
     position_id: str,
     observed_at: str,
     token_y_quote_per_atomic: float,
+    quote_max_age_seconds: int = 300,
     estimated_exit_cost_quote: float = 0.0,
     rebalance_cost_quote: float | None = None,
     emergency_exit: bool = False,
@@ -172,6 +176,7 @@ def apply_live_chain_paper_observation(
         observed_at=observed_at,
         token_y_quote_per_atomic=token_y_quote_per_atomic,
         pool_safe=safety.safe,
+        quote_max_age_seconds=quote_max_age_seconds,
         estimated_exit_cost_quote=estimated_exit_cost_quote,
         rebalance_cost_quote=rebalance_cost_quote,
         emergency_exit=emergency_exit,
@@ -227,6 +232,7 @@ def run_live_chain_paper_batch(
             PaperChainBatchItem(
                 position_id=item.position_id,
                 token_y_quote_per_atomic=item.token_y_quote_per_atomic,
+                quote_max_age_seconds=item.quote_max_age_seconds,
                 pool_safe=safety.safe,
                 emergency_exit=item.emergency_exit,
                 estimated_exit_cost_quote=item.estimated_exit_cost_quote,
