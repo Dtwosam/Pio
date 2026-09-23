@@ -1,12 +1,13 @@
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 
 from meteora_learner.ml_dataset import ML_FEATURE_COLUMNS
 from meteora_learner.ml_registry import (
-    OFFLINE_QUALIFIED,
-    PAPER_CHALLENGER,
+    qualify_offline_challenger,
     register_ml_v1_bundle,
-    transition_model,
+    start_paper_challenger,
 )
 from meteora_learner.ml_training import train_ml_v1_frame
 from meteora_learner.paper_account import (
@@ -50,6 +51,21 @@ def training_frame(rows=60):
     return pd.DataFrame(records)
 
 
+def offline_validation(bundle):
+    return SimpleNamespace(
+        offline_qualified=True,
+        phase3_ready=True,
+        validation_start=bundle.validation_start,
+        validation_end=bundle.validation_end,
+        to_record=lambda: {
+            "offline_qualified": True,
+            "phase3_ready": True,
+            "validation_start": bundle.validation_start,
+            "validation_end": bundle.validation_end,
+        },
+    )
+
+
 def close_trade(storage, *, account, position, source, pnl, model_id=None):
     capital = 100.0
     open_paper_position(
@@ -88,15 +104,14 @@ def test_paper_performance_and_challenger_gate(tmp_path):
         bundle=bundle,
         dataset_version="dataset-v1",
     )
-    transition_model(
+    qualify_offline_challenger(
         storage,
         model_id="model-a",
-        new_status=OFFLINE_QUALIFIED,
+        validation=offline_validation(bundle),
     )
-    transition_model(
+    start_paper_challenger(
         storage,
         model_id="model-a",
-        new_status=PAPER_CHALLENGER,
     )
 
     for index, pnl in enumerate((2, 3, -1, 4)):
@@ -165,16 +180,14 @@ def test_paper_challenger_cannot_qualify_before_phase3(tmp_path):
         dataset_version="dataset-v1",
         metrics={},
     )
-    storage.update_model_status(
-        "model",
-        expected_status="OFFLINE_CANDIDATE",
-        new_status="OFFLINE_QUALIFIED",
+    storage.save_model_offline_evidence(
+        model_id="model",
+        evidence_type="OFFLINE_CHALLENGER_V1",
+        qualified=True,
+        evidence={"test": True},
     )
-    storage.update_model_status(
-        "model",
-        expected_status="OFFLINE_QUALIFIED",
-        new_status="PAPER_CHALLENGER",
-    )
+    storage.qualify_model_offline("model")
+    storage.start_model_paper_challenger("model")
 
     validation = evaluate_paper_challenger(
         storage,
