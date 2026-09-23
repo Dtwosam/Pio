@@ -1,0 +1,18 @@
+[Unit]
+Description=Pio Phase 9 bounded read-only source capture
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/pio phase9-source-capture-run --history-min-observation-interval-seconds 3600 $PIO_PHASE9_SOURCE_CAPTURE_EXTRA_ARGS
+TimeoutStartSec=20min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pio/data
