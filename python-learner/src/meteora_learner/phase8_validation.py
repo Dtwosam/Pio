@@ -76,6 +76,21 @@ class Phase8PromotionReport:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class Phase8PersistedPromotionAudit:
+    exists: bool
+    history_exists: bool
+    qualified: bool
+    evidence_type_valid: bool
+    current_row_matches_latest_history: bool
+    current_promotion_ready: bool
+    champion_lineage_matches: bool
+    current: bool
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
 def evaluate_phase8_promotion(
     storage: Storage,
     *,
@@ -173,5 +188,116 @@ def evaluate_phase8_promotion(
         live_champion=live_report,
         criteria=criteria,
         promotion_ready=not reasons,
+        reasons=tuple(reasons),
+    )
+
+
+def audit_persisted_phase8_promotion(
+    storage: Storage,
+) -> Phase8PersistedPromotionAudit:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT promoted_at, evidence_type, qualified, evidence_json
+            FROM phase_promotion_evidence
+            WHERE phase_name = ?
+            LIMIT 1
+            """,
+            (PHASE8,),
+        ).fetchone()
+        history_row = conn.execute(
+            """
+            SELECT promoted_at, evidence_type, qualified, evidence_json
+            FROM phase_promotion_evidence_history
+            WHERE phase_name = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (PHASE8,),
+        ).fetchone()
+
+    if row is None:
+        return Phase8PersistedPromotionAudit(
+            exists=False,
+            history_exists=history_row is not None,
+            qualified=False,
+            evidence_type_valid=False,
+            current_row_matches_latest_history=False,
+            current_promotion_ready=False,
+            champion_lineage_matches=False,
+            current=False,
+            reasons=("persisted Phase 8 promotion evidence is missing",),
+        )
+
+    reasons: list[str] = []
+    history_exists = history_row is not None
+    current_row_matches_latest_history = (
+        history_row is not None and tuple(row) == tuple(history_row)
+    )
+    evidence_type_valid = str(row[1]) == PHASE8_EVIDENCE_TYPE
+    qualified = bool(row[2])
+
+    try:
+        persisted = json.loads(str(row[3]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        persisted = None
+
+    criteria = None
+    if isinstance(persisted, dict):
+        criteria_raw = persisted.get("criteria")
+        if isinstance(criteria_raw, dict):
+            try:
+                criteria = Phase8PromotionCriteria(**criteria_raw)
+            except (TypeError, ValueError):
+                criteria = None
+
+    current_report = (
+        evaluate_phase8_promotion(storage, criteria=criteria)
+        if criteria is not None
+        else None
+    )
+    current_promotion_ready = bool(
+        current_report is not None and current_report.promotion_ready
+    )
+
+    champion_lineage_matches = False
+    if isinstance(persisted, dict) and current_report is not None:
+        champion_lineage_matches = (
+            persisted.get("champion_model_id")
+            == current_report.champion_model_id
+            and persisted.get("champion_cycle_id")
+            == current_report.champion_cycle_id
+            and persisted.get("continuous_promotion_evidence_id")
+            == current_report.continuous_promotion_evidence_id
+        )
+
+    if not history_exists:
+        reasons.append("immutable Phase 8 promotion history is missing")
+    elif not current_row_matches_latest_history:
+        reasons.append(
+            "current Phase 8 promotion row differs from immutable history"
+        )
+    if not evidence_type_valid:
+        reasons.append("persisted Phase 8 promotion evidence type is invalid")
+    if not qualified:
+        reasons.append("persisted Phase 8 promotion evidence is not qualified")
+    if criteria is None:
+        reasons.append("persisted Phase 8 promotion criteria are invalid")
+    if not current_promotion_ready:
+        reasons.append("current Phase 8 promotion gate no longer passes")
+    if not champion_lineage_matches:
+        reasons.append(
+            "current Phase 8 champion lineage differs from persisted promotion"
+        )
+
+    return Phase8PersistedPromotionAudit(
+        exists=True,
+        history_exists=history_exists,
+        qualified=qualified,
+        evidence_type_valid=evidence_type_valid,
+        current_row_matches_latest_history=current_row_matches_latest_history,
+        current_promotion_ready=current_promotion_ready,
+        champion_lineage_matches=champion_lineage_matches,
+        current=not reasons,
         reasons=tuple(reasons),
     )
