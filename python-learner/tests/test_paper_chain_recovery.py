@@ -162,7 +162,7 @@ def test_mark_written_before_checkpoint_is_recovered_without_double_fee(tmp_path
         position_id="pos",
         mark_quote=prepared.mark_quote,
         fee_delta_quote=prepared.fee_delta_quote,
-        reward_delta_quote=prepared.reward_delta_quote,
+        reward_delta_quote=0.0,
         event_time=OBS1,
     )
     after_crash = paper_account_snapshot(storage, account_id="paper")
