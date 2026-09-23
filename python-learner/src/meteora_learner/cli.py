@@ -71,6 +71,7 @@ from .paper_entry_workflow import build_and_open_bound_phase3_paper_entry
 from .paper_chain_collection import build_paper_chain_collection_queue
 from .quote_registry import save_token_quote, token_quote_status
 from .paper_supervisor import run_paper_supervisor
+from .paper_tick import run_paper_tick
 from .paper_performance import build_paper_performance
 from .paper_challenger import (
     PaperChallengerCriteria,
@@ -196,6 +197,32 @@ def main() -> None:
         type=int,
         default=0,
     )
+
+    paper_tick = subparsers.add_parser(
+        "paper-tick",
+        help="Refresh open-paper market/chain state and run one idempotent paper cycle",
+    )
+    paper_tick.add_argument("--account", required=True)
+    paper_tick.add_argument("--tick-id", required=True)
+    paper_tick.add_argument("--max-chain-age-seconds", type=int, default=300)
+    paper_tick.add_argument("--max-quote-age-seconds", type=int, default=300)
+    paper_tick.add_argument("--array-radius", type=int, default=1)
+    paper_tick.add_argument("--max-positions", type=int)
+    paper_tick.add_argument("--retry-failed", action="store_true")
+    paper_tick.add_argument("--stop-loss-bps", type=int, default=500)
+    paper_tick.add_argument("--take-profit-bps", type=int)
+    paper_tick.add_argument("--max-rebalances", type=int, default=3)
+    paper_tick.add_argument("--max-holding-observations", type=int)
+    paper_tick.add_argument(
+        "--proactive-rebalance-buffer-bins",
+        type=int,
+        default=0,
+    )
+    paper_tick.add_argument("--min-tvl-usd", type=float, default=50000.0)
+    paper_tick.add_argument("--min-volume-24h-usd", type=float, default=10000.0)
+    paper_tick.add_argument("--min-pool-age-hours", type=float, default=24.0)
+    paper_tick.add_argument("--min-chain-observations", type=int, default=12)
+    paper_tick.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
 
     paper_supervise = subparsers.add_parser(
         "paper-supervise",
@@ -1518,6 +1545,34 @@ def main() -> None:
             model_id=args.model_id,
         )
         print(json.dumps(record.__dict__, indent=2))
+        return
+
+    if args.command == "paper-tick":
+        settings = Settings.from_env()
+        result = run_paper_tick(
+            Storage(settings.database_path),
+            account_id=args.account,
+            tick_id=args.tick_id,
+            settings=settings,
+            chain_max_age_seconds=args.max_chain_age_seconds,
+            quote_max_age_seconds=args.max_quote_age_seconds,
+            array_radius=args.array_radius,
+            max_positions=args.max_positions,
+            safety_config=_pool_safety_config_from_args(args),
+            management_config=PositionManagementConfig(
+                stop_loss_bps=args.stop_loss_bps,
+                take_profit_bps=args.take_profit_bps,
+                max_rebalances=args.max_rebalances,
+                max_holding_observations=args.max_holding_observations,
+                proactive_rebalance_buffer_bins=(
+                    args.proactive_rebalance_buffer_bins
+                ),
+            ),
+            retry_failed=args.retry_failed,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if result.status == "FAILED":
+            raise SystemExit(2)
         return
 
     if args.command == "paper-supervise":
