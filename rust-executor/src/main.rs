@@ -16,6 +16,7 @@ mod phase5_gate;
 mod phase6_readiness;
 mod phase6_gate;
 mod phase7_gate;
+mod pool_activity;
 mod preflight;
 mod prestate_verifier;
 mod position_closure;
@@ -49,6 +50,8 @@ fn usage() {
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
   meteora-executor discover-pool-positions <RPC_URL> <POOL_ADDRESS> [LIMIT]
   meteora-executor discover-pool-positions-env <POOL_ADDRESS> [LIMIT]
+  meteora-executor discover-pool-activity <RPC_URL> <POOL_ADDRESS> [LIMIT] [BEFORE_SIGNATURE]
+  meteora-executor discover-pool-activity-env <POOL_ADDRESS> [LIMIT] [BEFORE_SIGNATURE]
   meteora-executor inspect-mint <RPC_URL> <MINT_ADDRESS>
   meteora-executor inspect-mint-env <MINT_ADDRESS>
   meteora-executor verify-position-closed <RPC_URL> <POSITION_ADDRESS>
@@ -237,6 +240,59 @@ RPC_URL is accepted as a compatibility fallback",
                 &rpc_url,
                 &pool_address,
                 limit,
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        "discover-pool-activity" => {
+            let rpc_url = args.next().context("RPC_URL is required")?;
+            let pool_address = args.next().context("POOL_ADDRESS is required")?;
+            let limit: usize = args
+                .next()
+                .as_deref()
+                .unwrap_or("100")
+                .parse()
+                .context("LIMIT must be a positive integer")?;
+            let before_signature = args.next();
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "discover-pool-activity accepts at most four arguments"
+                );
+            }
+            let result = pool_activity::discover_historical_pool_activity(
+                &rpc_url,
+                &pool_address,
+                limit,
+                before_signature.as_deref(),
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        "discover-pool-activity-env" => {
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let pool_address = args.next().context("POOL_ADDRESS is required")?;
+            let limit: usize = args
+                .next()
+                .as_deref()
+                .unwrap_or("100")
+                .parse()
+                .context("LIMIT must be a positive integer")?;
+            let before_signature = args.next();
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "discover-pool-activity-env accepts at most three arguments"
+                );
+            }
+            let result = pool_activity::discover_historical_pool_activity(
+                &rpc_url,
+                &pool_address,
+                limit,
+                before_signature.as_deref(),
             )
             .await?;
             println!("{}", serde_json::to_string_pretty(&result)?);
