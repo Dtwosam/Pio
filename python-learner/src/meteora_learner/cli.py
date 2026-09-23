@@ -27,6 +27,7 @@ from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .pool_safety import PoolSafetyConfig, screen_pool_universe
 from .position_policy import PositionManagementConfig, decide_position_action
 from .phase3_plan import build_phase3_research_plan
+from .multi_pool_research import PoolResearchInput, build_multi_pool_research
 from .reconciliation import reconcile_position
 from .reconciliation_corpus import build_reconciliation_corpus
 from .rebalance_execution import build_rebalance_execution_calibration
@@ -158,6 +159,34 @@ def main() -> None:
     )
     phase3_plan.add_argument("--max-share-bps", type=int, default=500)
     phase3_plan.add_argument("--favor-x-active", action="store_true")
+
+    multi_pool = subparsers.add_parser(
+        "phase3-multi-plan",
+        help="Compare equal-notional Phase 3 research plans across pools",
+    )
+    multi_pool.add_argument("--file", required=True, help="JSON array of pool plans")
+    multi_pool.add_argument("--equity", required=True, type=float)
+    multi_pool.add_argument("--cash", required=True, type=float)
+    multi_pool.add_argument("--deployed", required=True, type=float)
+    multi_pool.add_argument("--drawdown-bps", required=True, type=int)
+    multi_pool.add_argument("--observations", type=int, default=12)
+    multi_pool.add_argument(
+        "--half-widths",
+        type=_parse_int_csv,
+        default=(0, 1, 2, 5, 10),
+    )
+    multi_pool.add_argument(
+        "--center-offsets",
+        type=_parse_int_csv,
+        default=(0,),
+    )
+    multi_pool.add_argument(
+        "--strategies",
+        type=_parse_strategy_csv,
+        default=tuple(StrategyType),
+    )
+    multi_pool.add_argument("--max-share-bps", type=int, default=500)
+    multi_pool.add_argument("--favor-x-active", action="store_true")
 
     ingest = subparsers.add_parser(
         "ingest-chain-snapshot",
@@ -718,6 +747,40 @@ def main() -> None:
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
+        return
+
+    if args.command == "phase3-multi-plan":
+        settings = Settings.from_env()
+        with open(args.file, "r", encoding="utf-8") as handle:
+            raw_inputs = json.load(handle)
+        if not isinstance(raw_inputs, list):
+            raise ValueError("phase3-multi-plan file must contain a JSON array")
+        inputs = tuple(
+            PoolResearchInput(
+                pool_address=str(item["pool_address"]),
+                amount_x=int(item["amount_x"]),
+                amount_y=int(item["amount_y"]),
+                requested_quote=float(item["requested_quote"]),
+                network_cost_y_atomic=int(item["network_cost_y_atomic"]),
+            )
+            for item in raw_inputs
+        )
+        result = build_multi_pool_research(
+            str(settings.database_path),
+            inputs=inputs,
+            account_equity_quote=args.equity,
+            cash_quote=args.cash,
+            current_deployed_quote=args.deployed,
+            portfolio_drawdown_bps=args.drawdown_bps,
+            phase2_gate=None,
+            observation_limit=args.observations,
+            half_widths=args.half_widths,
+            center_offsets=args.center_offsets,
+            strategies=args.strategies,
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "phase3-plan":
