@@ -39,6 +39,9 @@ from .phase9_mint_capture import (
 )
 from .phase9_replay_audit import evaluate_phase9_replay_audit
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
+from .phase9_source_freshness import (
+    evaluate_phase9_source_freshness,
+)
 from .phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
     evaluate_phase9_research,
@@ -322,8 +325,23 @@ def run_phase9_research_refresh(
         criteria=criteria,
     )
 
+    source_freshness_report = evaluate_phase9_source_freshness(
+        storage
+    )
+    source_freshness = source_freshness_report.by_family()
+    source_freshness_reasons = {
+        item.family: item.reason
+        for item in source_freshness_report.families
+    }
+
+    def family_current(family: str) -> bool:
+        return bool(
+            replay.get(family, False)
+            and source_freshness.get(family, False)
+        )
+
     # Adaptive/regime multi-pool research.
-    if replay.get("adaptive_regime", False):
+    if family_current("adaptive_regime"):
         items.append(
             Phase9ResearchRefreshItem(
                 family="adaptive_regime",
@@ -331,7 +349,10 @@ def run_phase9_research_refresh(
                 status="UNCHANGED",
                 research_qualified=True,
                 persisted_evidence_id=None,
-                reason="latest qualified evidence is replay-verified",
+                reason=(
+                    "latest qualified evidence is replay-verified and "
+                    "uses current persisted sources"
+                ),
             )
         )
     else:
@@ -378,6 +399,17 @@ def run_phase9_research_refresh(
                         persisted_evidence_id=evidence_id,
                         reason=(
                             "recomputed from persisted chain-history sources"
+                            + (
+                                "; source freshness: "
+                                + source_freshness_reasons.get(
+                                    "adaptive_regime", ""
+                                )
+                                if replay.get("adaptive_regime", False)
+                                and not source_freshness.get(
+                                    "adaptive_regime", False
+                                )
+                                else ""
+                            )
                         ),
                     )
                 )
@@ -394,7 +426,7 @@ def run_phase9_research_refresh(
             )
 
     # Mint risk for the exact currently selected mint-source pools.
-    if replay.get("mint_risk", False):
+    if family_current("mint_risk"):
         items.append(
             Phase9ResearchRefreshItem(
                 family="mint_risk",
@@ -402,7 +434,10 @@ def run_phase9_research_refresh(
                 status="UNCHANGED",
                 research_qualified=True,
                 persisted_evidence_id=None,
-                reason="required qualified mint-risk evidence is replay-verified",
+                reason=(
+                    "required qualified mint-risk evidence is replay-verified "
+                    "and uses current persisted sources"
+                ),
             )
         )
     else:
@@ -468,6 +503,17 @@ def run_phase9_research_refresh(
                             reason=(
                                 "recomputed from authoritative persisted "
                                 "pool/mint snapshots"
+                                + (
+                                    "; source freshness: "
+                                    + source_freshness_reasons.get(
+                                        "mint_risk", ""
+                                    )
+                                    if replay.get("mint_risk", False)
+                                    and not source_freshness.get(
+                                        "mint_risk", False
+                                    )
+                                    else ""
+                                )
                             ),
                         )
                     )
@@ -484,7 +530,7 @@ def run_phase9_research_refresh(
             )
 
     # Descriptive wallet-flow research over the same bounded source window.
-    if replay.get("wallet_flow", False):
+    if family_current("wallet_flow"):
         items.append(
             Phase9ResearchRefreshItem(
                 family="wallet_flow",
@@ -492,7 +538,10 @@ def run_phase9_research_refresh(
                 status="UNCHANGED",
                 research_qualified=True,
                 persisted_evidence_id=None,
-                reason="required qualified wallet-flow evidence is replay-verified",
+                reason=(
+                    "required qualified wallet-flow evidence is replay-verified "
+                    "and uses current persisted sources"
+                ),
             )
         )
     else:
@@ -567,6 +616,17 @@ def run_phase9_research_refresh(
                             reason=(
                                 "recomputed from immutable persisted "
                                 "position-event history"
+                                + (
+                                    "; source freshness: "
+                                    + source_freshness_reasons.get(
+                                        "wallet_flow", ""
+                                    )
+                                    if replay.get("wallet_flow", False)
+                                    and not source_freshness.get(
+                                        "wallet_flow", False
+                                    )
+                                    else ""
+                                )
                             ),
                         )
                     )
@@ -592,11 +652,11 @@ def run_phase9_research_refresh(
     allocation_required = criteria.require_portfolio_allocation
     static_needs_refresh = (
         static_required
-        and not replay.get("static_hedge", False)
+        and not family_current("static_hedge")
     )
     allocation_needs_refresh = (
         allocation_required
-        and not replay.get("portfolio_allocation", False)
+        and not family_current("portfolio_allocation")
     )
 
     if static_required and not static_needs_refresh:
@@ -607,7 +667,10 @@ def run_phase9_research_refresh(
                 status="UNCHANGED",
                 research_qualified=True,
                 persisted_evidence_id=None,
-                reason="required qualified static-hedge evidence is replay-verified",
+                reason=(
+                    "required qualified static-hedge evidence is replay-verified "
+                    "and uses current persisted sources"
+                ),
             )
         )
     if allocation_required and not allocation_needs_refresh:
@@ -618,7 +681,10 @@ def run_phase9_research_refresh(
                 status="UNCHANGED",
                 research_qualified=True,
                 persisted_evidence_id=None,
-                reason="qualified portfolio-allocation evidence is replay-verified",
+                reason=(
+                    "qualified portfolio-allocation evidence is replay-verified "
+                    "and uses current persisted sources"
+                ),
             )
         )
 
@@ -776,7 +842,7 @@ def run_phase9_research_refresh(
     # dataset. If none exists, Phase 9 may derive a research-only action
     # dataset from a validated explicit-input artifact plus persisted chain
     # history. No labels or economic assumptions are synthesized.
-    if replay.get("contextual_bandit", False):
+    if family_current("contextual_bandit"):
         items.append(
             Phase9ResearchRefreshItem(
                 family="contextual_bandit",
@@ -784,7 +850,10 @@ def run_phase9_research_refresh(
                 status="UNCHANGED",
                 research_qualified=True,
                 persisted_evidence_id=None,
-                reason="latest qualified bandit evidence is replay-verified",
+                reason=(
+                    "latest qualified bandit evidence is replay-verified and "
+                    "uses the latest available dataset source"
+                ),
             )
         )
     else:
