@@ -152,6 +152,7 @@ from .phase9_operation_lease import (
     phase9_operation_lease_status,
     release_phase9_operation_lease,
 )
+from .phase9_evidence_status import evaluate_phase9_evidence_status
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
@@ -2478,6 +2479,38 @@ def main() -> None:
         "--require-current",
         action="store_true",
         help="Exit non-zero unless every Phase 9 research family is source-current",
+    )
+
+    phase9_evidence_status = subparsers.add_parser(
+        "phase9-evidence-status",
+        help="Show quantitative Phase 9 ranked-cohort and research evidence readiness without external calls",
+    )
+    phase9_evidence_status.add_argument(
+        "--as-of",
+        help="Optional timezone-aware evaluation cutoff; defaults to current time",
+    )
+    phase9_evidence_status.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_evidence_status.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_evidence_status.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_evidence_status.add_argument(
+        "--require-source-ready",
+        action="store_true",
+    )
+    phase9_evidence_status.add_argument(
+        "--require-bundle-ready",
+        action="store_true",
     )
 
     phase9_maintenance_status = subparsers.add_parser(
@@ -5481,6 +5514,31 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_current and not result.current:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-evidence-status":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_evidence_status(
+            storage,
+            criteria=Phase9ResearchBundleCriteria(
+                min_mint_risk_pools=args.min_mint_risk_pools,
+                min_wallet_flow_pools=args.min_wallet_flow_pools,
+                min_static_hedge_pools=args.min_static_hedge_pools,
+            ),
+            as_of=args.as_of or utc_now_iso(),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_source_ready and not (
+            result.chain_history_ready
+            and result.mint_ready_pools >= result.mint_required_pools
+            and result.wallet_ready_pools >= result.wallet_required_pools
+            and result.explicit_inputs_valid
+            and result.research_sources_current
+        ):
+            raise SystemExit(2)
+        if args.require_bundle_ready and not result.research_bundle_ready:
             raise SystemExit(2)
         return
 
