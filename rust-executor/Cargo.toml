@@ -3,6 +3,10 @@ name = "meteora-executor"
 version = "0.3.0"
 edition = "2021"
 
+[features]
+default = []
+live-submit = []
+
 [dependencies]
 base64 = "0.22"
 anyhow = "1"
