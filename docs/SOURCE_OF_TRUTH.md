@@ -381,6 +381,13 @@ stale and must be revalidated and persisted again before
 `PHASE9_PROMOTION_V1` can be written.
 
 
+The Phase 9 minimum history depth is a readiness floor, not a stopping rule.
+Once the selected pool cohort reaches that floor, unattended source capture
+must continue cadence-guarded read-only observations so later market regimes
+can enter the research corpus. Manual history capture may remain deficit-only
+unless ongoing sampling is explicitly requested. Continued collection is
+source acquisition only and cannot make an advanced signal LIVE-actionable.
+
 Phase 9 deterministic replay and Phase 9 source freshness are separate
 properties. Replay proves that a persisted research report still reproduces
 from the immutable source lineage it originally used. Source freshness asks
