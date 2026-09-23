@@ -550,3 +550,65 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def rebalance_request(
+        self,
+        signature: str,
+        instruction_index: int,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT observed_at, signature, instruction_index,
+                       observed_active_id, max_active_bin_slippage,
+                       should_claim_fee, should_claim_reward,
+                       min_withdraw_x_amount, max_deposit_x_amount,
+                       min_withdraw_y_amount, max_deposit_y_amount,
+                       shrink_mode
+                FROM chain_rebalance_requests
+                WHERE signature = ? AND instruction_index = ?
+                LIMIT 1
+                """,
+                (signature, instruction_index),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
+    def load_position_transaction_events(
+        self,
+        position_address: str,
+        *,
+        event_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = [position_address]
+        event_clause = ""
+        if event_type is not None:
+            event_clause = "AND event_type = ?"
+            params.append(event_type)
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT observed_at, signature, event_index, parent_ix_index,
+                       slot, block_time, event_type, lb_pair, from_address,
+                       position_address, active_bin_id, bin_id, amount_x, amount_y,
+                       token_x_fee_amount, token_y_fee_amount,
+                       protocol_token_x_fee_amount, protocol_token_y_fee_amount,
+                       owner_address, x_withdrawn_amount, x_added_amount,
+                       y_withdrawn_amount, y_added_amount,
+                       x_fee_amount, y_fee_amount,
+                       old_min_id, old_max_id, new_min_id, new_max_id,
+                       reward_one, reward_two
+                FROM chain_transaction_events
+                WHERE position_address = ?
+                {event_clause}
+                ORDER BY block_time ASC, slot ASC, event_index ASC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
