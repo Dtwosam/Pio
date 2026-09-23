@@ -32,6 +32,8 @@ pub struct ControlledLiveReport {
     pub pool_address: String,
     pub live_enabled: bool,
     pub open_positions: usize,
+    pub unresolved_entry_intents: usize,
+    pub effective_open_positions: usize,
     pub matching_pool_positions: usize,
     pub max_open_positions: usize,
     pub pool_allowed: bool,
@@ -210,6 +212,8 @@ pub fn evaluate_controlled_live(
         pool_address: proposal.pool_address.clone(),
         live_enabled: config.enabled,
         open_positions,
+        unresolved_entry_intents: 0,
+        effective_open_positions: open_positions,
         matching_pool_positions,
         max_open_positions: config.max_open_positions,
         pool_allowed,
@@ -219,6 +223,35 @@ pub fn evaluate_controlled_live(
         daily_drawdown_pct: proposal.daily_drawdown_pct,
         max_daily_drawdown_pct: config.max_daily_drawdown_pct,
     })
+}
+
+fn reconciled_open_decision_ids(
+    database_path: &Path,
+) -> Result<BTreeSet<String>> {
+    let conn = Connection::open_with_flags(
+        database_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .with_context(|| {
+        format!(
+            "failed to open live position reconciliation database read-only: {}",
+            database_path.display()
+        )
+    })?;
+    let mut statement = conn.prepare(
+        r#"
+        SELECT opened_decision_id
+        FROM live_positions
+        WHERE status IN ('OPEN', 'LIQUIDITY_REMOVED', 'CLOSED')
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    let mut result = BTreeSet::new();
+    for row in rows {
+        result.insert(row?);
+    }
+    Ok(result)
 }
 
 pub fn evaluate_controlled_live_intent(
@@ -233,11 +266,36 @@ pub fn evaluate_controlled_live_intent(
             "persisted execution request decision_id does not match lookup key"
         );
     }
-    evaluate_controlled_live(
+    let mut report = evaluate_controlled_live(
         database_path,
         &request.proposal,
         config,
-    )
+    )?;
+
+    let unresolved = execution_store
+        .unresolved_live_entry_decision_ids(Some(decision_id))?;
+    let reconciled = reconciled_open_decision_ids(database_path)?;
+    let unresolved_entry_intents = unresolved
+        .iter()
+        .filter(|item| !reconciled.contains(*item))
+        .count();
+    let effective_open_positions = report
+        .open_positions
+        .checked_add(unresolved_entry_intents)
+        .context("effective live position count overflow")?;
+
+    report.unresolved_entry_intents = unresolved_entry_intents;
+    report.effective_open_positions = effective_open_positions;
+
+    if report.accepted
+        && request.proposal.action == Action::Enter
+        && effective_open_positions >= config.max_open_positions
+    {
+        report.accepted = false;
+        report.reason = "max_effective_open_positions_reached".into();
+    }
+
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -270,7 +328,8 @@ mod tests {
             CREATE TABLE live_positions (
                 position_address TEXT PRIMARY KEY,
                 pool_address TEXT NOT NULL,
-                status TEXT NOT NULL
+                status TEXT NOT NULL,
+                opened_decision_id TEXT
             );
             "#,
         )
@@ -538,6 +597,148 @@ mod tests {
 
         assert!(!report.accepted);
         assert_eq!(report.reason, "entry_capital_cap_exceeded");
+
+        let _ = std::fs::remove_file(pio_path);
+        let _ = std::fs::remove_file(execution_path);
+    }
+
+    #[test]
+    fn unresolved_entry_consumes_position_slot_until_reconciled() {
+        use crate::blockhash::PreparedUnsignedTransaction;
+        use crate::dry_run::DryRunExecutionRequest;
+        use crate::execution_guard::RiskCheckReport;
+        use crate::risk::RiskConfig;
+        use crate::simulation::SimulationReport;
+        use crate::transaction_guard::TransactionGuardReport;
+        use crate::wallet_guard::WalletAuthorizationReport;
+        use serde_json::json;
+
+        let pio_path = db_path();
+        seed(&pio_path, 0);
+        let execution_path = std::env::temp_dir().join(format!(
+            "pio-controlled-live-pending-{}.db",
+            Uuid::new_v4()
+        ));
+        let store = ExecutionIntentStore::open(&execution_path).unwrap();
+        let pool = Pubkey::new_unique();
+
+        let first = proposal(pool, Action::Enter);
+        let first_id = first.decision_id.to_string();
+        let first_request = DryRunExecutionRequest {
+            proposal: first.clone(),
+            transaction_base64: "tx-1".into(),
+        };
+        let second = proposal(pool, Action::Enter);
+        let second_id = second.decision_id.to_string();
+        let second_request = DryRunExecutionRequest {
+            proposal: second,
+            transaction_base64: "tx-2".into(),
+        };
+        let risk_config = RiskConfig {
+            max_capital_per_position_pct: 10.0,
+            max_total_deployed_pct: 50.0,
+            max_daily_drawdown_pct: 5.0,
+            min_expected_edge_pct: 0.0,
+            max_expected_downside_pct: 10.0,
+            max_data_age_seconds: 60,
+        };
+        store.register(&first_request, &risk_config).unwrap();
+        store.register(&second_request, &risk_config).unwrap();
+
+        let risk = RiskCheckReport {
+            decision_id: first.decision_id,
+            mode: Mode::Live,
+            action: Action::Enter,
+            accepted: true,
+            reason: "approved".into(),
+        };
+        let guard = TransactionGuardReport {
+            accepted: true,
+            reason: "approved".into(),
+            fee_payer: "payer".into(),
+            pool_account_present: true,
+            required_accounts_present: true,
+            instruction_count: 1,
+            static_account_count: 2,
+            required_signatures: 1,
+            signatures_all_default: true,
+            address_lookup_table_count: 0,
+            program_ids: vec!["program".into()],
+            instruction_fingerprints: vec![],
+        };
+        let simulation = SimulationReport {
+            succeeded: true,
+            rpc_context_slot: 1,
+            result: json!({"err": null}),
+        };
+        let wallet = WalletAuthorizationReport {
+            accepted: true,
+            reason: "approved".into(),
+            wallet_pubkey: "payer".into(),
+            transaction_fee_payer: "payer".into(),
+        };
+        store.record_risk(&first_id, &risk).unwrap();
+        store.record_transaction_guard(&first_id, &guard).unwrap();
+        store.record_simulation(&first_id, &simulation).unwrap();
+        store
+            .record_wallet_authorization(&first_id, &wallet)
+            .unwrap();
+        store
+            .record_final_presign(
+                &first_id,
+                &PreparedUnsignedTransaction {
+                    transaction_base64: "prepared".into(),
+                    recent_blockhash: "blockhash".into(),
+                    last_valid_block_height: 100,
+                    rpc_context_slot: 1,
+                    signatures_all_default: true,
+                },
+                &guard,
+                &wallet,
+                &simulation,
+            )
+            .unwrap();
+        store.begin_signing(&first_id).unwrap();
+
+        let report = evaluate_controlled_live_intent(
+            &pio_path,
+            &store,
+            &second_id,
+            &config(pool),
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(
+            report.reason,
+            "max_effective_open_positions_reached"
+        );
+        assert_eq!(report.unresolved_entry_intents, 1);
+        assert_eq!(report.effective_open_positions, 1);
+
+        let conn = Connection::open(&pio_path).unwrap();
+        conn.execute(
+            "INSERT INTO live_positions(position_address, pool_address, status, opened_decision_id) VALUES (?1, ?2, 'OPEN', ?3)",
+            [
+                "tracked-first".to_string(),
+                pool.to_string(),
+                first_id.clone(),
+            ],
+        )
+        .unwrap();
+
+        let reconciled_report = evaluate_controlled_live_intent(
+            &pio_path,
+            &store,
+            &second_id,
+            &ControlledLiveConfig {
+                max_open_positions: 2,
+                ..config(pool)
+            },
+        )
+        .unwrap();
+        assert_eq!(reconciled_report.unresolved_entry_intents, 0);
+        assert_eq!(reconciled_report.effective_open_positions, 1);
 
         let _ = std::fs::remove_file(pio_path);
         let _ = std::fs::remove_file(execution_path);
