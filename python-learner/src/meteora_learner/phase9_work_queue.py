@@ -311,12 +311,23 @@ def build_phase9_work_queue(
         items.append(
             Phase9WorkItem(
                 task_type="PORTFOLIO_ALLOCATION",
-                scope="CANDIDATE_FILE_REQUIRED",
+                scope="REPRODUCIBLE_CANDIDATE_PIPELINE",
                 reason=(
-                    "portfolio allocation research requires an explicit "
-                    "candidate JSON file and quote budget"
+                    "portfolio allocation requires a fixed multi-pool "
+                    "candidate corpus plus explicit account-state and quote-"
+                    "budget assumptions"
                 ),
-                shell_command=None,
+                shell_command=(
+                    "pio multi-pool-research "
+                    "--file <POOL_INPUTS_JSON> "
+                    "--equity <EQUITY> --cash <CASH> "
+                    "--deployed <DEPLOYED> --drawdown-bps <BPS> "
+                    "> phase9-multi-pool.json && "
+                    "pio portfolio-allocation-research "
+                    "--file phase9-multi-pool.json "
+                    "--budget-quote <QUOTE> "
+                    "--persist --require-qualified"
+                ),
             )
         )
 
