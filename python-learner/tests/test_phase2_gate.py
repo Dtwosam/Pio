@@ -1,5 +1,6 @@
 from meteora_learner.liquidity_math import Q64
 from meteora_learner.phase2_gate import (
+    Phase2CapabilityStatus,
     Phase2PromotionCriteria,
     evaluate_phase2_promotion_gate,
 )
@@ -71,8 +72,9 @@ def test_phase2_gate_passes_only_when_math_and_sample_criteria_pass(tmp_path):
 
     assert gate.exact_math_passed is True
     assert gate.sample_sufficiency_passed is True
-    assert gate.promotion_ready is True
-    assert gate.reasons == ()
+    assert gate.capability_gate_passed is False
+    assert gate.promotion_ready is False
+    assert any("composition_formula_reconciliation" in reason for reason in gate.reasons)
 
 
 def test_phase2_gate_separates_math_from_sample_shortfall(tmp_path):
@@ -143,3 +145,40 @@ def test_phase2_gate_validates_criteria():
         assert "min_positions" in str(exc)
     else:
         raise AssertionError("expected invalid criteria to be rejected")
+
+
+
+def test_phase2_gate_can_pass_when_required_capabilities_are_validated(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_position(storage, "a", "2026-09-22T00:00:00+00:00")
+    save_position(
+        storage,
+        "a",
+        "2026-09-22T00:05:00+00:00",
+        checkpoint=Q64,
+        fee=10,
+    )
+
+    gate = evaluate_phase2_promotion_gate(
+        str(db),
+        criteria=Phase2PromotionCriteria(
+            min_positions=1,
+            min_amount_bins=1,
+            min_fee_intervals=1,
+            min_fee_bins=1,
+        ),
+        capabilities=Phase2CapabilityStatus(
+            position_amount_reconciliation=True,
+            fee_checkpoint_reconciliation=True,
+            composition_event_labels=True,
+            composition_formula_reconciliation=True,
+            rebalance_lifecycle=True,
+            reward_accounting=True,
+        ),
+    )
+
+    assert gate.exact_math_passed is True
+    assert gate.sample_sufficiency_passed is True
+    assert gate.capability_gate_passed is True
+    assert gate.promotion_ready is True
