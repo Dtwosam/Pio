@@ -21,6 +21,10 @@ from meteora_learner.paper_challenger import (
     promote_paper_challenger,
 )
 from meteora_learner.paper_performance import build_paper_performance
+from meteora_learner.phase_promotion import (
+    persist_phase2_promotion,
+    persist_phase3_promotion,
+)
 from meteora_learner.storage import Storage
 
 
@@ -66,6 +70,15 @@ def offline_validation(bundle):
     )
 
 
+def seed_phase3(storage):
+    ready = SimpleNamespace(
+        promotion_ready=True,
+        to_record=lambda: {"promotion_ready": True},
+    )
+    persist_phase2_promotion(storage, report=ready)
+    persist_phase3_promotion(storage, report=ready)
+
+
 def close_trade(storage, *, account, position, source, pnl, model_id=None):
     capital = 100.0
     open_paper_position(
@@ -98,6 +111,7 @@ def test_paper_performance_and_challenger_gate(tmp_path):
     )
 
     bundle = train_ml_v1_frame(training_frame(), min_rows=50)
+    seed_phase3(storage)
     register_ml_v1_bundle(
         storage,
         model_id="model-a",
@@ -146,7 +160,6 @@ def test_paper_performance_and_challenger_gate(tmp_path):
         storage,
         account_id="paper",
         model_id="model-a",
-        phase3_ready=True,
         criteria=PaperChallengerCriteria(
             min_closed_trades=4,
             min_realized_return_bps=0,
@@ -193,7 +206,6 @@ def test_paper_challenger_cannot_qualify_before_phase3(tmp_path):
         storage,
         account_id="paper",
         model_id="model",
-        phase3_ready=False,
         criteria=PaperChallengerCriteria(min_closed_trades=1),
     )
     assert validation.paper_qualified is False
