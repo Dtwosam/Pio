@@ -617,3 +617,44 @@ pio phase9-policy-rollout-audit --require-current
 This stage proves only that a narrower disabled envelope is internally
 consistent with the existing controlled-live limits. It does not modify Rust
 configuration, enable submission, choose trades or authorize capital.
+
+
+## Rollback-trigger simulation
+
+Rollback thresholds are explicit inputs rather than hidden defaults. Provide a
+JSON object containing `metrics` and `criteria`:
+
+```bash
+pio phase9-policy-rollback-simulate \
+  --file config/phase9_rollback_simulation.example.json \
+  --persist
+```
+
+The simulator distinguishes three states:
+
+- `NO_ROLLBACK_TRIGGER`: the rollout simulation is current, the configured
+  minimum sample depth is met, and no configured trigger is breached;
+- `OBSERVATION_PENDING`: the rollout simulation is current, no hard trigger is
+  breached, but the configured minimum sample depth is not yet met;
+- `ROLLBACK_REQUIRED`: the rollout simulation is stale, an explicit hard
+  trigger is breached, or a configured performance floor is breached after the
+  minimum sample depth.
+
+Hard triggers can cover realized loss, drawdown, reconciliation failures,
+unvalued closed positions, stale decisions and policy errors. Optional
+performance triggers can cover win rate and mean return, but they are evaluated
+only after the user-supplied minimum observation/closed-position/pool depth.
+
+Persisted `PHASE9_POLICY_ROLLBACK_SIMULATION_V1` evidence remains
+`research_only=true`, `simulation_only=true`,
+`policy_actionable=false` and `execution_wired=false`. The example values
+are illustrative test inputs, not production thresholds or return targets.
+
+Audit replay/currentness with:
+
+```bash
+pio phase9-policy-rollback-audit --require-current
+```
+
+The simulator never closes a position, changes a policy, edits the rollout
+envelope or calls the Rust executor.
