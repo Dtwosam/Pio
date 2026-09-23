@@ -381,6 +381,23 @@ CREATE TABLE IF NOT EXISTS paper_ticks (
 CREATE INDEX IF NOT EXISTS idx_paper_ticks_account_time
 ON paper_ticks(account_id, started_at);
 
+CREATE TABLE IF NOT EXISTS paper_scheduler_state (
+    account_id TEXT PRIMARY KEY,
+    owner_id TEXT,
+    lease_until TEXT,
+    heartbeat_at TEXT,
+    last_tick_id TEXT,
+    last_started_at TEXT,
+    last_finished_at TEXT,
+    last_status TEXT,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    total_ticks INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_scheduler_lease
+ON paper_scheduler_state(lease_until);
+
 CREATE TABLE IF NOT EXISTS token_quote_observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     token_mint TEXT NOT NULL,
