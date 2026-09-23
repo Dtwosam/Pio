@@ -36,6 +36,11 @@ class Phase3ResearchPlan:
     policy_authorized: bool
     live_execution_ready: bool
     reasons: tuple[str, ...]
+    amount_x: int = 0
+    amount_y: int = 0
+    decision_observed_at: str | None = None
+    max_share_bps: int = 500
+    favor_x_in_active_bin: bool = False
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -163,4 +168,9 @@ def build_phase3_research_plan(
         policy_authorized=entry_gate.entry_authorized,
         live_execution_ready=False,
         reasons=entry_gate.reasons,
+        amount_x=amount_x,
+        amount_y=amount_y,
+        decision_observed_at=scan.decision_observed_at,
+        max_share_bps=max_share_bps,
+        favor_x_in_active_bin=favor_x_in_active_bin,
     )
