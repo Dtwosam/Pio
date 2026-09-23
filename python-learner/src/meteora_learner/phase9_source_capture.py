@@ -52,6 +52,30 @@ class Phase9SourceCaptureReport:
         return asdict(self)
 
 
+def _cohort_source_pools(
+    storage: Storage,
+    *,
+    sampling_pools: tuple[str, ...],
+    limit: int,
+) -> tuple[str, ...]:
+    if limit < 1:
+        return ()
+    selected: list[str] = []
+    for pool in sampling_pools:
+        value = str(pool).strip()
+        if value and value not in selected:
+            selected.append(value)
+        if len(selected) >= limit:
+            return tuple(selected)
+
+    for pool in _top_chain_pools(storage, limit=max(limit, 8)):
+        if pool not in selected:
+            selected.append(pool)
+        if len(selected) >= limit:
+            break
+    return tuple(selected)
+
+
 def _top_chain_pools(
     storage: Storage,
     *,
@@ -186,6 +210,7 @@ def run_phase9_source_capture(
                     api_ranking_max_age_seconds
                 ),
             ),
+            pool_addresses=mint_pools,
             rust_manifest_path=rust_manifest_path,
             rust_binary_path=rust_binary_path,
             timeout_seconds=timeout_seconds,
@@ -233,6 +258,17 @@ def run_phase9_source_capture(
             f"{type(exc).__name__}: {str(exc)[:1000]}"
         )
 
+    mint_pools = _cohort_source_pools(
+        storage,
+        sampling_pools=cohort_after_chain.sampling_pools,
+        limit=criteria.min_mint_risk_pools,
+    )
+    wallet_pools = _cohort_source_pools(
+        storage,
+        sampling_pools=cohort_after_chain.sampling_pools,
+        limit=criteria.min_wallet_flow_pools,
+    )
+
     try:
         mint = run_phase9_mint_capture(
             storage,
@@ -254,10 +290,6 @@ def run_phase9_source_capture(
             f"{type(exc).__name__}: {str(exc)[:1000]}"
         )
 
-    wallet_pools = _top_chain_pools(
-        storage,
-        limit=criteria.min_wallet_flow_pools,
-    )
     for pool in wallet_pools:
         try:
             report = run_phase9_wallet_flow_capture(
@@ -308,6 +340,11 @@ def run_phase9_source_capture(
         if final_cohort.research_pools
         else build_phase9_history_plan(storage)
     )
+    final_mint_pools = _cohort_source_pools(
+        storage,
+        sampling_pools=final_cohort.sampling_pools,
+        limit=criteria.min_mint_risk_pools,
+    )
     mint_plan = build_phase9_mint_capture_plan(
         storage,
         criteria=Phase9MintCaptureCriteria(
@@ -315,6 +352,7 @@ def run_phase9_source_capture(
             max_snapshot_age_seconds=mint_max_snapshot_age_seconds,
             include_reward_mints=True,
         ),
+        pool_addresses=final_mint_pools,
     )
     wallet_ready = sum(
         wallet_flow_source_state(
