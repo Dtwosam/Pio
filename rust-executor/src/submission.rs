@@ -1,3 +1,4 @@
+use crate::controlled_live::ControlledLiveReport;
 use crate::execution_store::{ExecutionIntentStatus, ExecutionIntentStore};
 use crate::phase5_gate::Phase5PromotionGateReport;
 use crate::signer::{
@@ -101,6 +102,7 @@ pub fn submit_execution_intent_with<F>(
     decision_id: &str,
     keypair: &Keypair,
     phase5_gate: &Phase5PromotionGateReport,
+    controlled_live: &ControlledLiveReport,
     current_block_height: u64,
     send: F,
 ) -> Result<SubmissionReport>
@@ -111,6 +113,41 @@ where
         anyhow::bail!(
             "Phase 5 promotion gate rejected live submission: {}",
             phase5_gate.reason
+        );
+    }
+    if !controlled_live.accepted {
+        anyhow::bail!(
+            "controlled-live authorization rejected submission: {}",
+            controlled_live.reason
+        );
+    }
+    if controlled_live.decision_id != decision_id {
+        anyhow::bail!(
+            "controlled-live authorization decision_id does not match submission"
+        );
+    }
+    if controlled_live.phase5.promoted_at != phase5_gate.promoted_at
+        || controlled_live.phase5.evidence_type != phase5_gate.evidence_type
+    {
+        anyhow::bail!(
+            "controlled-live authorization Phase 5 evidence does not match submission gate"
+        );
+    }
+    let current_for_authorization = store.load(decision_id)?;
+    if controlled_live.pool_address != current_for_authorization.pool_address {
+        anyhow::bail!(
+            "controlled-live authorization pool does not match execution intent"
+        );
+    }
+    let expected_action = match controlled_live.action {
+        crate::models::Action::Enter => "ENTER",
+        crate::models::Action::Rebalance => "REBALANCE",
+        crate::models::Action::Exit => "EXIT",
+        crate::models::Action::Skip => "SKIP",
+    };
+    if current_for_authorization.action != expected_action {
+        anyhow::bail!(
+            "controlled-live authorization action does not match execution intent"
         );
     }
     ensure_submission_blockhash_is_live(
@@ -198,6 +235,29 @@ mod tests {
             evidence_endurance_passing: true,
             evidence_ledger_audit_passing: true,
             evidence_phase3_promoted: true,
+        }
+    }
+
+    fn accepted_controlled_live(
+        decision_id: &str,
+        pool_address: &str,
+        action: crate::models::Action,
+    ) -> ControlledLiveReport {
+        ControlledLiveReport {
+            decision_id: decision_id.into(),
+            accepted: true,
+            reason: "approved".into(),
+            phase5: accepted_phase5_gate(),
+            action,
+            pool_address: pool_address.into(),
+            live_enabled: true,
+            open_positions: 0,
+            max_open_positions: 1,
+            pool_allowed: true,
+            capital_quote: 10.0,
+            max_capital_quote_per_entry: 50.0,
+            daily_drawdown_pct: 0.5,
+            max_daily_drawdown_pct: 2.0,
         }
     }
 
@@ -325,6 +385,11 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
             950,
             |signed| {
                 let current = store.load(&id).unwrap();
@@ -355,6 +420,11 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
             950,
             |_| anyhow::bail!("timeout after submit"),
         )
@@ -380,6 +450,11 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
             950,
             |_| anyhow::bail!("ambiguous"),
         )
@@ -389,6 +464,11 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
             950,
             |signed| Ok(signed.signature.clone()),
         )
@@ -411,6 +491,11 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
             950,
             |_| Ok(Signature::new_unique().to_string()),
         );
@@ -434,6 +519,11 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
             1_001,
             |_| {
                 called.set(true);
@@ -463,6 +553,11 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
             950,
             |_| anyhow::bail!("ambiguous"),
         )
@@ -475,6 +570,11 @@ mod tests {
             &id,
             &keypair,
             &accepted_phase5_gate(),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
             1_001,
             |_| {
                 called.set(true);
@@ -506,6 +606,11 @@ mod tests {
             &id,
             &keypair,
             &gate,
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
             950,
             |_| {
                 called.set(true);
@@ -515,6 +620,74 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!called.get());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::SimulationPassed
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn controlled_live_rejection_blocks_submission() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        let pool = store.load(&id).unwrap().pool_address;
+        let mut live = accepted_controlled_live(
+            &id,
+            &pool,
+            crate::models::Action::Enter,
+        );
+        live.accepted = false;
+        live.reason = "entry_capital_cap_exceeded".into();
+        let called = Cell::new(false);
+
+        let result = submit_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            &accepted_phase5_gate(),
+            &live,
+            950,
+            |_| {
+                called.set(true);
+                Ok("must-not-send".into())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!called.get());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::SimulationPassed
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn controlled_live_authorization_cannot_be_replayed_to_another_decision() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        let pool = store.load(&id).unwrap().pool_address;
+        let live = accepted_controlled_live(
+            "different-decision",
+            &pool,
+            crate::models::Action::Enter,
+        );
+
+        assert!(
+            submit_execution_intent_with(
+                &store,
+                &id,
+                &keypair,
+                &accepted_phase5_gate(),
+                &live,
+                950,
+                |_| Ok("must-not-send".into()),
+            )
+            .is_err()
+        );
         assert_eq!(
             store.load(&id).unwrap().status,
             ExecutionIntentStatus::SimulationPassed
