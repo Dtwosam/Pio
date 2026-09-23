@@ -67,23 +67,28 @@ def _latest_api_pools(
     with storage.connect() as conn:
         rows = conn.execute(
             """
-            SELECT p.address, p.observed_at, p.tvl,
-                   p.volume_24h, p.fees_24h
-            FROM pool_snapshots p
-            JOIN (
-                SELECT address, MAX(id) AS latest_id
+            WITH ranked AS (
+                SELECT
+                    address, observed_at, tvl,
+                    volume_24h, fees_24h,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY address
+                        ORDER BY julianday(observed_at) DESC, id DESC
+                    ) AS row_rank
                 FROM pool_snapshots
                 WHERE address IS NOT NULL
                   AND TRIM(address) != ''
-                GROUP BY address
-            ) latest
-              ON latest.latest_id = p.id
+            )
+            SELECT address, observed_at, tvl,
+                   volume_24h, fees_24h
+            FROM ranked
+            WHERE row_rank = 1
             ORDER BY
-                CASE WHEN p.tvl IS NULL THEN 1 ELSE 0 END ASC,
-                p.tvl DESC,
-                CASE WHEN p.volume_24h IS NULL THEN 1 ELSE 0 END ASC,
-                p.volume_24h DESC,
-                p.address ASC
+                CASE WHEN tvl IS NULL THEN 1 ELSE 0 END ASC,
+                tvl DESC,
+                CASE WHEN volume_24h IS NULL THEN 1 ELSE 0 END ASC,
+                volume_24h DESC,
+                address ASC
             """
         ).fetchall()
 
