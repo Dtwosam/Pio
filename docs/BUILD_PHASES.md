@@ -329,6 +329,7 @@ Built:
 - post-promotion checksum-bound shadow validation corpus requiring current Phase 9 promotion and newer independent retraining data while remaining non-actionable
 - replay-verified future LIVE-policy authorization evidence gate requiring multiple unique shadow cycles/datasets/cutoffs and aggregate validation depth while remaining disconnected from execution
 - fresh post-authorization simulation-only holdout validation requiring current authorization evidence, a new cycle and dataset hash, a cutoff after authorization creation, deterministic replay and persisted currentness audit
+- consolidated fail-able Phase 9 policy-readiness audit requiring both current authorization evidence and current fresh-holdout controlled validation while remaining non-actionable
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
