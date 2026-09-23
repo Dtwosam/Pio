@@ -8,6 +8,7 @@ from meteora_learner.wallet_flow import (
     WalletFlowCriteria,
     persist_wallet_flow_research,
     research_wallet_flow,
+    wallet_flow_source_sha256,
 )
 
 
@@ -119,6 +120,8 @@ def test_broad_wallet_flow_is_research_ready(tmp_path):
     assert report.unclassified_events == 0
     assert report.direction_fidelity == "CLASSIFIED"
     assert report.policy_actionable is False
+    assert len(report.source_event_ids) == 10
+    assert len(report.source_event_sha256) == 64
 
 
 def test_wallet_flow_cutoff_excludes_future_whale(tmp_path):
@@ -233,3 +236,48 @@ def test_wallet_flow_evidence_round_trip(tmp_path):
     assert latest["status"] == "RESEARCH_READY"
     assert latest["evidence"]["research_only"] is True
     assert latest["evidence"]["policy_actionable"] is False
+
+
+def test_wallet_flow_source_hash_matches_persisted_events(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_broad_flow(storage)
+    promote_phase8(storage)
+
+    report = research_wallet_flow(
+        storage,
+        pool_address="pool",
+        criteria=criteria(),
+        as_of="2026-09-23T09:00:00+00:00",
+    )
+
+    records = []
+    with storage.connect() as conn:
+        for event_id in report.source_event_ids:
+            row = conn.execute(
+                """
+                SELECT id, created_at, user_address, event_type,
+                       total_usd, signature, ix_index,
+                       position_address
+                FROM position_event_history
+                WHERE id = ?
+                """,
+                (event_id,),
+            ).fetchone()
+            assert row is not None
+            records.append(
+                {
+                    "id": int(row[0]),
+                    "created_at": str(row[1]),
+                    "user_address": str(row[2]),
+                    "event_type": str(row[3]),
+                    "total_usd": str(row[4]),
+                    "signature": str(row[5]),
+                    "ix_index": int(row[6]),
+                    "position_address": str(row[7]),
+                }
+            )
+
+    assert (
+        wallet_flow_source_sha256(records)
+        == report.source_event_sha256
+    )
