@@ -111,6 +111,7 @@ from .execution_receipt_ingest import ingest_execution_receipt
 from .execution_receipt_audit import audit_execution_receipts
 from .live_execution_effects import apply_live_execution_effect
 from .live_position_ledger import apply_live_position_effect
+from .live_position_closure import finalize_live_position_closure
 from .transaction_costs import build_transaction_cost_report
 
 
@@ -1006,6 +1007,17 @@ def main() -> None:
         help="JSON file path, or - for stdin",
     )
 
+    live_close_cmd = subparsers.add_parser(
+        "finalize-live-position-closure",
+        help="Mark a liquidity-removed live position closed from confirmed Rust RPC proof",
+    )
+    live_close_cmd.add_argument("--decision", required=True)
+    live_close_cmd.add_argument(
+        "--file",
+        default="-",
+        help="Rust verify-position-closed JSON file, or - for stdin",
+    )
+
     live_position_cmd = subparsers.add_parser(
         "apply-live-position-effect",
         help="Apply one reconciled live execution effect to position lifecycle state",
@@ -1381,6 +1393,21 @@ def main() -> None:
                 payload = json.load(handle)
         result = ingest_chain_snapshot(Storage(settings.database_path), payload)
         print(json.dumps(result.__dict__, indent=2))
+        return
+
+    if args.command == "finalize-live-position-closure":
+        settings = Settings.from_env()
+        if args.file == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with open(args.file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        result = finalize_live_position_closure(
+            Storage(settings.database_path),
+            decision_id=args.decision,
+            proof=payload,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "apply-live-position-effect":
