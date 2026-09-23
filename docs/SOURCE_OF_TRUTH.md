@@ -390,6 +390,8 @@ evidence must reference that evidence ID/hash for Phase 9 bundle readiness.
 Free-form candidate files remain exploratory only.
 
 Contextual-bandit qualification is likewise lineage-bound: qualified Phase 9
+A persisted Phase 9 research promotion is considered current only when its stored promotion report still exactly matches the presently replay-verified, checksum-valid research bundle. The generic promotion row remains historical evidence; operational status must distinguish row existence from currentness. New component evidence, source tampering, replay mismatch or bundle refresh makes the previous Phase 9 promotion stale until it is revalidated and re-persisted. This currentness check remains research-only and grants no LIVE-policy authority.
+
 bundle evidence must resolve its dataset evidence ID back to a persisted
 `CONTINUOUS_RETRAIN_DATASET_V1` record and matching retraining cycle, dataset
 version, SHA-256 and cutoff. Merely supplying lineage-shaped JSON is
