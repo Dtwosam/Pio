@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from meteora_learner.chain_replay import STANDARD_SPL_TOKEN_PROGRAM
@@ -219,3 +220,48 @@ def test_cycle_bound_bandit_requires_dataset_file(tmp_path):
         assert "does not exist" in str(exc)
     else:
         raise AssertionError("expected missing dataset refusal")
+
+
+
+def test_cycle_bound_bandit_rejects_symlinked_dataset_evidence(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed(storage)
+    output = tmp_path / "retrain.csv"
+    build_cycle(storage, output)
+
+    link = tmp_path / "retrain-link.csv"
+    link.symlink_to(output)
+
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, evidence_json
+            FROM model_live_evidence
+            WHERE model_id = 'champion'
+              AND evidence_type = 'CONTINUOUS_RETRAIN_DATASET_V1'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(str(row[1]))
+        payload["output_file"] = str(link.absolute())
+        conn.execute(
+            """
+            UPDATE model_live_evidence
+            SET evidence_json = ?
+            WHERE id = ?
+            """,
+            (json.dumps(payload, separators=(",", ":")), int(row[0])),
+        )
+
+    try:
+        evaluate_cycle_contextual_bandit(
+            storage,
+            cycle_id="cycle",
+            criteria=criteria(),
+        )
+    except ValueError as exc:
+        assert "symlink" in str(exc)
+    else:
+        raise AssertionError("expected symlinked dataset refusal")
