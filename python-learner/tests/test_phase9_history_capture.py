@@ -247,3 +247,69 @@ def test_history_capture_does_not_hide_missing_pool_diversity(tmp_path):
         "diversity must be satisfied" in reason
         for reason in report.reasons
     )
+
+
+def test_history_capture_continues_sampling_after_depth_ready(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_chain_observations(storage, pool, 43)
+
+    calls = []
+    report = run_phase9_history_capture(
+        storage,
+        inspector=lambda pool, radius: (
+            calls.append((pool, radius)) or payload(pool)
+        ),
+        ingest_observed_at="2026-09-23T13:00:42+00:00",
+        min_observation_interval_seconds=3600,
+        continue_sampling_when_ready=True,
+    )
+
+    assert report.history_ready_before is True
+    assert report.history_ready_after is True
+    assert report.continue_sampling_when_ready is True
+    assert report.pools_attempted == 3
+    assert report.pools_captured == 3
+    assert report.observations_remaining_after == 0
+    assert calls == [
+        ("pool-a", 1),
+        ("pool-b", 1),
+        ("pool-c", 1),
+    ]
+    assert all(
+        item.observations_before == 43
+        and item.observations_after == 44
+        and item.additional_observations_needed_after == 0
+        for item in report.items
+    )
+    assert any(
+        "ongoing cadence sampling remained enabled" in reason
+        for reason in report.reasons
+    )
+
+
+def test_history_capture_ready_sampling_still_honors_interval(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_chain_observations(storage, pool, 43)
+
+    calls = []
+    report = run_phase9_history_capture(
+        storage,
+        inspector=lambda pool, radius: (
+            calls.append((pool, radius)) or payload(pool)
+        ),
+        ingest_observed_at="2026-09-23T12:30:42+00:00",
+        min_observation_interval_seconds=3600,
+        continue_sampling_when_ready=True,
+    )
+
+    assert calls == []
+    assert report.history_ready_after is True
+    assert report.pools_attempted == 3
+    assert report.pools_captured == 0
+    assert report.pools_skipped_interval == 3
+    assert all(
+        item.status == "SKIPPED_INTERVAL"
+        for item in report.items
+    )
