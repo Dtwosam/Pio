@@ -1,4 +1,5 @@
 import hashlib
+import sqlite3
 from pathlib import Path
 from meteora_learner.adaptive_range import AdaptiveRangeCriteria
 from meteora_learner.adaptive_range_validation import (
@@ -41,7 +42,10 @@ from meteora_learner.phase9_validation import (
     evaluate_phase9_research_bundle,
     persist_phase9_research_bundle,
 )
-from meteora_learner.phase9_work_queue import build_phase9_work_queue
+from meteora_learner.phase9_work_queue import (
+    build_phase9_work_queue,
+    persist_phase9_work_queue_snapshot,
+)
 from meteora_learner.phase_promotion import (
     PHASE7,
     PHASE7_EVIDENCE_TYPE,
@@ -956,3 +960,61 @@ def test_work_queue_surfaces_stale_phase8_currentness(tmp_path):
         item.task_type == "PHASE8_PROMOTION_REQUIRED"
         for item in queue.items
     )
+
+
+def test_work_queue_snapshot_is_sanitized_and_immutable(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    criteria = Phase9ResearchBundleCriteria(
+        min_mint_risk_pools=1,
+        min_wallet_flow_pools=1,
+        min_static_hedge_pools=1,
+    )
+    secret_rpc = "https://rpc.example.invalid/?token=secret-value"
+    queue = build_phase9_work_queue(
+        storage,
+        criteria=criteria,
+        rpc_url=secret_rpc,
+    )
+
+    snapshot = persist_phase9_work_queue_snapshot(
+        storage,
+        queue=queue,
+        criteria=criteria,
+        created_at="2026-09-23T18:00:00+00:00",
+    )
+
+    assert snapshot.snapshot_id > 0
+    assert len(snapshot.queue_sha256) == 64
+    assert snapshot.task_count == len(queue.items)
+
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT criteria_json, state_json
+            FROM phase9_work_queue_snapshots
+            WHERE id = ?
+            """,
+            (snapshot.snapshot_id,),
+        ).fetchone()
+        assert row is not None
+        persisted_text = str(row[0]) + str(row[1])
+        assert secret_rpc not in persisted_text
+        assert "shell_command" not in str(row[1])
+        try:
+            conn.execute(
+                """
+                UPDATE phase9_work_queue_snapshots
+                SET state_json = '{}'
+                WHERE id = ?
+                """,
+                (snapshot.snapshot_id,),
+            )
+        except sqlite3.IntegrityError as exc:
+            assert "immutable" in str(exc)
+        else:
+            raise AssertionError("expected immutable snapshot update refusal")
