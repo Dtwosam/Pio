@@ -331,3 +331,41 @@ def test_evidence_plan_validates_history_interval(tmp_path):
         assert "history_interval_seconds" in str(exc)
     else:
         raise AssertionError("expected invalid history interval failure")
+
+
+def test_evidence_plan_stops_at_phase8_after_independent_debt_is_clear(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = status(
+        phase8_current=False,
+        research_sources_current=False,
+        research_bundle_ready=False,
+        families=(
+            family("adaptive_regime", False),
+            family("mint_risk", False),
+            family("wallet_flow", False),
+            family("portfolio_allocation", False),
+            family("static_hedge", False),
+            family("contextual_bandit", False),
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase9_evidence_status",
+        lambda *args, **kwargs: report,
+    )
+
+    plan = build_phase9_evidence_plan(storage)
+
+    assert plan.next_action is not None
+    assert plan.next_action.debt_type == "PHASE8_DEPENDENCY"
+    refresh = next(
+        item for item in plan.items
+        if item.debt_type == "RESEARCH_REFRESH"
+    )
+    assert refresh.actionable is False
+    assert refresh.shell_command is None
+    assert "blocked until Phase 8" in refresh.reason
+    assert "contextual_bandit" in refresh.reason
