@@ -23,6 +23,7 @@ from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
 from .position_history import collect_position_history
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
+from .pool_safety import PoolSafetyConfig, screen_pool_universe
 from .reconciliation import reconcile_position
 from .reconciliation_corpus import build_reconciliation_corpus
 from .rebalance_execution import build_rebalance_execution_calibration
@@ -69,6 +70,16 @@ def main() -> None:
     subparsers.add_parser("collect-once", help="Collect one Meteora market-data snapshot")
     subparsers.add_parser("protocol-metrics", help="Print current Meteora protocol metrics")
     subparsers.add_parser("data-status", help="Print local market-data coverage and quality status")
+
+    pool_screen = subparsers.add_parser(
+        "screen-pools",
+        help="Apply fail-closed safety filters to the latest pool universe",
+    )
+    pool_screen.add_argument("--min-tvl-usd", type=float, default=50000.0)
+    pool_screen.add_argument("--min-volume-24h-usd", type=float, default=10000.0)
+    pool_screen.add_argument("--min-pool-age-hours", type=float, default=24.0)
+    pool_screen.add_argument("--min-chain-observations", type=int, default=12)
+    pool_screen.add_argument("--max-dynamic-fee-pct", type=float, default=5.0)
 
     ingest = subparsers.add_parser(
         "ingest-chain-snapshot",
@@ -629,6 +640,21 @@ def main() -> None:
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.promotion_ready:
             raise SystemExit(2)
+        return
+
+    if args.command == "screen-pools":
+        settings = Settings.from_env()
+        result = screen_pool_universe(
+            str(settings.database_path),
+            config=PoolSafetyConfig(
+                min_tvl_usd=args.min_tvl_usd,
+                min_volume_24h_usd=args.min_volume_24h_usd,
+                min_pool_age_hours=args.min_pool_age_hours,
+                min_chain_observations=args.min_chain_observations,
+                max_dynamic_fee_pct=args.max_dynamic_fee_pct,
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "scan-chain":
