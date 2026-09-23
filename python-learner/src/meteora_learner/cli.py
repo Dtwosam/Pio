@@ -2896,10 +2896,14 @@ def main() -> None:
                 storage,
                 phase_name=PHASE8,
             ).__dict__,
-            "phase9": phase_promotion_state(
-                storage,
-                phase_name=PHASE9,
-            ).__dict__,
+            "phase9": {
+                **phase_promotion_state(
+                    storage,
+                    phase_name=PHASE9,
+                ).__dict__,
+                "research_only": True,
+                "policy_actionable": False,
+            },
         }
         print(json.dumps(output, indent=2))
         return
