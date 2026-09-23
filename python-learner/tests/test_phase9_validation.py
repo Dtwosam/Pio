@@ -455,3 +455,34 @@ def test_forged_bandit_dataset_lineage_blocks_bundle(tmp_path):
         "checksum-verified retraining dataset lineage" in reason
         for reason in report.reasons
     )
+
+
+def test_forged_portfolio_candidate_lineage_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO__",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    forged["candidate_lineage"] = {
+        **forged["candidate_lineage"],
+        "candidate_evidence_id": 999999,
+    }
+    storage.save_advanced_edge_evidence(
+        edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO__",
+        as_of="2026-09-23T12:02:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "immutable candidate-artifact lineage" in reason
+        for reason in report.reasons
+    )
