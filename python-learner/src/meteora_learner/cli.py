@@ -74,7 +74,10 @@ from .phase9_validation import (
 from .phase9_replay_audit import evaluate_phase9_replay_audit
 from .phase9_operational_audit import evaluate_phase9_operational_audit
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
-from .phase9_work_queue import build_phase9_work_queue
+from .phase9_work_queue import (
+    build_phase9_work_queue,
+    persist_phase9_work_queue_snapshot,
+)
 from .phase3_workflow import (
     Phase3ValidationInput,
     validate_phase3_from_chain,
@@ -1798,6 +1801,11 @@ def main() -> None:
     phase9_work_queue.add_argument(
         "--rpc-url",
         help="Optional Solana RPC URL used in emitted read-only mint inspection commands",
+    )
+    phase9_work_queue.add_argument(
+        "--persist-snapshot",
+        action="store_true",
+        help="Persist a sanitized append-only progress snapshot without shell commands or RPC URLs",
     )
 
     phase9_validate = subparsers.add_parser(
@@ -3934,16 +3942,27 @@ def main() -> None:
     if args.command == "phase9-work-queue":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
+        criteria = Phase9ResearchBundleCriteria(
+            min_mint_risk_pools=args.min_mint_risk_pools,
+            min_wallet_flow_pools=args.min_wallet_flow_pools,
+            min_static_hedge_pools=args.min_static_hedge_pools,
+        )
         result = build_phase9_work_queue(
             storage,
-            criteria=Phase9ResearchBundleCriteria(
-                min_mint_risk_pools=args.min_mint_risk_pools,
-                min_wallet_flow_pools=args.min_wallet_flow_pools,
-                min_static_hedge_pools=args.min_static_hedge_pools,
-            ),
+            criteria=criteria,
             rpc_url=args.rpc_url,
         )
-        print(json.dumps(result.to_record(), indent=2))
+        output = result.to_record()
+        output["persisted_snapshot"] = None
+        if args.persist_snapshot:
+            output["persisted_snapshot"] = (
+                persist_phase9_work_queue_snapshot(
+                    storage,
+                    queue=result,
+                    criteria=criteria,
+                ).to_record()
+            )
+        print(json.dumps(output, indent=2))
         return
 
     if args.command == "phase9-validate":
