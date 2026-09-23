@@ -49,6 +49,10 @@ def test_y_heavy_active_deposit_pays_composition_fee_in_y():
     assert result.amount_y_into_bin < 20_000
     assert result.composition_fee_x == 0
     assert result.composition_fee_y > 0
+    assert result.credited_amount_x == result.amount_x_into_bin
+    assert result.credited_amount_y == (
+        result.amount_y_into_bin - result.composition_fee_y
+    )
     assert result.protocol_fee_y == result.composition_fee_y // 10
     assert result.lp_fee_y == result.composition_fee_y - result.protocol_fee_y
 
@@ -85,6 +89,8 @@ def test_empty_bin_has_no_composition_fee():
     assert result.composition_fee_y == 0
     assert result.amount_x_into_bin == 10
     assert result.amount_y_into_bin == 20
+    assert result.credited_amount_x == 10
+    assert result.credited_amount_y == 20
 
 
 def test_invalid_fee_rate_is_rejected():
