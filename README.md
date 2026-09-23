@@ -24,9 +24,9 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 3: deterministic policy + persisted validation/promotion workflow implemented; real promotion evidence pending
 - Phase 4: reproducible no-lookahead ML challenger workflow implemented; not promoted
 - Phase 5: implementation complete; persisted real PAPER promotion evidence pending
-- Phase 6: standard-SPL entry/rebalance + guarded presign + internal deterministic signer/submission infrastructure in progress; public signing/sending disabled
+- Phase 6: implementation + persistent pre-live validation workflow complete; real promotion evidence pending; default builds cannot submit
 - Default mode: PAPER
-- Live signing: implemented internally behind persisted presign evidence; no public sign/send command
+- Live submit: available only in a non-default `live-submit` build, additionally runtime-disabled by default and gated by Phase 5/6 promotion plus controlled-live authorization
 
 Current research paths:
 - `DISCRETE_COMPLETED_BIN_V1`: OHLC inventory/IL studies.
@@ -101,6 +101,7 @@ pio paper-health --account paper --require-healthy
 pio paper-endurance-report --account paper --require-passing
 pio paper-audit --account paper --require-passing
 pio phase5-validate --account paper --require-ready
+pio phase6-validate --execution-db /absolute/path/to/execution.db --require-ready
 
 # Persisted promotion / ML workflow
 pio phase-status
@@ -122,7 +123,7 @@ pio transaction-costs --position <POSITION>
 pio composition-prestate --position <POSITION>
 pio reconcile-composition --position <POSITION>
 
-# Reconciled controlled-live evidence (still no public sign/send command)
+# Reconciled controlled-live evidence (default build still cannot submit)
 pio ingest-execution-receipt --file <RUST_RECEIPT_JSON>
 pio apply-live-execution-effect --decision <DECISION_ID>
 pio apply-live-position-effect --decision <DECISION_ID>
@@ -143,14 +144,13 @@ ML v1 is research-only: it learns from all replay-valid candidate actions at eac
 
 ## Rust execution preflight
 
-Phase 6 public commands still stop before signing/sending. The Rust executor can enforce
-risk, transaction/account/instruction policy, simulation, isolated-wallet
-authorization, durable restart state, build chain-resolved unsigned standard-SPL
-entry/rebalance/emergency-exit/settlement transactions, deterministically sign exact
-persisted presign evidence internally, coordinate same-signature submission retries,
-and reconcile confirmation/receipts. Python can turn fully reconciled closed live
-positions into no-lookahead valued PnL and immutable model-attributed learning labels.
-Public sign/send exposure remains disabled.
+Phase 6 can enforce risk, transaction/account/instruction policy, simulation,
+isolated-wallet authorization, durable restart state, chain-resolved standard-SPL and
+Token-2022 construction, deterministic signing, same-signature submission recovery,
+confirmation and receipts. Python can persist a pre-live Phase 6 promotion only from a
+multi-intent guarded presign corpus with zero pre-promotion signing/sending. Default
+Rust builds omit live submission; the non-default `live-submit` build additionally
+requires the runtime switch plus persisted Phase 5/6 and controlled-live gates.
 
 See `docs/PHASE6_EXECUTION_RUNBOOK.md`.
 
