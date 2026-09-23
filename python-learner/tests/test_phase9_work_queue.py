@@ -66,7 +66,7 @@ def promote_phase8(storage):
     )
 
 
-def evidence(storage, edge_type, pool):
+def evidence(storage, edge_type, pool, *, extra=None):
     return storage.save_advanced_edge_evidence(
         edge_type=edge_type,
         pool_address=pool,
@@ -77,6 +77,7 @@ def evidence(storage, edge_type, pool):
             "research_qualified": True,
             "research_only": True,
             "policy_actionable": False,
+            **(extra or {}),
         },
     )
 
