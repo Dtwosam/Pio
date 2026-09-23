@@ -69,8 +69,11 @@ pub fn build_standard_spl_emergency_exit(
     let token_program = Pubkey::from_str(SPL_TOKEN_PROGRAM)
         .context("hard-coded SPL token program id is invalid")?;
     let bitmap_extension = match request.bin_array_bitmap_extension.as_deref() {
-        Some(value) => parse_pubkey("bin_array_bitmap_extension", value)?,
-        None => dlmm::ID,
+        Some(value) => Some(parse_pubkey(
+            "bin_array_bitmap_extension",
+            value,
+        )?),
+        None => Some(dlmm::ID),
     };
     let (event_authority, _) = derive_event_authority_pda();
 
