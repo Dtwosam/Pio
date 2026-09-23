@@ -193,3 +193,47 @@ def test_cycle_bound_training_rejects_tampered_dataset(tmp_path):
         raise AssertionError("expected tampered dataset refusal")
 
     assert storage.model_registry_entry("challenger") is None
+
+
+def test_retraining_dataset_persists_absolute_output_path(
+    tmp_path, monkeypatch
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed(storage)
+    monkeypatch.chdir(tmp_path)
+
+    result = start_retraining_cycle_with_dataset(
+        storage,
+        pools=(
+            MLRetrainPoolSpec(
+                pool_address="pool",
+                amount_x=0,
+                amount_y=10,
+                network_cost_y_atomic=0,
+            ),
+        ),
+        output_file="datasets/retrain.csv",
+        cycle_id="cycle-absolute",
+        as_of=NOW,
+        criteria=ContinuousLearningCriteria(
+            min_new_chain_observations=3,
+            min_new_chain_pools=1,
+            min_new_live_labels=0,
+            max_champion_age_days=1,
+        ),
+        lookback_observations=2,
+        forward_observations=2,
+        half_widths=(1,),
+        center_offsets=(0,),
+        max_share_bps=500,
+    )
+
+    output = Path(result.output_file)
+    assert output.is_absolute()
+    assert output == (tmp_path / "datasets/retrain.csv").resolve()
+    evidence = storage.latest_model_live_evidence(
+        "champion",
+        evidence_type=RETRAIN_DATASET_EVIDENCE_TYPE,
+    )
+    assert evidence is not None
+    assert Path(evidence["evidence"]["output_file"]) == output
