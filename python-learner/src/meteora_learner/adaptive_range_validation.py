@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .chain_snapshot_lineage import (
+    chain_snapshot_source_record,
+    chain_snapshot_source_sha256,
+)
 from .adaptive_range import (
     AdaptiveRangeCriteria,
     _historical_max_displacements,
@@ -75,6 +79,8 @@ class AdaptiveRangeValidationReport:
     fixed_half_width_bins: int
     mean_width_multiple_vs_fixed: float | None
     cap_exceeded_rate: float | None
+    source_snapshot_ids: tuple[int, ...]
+    source_snapshot_sha256: str
     adaptive_criteria: AdaptiveRangeCriteria
     validation_criteria: AdaptiveRangeValidationCriteria
     research_qualified: bool
@@ -107,7 +113,7 @@ def validate_adaptive_range_walk_forward(
         if as_of is None:
             rows = conn.execute(
                 """
-                SELECT observed_at, active_bin_id
+                SELECT id, pool_address, observed_at, active_bin_id
                 FROM chain_pool_snapshots
                 WHERE pool_address = ?
                 ORDER BY julianday(observed_at) ASC, id ASC
@@ -117,7 +123,7 @@ def validate_adaptive_range_walk_forward(
         else:
             rows = conn.execute(
                 """
-                SELECT observed_at, active_bin_id
+                SELECT id, pool_address, observed_at, active_bin_id
                 FROM chain_pool_snapshots
                 WHERE pool_address = ?
                   AND julianday(observed_at) <= julianday(?)
@@ -126,8 +132,17 @@ def validate_adaptive_range_walk_forward(
                 (pool_address, as_of),
             ).fetchall()
 
-    observed_at = [str(row[0]) for row in rows]
-    active_bins = [int(row[1]) for row in rows]
+    source_records = [
+        chain_snapshot_source_record(row) for row in rows
+    ]
+    source_snapshot_ids = tuple(
+        int(record["id"]) for record in source_records
+    )
+    source_snapshot_sha256 = chain_snapshot_source_sha256(
+        source_records
+    )
+    observed_at = [str(row[2]) for row in rows]
+    active_bins = [int(row[3]) for row in rows]
     holding = adaptive_criteria.holding_observations
     results: list[AdaptiveRangeDecisionResult] = []
 
@@ -274,6 +289,8 @@ def validate_adaptive_range_walk_forward(
         fixed_half_width_bins=validation_criteria.fixed_half_width_bins,
         mean_width_multiple_vs_fixed=width_multiple,
         cap_exceeded_rate=cap_rate,
+        source_snapshot_ids=source_snapshot_ids,
+        source_snapshot_sha256=source_snapshot_sha256,
         adaptive_criteria=adaptive_criteria,
         validation_criteria=validation_criteria,
         research_qualified=qualified,
