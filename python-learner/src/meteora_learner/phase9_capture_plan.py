@@ -85,32 +85,62 @@ def _latest_api_pools(
     max_age_seconds: int,
 ) -> tuple[tuple[dict[str, Any], ...], int]:
     with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            WITH ranked AS (
-                SELECT
-                    address, observed_at, tvl,
-                    volume_24h, fees_24h,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY address
-                        ORDER BY julianday(observed_at) DESC, id DESC
-                    ) AS row_rank
-                FROM pool_snapshots
-                WHERE address IS NOT NULL
-                  AND TRIM(address) != ''
-            )
-            SELECT address, observed_at, tvl,
-                   volume_24h, fees_24h
-            FROM ranked
-            WHERE row_rank = 1
-            ORDER BY
-                CASE WHEN tvl IS NULL THEN 1 ELSE 0 END ASC,
-                tvl DESC,
-                CASE WHEN volume_24h IS NULL THEN 1 ELSE 0 END ASC,
-                volume_24h DESC,
-                address ASC
-            """
-        ).fetchall()
+        if as_of is None:
+            rows = conn.execute(
+                """
+                WITH ranked AS (
+                    SELECT
+                        address, observed_at, tvl,
+                        volume_24h, fees_24h,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY address
+                            ORDER BY julianday(observed_at) DESC, id DESC
+                        ) AS row_rank
+                    FROM pool_snapshots
+                    WHERE address IS NOT NULL
+                      AND TRIM(address) != ''
+                )
+                SELECT address, observed_at, tvl,
+                       volume_24h, fees_24h
+                FROM ranked
+                WHERE row_rank = 1
+                ORDER BY
+                    CASE WHEN tvl IS NULL THEN 1 ELSE 0 END ASC,
+                    tvl DESC,
+                    CASE WHEN volume_24h IS NULL THEN 1 ELSE 0 END ASC,
+                    volume_24h DESC,
+                    address ASC
+                """
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                WITH ranked AS (
+                    SELECT
+                        address, observed_at, tvl,
+                        volume_24h, fees_24h,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY address
+                            ORDER BY julianday(observed_at) DESC, id DESC
+                        ) AS row_rank
+                    FROM pool_snapshots
+                    WHERE address IS NOT NULL
+                      AND TRIM(address) != ''
+                      AND julianday(observed_at) <= julianday(?)
+                )
+                SELECT address, observed_at, tvl,
+                       volume_24h, fees_24h
+                FROM ranked
+                WHERE row_rank = 1
+                ORDER BY
+                    CASE WHEN tvl IS NULL THEN 1 ELSE 0 END ASC,
+                    tvl DESC,
+                    CASE WHEN volume_24h IS NULL THEN 1 ELSE 0 END ASC,
+                    volume_24h DESC,
+                    address ASC
+                """,
+                (as_of,),
+            ).fetchall()
 
     latest = tuple(
         {
