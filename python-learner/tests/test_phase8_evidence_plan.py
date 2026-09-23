@@ -116,6 +116,15 @@ def test_phase8_plan_surfaces_retrain_dataset_inputs_when_due(
             new_live_labels_since_champion=6,
         ),
     )
+    monkeypatch.setattr(
+        plan_module,
+        "audit_phase8_retrain_inputs",
+        lambda storage: SimpleNamespace(
+            valid=False,
+            evidence_id=None,
+            reasons=("persisted Phase 8 retrain inputs are missing",),
+        ),
+    )
 
     plan = build_phase8_evidence_plan(storage)
 
@@ -125,9 +134,49 @@ def test_phase8_plan_surfaces_retrain_dataset_inputs_when_due(
     )
     assert (
         plan.next_action.shell_command
-        == "pio ml-retrain-plan --persist --require-due"
+        == "pio phase8-retrain-input-template "
+        "> phase8-retrain-inputs.json"
     )
     assert "must not be invented" in plan.next_action.reason
+    assert "retrain inputs are missing" in plan.next_action.reason
+
+
+def test_phase8_plan_unlocks_dataset_build_from_valid_inputs(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase8_evidence_status",
+        lambda *args, **kwargs: status(
+            retrain_status="RETRAIN_DUE",
+            retrain_due=True,
+            new_chain_observations=600,
+            new_chain_pools=4,
+            new_live_labels_since_champion=6,
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "audit_phase8_retrain_inputs",
+        lambda storage: SimpleNamespace(
+            valid=True,
+            evidence_id=88,
+            reasons=(),
+        ),
+    )
+
+    plan = build_phase8_evidence_plan(storage)
+
+    assert plan.next_action is not None
+    assert plan.next_action.debt_type == "RETRAIN_DATASET_BUILD_READY"
+    assert plan.next_action.scope == "88"
+    assert plan.next_action.operator_required is False
+    assert plan.next_action.shell_command == (
+        "pio phase8-retrain-build-run --input-evidence-id 88"
+    )
+    assert "model training" in plan.next_action.reason
 
 
 def test_phase8_plan_maps_offline_qualified_cycle_to_paper_start(
