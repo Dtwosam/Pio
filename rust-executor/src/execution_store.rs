@@ -146,8 +146,12 @@ impl ExecutionIntentStore {
     pub fn register(
         &self,
         request: &DryRunExecutionRequest,
+        config: &RiskConfig,
     ) -> Result<RegisteredExecutionIntent> {
-        let canonical = serde_json::to_string(request)?;
+        let canonical = serde_json::to_string(&serde_json::json!({
+            "request": request,
+            "risk_config": config,
+        }))?;
         let decision_id = request.proposal.decision_id.to_string();
         let mode = enum_text(&request.proposal.mode)?;
         let action = enum_text(&request.proposal.action)?;
@@ -346,6 +350,17 @@ mod tests {
         }
     }
 
+    fn config() -> RiskConfig {
+        RiskConfig {
+            max_capital_per_position_pct: 2.0,
+            max_total_deployed_pct: 20.0,
+            max_daily_drawdown_pct: 3.0,
+            min_expected_edge_pct: 0.25,
+            max_expected_downside_pct: 2.0,
+            max_data_age_seconds: 30,
+        }
+    }
+
     fn risk(accepted: bool, id: Uuid) -> RiskCheckReport {
         RiskCheckReport {
             decision_id: id,
@@ -370,8 +385,9 @@ mod tests {
         let store = ExecutionIntentStore::open(&path).unwrap();
         let request = request();
 
-        let first = store.register(&request).unwrap();
-        let second = store.register(&request).unwrap();
+        let cfg = config();
+        let first = store.register(&request, &cfg).unwrap();
+        let second = store.register(&request, &cfg).unwrap();
 
         assert!(!first.reused_existing);
         assert!(second.reused_existing);
@@ -384,11 +400,26 @@ mod tests {
         let path = db_path();
         let store = ExecutionIntentStore::open(&path).unwrap();
         let request = request();
-        store.register(&request).unwrap();
+        let cfg = config();
+        store.register(&request, &cfg).unwrap();
 
         let mut changed = request.clone();
         changed.transaction_base64 = "different".into();
-        assert!(store.register(&changed).is_err());
+        assert!(store.register(&changed, &cfg).is_err());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn decision_id_cannot_reuse_different_risk_config() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let cfg = config();
+        store.register(&request, &cfg).unwrap();
+
+        let mut changed = cfg.clone();
+        changed.max_total_deployed_pct = 25.0;
+        assert!(store.register(&request, &changed).is_err());
         let _ = std::fs::remove_file(path);
     }
 
@@ -398,7 +429,8 @@ mod tests {
         let store = ExecutionIntentStore::open(&path).unwrap();
         let request = request();
         let id = request.proposal.decision_id;
-        store.register(&request).unwrap();
+        let cfg = config();
+        store.register(&request, &cfg).unwrap();
 
         let after_risk = store.record_risk(&id.to_string(), &risk(true, id)).unwrap();
         assert_eq!(after_risk.status, ExecutionIntentStatus::RiskApproved);
