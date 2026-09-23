@@ -3,6 +3,9 @@ use std::str::FromStr;
 
 use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use anchor_client::solana_sdk::pubkey::Pubkey;
+use anchor_lang::Discriminator;
+use solana_client::rpc_config::RpcProgramAccountsConfig;
+use solana_client::rpc_filter::{Memcmp, RpcFilterType};
 use anchor_client::solana_sdk::sysvar::clock::{Clock, ID as CLOCK_ID};
 use anyhow::{Context, Result};
 use commons::dlmm::accounts::{BinArray, LbPair, PositionV2};
@@ -73,6 +76,24 @@ pub struct PoolChainSnapshot {
     pub reward_last_update_times: [u64; 2],
     pub fee_state: FeeStateSnapshot,
     pub bin_arrays: Vec<BinArraySnapshot>,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+pub struct PoolPositionDiscoveryItem {
+    pub position_address: String,
+    pub pool_address: String,
+    pub owner: String,
+    pub lower_bin_id: i32,
+    pub upper_bin_id: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PoolPositionDiscovery {
+    pub pool_address: String,
+    pub positions_found: usize,
+    pub positions_returned: usize,
+    pub truncated: bool,
+    pub positions: Vec<PoolPositionDiscoveryItem>,
 }
 
 #[derive(Debug, Serialize)]
@@ -367,6 +388,81 @@ pub async fn inspect_pool(
     })
 }
 
+pub fn position_v2_pool_filter_offset() -> usize {
+    8 + std::mem::offset_of!(PositionV2, lb_pair)
+}
+
+pub async fn discover_pool_positions(
+    rpc_url: &str,
+    pool_address: &str,
+    limit: usize,
+) -> Result<PoolPositionDiscovery> {
+    if limit == 0 || limit > 5_000 {
+        anyhow::bail!("limit must be between 1 and 5000");
+    }
+
+    let pool = Pubkey::from_str(pool_address).context("invalid pool address")?;
+    let rpc = RpcClient::new(rpc_url.to_string());
+    let filters = vec![
+        RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
+            0,
+            PositionV2::DISCRIMINATOR,
+        )),
+        RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
+            position_v2_pool_filter_offset(),
+            &pool.to_bytes(),
+        )),
+    ];
+    let accounts = rpc
+        .get_program_accounts_with_config(
+            &commons::dlmm::ID,
+            RpcProgramAccountsConfig {
+                filters: Some(filters),
+                ..RpcProgramAccountsConfig::default()
+            },
+        )
+        .await
+        .context("failed to discover Meteora PositionV2 accounts")?;
+
+    let mut positions = Vec::new();
+    for (position_address, account) in accounts {
+        if account.owner != commons::dlmm::ID {
+            continue;
+        }
+        let state: PositionV2 = match pod_read_unaligned_skip_disc(&account.data) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if state.lb_pair != pool {
+            continue;
+        }
+        positions.push(PoolPositionDiscoveryItem {
+            position_address: position_address.to_string(),
+            pool_address: state.lb_pair.to_string(),
+            owner: state.owner.to_string(),
+            lower_bin_id: state.lower_bin_id,
+            upper_bin_id: state.upper_bin_id,
+        });
+    }
+
+    positions.sort_by(|left, right| {
+        left.owner
+            .cmp(&right.owner)
+            .then_with(|| left.position_address.cmp(&right.position_address))
+    });
+    let positions_found = positions.len();
+    positions.truncate(limit);
+    let positions_returned = positions.len();
+
+    Ok(PoolPositionDiscovery {
+        pool_address: pool.to_string(),
+        positions_found,
+        positions_returned,
+        truncated: positions_found > positions_returned,
+        positions,
+    })
+}
+
 pub async fn inspect_position(
     rpc_url: &str,
     position_address: &str,
@@ -512,4 +608,21 @@ pub async fn inspect_position(
         ],
         bins,
     })
+}
+
+
+#[cfg(test)]
+mod discovery_layout_tests {
+    use super::*;
+
+    #[test]
+    fn position_v2_pool_filter_offset_fits_position_layout() {
+        let offset = position_v2_pool_filter_offset();
+        assert_eq!(PositionV2::DISCRIMINATOR.len(), 8);
+        assert!(offset >= 8);
+        assert!(
+            offset + std::mem::size_of::<Pubkey>()
+                <= 8 + std::mem::size_of::<PositionV2>()
+        );
+    }
 }
