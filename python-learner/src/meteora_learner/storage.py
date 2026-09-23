@@ -874,6 +874,38 @@ CREATE TABLE IF NOT EXISTS model_live_evidence (
     evidence_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS continuous_learning_cycles (
+    cycle_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(
+        status IN (
+            'PLANNED',
+            'CHALLENGER_REGISTERED',
+            'OFFLINE_QUALIFIED',
+            'PAPER_CHALLENGER',
+            'COMPLETED',
+            'FAILED',
+            'CANCELLED'
+        )
+    ),
+    active_key TEXT UNIQUE CHECK(
+        active_key IS NULL OR active_key = 'ACTIVE'
+    ),
+    champion_model_id TEXT NOT NULL,
+    champion_dataset_version TEXT NOT NULL,
+    champion_evidence_watermark TEXT NOT NULL,
+    plan_evidence_id INTEGER NOT NULL,
+    plan_as_of TEXT NOT NULL,
+    target_dataset_version TEXT NOT NULL,
+    challenger_model_id TEXT UNIQUE,
+    plan_json TEXT NOT NULL,
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_continuous_learning_cycles_status
+ON continuous_learning_cycles(status, updated_at);
+
 CREATE INDEX IF NOT EXISTS idx_model_live_evidence_model_time
 ON model_live_evidence(model_id, created_at, id);
 
