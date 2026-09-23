@@ -290,29 +290,29 @@ def seed_mint_risk_lineage(storage, pool):
 
 
 def seed_adaptive_multi_pool_lineage(storage, pools):
-    token_program = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-    with storage.connect() as conn:
-        for pool in pools:
-            for index in range(10):
-                observed_at = (
-                    f"2026-09-23T11:{50 + index:02d}:00+00:00"
-                )
+    values = [
+        100, 102, 104, 102, 100, 102, 104, 102,
+        100, 102, 104, 102, 100, 102, 104, 102,
+        100, 102, 104, 102, 100, 102, 104, 102,
+    ]
+    for pool_index, pool in enumerate(pools):
+        with storage.connect() as conn:
+            for index, value in enumerate(values):
                 conn.execute(
                     """
                     INSERT INTO chain_pool_snapshots(
                         observed_at, pool_address, active_bin_id,
                         bin_step, token_x_mint, token_y_mint,
-                        token_x_program, token_y_program, raw_json
-                    ) VALUES (?, ?, ?, 25, ?, ?, ?, ?, '{}')
+                        raw_json
+                    ) VALUES (?, ?, ?, 25, 'x', 'y', '{}')
                     """,
                     (
-                        observed_at,
+                        (
+                            "2026-09-23T00:"
+                            f"{index:02d}:00+00:00"
+                        ),
                         pool,
-                        index % 2,
-                        f"{pool}-x",
-                        f"{pool}-y",
-                        token_program,
-                        token_program,
+                        value + pool_index * 10,
                     ),
                 )
 
@@ -320,37 +320,39 @@ def seed_adaptive_multi_pool_lineage(storage, pools):
         storage,
         pool_addresses=pools,
         criteria=Phase9ResearchCriteria(
-            min_pools=len(pools),
-            min_qualified_pools=len(pools),
+            min_pools=2,
+            min_qualified_pools=2,
             min_qualified_pool_rate=1.0,
-            min_mean_survival_uplift_vs_fixed=-1.0,
-            max_mean_width_multiple_vs_fixed=10.0,
+            min_mean_survival_uplift_vs_fixed=0.25,
+            max_mean_width_multiple_vs_fixed=5.0,
         ),
         adaptive_criteria=AdaptiveRangeCriteria(
-            lookback_observations=8,
-            holding_observations=1,
-            target_coverage=0.5,
+            lookback_observations=20,
+            holding_observations=2,
+            target_coverage=0.80,
             min_half_width_bins=1,
-            max_half_width_bins=10,
-            min_historical_windows=2,
+            max_half_width_bins=6,
+            min_historical_windows=4,
         ),
-        adaptive_validation_criteria=AdaptiveRangeValidationCriteria(
-            fixed_half_width_bins=5,
-            min_decisions=2,
-            min_adaptive_survival_rate=0.0,
-            min_survival_uplift_vs_fixed=-1.0,
-            max_mean_width_multiple_vs_fixed=10.0,
-            max_cap_exceeded_rate=1.0,
+        adaptive_validation_criteria=(
+            AdaptiveRangeValidationCriteria(
+                fixed_half_width_bins=1,
+                min_decisions=8,
+                min_adaptive_survival_rate=0.75,
+                min_survival_uplift_vs_fixed=0.25,
+                max_mean_width_multiple_vs_fixed=5.0,
+                max_cap_exceeded_rate=0.0,
+            )
         ),
         regime_criteria=DLMMRegimeCriteria(
-            lookback_observations=8,
-            recent_observations=2,
-            min_observations=3,
+            lookback_observations=24,
+            recent_observations=6,
+            min_observations=12,
             trend_efficiency_threshold=0.65,
             activity_percentile=0.75,
             quiet_percentile=0.25,
         ),
-        as_of="2026-09-23T12:00:00+00:00",
+        as_of="2026-09-23T00:23:00+00:00",
     )
     assert report.research_qualified is True
     persist_phase9_research(storage, report=report)
@@ -983,6 +985,40 @@ def test_forged_adaptive_snapshot_lineage_blocks_bundle(tmp_path):
         for reason in report.reasons
     )
 
+
+
+def test_forged_adaptive_metrics_block_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    pools = [dict(item) for item in forged["pools"]]
+    first = dict(pools[0])
+    adaptive = dict(first["adaptive"])
+    adaptive["survival_uplift_vs_fixed"] = 999.0
+    first["adaptive"] = adaptive
+    pools[0] = first
+    forged["pools"] = pools
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+        as_of="2026-09-23T00:24:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "immutable chain snapshot IDs" in reason
+        for reason in report.reasons
+    )
 
 def test_forged_static_hedge_lineage_blocks_bundle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
