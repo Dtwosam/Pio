@@ -47,6 +47,20 @@ pub struct LiquidityAddRequest {
     pub weighted_distribution: Vec<WeightedBinDistribution>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RebalanceRequest {
+    pub instruction_index: usize,
+    pub observed_active_id: i32,
+    pub max_active_bin_slippage: u16,
+    pub should_claim_fee: bool,
+    pub should_claim_reward: bool,
+    pub min_withdraw_x_amount: String,
+    pub max_deposit_x_amount: String,
+    pub min_withdraw_y_amount: String,
+    pub max_deposit_y_amount: String,
+    pub shrink_mode: u8,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TransactionEventSnapshot {
     pub signature: String,
@@ -56,6 +70,7 @@ pub struct TransactionEventSnapshot {
     pub compute_units_consumed: Option<u64>,
     pub succeeded: Option<bool>,
     pub add_requests: Vec<LiquidityAddRequest>,
+    pub rebalance_requests: Vec<RebalanceRequest>,
     pub events: Vec<TransactionEventRecord>,
 }
 
@@ -65,6 +80,7 @@ const ADD_BY_STRATEGY_IX: [u8; 8] = [7, 3, 150, 127, 148, 40, 61, 200];
 const ADD_BY_STRATEGY2_IX: [u8; 8] = [3, 221, 149, 218, 111, 141, 118, 213];
 const ADD_BY_WEIGHT_IX: [u8; 8] = [28, 140, 238, 99, 231, 162, 21, 149];
 const ADD_BY_WEIGHT2_IX: [u8; 8] = [209, 59, 63, 91, 111, 200, 153, 228];
+const REBALANCE_LIQUIDITY_IX: [u8; 8] = [92, 4, 176, 193, 119, 185, 83, 9];
 
 fn read_i32_at(data: &[u8], offset: usize) -> Option<i32> {
     Some(i32::from_le_bytes(data.get(offset..offset + 4)?.try_into().ok()?))
@@ -167,6 +183,65 @@ fn decode_add_request(data: &[u8], instruction_index: usize) -> Option<Liquidity
         weighted_distribution,
     })
 }
+fn decode_rebalance_request(
+    data: &[u8],
+    instruction_index: usize,
+) -> Option<RebalanceRequest> {
+    if data.len() < 80 || data[..8] != REBALANCE_LIQUIDITY_IX {
+        return None;
+    }
+
+    Some(RebalanceRequest {
+        instruction_index,
+        observed_active_id: read_i32_at(data, 8)?,
+        max_active_bin_slippage: read_u16_at(data, 12)?,
+        should_claim_fee: *data.get(14)? != 0,
+        should_claim_reward: *data.get(15)? != 0,
+        min_withdraw_x_amount: u64::from_le_bytes(
+            data.get(16..24)?.try_into().ok()?,
+        )
+        .to_string(),
+        max_deposit_x_amount: u64::from_le_bytes(
+            data.get(24..32)?.try_into().ok()?,
+        )
+        .to_string(),
+        min_withdraw_y_amount: u64::from_le_bytes(
+            data.get(32..40)?.try_into().ok()?,
+        )
+        .to_string(),
+        max_deposit_y_amount: u64::from_le_bytes(
+            data.get(40..48)?.try_into().ok()?,
+        )
+        .to_string(),
+        shrink_mode: *data.get(48)?,
+    })
+}
+
+fn decode_rebalance_requests(value: &Value) -> Vec<RebalanceRequest> {
+    let Some(instructions) = value
+        .pointer("/transaction/transaction/message/instructions")
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let meteora_program = commons::dlmm::ID.to_string();
+
+    instructions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, instruction)| {
+            if instruction.get("programId").and_then(Value::as_str)
+                != Some(meteora_program.as_str())
+            {
+                return None;
+            }
+            let encoded = instruction.get("data").and_then(Value::as_str)?;
+            let data = bs58::decode(encoded).into_vec().ok()?;
+            decode_rebalance_request(&data, index)
+        })
+        .collect()
+}
+
 fn decode_add_requests(value: &Value) -> Vec<LiquidityAddRequest> {
     let Some(instructions) = value
         .pointer("/transaction/transaction/message/instructions")
@@ -278,6 +353,7 @@ pub async fn inspect_transaction_events(
     let value = serde_json::to_value(&confirmed).context("failed to serialize transaction")?;
     let events = decode_inner_events(&value)?;
     let add_requests = decode_add_requests(&value);
+    let rebalance_requests = decode_rebalance_requests(&value);
     let (network_fee_lamports, compute_units_consumed, succeeded) =
         extract_transaction_costs(&value);
 
@@ -289,6 +365,7 @@ pub async fn inspect_transaction_events(
         compute_units_consumed,
         succeeded,
         add_requests,
+        rebalance_requests,
         events,
     })
 }
@@ -407,6 +484,34 @@ mod tests {
         assert_eq!(requests[0].requested_amount_y, "20");
         assert_eq!(requests[0].observed_active_id, None);
         assert!(requests[0].explicit_distribution.is_empty());
+    }
+
+    #[test]
+    fn decodes_rebalance_execution_bounds() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&REBALANCE_LIQUIDITY_IX);
+        bytes.extend_from_slice(&12i32.to_le_bytes());
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        bytes.push(1);
+        bytes.push(0);
+        bytes.extend_from_slice(&100u64.to_le_bytes());
+        bytes.extend_from_slice(&90u64.to_le_bytes());
+        bytes.extend_from_slice(&200u64.to_le_bytes());
+        bytes.extend_from_slice(&180u64.to_le_bytes());
+        bytes.push(2);
+        bytes.extend_from_slice(&[0u8; 31]);
+
+        let request = decode_rebalance_request(&bytes, 4).expect("request");
+        assert_eq!(request.instruction_index, 4);
+        assert_eq!(request.observed_active_id, 12);
+        assert_eq!(request.max_active_bin_slippage, 3);
+        assert!(request.should_claim_fee);
+        assert!(!request.should_claim_reward);
+        assert_eq!(request.min_withdraw_x_amount, "100");
+        assert_eq!(request.max_deposit_x_amount, "90");
+        assert_eq!(request.min_withdraw_y_amount, "200");
+        assert_eq!(request.max_deposit_y_amount, "180");
+        assert_eq!(request.shrink_mode, 2);
     }
 
     #[test]
