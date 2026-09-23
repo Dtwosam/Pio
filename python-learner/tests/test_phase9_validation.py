@@ -1028,7 +1028,7 @@ def test_forged_bandit_dataset_lineage_blocks_bundle(tmp_path):
 
     assert report.research_ready is False
     assert any(
-        "checksum-verified retraining dataset lineage" in reason
+        "checksum-verified dataset lineage" in reason
         for reason in report.reasons
     )
 
@@ -1417,7 +1417,7 @@ def test_tampered_bandit_dataset_file_blocks_bundle(tmp_path):
 
     assert report.research_ready is False
     assert any(
-        "checksum-verified retraining dataset lineage" in reason
+        "checksum-verified dataset lineage" in reason
         for reason in report.reasons
     )
 
@@ -1537,7 +1537,7 @@ def test_forged_bandit_metric_blocks_bundle(tmp_path):
 
     assert report.research_ready is False
     assert any(
-        "checksum-verified retraining dataset lineage" in reason
+        "checksum-verified dataset lineage" in reason
         for reason in report.reasons
     )
 
