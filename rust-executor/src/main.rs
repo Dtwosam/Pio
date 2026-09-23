@@ -1,5 +1,6 @@
 mod blockhash;
 mod confirmation;
+mod controlled_live;
 mod decision_context;
 mod dry_run;
 mod entry;
@@ -51,6 +52,7 @@ fn usage() {
   meteora-executor execution-intent-status <EXECUTION_DB> <DECISION_ID>
   meteora-executor phase5-promotion-gate <PIO_DATABASE>
   meteora-executor phase6-readiness <PIO_DATABASE> <TRANSACTION_GUARD_CONFIG_JSON>
+  meteora-executor controlled-live-check <PIO_DATABASE> <PROPOSAL_JSON_OR_-> <CONTROLLED_LIVE_CONFIG_JSON>
   meteora-executor execution-decision-context <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-confirmation <EXECUTION_DB> <DECISION_ID>
   meteora-executor execution-recovery <EXECUTION_DB> <DECISION_ID> [EXPIRY_GRACE_BLOCKS]
@@ -431,6 +433,57 @@ RPC_URL is accepted as a compatibility fallback",
                     &decision_id,
                 )?;
             println!("{}", serde_json::to_string_pretty(&context)?);
+        }
+        "controlled-live-check" => {
+            let database_path = args
+                .next()
+                .context("PIO_DATABASE is required")?;
+            let proposal_source = args
+                .next()
+                .context("PROPOSAL_JSON_OR_- is required")?;
+            let config_path = args
+                .next()
+                .context("CONTROLLED_LIVE_CONFIG_JSON is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "controlled-live-check accepts exactly three arguments"
+                );
+            }
+            let proposal_json = if proposal_source == "-" {
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut input)
+                    .context("failed to read proposal JSON from stdin")?;
+                input
+            } else {
+                std::fs::read_to_string(&proposal_source)
+                    .with_context(|| {
+                        format!(
+                            "failed to read proposal JSON: {proposal_source}"
+                        )
+                    })?
+            };
+            let config_json = std::fs::read_to_string(&config_path)
+                .with_context(|| {
+                    format!(
+                        "failed to read controlled-live config JSON: {config_path}"
+                    )
+                })?;
+            let proposal: models::TradeProposal =
+                serde_json::from_str(&proposal_json)
+                    .context("invalid trade proposal JSON")?;
+            let config: controlled_live::ControlledLiveConfig =
+                serde_json::from_str(&config_json)
+                    .context("invalid controlled-live config JSON")?;
+            let report = controlled_live::evaluate_controlled_live(
+                std::path::Path::new(&database_path),
+                &proposal,
+                &config,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.accepted {
+                std::process::exit(2);
+            }
         }
         "phase6-readiness" => {
             let database_path = args
