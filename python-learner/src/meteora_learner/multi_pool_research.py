@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from .baseline_policy import BaselinePolicyConfig
 from .capital_sizing import CapitalSizingConfig
@@ -77,6 +77,7 @@ def build_multi_pool_research(
     safety_config: PoolSafetyConfig = PoolSafetyConfig(),
     sizing_config: CapitalSizingConfig = CapitalSizingConfig(),
     observation_limit: int = 12,
+    observation_times_by_pool: Mapping[str, Sequence[str]] | None = None,
     half_widths: Sequence[int] = (0, 1, 2, 5, 10),
     center_offsets: Sequence[int] = (0,),
     strategies: Sequence[StrategyType | str] = (
@@ -89,6 +90,17 @@ def build_multi_pool_research(
 ) -> MultiPoolResearchReport:
     requested_quote = _common_requested_quote(inputs)
     plans: list[Phase3ResearchPlan] = []
+
+    if observation_times_by_pool is not None:
+        unknown = sorted(
+            set(observation_times_by_pool)
+            - {item.pool_address for item in inputs}
+        )
+        if unknown:
+            raise ValueError(
+                "observation_times_by_pool contains unknown pools: "
+                + ", ".join(unknown)
+            )
 
     for item in inputs:
         plan = build_phase3_research_plan(
@@ -108,6 +120,11 @@ def build_multi_pool_research(
             ),
             sizing_config=sizing_config,
             observation_limit=observation_limit,
+            observation_times=(
+                observation_times_by_pool.get(item.pool_address)
+                if observation_times_by_pool is not None
+                else None
+            ),
             half_widths=half_widths,
             center_offsets=center_offsets,
             strategies=strategies,
