@@ -505,7 +505,7 @@ def seed_static_hedge_lineage(storage, pool):
         criteria=StaticHedgeCriteria(
             observation_limit=10,
             holding_observations=1,
-            hedge_fraction=1.0,
+            hedge_fraction=0.0,
             hedge_round_trip_cost_bps=0.0,
             min_windows=1,
             min_mean_abs_return_reduction_bps=0.0,
