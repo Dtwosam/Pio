@@ -8,6 +8,7 @@ from .ml_registry import CHAMPION, PAPER_CHALLENGER, ROLLED_BACK, _to_record
 from .paper_performance import PaperPerformanceReport, build_paper_performance
 from .phase_promotion import PHASE7, PHASE7_EVIDENCE_TYPE
 from .retraining_cycle import retraining_cycle
+from .retraining_workflow import WALK_FORWARD_EVIDENCE_TYPE
 from .storage import Storage, utc_now_iso
 
 
@@ -55,6 +56,8 @@ class ContinuousChampionValidation:
     challenger_model_id: str
     challenger_status: str
     dataset_version_matches_cycle: bool
+    walk_forward_qualified: bool
+    walk_forward_evidence_id: int | None
     incumbent: PaperPerformanceReport
     challenger: PaperPerformanceReport
     return_uplift_vs_incumbent_bps: int | None
@@ -99,6 +102,25 @@ def evaluate_continuous_champion(
         PHASE7,
         evidence_type=PHASE7_EVIDENCE_TYPE,
     )
+    walk_forward = storage.latest_model_live_evidence(
+        cycle.challenger_model_id,
+        evidence_type=WALK_FORWARD_EVIDENCE_TYPE,
+    )
+    walk_forward_qualified = False
+    walk_forward_evidence_id = None
+    if walk_forward is not None:
+        walk_forward_evidence_id = int(walk_forward["id"])
+        evidence = walk_forward["evidence"]
+        report = evidence.get("report", {})
+        walk_forward_qualified = (
+            walk_forward.get("status") == "QUALIFIED"
+            and evidence.get("cycle_id") == cycle_id
+            and evidence.get("model_id")
+                == cycle.challenger_model_id
+            and evidence.get("dataset_version")
+                == cycle.target_dataset_version
+            and report.get("walk_forward_qualified") is True
+        )
 
     incumbent = build_paper_performance(
         storage,
@@ -148,6 +170,10 @@ def evaluate_continuous_champion(
         (
             dataset_matches,
             "challenger dataset_version does not match retraining cycle",
+        ),
+        (
+            walk_forward_qualified,
+            "qualified cycle-bound walk-forward evidence is missing",
         ),
         (
             challenger.closed_trades
@@ -203,6 +229,8 @@ def evaluate_continuous_champion(
         challenger_model_id=cycle.challenger_model_id,
         challenger_status=challenger_status,
         dataset_version_matches_cycle=dataset_matches,
+        walk_forward_qualified=walk_forward_qualified,
+        walk_forward_evidence_id=walk_forward_evidence_id,
         incumbent=incumbent,
         challenger=challenger,
         return_uplift_vs_incumbent_bps=uplift,
@@ -281,6 +309,45 @@ def promote_continuous_challenger(
         if str(challenger[1]) != str(cycle[4]):
             raise ValueError(
                 "challenger dataset changed from retraining cycle"
+            )
+
+        latest_walk_forward = conn.execute(
+            """
+            SELECT id, status, evidence_json
+            FROM model_live_evidence
+            WHERE model_id = ?
+              AND evidence_type = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                validation.challenger_model_id,
+                WALK_FORWARD_EVIDENCE_TYPE,
+            ),
+        ).fetchone()
+        if latest_walk_forward is None:
+            raise ValueError(
+                "walk-forward evidence disappeared before champion rotation"
+            )
+        latest_walk_forward_json = json.loads(
+            str(latest_walk_forward[2])
+        )
+        if (
+            int(latest_walk_forward[0])
+                != validation.walk_forward_evidence_id
+            or str(latest_walk_forward[1]) != "QUALIFIED"
+            or latest_walk_forward_json.get("cycle_id")
+                != validation.cycle_id
+            or latest_walk_forward_json.get("model_id")
+                != validation.challenger_model_id
+            or latest_walk_forward_json.get("dataset_version")
+                != str(cycle[4])
+            or latest_walk_forward_json
+                .get("report", {})
+                .get("walk_forward_qualified") is not True
+        ):
+            raise ValueError(
+                "walk-forward evidence changed before champion rotation"
             )
 
         phase7 = conn.execute(
