@@ -494,6 +494,31 @@ CREATE TABLE IF NOT EXISTS live_position_closure_proofs (
 CREATE INDEX IF NOT EXISTS idx_live_position_closure_position
 ON live_position_closure_proofs(position_address, proof_slot);
 
+CREATE TABLE IF NOT EXISTS live_position_outcomes (
+    position_address TEXT PRIMARY KEY,
+    pool_address TEXT NOT NULL,
+    opened_decision_id TEXT NOT NULL,
+    closed_decision_id TEXT NOT NULL,
+    execution_count INTEGER NOT NULL,
+    token_x_wallet_delta_atomic TEXT NOT NULL,
+    token_y_wallet_delta_atomic TEXT NOT NULL,
+    composition_fee_x_atomic TEXT NOT NULL,
+    composition_fee_y_atomic TEXT NOT NULL,
+    earned_fee_x_atomic TEXT NOT NULL,
+    earned_fee_y_atomic TEXT NOT NULL,
+    reward_one_atomic TEXT NOT NULL,
+    reward_two_atomic TEXT NOT NULL,
+    network_fee_lamports INTEGER NOT NULL,
+    label_status TEXT NOT NULL CHECK(
+        label_status IN ('ATOMIC_ONLY', 'VALUED')
+    ),
+    created_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_position_outcomes_pool
+ON live_position_outcomes(pool_address, created_at);
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
