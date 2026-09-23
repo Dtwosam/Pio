@@ -1041,6 +1041,29 @@ BEGIN
     SELECT RAISE(ABORT, 'advanced_edge_evidence is immutable');
 END;
 
+CREATE TABLE IF NOT EXISTS phase9_work_queue_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    queue_sha256 TEXT NOT NULL,
+    criteria_json TEXT NOT NULL,
+    state_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase9_work_queue_snapshots_id
+ON phase9_work_queue_snapshots(id);
+
+CREATE TRIGGER IF NOT EXISTS phase9_work_queue_snapshots_no_update
+BEFORE UPDATE ON phase9_work_queue_snapshots
+BEGIN
+    SELECT RAISE(ABORT, 'phase9_work_queue_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase9_work_queue_snapshots_no_delete
+BEFORE DELETE ON phase9_work_queue_snapshots
+BEGIN
+    SELECT RAISE(ABORT, 'phase9_work_queue_snapshots is immutable');
+END;
+
 CREATE TABLE IF NOT EXISTS data_quality_checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     checked_at TEXT NOT NULL,
