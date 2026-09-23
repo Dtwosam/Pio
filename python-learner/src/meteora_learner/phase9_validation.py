@@ -496,6 +496,15 @@ def evaluate_phase9_research_bundle(
         and not _wallet_flow_lineage_valid(storage)
     ):
         reasons.append(
+            "qualified wallet-flow evidence must reproduce from immutable "
+            "source event IDs and SHA-256"
+        )
+    if (
+        criteria.require_wallet_flow_lineage
+        and wallet.qualified_records >= criteria.min_wallet_flow_pools
+        and not _wallet_flow_lineage_valid(storage)
+    ):
+        reasons.append(
             "qualified wallet-flow evidence must resolve to immutable "
             "position-event IDs with matching source hash"
         )
