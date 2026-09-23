@@ -11,6 +11,17 @@ from meteora_learner.storage import Storage
 
 
 @dataclass
+class DummyLineage:
+    cycle_id: str
+    champion_model_id: str
+    dataset_evidence_id: int
+    dataset_version: str
+    dataset_sha256: str
+    cutoff: str
+    output_file: str
+
+
+@dataclass
 class DummyReport:
     name: str
     research_qualified: bool = True
@@ -331,7 +342,7 @@ def test_research_refresh_runs_ready_missing_families_and_bundle(
         lambda storage: "cycle-1",
     )
     bandit_result = SimpleNamespace(
-        lineage=SimpleNamespace(
+        lineage=DummyLineage(
             cycle_id="cycle-1",
             champion_model_id="model",
             dataset_evidence_id=1,
