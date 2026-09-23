@@ -58,6 +58,16 @@ class BaselineCandidateAssessment:
 
 
 @dataclass(frozen=True)
+class BaselineProposal:
+    strategy: str
+    half_width: int
+    center_offset: int
+    decision_active_bin_id: int
+    min_bin_id: int
+    max_bin_id: int
+
+
+@dataclass(frozen=True)
 class BaselineSelection:
     pool_address: str
     phase2_ready: bool
@@ -65,7 +75,8 @@ class BaselineSelection:
     candidates_evaluated: int
     candidates_eligible: int
     research_choice: BaselineCandidateAssessment | None
-    actionable_choice: BaselineCandidateAssessment | None
+    research_proposal: BaselineProposal | None
+    actionable_proposal: BaselineProposal | None
     selection_rule: str
     assessments: tuple[BaselineCandidateAssessment, ...]
 
@@ -301,7 +312,20 @@ def select_deterministic_baseline(
 
     eligible = [item for item in assessments if item.eligible]
     research_choice = max(eligible, key=_rank_key) if eligible else None
-    actionable_choice = research_choice if phase2_gate.promotion_ready else None
+    research_proposal = None
+    if research_choice is not None:
+        center = scan.decision_active_bin_id + research_choice.center_offset
+        research_proposal = BaselineProposal(
+            strategy=research_choice.strategy,
+            half_width=research_choice.half_width,
+            center_offset=research_choice.center_offset,
+            decision_active_bin_id=scan.decision_active_bin_id,
+            min_bin_id=center - research_choice.half_width,
+            max_bin_id=center + research_choice.half_width,
+        )
+    actionable_proposal = (
+        research_proposal if phase2_gate.promotion_ready else None
+    )
 
     return BaselineSelection(
         pool_address=scan.pool_address,
@@ -310,7 +334,8 @@ def select_deterministic_baseline(
         candidates_evaluated=len(assessments),
         candidates_eligible=len(eligible),
         research_choice=research_choice,
-        actionable_choice=actionable_choice,
+        research_proposal=research_proposal,
+        actionable_proposal=actionable_proposal,
         selection_rule=(
             "lexicographic: excess_vs_hold_bps, range_survival, "
             "fee_minus_entry_cost, lower counterfactual share, narrower range"
