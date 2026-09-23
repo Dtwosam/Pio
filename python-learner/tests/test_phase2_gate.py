@@ -190,6 +190,7 @@ def test_phase2_gate_can_pass_when_required_capabilities_are_validated(tmp_path)
             rebalance_lifecycle=True,
             reward_accounting=True,
             transaction_fee_calibration=True,
+            add_execution_calibration=True,
             slippage_calibration=True,
         ),
     )
