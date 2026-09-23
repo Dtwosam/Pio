@@ -2096,3 +2096,51 @@ def test_work_queue_requests_api_pool_discovery_when_no_candidates_exist(
     )
     assert task.scope == "METEORA_POOLS"
     assert task.shell_command == "pio collect-once"
+
+
+def test_work_queue_surfaces_replay_valid_source_refresh(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+
+    values = {
+        "adaptive_regime": False,
+        "mint_risk": True,
+        "wallet_flow": True,
+        "portfolio_allocation": True,
+        "static_hedge": True,
+        "contextual_bandit": True,
+    }
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_source_freshness",
+        lambda storage: SimpleNamespace(
+            families=tuple(
+                SimpleNamespace(
+                    family=family,
+                    current=current,
+                    reason=(
+                        "new chain snapshot available"
+                        if not current
+                        else "current"
+                    ),
+                )
+                for family, current in values.items()
+            ),
+            by_family=lambda: dict(values),
+        ),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "RESEARCH_SOURCE_REFRESH"
+    )
+    assert task.scope == "adaptive_regime"
+    assert task.shell_command == "pio phase9-research-refresh-run"
+    assert "newer source evidence is available" in task.reason
+    assert "new chain snapshot available" in task.reason
+    assert queue.research_sources_current is False
