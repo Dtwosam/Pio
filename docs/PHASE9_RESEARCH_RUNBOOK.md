@@ -296,3 +296,23 @@ must define:
   research-only `PHASE9_PROMOTION_V1` milestone.
 
 Until such a design is implemented and validated, Phase 9 stays research-only.
+
+
+## Deterministic replay audit
+
+Phase 9 qualification must be reproducible from persisted immutable sources.
+Use the read-only replay audit to inspect every required research family:
+
+```bash
+pio phase9-replay-audit --require-verified
+```
+
+The report names the latest and qualified evidence IDs for adaptive/regime,
+mint-risk, wallet-flow, portfolio-allocation, static-hedge and contextual-
+bandit research. A family is `REPLAY_VERIFIED` only when enough qualified
+records exist, the research-only boundary is intact, and the persisted report
+reproduces from its bound source lineage. Missing evidence, boundary violations
+and replay mismatches fail the command when `--require-verified` is used.
+
+This audit is diagnostic and non-actionable. It does not grant LIVE policy
+authority.
