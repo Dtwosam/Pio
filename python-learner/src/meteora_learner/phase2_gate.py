@@ -10,6 +10,19 @@ from .reconciliation_corpus import (
 
 
 @dataclass(frozen=True)
+class Phase2CapabilityStatus:
+    position_amount_reconciliation: bool = True
+    fee_checkpoint_reconciliation: bool = True
+    composition_event_labels: bool = True
+    composition_formula_reconciliation: bool = False
+    rebalance_lifecycle: bool = False
+    reward_accounting: bool = False
+
+
+CURRENT_PHASE2_CAPABILITIES = Phase2CapabilityStatus()
+
+
+@dataclass(frozen=True)
 class Phase2PromotionCriteria:
     min_positions: int
     min_amount_bins: int
@@ -37,6 +50,8 @@ class Phase2PromotionGate:
     amount_coverage_rate: float
     exact_math_passed: bool
     sample_sufficiency_passed: bool
+    capability_gate_passed: bool
+    capabilities: Phase2CapabilityStatus
     promotion_ready: bool
     reasons: tuple[str, ...]
 
@@ -49,6 +64,7 @@ def evaluate_phase2_promotion_gate(
     *,
     criteria: Phase2PromotionCriteria,
     position_limit: int | None = None,
+    capabilities: Phase2CapabilityStatus = CURRENT_PHASE2_CAPABILITIES,
 ) -> Phase2PromotionGate:
     corpus = build_reconciliation_corpus(
         database_path,
@@ -107,7 +123,23 @@ def evaluate_phase2_promotion_gate(
     sample_sufficiency_passed = all(ok for ok, _ in sample_checks)
     reasons.extend(message for ok, message in sample_checks if not ok)
 
-    promotion_ready = exact_math_passed and sample_sufficiency_passed
+    required_capabilities = {
+        "position_amount_reconciliation": capabilities.position_amount_reconciliation,
+        "fee_checkpoint_reconciliation": capabilities.fee_checkpoint_reconciliation,
+        "composition_formula_reconciliation": capabilities.composition_formula_reconciliation,
+        "rebalance_lifecycle": capabilities.rebalance_lifecycle,
+        "reward_accounting": capabilities.reward_accounting,
+    }
+    capability_gate_passed = all(required_capabilities.values())
+    for name, ready in required_capabilities.items():
+        if not ready:
+            reasons.append(f"required capability not validated: {name}")
+
+    promotion_ready = (
+        exact_math_passed
+        and sample_sufficiency_passed
+        and capability_gate_passed
+    )
 
     return Phase2PromotionGate(
         criteria=criteria,
@@ -115,6 +147,8 @@ def evaluate_phase2_promotion_gate(
         amount_coverage_rate=amount_coverage_rate,
         exact_math_passed=exact_math_passed,
         sample_sufficiency_passed=sample_sufficiency_passed,
+        capability_gate_passed=capability_gate_passed,
+        capabilities=capabilities,
         promotion_ready=promotion_ready,
         reasons=tuple(reasons),
     )
