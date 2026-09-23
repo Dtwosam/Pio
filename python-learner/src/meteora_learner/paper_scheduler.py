@@ -315,7 +315,7 @@ def run_scheduled_paper_tick(
             max_positions=max_positions,
             safety_config=safety_config,
             management_config=management_config,
-            retry_failed=retry_failed,
+            retry_failed=(retry_failed or recovered),
             refresh_jupiter_quotes=refresh_jupiter_quotes,
         )
         status = tick.status
@@ -329,7 +329,7 @@ def run_scheduled_paper_tick(
             account_id=account_id,
             owner_id=worker,
             status=status,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=max(datetime.now(timezone.utc), now),
         )
 
     return ScheduledPaperTickReport(
