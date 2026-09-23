@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Build Phases
 
-Status: v0.6
+Status: v0.7
 
 ## Phase 0 — Foundation
 Status: complete.
@@ -8,16 +8,8 @@ Status: complete.
 ## Phase 1 — Market Data Engine
 Status: implementation complete; extended live validation pending.
 
-Built:
-- Meteora Data API ingestion
-- raw + normalized pool/OHLCV/volume storage
-- protocol-fee separation
-- quality checks
-- retry/rate limiting
-- endpoint failure isolation
-
 ## Phase 2 — Position Simulator / Backtester
-Status: advanced implementation; promotion gate remains closed.
+Status: standard-SPL implementation complete; promotion evidence pending.
 
 Built:
 - high-precision DLMM bin math
@@ -26,44 +18,48 @@ Built:
 - withdrawal/pro-rata amount math
 - exact fee-checkpoint math
 - effective reward-checkpoint math
+- target-time dynamic fee-state replay
 - active-bin composition-fee model
+- slot-bounded pre-add pool captures
+- exact pool/bin-array prestate gap verification
+- exact positive CompositionFee event reconciliation
 - read-only pool/bin/DynamicPosition Rust inspection
-- reward campaign metadata and checkpoint storage
 - multi-snapshot small-LP chain replay
 - reward attribution
 - observation-boundary rebalance lifecycle replay
-- counterfactual size/zero-supply guards
 - Token-2022 fail-closed gate
 - exact amount/fee/reward DynamicPosition reconciliation
 - full-history reconciliation corpus
-- operator-supplied Phase 2 sample thresholds
-- fail-closed capability promotion gate
-- position-history event collection
 - Anchor event-CPI decoding for AddLiquidity, CompositionFee, RemoveLiquidity and Rebalancing
 - transaction receipt fee/compute-unit capture
 - requested-vs-actual add execution calibration
+- rebalance transaction guard decoding and calibration
+- evidence-driven Phase 2 capability gate
+- actionable Phase 2 calibration work queue
 - chain-backed candidate scanner
 
-Still blocking Phase 2 promotion:
-- collect a meaningful fresh real-position corpus with reward growth
-- independently reconcile composition-fee formula against real pre-deposit state
-- broader execution/slippage calibration
+Promotion still requires real evidence:
+- a meaningful fresh real-position corpus with positive reward growth
+- enough verified positive composition-fee samples
+- complete add execution request/event coverage for the selected corpus
+- enough real rebalance guard samples with no unexplained violations
+- real transaction-fee receipt coverage
 - extended high-frequency chain collection
-- Token-2022 transfer-fee support if Token-2022 pools enter scope
 
-Current capability gate deliberately remains false for:
-- composition_formula_reconciliation
-- slippage_calibration
+Token-2022 transfer-fee support remains outside the current high-fidelity path and fails closed.
 
 Exit condition:
-- exact deterministic reconciliation passes;
-- operator-selected sample minimums pass;
-- all required fidelity capabilities pass.
+- exact deterministic amount/fee/reward reconciliation passes;
+- exact positive composition-fee samples pass;
+- add/rebalance execution guards pass at the configured sample minimums;
+- transaction-cost sample minimums pass;
+- operator-selected coverage/sample thresholds pass;
+- no required capability remains unvalidated.
 
 ## Phase 3 — Deterministic Baseline Strategy
 Status: candidate comparison exists; policy not promoted.
 
-Next after Phase 2:
+Next after the Phase 2 evidence gate:
 - pool safety filters
 - comparable value/PnL normalization
 - deterministic entry/range/strategy policy
