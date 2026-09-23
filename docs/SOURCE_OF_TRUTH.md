@@ -325,3 +325,23 @@ Adaptive-range output always carries `research_only=true` and
 `policy_actionable=false`. A `RESEARCH_READY` status means the evidence is
 sufficient to study; it does not authorize entry, rebalance, signing or
 submission.
+
+
+### Phase 9 mint and flow research boundary
+
+Mint-risk research uses authoritative Solana mint accounts captured by the
+read-only Rust executor. Python persists those snapshots immutably and evaluates
+only observations available at or before the requested research cutoff.
+Research checks token-program consistency with the DLMM pool, initialization,
+mint/freeze authority revocation, decimal bounds, reward mints, snapshot
+freshness and Token-2022 extension presence. Unknown or stale evidence fails
+closed. Token-2022 extension bytes are treated conservatively unless explicitly
+allowed for a research run because the base inspector does not yet classify
+each extension type.
+
+Wallet-flow research remains descriptive. It requires minimum event/user
+coverage and rejects highly concentrated activity before the evidence can be
+research-qualified. Portfolio allocation research is likewise non-actionable:
+it caps per-pool concentration, number of positions and minimum budget
+utilization. None of these Phase 9 outputs may alter LIVE policy without a
+separate future promotion boundary.
