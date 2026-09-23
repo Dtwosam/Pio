@@ -88,3 +88,73 @@ def test_transaction_event_ingest_is_idempotent(tmp_path):
         conn.close()
 
     assert count == 2
+
+
+
+def test_rebalance_lifecycle_event_fields_are_persisted(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    payload = {
+        "signature": "rebalance-sig",
+        "slot": 999,
+        "block_time": 1700000100,
+        "network_fee_lamports": 9000,
+        "compute_units_consumed": 250000,
+        "succeeded": True,
+        "events": [
+            {
+                "event_index": 0,
+                "parent_ix_index": 3,
+                "event": {
+                    "event_type": "Rebalancing",
+                    "event": {
+                        "lb_pair": "pool",
+                        "position": "position",
+                        "owner": "owner",
+                        "active_bin_id": 12,
+                        "x_withdrawn_amount": "10",
+                        "x_added_amount": "8",
+                        "y_withdrawn_amount": "20",
+                        "y_added_amount": "18",
+                        "x_fee_amount": "1",
+                        "y_fee_amount": "2",
+                        "old_min_id": 1,
+                        "old_max_id": 5,
+                        "new_min_id": 10,
+                        "new_max_id": 14,
+                        "reward_one": "3",
+                        "reward_two": "4",
+                    },
+                },
+            }
+        ],
+    }
+
+    result = ingest_transaction_events(storage, payload)
+    assert result.events == 1
+
+    conn = sqlite3.connect(storage.path)
+    try:
+        row = conn.execute(
+            """
+            SELECT event_type, position_address, owner_address,
+                   x_withdrawn_amount, x_added_amount,
+                   old_min_id, new_max_id, reward_one
+            FROM chain_transaction_events
+            WHERE signature = 'rebalance-sig'
+            """
+        ).fetchone()
+        receipt = conn.execute(
+            """
+            SELECT network_fee_lamports, compute_units_consumed, succeeded
+            FROM chain_transaction_snapshots
+            WHERE signature = 'rebalance-sig'
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row == (
+        "Rebalancing", "position", "owner",
+        "10", "8", 1, 14, "3",
+    )
+    assert receipt == (9000, 250000, 1)
