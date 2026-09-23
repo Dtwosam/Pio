@@ -406,3 +406,20 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def transaction_snapshot(self, signature: str) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT observed_at, signature, slot, block_time,
+                       network_fee_lamports, compute_units_consumed, succeeded
+                FROM chain_transaction_snapshots
+                WHERE signature = ?
+                LIMIT 1
+                """,
+                (signature,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
