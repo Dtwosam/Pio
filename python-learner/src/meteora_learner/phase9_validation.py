@@ -16,7 +16,11 @@ from .portfolio_allocation import (
     PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
     PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
 )
-from .static_hedge import STATIC_HEDGE_EVIDENCE_TYPE
+from .static_hedge import (
+    STATIC_HEDGE_EVIDENCE_TYPE,
+    StaticHedgeSourceObservation,
+    static_hedge_source_sha256,
+)
 from .storage import Storage
 from .wallet_flow import (
     WALLET_FLOW_EVIDENCE_TYPE,
@@ -34,6 +38,7 @@ class Phase9ResearchBundleCriteria:
     require_wallet_flow_lineage: bool = True
     require_mint_snapshot_lineage: bool = True
     min_static_hedge_pools: int = 1
+    require_static_hedge_lineage: bool = True
     require_adaptive_multi_pool: bool = True
     require_adaptive_snapshot_lineage: bool = True
     require_portfolio_allocation: bool = True
@@ -426,6 +431,110 @@ def _allocation_lineage_valid(storage: Storage) -> bool:
     )
 
 
+def _static_hedge_lineage_valid(
+    storage: Storage,
+) -> bool:
+    rows = _latest_by_pool(
+        storage,
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+    )
+    qualified = [row for row in rows if row["qualified"]]
+    if not qualified:
+        return False
+
+    with storage.connect() as conn:
+        for row in qualified:
+            evidence = row["evidence"]
+            raw_observations = evidence.get("source_observations")
+            expected_sha = str(
+                evidence.get("source_path_sha256", "")
+            ).strip()
+            if (
+                not isinstance(raw_observations, list)
+                or not raw_observations
+                or not expected_sha
+            ):
+                return False
+
+            observations: list[StaticHedgeSourceObservation] = []
+            for item in raw_observations:
+                if not isinstance(item, dict):
+                    return False
+                try:
+                    observation = StaticHedgeSourceObservation(
+                        pool_snapshot_id=int(item["pool_snapshot_id"]),
+                        bin_liquidity_snapshot_id=int(
+                            item["bin_liquidity_snapshot_id"]
+                        ),
+                        pool_address=str(item["pool_address"]),
+                        observed_at=str(item["observed_at"]),
+                        active_bin_id=int(item["active_bin_id"]),
+                        price_q64=int(item["price_q64"]),
+                    )
+                except (KeyError, TypeError, ValueError):
+                    return False
+                if observation.pool_address != str(
+                    row["pool_address"]
+                ):
+                    return False
+
+                pool_row = conn.execute(
+                    """
+                    SELECT pool_address, observed_at, active_bin_id
+                    FROM chain_pool_snapshots
+                    WHERE id = ?
+                    """,
+                    (observation.pool_snapshot_id,),
+                ).fetchone()
+                if pool_row is None:
+                    return False
+                if (
+                    str(pool_row[0]) != observation.pool_address
+                    or str(pool_row[1]) != observation.observed_at
+                    or int(pool_row[2]) != observation.active_bin_id
+                ):
+                    return False
+
+                bin_row = conn.execute(
+                    """
+                    SELECT pool_address, observed_at, bin_id, price
+                    FROM bin_liquidity_snapshots
+                    WHERE id = ?
+                    """,
+                    (observation.bin_liquidity_snapshot_id,),
+                ).fetchone()
+                if bin_row is None:
+                    return False
+                if (
+                    str(bin_row[0]) != observation.pool_address
+                    or str(bin_row[1]) != observation.observed_at
+                    or int(bin_row[2]) != observation.active_bin_id
+                    or int(str(bin_row[3])) != observation.price_q64
+                ):
+                    return False
+
+                as_of = evidence.get("as_of")
+                if (
+                    as_of is not None
+                    and conn.execute(
+                        """
+                        SELECT julianday(?) <= julianday(?)
+                        """,
+                        (
+                            observation.observed_at,
+                            str(as_of),
+                        ),
+                    ).fetchone()[0]
+                    != 1
+                ):
+                    return False
+                observations.append(observation)
+
+            if static_hedge_source_sha256(observations) != expected_sha:
+                return False
+    return True
+
+
 def _bandit_lineage_valid(storage: Storage) -> bool:
     rows = _latest_by_pool(
         storage,
@@ -634,6 +743,15 @@ def evaluate_phase9_research_bundle(
         reasons.append(
             f"qualified static-hedge pools {hedge.qualified_records} are below "
             f"{criteria.min_static_hedge_pools}"
+        )
+    if (
+        criteria.require_static_hedge_lineage
+        and hedge.qualified_records >= criteria.min_static_hedge_pools
+        and not _static_hedge_lineage_valid(storage)
+    ):
+        reasons.append(
+            "qualified static-hedge evidence must resolve to immutable "
+            "pool/bin price-path IDs with matching source hash"
         )
     if (
         criteria.require_contextual_bandit
