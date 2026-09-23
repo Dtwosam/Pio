@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .adaptive_range import AdaptiveRangeCriteria
@@ -15,6 +16,7 @@ class Phase9PoolCohortCriteria:
     min_research_pools: int = 3
     target_pools: int = 5
     max_sampling_pools: int = 8
+    max_api_snapshot_age_seconds: int = 10_800
 
     def __post_init__(self) -> None:
         if self.min_research_pools < 1:
@@ -26,6 +28,10 @@ class Phase9PoolCohortCriteria:
         if self.max_sampling_pools < self.target_pools:
             raise ValueError(
                 "max_sampling_pools cannot be below target_pools"
+            )
+        if self.max_api_snapshot_age_seconds < 0:
+            raise ValueError(
+                "max_api_snapshot_age_seconds cannot be negative"
             )
 
 
@@ -53,6 +59,8 @@ class Phase9PoolCohortReport:
     required_observations: int
     criteria: Phase9PoolCohortCriteria
     api_pools_seen: int
+    stale_api_pools_excluded: int
+    api_ranking_as_of: str | None
     chain_pools_seen: int
     desired_pools: tuple[str, ...]
     research_pools: tuple[str, ...]
@@ -66,7 +74,26 @@ class Phase9PoolCohortReport:
         return asdict(self)
 
 
-def _ranked_api_pools(storage: Storage) -> tuple[dict[str, Any], ...]:
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("Phase 9 cohort timestamps require timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _ranked_api_pools(
+    storage: Storage,
+    *,
+    as_of: str | None,
+    max_age_seconds: int,
+) -> tuple[tuple[dict[str, Any], ...], int]:
+    cutoff_text = None
+    if as_of is not None:
+        cutoff_text = (
+            _parse_time(as_of)
+            - timedelta(seconds=max_age_seconds)
+        ).isoformat()
+
     with storage.connect() as conn:
         rows = conn.execute(
             """
@@ -92,7 +119,8 @@ def _ranked_api_pools(storage: Storage) -> tuple[dict[str, Any], ...]:
                 address ASC
             """
         ).fetchall()
-    return tuple(
+
+    latest = tuple(
         {
             "pool_address": str(row[0]),
             "observed_at": str(row[1]),
@@ -103,6 +131,17 @@ def _ranked_api_pools(storage: Storage) -> tuple[dict[str, Any], ...]:
         }
         for row in rows
     )
+    if cutoff_text is None:
+        return latest, 0
+
+    cutoff = _parse_time(cutoff_text)
+    fresh = tuple(
+        item
+        for item in latest
+        if _parse_time(str(item["observed_at"])) >= cutoff
+        and _parse_time(str(item["observed_at"])) <= _parse_time(as_of)
+    )
+    return fresh, len(latest) - len(fresh)
 
 
 def _chain_counts(storage: Storage) -> dict[str, int]:
@@ -135,8 +174,13 @@ def evaluate_phase9_pool_cohort(
     storage: Storage,
     *,
     criteria: Phase9PoolCohortCriteria = Phase9PoolCohortCriteria(),
+    as_of: str | None = None,
 ) -> Phase9PoolCohortReport:
-    api_pools = _ranked_api_pools(storage)
+    api_pools, stale_api_pools = _ranked_api_pools(
+        storage,
+        as_of=as_of,
+        max_age_seconds=criteria.max_api_snapshot_age_seconds,
+    )
     chain_counts = _chain_counts(storage)
     required = _required_observations()
 
@@ -230,6 +274,11 @@ def evaluate_phase9_pool_cohort(
     )
 
     reasons: list[str] = []
+    if stale_api_pools:
+        reasons.append(
+            f"{stale_api_pools} stale API pool ranking snapshot(s) were "
+            "excluded from cohort steering"
+        )
     if len(desired_pools) < criteria.min_research_pools:
         reasons.append(
             f"ranked pool universe {len(desired_pools)} is below "
@@ -254,6 +303,8 @@ def evaluate_phase9_pool_cohort(
         required_observations=required,
         criteria=criteria,
         api_pools_seen=len(api_pools),
+        stale_api_pools_excluded=stale_api_pools,
+        api_ranking_as_of=as_of,
         chain_pools_seen=len(chain_counts),
         desired_pools=desired_pools,
         research_pools=research_pools,
