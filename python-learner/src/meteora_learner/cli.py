@@ -2152,6 +2152,10 @@ def main() -> None:
         default=2,
     )
     phase9_mint_plan.add_argument(
+        "--pools",
+        help="Optional comma-separated exact pool set instead of highest-depth automatic selection",
+    )
+    phase9_mint_plan.add_argument(
         "--max-snapshot-age-seconds",
         type=int,
         default=3600,
@@ -2174,6 +2178,10 @@ def main() -> None:
         "--target-pools",
         type=int,
         default=2,
+    )
+    phase9_mint_run.add_argument(
+        "--pools",
+        help="Optional comma-separated exact pool set instead of highest-depth automatic selection",
     )
     phase9_mint_run.add_argument(
         "--max-snapshot-age-seconds",
@@ -3982,6 +3990,7 @@ def main() -> None:
                 activity_percentile=args.activity_percentile,
                 quiet_percentile=args.quiet_percentile,
             ),
+            pool_addresses=mint_pools,
             as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
@@ -4873,6 +4882,15 @@ def main() -> None:
     if args.command == "phase9-mint-capture-plan":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
+        mint_pools = (
+            tuple(
+                item.strip()
+                for item in args.pools.split(",")
+                if item.strip()
+            )
+            if args.pools
+            else None
+        )
         result = build_phase9_mint_capture_plan(
             storage,
             criteria=Phase9MintCaptureCriteria(
@@ -4894,6 +4912,15 @@ def main() -> None:
     if args.command == "phase9-mint-capture-run":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
+        mint_pools = (
+            tuple(
+                item.strip()
+                for item in args.pools.split(",")
+                if item.strip()
+            )
+            if args.pools
+            else None
+        )
         result = run_phase9_mint_capture(
             storage,
             criteria=Phase9MintCaptureCriteria(
@@ -4905,6 +4932,7 @@ def main() -> None:
                     not args.exclude_reward_mints
                 ),
             ),
+            pool_addresses=mint_pools,
             rust_manifest_path=args.rust_manifest_path,
             rust_binary_path=args.rust_binary_path,
             timeout_seconds=args.timeout_seconds,
