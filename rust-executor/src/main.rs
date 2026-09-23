@@ -1,5 +1,6 @@
 mod events;
 mod models;
+mod prestate_verifier;
 mod risk;
 mod state_reader;
 mod transaction_events;
@@ -11,7 +12,8 @@ fn usage() {
         "Usage:
   meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
-  meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>"
+  meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>
+  meteora-executor verify-prestate <RPC_URL> <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]"
     );
 }
 
@@ -53,6 +55,30 @@ async fn main() -> Result<()> {
             let snapshot =
                 transaction_events::inspect_transaction_events(&rpc_url, &signature).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "verify-prestate" => {
+            let rpc_url = args.next().context("RPC_URL is required")?;
+            let signature = args.next().context("SIGNATURE is required")?;
+            let capture_slot_start: u64 = args
+                .next()
+                .context("CAPTURE_START_SLOT is required")?
+                .parse()
+                .context("CAPTURE_START_SLOT must be an integer")?;
+            let capture_slot_end: u64 = args
+                .next()
+                .context("CAPTURE_END_SLOT is required")?
+                .parse()
+                .context("CAPTURE_END_SLOT must be an integer")?;
+            let addresses: Vec<String> = args.collect();
+            let result = prestate_verifier::verify_prestate_gap(
+                &rpc_url,
+                &signature,
+                capture_slot_start,
+                capture_slot_end,
+                &addresses,
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
         }
         _ => {
             usage();
