@@ -100,6 +100,7 @@ from .paper_challenger import (
 )
 from .phase3_plan import build_phase3_research_plan
 from .multi_pool_research import PoolResearchInput, build_multi_pool_research
+from .market_regime import DLMMRegimeCriteria, classify_dlmm_regime
 from .ml_challenger import MLChallengerCriteria
 from .ml_inference import MLInferenceConfig
 from .ml_registry import model_record, start_paper_challenger
@@ -1041,6 +1042,47 @@ def main() -> None:
     )
     phase8_validate.add_argument("--persist-ready", action="store_true")
     phase8_validate.add_argument("--require-ready", action="store_true")
+
+    dlmm_regime = subparsers.add_parser(
+        "dlmm-regime-research",
+        help="Classify a no-lookahead DLMM active-bin movement regime",
+    )
+    dlmm_regime.add_argument("--pool", required=True)
+    dlmm_regime.add_argument(
+        "--lookback-observations",
+        type=int,
+        default=72,
+    )
+    dlmm_regime.add_argument(
+        "--recent-observations",
+        type=int,
+        default=8,
+    )
+    dlmm_regime.add_argument(
+        "--min-observations",
+        type=int,
+        default=16,
+    )
+    dlmm_regime.add_argument(
+        "--trend-efficiency-threshold",
+        type=float,
+        default=0.65,
+    )
+    dlmm_regime.add_argument(
+        "--activity-percentile",
+        type=float,
+        default=0.75,
+    )
+    dlmm_regime.add_argument(
+        "--quiet-percentile",
+        type=float,
+        default=0.25,
+    )
+    dlmm_regime.add_argument("--as-of")
+    dlmm_regime.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
 
     adaptive_range = subparsers.add_parser(
         "adaptive-range-research",
@@ -2455,6 +2497,31 @@ def main() -> None:
             output["persisted"] = None
         print(json.dumps(output, indent=2))
         if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "dlmm-regime-research":
+        settings = Settings.from_env()
+        result = classify_dlmm_regime(
+            Storage(settings.database_path),
+            pool_address=args.pool,
+            criteria=DLMMRegimeCriteria(
+                lookback_observations=args.lookback_observations,
+                recent_observations=args.recent_observations,
+                min_observations=args.min_observations,
+                trend_efficiency_threshold=(
+                    args.trend_efficiency_threshold
+                ),
+                activity_percentile=args.activity_percentile,
+                quiet_percentile=args.quiet_percentile,
+            ),
+            as_of=args.as_of,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if (
+            args.require_ready
+            and result.status != "RESEARCH_READY"
+        ):
             raise SystemExit(2)
         return
 
