@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import json
 from typing import Any, Callable
 
@@ -158,6 +159,13 @@ def _latest_retraining_dataset_cycle(
     return cycle_id
 
 
+def _source_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("Phase 9 source timestamps must be timezone-aware")
+    return parsed.astimezone(timezone.utc)
+
+
 def _mint_evaluation_as_of(
     storage: Storage,
     *,
@@ -169,27 +177,23 @@ def _mint_evaluation_as_of(
         for item in mint_plan.candidates
         if item.latest_snapshot_at is not None
     ]
-    if selected_pools:
-        placeholders = ",".join("?" for _ in selected_pools)
-        with storage.connect() as conn:
-            rows = conn.execute(
-                f"""
+    with storage.connect() as conn:
+        for pool in selected_pools:
+            row = conn.execute(
+                """
                 SELECT observed_at
                 FROM chain_pool_snapshots
-                WHERE pool_address IN ({placeholders})
-                  AND id IN (
-                      SELECT MAX(id)
-                      FROM chain_pool_snapshots
-                      WHERE pool_address IN ({placeholders})
-                      GROUP BY pool_address
-                  )
+                WHERE pool_address = ?
+                ORDER BY julianday(observed_at) DESC, id DESC
+                LIMIT 1
                 """,
-                (*selected_pools, *selected_pools),
-            ).fetchall()
-        source_times.extend(str(row[0]) for row in rows)
+                (pool,),
+            ).fetchone()
+            if row is not None:
+                source_times.append(str(row[0]))
     if not source_times:
         raise ValueError("mint research has no source timestamps")
-    return max(source_times)
+    return max(source_times, key=_source_time)
 
 
 def _replay_statuses(
