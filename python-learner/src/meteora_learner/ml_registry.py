@@ -16,9 +16,9 @@ REJECTED = "REJECTED"
 ROLLED_BACK = "ROLLED_BACK"
 
 _ALLOWED_TRANSITIONS = {
-    OFFLINE_CANDIDATE: {OFFLINE_QUALIFIED, REJECTED},
-    OFFLINE_QUALIFIED: {PAPER_CHALLENGER, REJECTED},
-    PAPER_CHALLENGER: {CHAMPION, REJECTED},
+    OFFLINE_CANDIDATE: {REJECTED},
+    OFFLINE_QUALIFIED: {REJECTED},
+    PAPER_CHALLENGER: {REJECTED},
     CHAMPION: {ROLLED_BACK},
     REJECTED: set(),
     ROLLED_BACK: set(),
@@ -107,6 +107,64 @@ def register_ml_v1_bundle(
     if raw is None:
         raise RuntimeError("registered model disappeared")
     return _to_record(raw)
+
+
+def qualify_offline_challenger(
+    storage: Storage,
+    *,
+    model_id: str,
+    validation: Any,
+    notes: str | None = None,
+) -> ModelRegistryRecord:
+    raw = storage.model_registry_entry(model_id)
+    if raw is None:
+        raise ValueError(f"unknown model_id: {model_id}")
+    if str(raw["status"]) != OFFLINE_CANDIDATE:
+        raise ValueError("model is not in OFFLINE_CANDIDATE status")
+    if not bool(getattr(validation, "offline_qualified", False)):
+        raise ValueError("offline challenger has not passed validation")
+    if not bool(getattr(validation, "phase3_ready", False)):
+        raise ValueError("Phase 3 deterministic policy is not promoted")
+    if str(getattr(validation, "validation_start", "")) != str(
+        raw.get("validation_start")
+    ):
+        raise ValueError("offline validation window start does not match model")
+    if str(getattr(validation, "validation_end", "")) != str(
+        raw.get("validation_end")
+    ):
+        raise ValueError("offline validation window end does not match model")
+
+    to_record = getattr(validation, "to_record", None)
+    evidence = to_record() if callable(to_record) else {
+        "offline_qualified": True,
+        "phase3_ready": True,
+        "validation_start": getattr(validation, "validation_start"),
+        "validation_end": getattr(validation, "validation_end"),
+    }
+    storage.save_model_offline_evidence(
+        model_id=model_id,
+        evidence_type="OFFLINE_CHALLENGER_V1",
+        qualified=True,
+        evidence=evidence,
+    )
+    storage.qualify_model_offline(model_id, notes=notes)
+    updated = storage.model_registry_entry(model_id)
+    if updated is None:
+        raise RuntimeError("qualified model disappeared")
+    return _to_record(updated)
+
+
+def start_paper_challenger(
+    storage: Storage,
+    *,
+    model_id: str,
+    notes: str | None = None,
+) -> ModelRegistryRecord:
+    storage.start_model_paper_challenger(model_id, notes=notes)
+    updated = storage.model_registry_entry(model_id)
+    if updated is None:
+        raise RuntimeError("paper challenger disappeared")
+    return _to_record(updated)
 
 
 def transition_model(
