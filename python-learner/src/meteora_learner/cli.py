@@ -32,16 +32,19 @@ from .phase_promotion import (
     PHASE5,
     PHASE6,
     PHASE7,
+    PHASE8,
     persist_phase2_promotion,
     persist_phase5_promotion,
     persist_phase6_promotion,
     persist_phase7_promotion,
+    persist_phase8_promotion,
     phase_promotion_state,
 )
 from .phase3_validation import Phase3PromotionCriteria
 from .phase5_validation import Phase5PromotionCriteria, evaluate_phase5_promotion
 from .phase6_validation import Phase6PromotionCriteria, evaluate_phase6_promotion
 from .phase7_validation import Phase7PromotionCriteria, evaluate_phase7_promotion
+from .phase8_validation import Phase8PromotionCriteria, evaluate_phase8_promotion
 from .phase3_workflow import (
     Phase3ValidationInput,
     validate_phase3_from_chain,
@@ -817,7 +820,7 @@ def main() -> None:
 
     subparsers.add_parser(
         "phase-status",
-        help="Print persisted Phase 2, Phase 3, Phase 5, Phase 6 and Phase 7 promotion state",
+        help="Print persisted Phase 2, Phase 3, Phase 5, Phase 6, Phase 7 and Phase 8 promotion state",
     )
 
     phase3_validate = subparsers.add_parser(
@@ -990,6 +993,48 @@ def main() -> None:
     )
     phase7_validate.add_argument("--persist-ready", action="store_true")
     phase7_validate.add_argument("--require-ready", action="store_true")
+
+    phase8_validate = subparsers.add_parser(
+        "phase8-validate",
+        help="Evaluate continuous-learning evidence for Phase 8 promotion",
+    )
+    phase8_validate.add_argument(
+        "--min-completed-cycles",
+        type=int,
+        default=1,
+    )
+    phase8_validate.add_argument(
+        "--min-live-labels",
+        type=int,
+        default=10,
+    )
+    phase8_validate.add_argument(
+        "--max-realized-drawdown-bps",
+        type=int,
+        default=2000,
+    )
+    phase8_validate.add_argument(
+        "--max-single-loss-bps",
+        type=int,
+        default=1500,
+    )
+    phase8_validate.add_argument(
+        "--min-win-rate",
+        type=float,
+        default=0.30,
+    )
+    phase8_validate.add_argument(
+        "--min-mean-return-bps",
+        type=float,
+        default=-100.0,
+    )
+    phase8_validate.add_argument(
+        "--max-mean-abs-prediction-error-bps",
+        type=float,
+        default=1500.0,
+    )
+    phase8_validate.add_argument("--persist-ready", action="store_true")
+    phase8_validate.add_argument("--require-ready", action="store_true")
 
     ml_train = subparsers.add_parser(
         "ml-train-csv",
@@ -2188,6 +2233,10 @@ def main() -> None:
                 storage,
                 phase_name=PHASE7,
             ).__dict__,
+            "phase8": phase_promotion_state(
+                storage,
+                phase_name=PHASE8,
+            ).__dict__,
         }
         print(json.dumps(output, indent=2))
         return
@@ -2318,6 +2367,38 @@ def main() -> None:
         output = result.to_record()
         if args.persist_ready and result.promotion_ready:
             output["persisted"] = persist_phase7_promotion(
+                storage,
+                report=result,
+            ).__dict__
+        else:
+            output["persisted"] = None
+        print(json.dumps(output, indent=2))
+        if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase8-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase8_promotion(
+            storage,
+            criteria=Phase8PromotionCriteria(
+                min_completed_cycles=args.min_completed_cycles,
+                min_live_labels=args.min_live_labels,
+                max_realized_drawdown_bps=(
+                    args.max_realized_drawdown_bps
+                ),
+                max_single_loss_bps=args.max_single_loss_bps,
+                min_win_rate=args.min_win_rate,
+                min_mean_return_bps=args.min_mean_return_bps,
+                max_mean_abs_prediction_error_bps=(
+                    args.max_mean_abs_prediction_error_bps
+                ),
+            ),
+        )
+        output = result.to_record()
+        if args.persist_ready and result.promotion_ready:
+            output["persisted"] = persist_phase8_promotion(
                 storage,
                 report=result,
             ).__dict__
