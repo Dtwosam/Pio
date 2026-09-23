@@ -19,8 +19,15 @@ complete enough for review. It does **not** mean Phase 9 may affect LIVE policy.
 
 ## Prerequisite
 
-Phase 8 must be persistently promoted before Phase 9 evidence can be
-research-qualified.
+Phase 8 must be persistently promoted **and still current** before Phase 9 evidence can be research-qualified. Currentness rechecks the stored Phase 8 criteria against the current champion, completed-cycle lineage, continuous-promotion evidence and live champion health.
+
+Check the prerequisite directly:
+
+```bash
+pio phase8-promotion-audit --require-current
+```
+
+A rolled-back champion, changed champion lineage, invalid promotion history, or a current live-health breach makes Phase 8 stale and blocks new Phase 9 qualification even if the historical Phase 8 promotion row still exists.
 
 ## Research families
 
