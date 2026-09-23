@@ -31,6 +31,11 @@ class ChainScanResult:
     accepted: int
     rejected: int
     candidates: tuple[ChainCandidateOutcome, ...]
+    amount_x: int = 0
+    amount_y: int = 0
+    decision_observed_at: str | None = None
+    max_share_bps: int = 500
+    favor_x_in_active_bin: bool = False
 
     def to_record(self) -> dict[str, object]:
         return asdict(self)
@@ -191,4 +196,9 @@ def scan_chain_candidates(
         accepted=accepted,
         rejected=len(outcomes) - accepted,
         candidates=tuple(outcomes),
+        amount_x=amount_x,
+        amount_y=amount_y,
+        decision_observed_at=selected_times[-1],
+        max_share_bps=max_share_bps,
+        favor_x_in_active_bin=favor_x_in_active_bin,
     )
