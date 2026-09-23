@@ -334,6 +334,7 @@ Built:
 - explicit rollback-trigger simulation with user-supplied sample-depth, loss/drawdown, performance and data-integrity thresholds; stale rollout evidence or hard breaches fail toward rollback while insufficient clean samples remain observation-pending
 - consolidated non-actionable Phase 9 pre-wiring audit requiring current policy-readiness, current bounded-rollout simulation and a current rollback simulation resolved to `NO_ROLLBACK_TRIGGER`
 - dependency-aware Phase 9 work queue and checksum-verified progress snapshots now continue past research promotion through shadow evidence, authorization, controlled holdout, bounded rollout, rollback simulation and pre-wiring readiness
+- immutable checksum-bound pre-wiring manifest binding the exact authorization, controlled-validation, rollout and rollback evidence IDs/hashes, with automatic staleness when any component advances
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
