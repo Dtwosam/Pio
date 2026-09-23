@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -63,6 +65,8 @@ class WalletFlowResearchReport:
     classified_remove_usd: float
     classified_net_add_usd: float
     direction_fidelity: str
+    source_event_ids: tuple[int, ...]
+    source_event_sha256: str
     criteria: WalletFlowCriteria
     research_qualified: bool
     reasons: tuple[str, ...]
@@ -70,6 +74,18 @@ class WalletFlowResearchReport:
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def wallet_flow_source_sha256(
+    records: list[dict[str, Any]],
+) -> str:
+    canonical = json.dumps(
+        records,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _usd(value: Any) -> Decimal:
@@ -118,7 +134,8 @@ def research_wallet_flow(
         if as_of is None:
             rows = conn.execute(
                 """
-                SELECT created_at, user_address, event_type, total_usd
+                SELECT id, created_at, user_address, event_type, total_usd,
+                       signature, ix_index, position_address
                 FROM position_event_history
                 WHERE pool_address = ?
                 ORDER BY julianday(created_at) DESC, id DESC
@@ -129,7 +146,8 @@ def research_wallet_flow(
         else:
             rows = conn.execute(
                 """
-                SELECT created_at, user_address, event_type, total_usd
+                SELECT id, created_at, user_address, event_type, total_usd,
+                       signature, ix_index, position_address
                 FROM position_event_history
                 WHERE pool_address = ?
                   AND julianday(created_at) <= julianday(?)
@@ -151,10 +169,28 @@ def research_wallet_flow(
     add_usd = Decimal(0)
     remove_usd = Decimal(0)
 
+    source_records = [
+        {
+            "id": int(row[0]),
+            "created_at": str(row[1]),
+            "user_address": str(row[2]),
+            "event_type": str(row[3]),
+            "total_usd": str(row[4]),
+            "signature": str(row[5]),
+            "ix_index": int(row[6]),
+            "position_address": str(row[7]),
+        }
+        for row in rows
+    ]
+    source_event_ids = tuple(
+        int(record["id"]) for record in source_records
+    )
+    source_event_sha256 = wallet_flow_source_sha256(source_records)
+
     for row in rows:
-        user = str(row[1])
-        event_type = str(row[2])
-        activity = _usd(row[3])
+        user = str(row[2])
+        event_type = str(row[3])
+        activity = _usd(row[4])
         count, total = per_user.get(user, (0, Decimal(0)))
         per_user[user] = (count + 1, total + activity)
 
@@ -286,6 +322,8 @@ def research_wallet_flow(
         classified_remove_usd=float(remove_usd),
         classified_net_add_usd=float(add_usd - remove_usd),
         direction_fidelity=direction_fidelity,
+        source_event_ids=source_event_ids,
+        source_event_sha256=source_event_sha256,
         criteria=criteria,
         research_qualified=research_qualified,
         reasons=tuple(reasons),
