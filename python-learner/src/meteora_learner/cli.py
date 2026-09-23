@@ -8,6 +8,11 @@ import pandas as pd
 
 from .add_execution import build_add_execution_calibration
 from .adaptive_range import AdaptiveRangeCriteria, research_adaptive_range
+from .adaptive_range_validation import (
+    AdaptiveRangeValidationCriteria,
+    persist_adaptive_range_validation,
+    validate_adaptive_range_walk_forward,
+)
 from .baseline_policy import BaselinePolicyConfig
 from .baseline_walk_forward import walk_forward_baseline
 from .calibration_queue import build_calibration_work_queue
@@ -1081,6 +1086,78 @@ def main() -> None:
     dlmm_regime.add_argument("--as-of")
     dlmm_regime.add_argument(
         "--require-ready",
+        action="store_true",
+    )
+
+    adaptive_range_validate = subparsers.add_parser(
+        "adaptive-range-validate",
+        help="Walk-forward validate adaptive DLMM ranges against a fixed-width baseline",
+    )
+    adaptive_range_validate.add_argument("--pool", required=True)
+    adaptive_range_validate.add_argument(
+        "--lookback-observations",
+        type=int,
+        default=96,
+    )
+    adaptive_range_validate.add_argument(
+        "--holding-observations",
+        type=int,
+        default=6,
+    )
+    adaptive_range_validate.add_argument(
+        "--target-coverage",
+        type=float,
+        default=0.90,
+    )
+    adaptive_range_validate.add_argument(
+        "--min-half-width-bins",
+        type=int,
+        default=1,
+    )
+    adaptive_range_validate.add_argument(
+        "--max-half-width-bins",
+        type=int,
+        default=35,
+    )
+    adaptive_range_validate.add_argument(
+        "--min-historical-windows",
+        type=int,
+        default=12,
+    )
+    adaptive_range_validate.add_argument(
+        "--fixed-half-width-bins",
+        type=int,
+        default=5,
+    )
+    adaptive_range_validate.add_argument(
+        "--min-decisions",
+        type=int,
+        default=20,
+    )
+    adaptive_range_validate.add_argument(
+        "--min-adaptive-survival-rate",
+        type=float,
+        default=0.75,
+    )
+    adaptive_range_validate.add_argument(
+        "--min-survival-uplift-vs-fixed",
+        type=float,
+        default=0.0,
+    )
+    adaptive_range_validate.add_argument(
+        "--max-mean-width-multiple-vs-fixed",
+        type=float,
+        default=2.0,
+    )
+    adaptive_range_validate.add_argument(
+        "--max-cap-exceeded-rate",
+        type=float,
+        default=0.10,
+    )
+    adaptive_range_validate.add_argument("--as-of")
+    adaptive_range_validate.add_argument("--persist", action="store_true")
+    adaptive_range_validate.add_argument(
+        "--require-qualified",
         action="store_true",
     )
 
@@ -2522,6 +2599,50 @@ def main() -> None:
             args.require_ready
             and result.status != "RESEARCH_READY"
         ):
+            raise SystemExit(2)
+        return
+
+    if args.command == "adaptive-range-validate":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = validate_adaptive_range_walk_forward(
+            storage,
+            pool_address=args.pool,
+            adaptive_criteria=AdaptiveRangeCriteria(
+                lookback_observations=args.lookback_observations,
+                holding_observations=args.holding_observations,
+                target_coverage=args.target_coverage,
+                min_half_width_bins=args.min_half_width_bins,
+                max_half_width_bins=args.max_half_width_bins,
+                min_historical_windows=args.min_historical_windows,
+            ),
+            validation_criteria=AdaptiveRangeValidationCriteria(
+                fixed_half_width_bins=args.fixed_half_width_bins,
+                min_decisions=args.min_decisions,
+                min_adaptive_survival_rate=(
+                    args.min_adaptive_survival_rate
+                ),
+                min_survival_uplift_vs_fixed=(
+                    args.min_survival_uplift_vs_fixed
+                ),
+                max_mean_width_multiple_vs_fixed=(
+                    args.max_mean_width_multiple_vs_fixed
+                ),
+                max_cap_exceeded_rate=args.max_cap_exceeded_rate,
+            ),
+            as_of=args.as_of,
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        if args.persist:
+            output["persisted_evidence_id"] = (
+                persist_adaptive_range_validation(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
+        if args.require_qualified and not result.research_qualified:
             raise SystemExit(2)
         return
 
