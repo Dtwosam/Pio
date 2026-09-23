@@ -116,3 +116,31 @@ def test_walk_forward_rejects_overlapping_forward_windows(tmp_path):
             half_widths=(0,),
             strategies=(StrategyType.SPOT,),
         )
+
+
+
+def test_walk_forward_accepts_missing_phase2_gate_as_research_only(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    for minute in (0, 5, 10):
+        save_snapshot(storage, minute)
+
+    report = walk_forward_baseline(
+        str(storage.path),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=10,
+        phase2_gate=None,
+        config=BaselinePolicyConfig(
+            min_range_survival_ratio=0.0,
+            require_fee_cost_recovery=False,
+            estimated_network_cost_y_atomic=0,
+        ),
+        lookback_observations=2,
+        forward_observations=2,
+        half_widths=(0,),
+        strategies=(StrategyType.SPOT,),
+        max_share_bps=500,
+    )
+
+    assert report.phase2_ready is False
+    assert report.research_only is True
