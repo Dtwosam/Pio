@@ -68,6 +68,7 @@ from .phase9_validation import (
     persist_phase9_research_bundle,
 )
 from .phase9_replay_audit import evaluate_phase9_replay_audit
+from .phase9_operational_audit import evaluate_phase9_operational_audit
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import build_phase9_work_queue
 from .phase3_workflow import (
@@ -1686,6 +1687,30 @@ def main() -> None:
         help="Verify immutable Phase 9 source, evidence and promotion-history storage",
     )
     phase9_storage_integrity.add_argument(
+        "--require-verified",
+        action="store_true",
+    )
+
+    phase9_operational_audit = subparsers.add_parser(
+        "phase9-operational-audit",
+        help="Verify Phase 9 storage integrity, deterministic replay and promotion currentness together",
+    )
+    phase9_operational_audit.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_operational_audit.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_operational_audit.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_operational_audit.add_argument(
         "--require-verified",
         action="store_true",
     )
@@ -3796,6 +3821,22 @@ def main() -> None:
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
         result = evaluate_phase9_storage_integrity(storage)
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_verified and not result.verified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-operational-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_operational_audit(
+            storage,
+            criteria=Phase9ResearchBundleCriteria(
+                min_mint_risk_pools=args.min_mint_risk_pools,
+                min_wallet_flow_pools=args.min_wallet_flow_pools,
+                min_static_hedge_pools=args.min_static_hedge_pools,
+            ),
+        )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_verified and not result.verified:
             raise SystemExit(2)
