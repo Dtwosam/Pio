@@ -393,8 +393,12 @@ def build_phase9_work_queue(
         storage,
         as_of=as_of,
     )
+    live_as_of = as_of or utc_now_iso()
     live_cohort = (
-        evaluate_phase9_pool_cohort(storage)
+        evaluate_phase9_pool_cohort(
+            storage,
+            as_of=live_as_of,
+        )
         if as_of is None
         else None
     )
@@ -563,7 +567,8 @@ def build_phase9_work_queue(
                 criteria=Phase9ChainCaptureCriteria(
                     target_chain_pools=3,
                     max_candidates=8,
-                    bin_array_radius=1,
+                    bin_array_radius=1,,
+                as_of=live_as_of
                 ),
                 rpc_url=rpc_url,
             )
