@@ -209,6 +209,21 @@ ON position_event_history(position_address, block_time, ix_index);
 CREATE INDEX IF NOT EXISTS idx_position_event_history_signature
 ON position_event_history(signature, ix_index);
 
+CREATE TABLE IF NOT EXISTS chain_transaction_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    signature TEXT NOT NULL UNIQUE,
+    slot INTEGER NOT NULL,
+    block_time INTEGER,
+    network_fee_lamports INTEGER,
+    compute_units_consumed INTEGER,
+    succeeded INTEGER,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chain_tx_snapshot_time
+ON chain_transaction_snapshots(block_time, slot);
+
 CREATE TABLE IF NOT EXISTS chain_transaction_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
@@ -913,6 +928,9 @@ class Storage:
         slot = int(snapshot["slot"])
         block_time_raw = snapshot.get("block_time")
         block_time = int(block_time_raw) if block_time_raw is not None else None
+        network_fee_raw = snapshot.get("network_fee_lamports")
+        compute_units_raw = snapshot.get("compute_units_consumed")
+        succeeded_raw = snapshot.get("succeeded")
         events = snapshot.get("events")
         if not isinstance(events, list):
             raise ValueError("transaction events must be a list")
@@ -997,6 +1015,33 @@ class Storage:
             )
 
         with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO chain_transaction_snapshots(
+                    observed_at, signature, slot, block_time,
+                    network_fee_lamports, compute_units_consumed, succeeded,
+                    raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(signature) DO UPDATE SET
+                    observed_at=excluded.observed_at,
+                    slot=excluded.slot,
+                    block_time=excluded.block_time,
+                    network_fee_lamports=excluded.network_fee_lamports,
+                    compute_units_consumed=excluded.compute_units_consumed,
+                    succeeded=excluded.succeeded,
+                    raw_json=excluded.raw_json
+                """,
+                (
+                    observed_at,
+                    signature,
+                    slot,
+                    block_time,
+                    int(network_fee_raw) if network_fee_raw is not None else None,
+                    int(compute_units_raw) if compute_units_raw is not None else None,
+                    int(bool(succeeded_raw)) if succeeded_raw is not None else None,
+                    json.dumps(snapshot, separators=(",", ":")),
+                ),
+            )
             conn.executemany(
                 """
                 INSERT INTO chain_transaction_events(
@@ -1139,6 +1184,12 @@ class Storage:
             chain_tx_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT signature) FROM chain_transaction_events"
             ).fetchone()
+            chain_tx_snapshots = conn.execute(
+                """
+                SELECT COUNT(*), SUM(CASE WHEN network_fee_lamports IS NOT NULL THEN 1 ELSE 0 END)
+                FROM chain_transaction_snapshots
+                """
+            ).fetchone()
             failures = conn.execute(
                 "SELECT COUNT(*) FROM data_quality_checks WHERE status = 'FAIL'"
             ).fetchone()[0]
@@ -1166,6 +1217,8 @@ class Storage:
             "position_event_position_count": position_events[1],
             "chain_transaction_events": chain_tx_events[0],
             "chain_transaction_count": chain_tx_events[1],
+            "chain_transaction_snapshots": chain_tx_snapshots[0],
+            "transaction_fee_samples": chain_tx_snapshots[1] or 0,
             "quality_failures": failures,
             "collection_errors": errors,
         }
