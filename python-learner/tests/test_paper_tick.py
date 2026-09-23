@@ -225,3 +225,48 @@ def test_paper_tick_fails_closed_when_market_refresh_fails(tmp_path):
     assert result.supervisor is None
     assert result.chain is None
     assert chain_calls == []
+
+
+
+def test_paper_tick_explicit_retry_recovers_stale_running_row(tmp_path):
+    storage = seed(tmp_path)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO paper_ticks(
+                tick_id, account_id, started_at, status
+            ) VALUES ('tick-stale', 'paper', ?, 'RUNNING')
+            """,
+            (TICK,),
+        )
+
+    market_calls = []
+    chain_calls = []
+
+    def fetch_market(address):
+        market_calls.append(address)
+        return market_payload(address)
+
+    def inspect_chain(address, radius):
+        chain_calls.append((address, radius))
+        return chain_payload(address)
+
+    result = run_paper_tick(
+        storage,
+        account_id="paper",
+        tick_id="tick-stale",
+        observed_at="2026-09-23T10:01:00+00:00",
+        chain_max_age_seconds=60,
+        quote_max_age_seconds=60,
+        safety_config=safety(),
+        management_config=PositionManagementConfig(stop_loss_bps=5000),
+        fetch_pool=fetch_market,
+        inspect_pool=inspect_chain,
+        retry_failed=True,
+    )
+
+    assert result.status == "COMPLETE"
+    assert result.reused_existing_tick is False
+    assert result.observed_at == TICK
+    assert market_calls == ["pool"]
+    assert chain_calls == [("pool", 1)]
