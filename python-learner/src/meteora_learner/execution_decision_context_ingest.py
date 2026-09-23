@@ -139,7 +139,7 @@ def _normalize(payload: Any) -> dict[str, Any]:
 def _receipt_reconciles(conn: Any, context: dict[str, Any]) -> bool:
     receipt = conn.execute(
         """
-        SELECT action, pool_address, signature
+        SELECT action, pool_address, signature, intent_status
         FROM live_execution_receipts
         WHERE decision_id = ?
         """,
@@ -158,6 +158,10 @@ def _receipt_reconciles(conn: Any, context: dict[str, Any]) -> bool:
     if str(receipt[2]) != context["signature"]:
         raise ValueError(
             "decision context signature conflicts with execution receipt"
+        )
+    if str(receipt[3]) != context["status"]:
+        raise ValueError(
+            "decision context status conflicts with execution receipt"
         )
     return True
 
