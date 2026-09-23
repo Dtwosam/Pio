@@ -130,6 +130,7 @@ pio phase9-position-discovery --pool <POOL> --limit 250
 pio phase9-wallet-flow-capture-run --pool <POOL> --require-ready
 pio phase9-research-input-template --pools <POOL_A,POOL_B,POOL_C> > phase9-research-inputs.json
 pio phase9-research-inputs-ingest --file phase9-research-inputs.json
+pio phase9-research-inputs-audit --require-valid
 pio phase9-explicit-research-run --persist --require-ready
 pio phase9-chain-history-plan --require-ready
 pio phase9-chain-history-run  # one fresh read-only snapshot per deficient pool
