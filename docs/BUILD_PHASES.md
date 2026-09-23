@@ -269,7 +269,29 @@ Still needed:
 
 ## Phase 8 — Continuous Learning
 
-Champion/challenger retraining, walk-forward validation, paper validation, promotion gates and rollback.
+Status: implementation complete behind evidence gates; real continuous-learning promotion evidence pending.
+
+Built:
+- persisted champion/challenger model registry with immutable status transitions
+- evidence-driven retraining trigger from fresh chain observations, pool coverage, live labels and champion age
+- one-active-cycle continuous retraining state machine
+- deterministic cutoff-bound multi-pool retraining datasets with dataset identity/checksum binding
+- cycle-bound challenger training that rejects tampered or mismatched datasets
+- no-lookahead walk-forward challenger validation with persisted cycle-bound evidence
+- paper challenger validation against incumbent champion performance
+- champion rotation requires qualified walk-forward evidence, matching dataset lineage and paper evidence
+- immutable continuous-promotion evidence linking predecessor, challenger and cycle
+- live champion monitoring from realized labels, including drawdown, worst loss, win rate, mean return and prediction error
+- minimum live-label and distinct-pool diversity requirements for champion health
+- persisted live-monitor evidence and evidence-gated rollback to deterministic policy
+- persistent Phase 8 promotion evidence requiring Phase 7 promotion, completed continuous cycles, current-champion lineage and healthy live evidence
+- CLI workflows for retraining planning/build/train/walk-forward, challenger validation/promotion, live monitoring/rollback and Phase 8 validation
+
+Still needed:
+- real Phase 7 promotion evidence
+- at least one real completed continuous retraining cycle over fresh post-champion data
+- live champion evidence meeting Phase 8 label and pool-diversity thresholds
+- real Phase 8 promotion evidence before any Phase 9 adaptive edge is allowed to affect live policy
 
 ## Phase 9 — Advanced Edge
 
