@@ -512,7 +512,6 @@ def build_phase9_work_queue(
         if missing_mints:
             rpc = rpc_url if rpc_url is not None else "<RPC_URL>"
             for mint in missing_mints:
-                filename = f"mint-{mint}.json"
                 items.append(
                     Phase9WorkItem(
                         task_type="MINT_SNAPSHOT",
@@ -526,10 +525,7 @@ def build_phase9_work_queue(
                             + _q(rpc)
                             + " "
                             + _q(mint)
-                            + " > "
-                            + _q(filename)
-                            + " && pio mint-snapshot-ingest --file "
-                            + _q(filename)
+                            + " | pio ingest-mint-snapshot --file -"
                         ),
                     )
                 )
