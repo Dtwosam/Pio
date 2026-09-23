@@ -39,6 +39,7 @@ class Phase8EvidenceStatus:
     active_cycle_id: str | None
     active_cycle_status: str | None
     active_cycle_challenger_model_id: str | None
+    active_cycle_challenger_status: str | None
     completed_cycles: int
     champion_cycle_id: str | None
     continuous_promotion_evidence_id: int | None
@@ -79,6 +80,19 @@ def evaluate_phase8_evidence_status(
     )
     persisted = audit_persisted_phase8_promotion(storage)
     cycle = active_retraining_cycle(storage)
+    cycle_challenger_status = None
+    if (
+        cycle is not None
+        and cycle.challenger_model_id is not None
+    ):
+        challenger = storage.model_registry_entry(
+            cycle.challenger_model_id
+        )
+        cycle_challenger_status = (
+            str(challenger["status"])
+            if challenger is not None
+            else "MISSING"
+        )
 
     live = promotion.live_champion
     live_status = live.status if live is not None else None
@@ -134,6 +148,7 @@ def evaluate_phase8_evidence_status(
             if cycle is not None
             else None
         ),
+        active_cycle_challenger_status=cycle_challenger_status,
         completed_cycles=promotion.completed_cycles,
         champion_cycle_id=promotion.champion_cycle_id,
         continuous_promotion_evidence_id=(
