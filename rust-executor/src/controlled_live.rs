@@ -1065,7 +1065,8 @@ mod tests {
             "2026-09-23T10:00:00+00:00",
             Some("-25"),
         );
-        let cfg = config(pool);
+        let mut cfg = config(pool);
+        cfg.max_open_positions = 2;
 
         let entry = evaluate_controlled_live_at(
             &path,
