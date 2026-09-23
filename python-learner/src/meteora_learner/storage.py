@@ -1003,6 +1003,18 @@ ON continuous_learning_cycles(status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_model_live_evidence_model_time
 ON model_live_evidence(model_id, created_at, id);
 
+CREATE TRIGGER IF NOT EXISTS model_live_evidence_no_update
+BEFORE UPDATE ON model_live_evidence
+BEGIN
+    SELECT RAISE(ABORT, 'model_live_evidence is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS model_live_evidence_no_delete
+BEFORE DELETE ON model_live_evidence
+BEGIN
+    SELECT RAISE(ABORT, 'model_live_evidence is immutable');
+END;
+
 CREATE TABLE IF NOT EXISTS advanced_edge_evidence (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
