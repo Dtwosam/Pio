@@ -1,0 +1,12 @@
+[Unit]
+Description=Record Pio Phase 9 research evidence progress hourly
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+AccuracySec=2min
+Persistent=true
+Unit=pio-phase9-progress.service
+
+[Install]
+WantedBy=timers.target
