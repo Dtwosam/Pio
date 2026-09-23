@@ -359,20 +359,8 @@ def run_phase9_research_refresh(
     else:
         try:
             cohort = evaluate_phase9_pool_cohort(storage)
-            history = (
-                build_phase9_history_plan(
-                    storage,
-                    pool_addresses=cohort.research_pools,
-                )
-                if cohort.research_pools
-                else build_phase9_history_plan(storage)
-            )
-            if not cohort.research_ready or not history.plan_ready:
-                detail_parts = [
-                    *cohort.reasons,
-                    *history.reasons,
-                ]
-                detail = "; ".join(dict.fromkeys(detail_parts)) or (
+            if not cohort.research_ready:
+                detail = "; ".join(cohort.reasons) or (
                     "ranked Phase 9 research cohort is below the exact "
                     "chain-history requirement"
                 )
