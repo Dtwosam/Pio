@@ -19,6 +19,7 @@ pub struct ControlledLiveConfig {
     pub max_rebalances_per_position: usize,
     pub max_capital_quote_per_entry: f64,
     pub max_daily_entry_capital_quote: f64,
+    pub max_daily_entry_submissions: usize,
     pub max_daily_realized_loss_quote: f64,
     pub max_daily_drawdown_pct: f64,
     pub allow_rebalance: bool,
@@ -46,6 +47,8 @@ pub struct ControlledLiveReport {
     pub max_capital_quote_per_entry: f64,
     pub daily_submitted_entry_capital_quote: f64,
     pub max_daily_entry_capital_quote: f64,
+    pub daily_submitted_entry_count: usize,
+    pub max_daily_entry_submissions: usize,
     pub daily_realized_loss_quote: f64,
     pub max_daily_realized_loss_quote: f64,
     pub unvalued_closed_positions_today: usize,
@@ -80,6 +83,9 @@ fn validate_config(config: &ControlledLiveConfig) -> Result<BTreeSet<Pubkey>> {
         anyhow::bail!(
             "max_daily_entry_capital_quote cannot be below the per-entry cap"
         );
+    }
+    if config.max_daily_entry_submissions == 0 {
+        anyhow::bail!("max_daily_entry_submissions must be positive");
     }
     if !config.max_daily_realized_loss_quote.is_finite()
         || config.max_daily_realized_loss_quote <= 0.0
@@ -372,6 +378,9 @@ fn evaluate_controlled_live_at(
         daily_submitted_entry_capital_quote: 0.0,
         max_daily_entry_capital_quote:
             config.max_daily_entry_capital_quote,
+        daily_submitted_entry_count: 0,
+        max_daily_entry_submissions:
+            config.max_daily_entry_submissions,
         daily_realized_loss_quote,
         max_daily_realized_loss_quote:
             config.max_daily_realized_loss_quote,
@@ -432,6 +441,8 @@ pub fn evaluate_controlled_live_intent(
         .unresolved_live_entry_decision_ids(Some(decision_id))?;
     let daily_submitted_entry_capital_quote = execution_store
         .submitted_live_entry_capital_today(Some(decision_id))?;
+    let daily_submitted_entry_count = execution_store
+        .submitted_live_entry_count_today(Some(decision_id))?;
     let reconciled = reconciled_open_decision_ids(database_path)?;
     let unresolved_entry_intents = unresolved
         .iter()
@@ -446,8 +457,17 @@ pub fn evaluate_controlled_live_intent(
     report.effective_open_positions = effective_open_positions;
     report.daily_submitted_entry_capital_quote =
         daily_submitted_entry_capital_quote;
+    report.daily_submitted_entry_count =
+        daily_submitted_entry_count;
 
     if report.accepted
+        && request.proposal.action == Action::Enter
+        && daily_submitted_entry_count
+            >= config.max_daily_entry_submissions
+    {
+        report.accepted = false;
+        report.reason = "daily_entry_submission_count_reached".into();
+    } else if report.accepted
         && request.proposal.action == Action::Enter
         && daily_submitted_entry_capital_quote
             + request.proposal.capital_quote
@@ -615,6 +635,7 @@ mod tests {
             max_rebalances_per_position: 3,
             max_capital_quote_per_entry: 50.0,
             max_daily_entry_capital_quote: 100.0,
+            max_daily_entry_submissions: 3,
             max_daily_realized_loss_quote: 20.0,
             max_daily_drawdown_pct: 2.0,
             allow_rebalance: true,
@@ -1217,6 +1238,149 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn daily_entry_submission_count_blocks_additional_entry() {
+        use crate::blockhash::PreparedUnsignedTransaction;
+        use crate::dry_run::DryRunExecutionRequest;
+        use crate::execution_guard::RiskCheckReport;
+        use crate::risk::RiskConfig;
+        use crate::simulation::SimulationReport;
+        use crate::transaction_guard::TransactionGuardReport;
+        use crate::wallet_guard::WalletAuthorizationReport;
+        use serde_json::json;
+
+        let pio_path = db_path();
+        seed(&pio_path, 0);
+        let execution_path = std::env::temp_dir().join(format!(
+            "pio-controlled-live-daily-count-{}.db",
+            Uuid::new_v4()
+        ));
+        let store = ExecutionIntentStore::open(&execution_path).unwrap();
+        let pool = Pubkey::new_unique();
+        let cfg = config(pool);
+
+        for index in 0..cfg.max_daily_entry_submissions {
+            let item = proposal(pool, Action::Enter);
+            let id = item.decision_id.to_string();
+            let request = DryRunExecutionRequest {
+                proposal: item.clone(),
+                transaction_base64: format!("tx-{index}"),
+            };
+            let risk_config = RiskConfig {
+                max_capital_per_position_pct: 10.0,
+                max_total_deployed_pct: 50.0,
+                max_daily_drawdown_pct: 5.0,
+                min_expected_edge_pct: 0.0,
+                max_expected_downside_pct: 10.0,
+                max_data_age_seconds: 60,
+            };
+            store.register(&request, &risk_config).unwrap();
+            store
+                .record_risk(
+                    &id,
+                    &RiskCheckReport {
+                        decision_id: item.decision_id,
+                        mode: Mode::Live,
+                        action: Action::Enter,
+                        accepted: true,
+                        reason: "approved".into(),
+                    },
+                )
+                .unwrap();
+            let guard = TransactionGuardReport {
+                accepted: true,
+                reason: "approved".into(),
+                fee_payer: "payer".into(),
+                pool_account_present: true,
+                required_accounts_present: true,
+                instruction_count: 1,
+                static_account_count: 2,
+                required_signatures: 1,
+                signatures_all_default: true,
+                address_lookup_table_count: 0,
+                program_ids: vec![],
+                instruction_fingerprints: vec![],
+            };
+            store.record_transaction_guard(&id, &guard).unwrap();
+            store
+                .record_simulation(
+                    &id,
+                    &SimulationReport {
+                        succeeded: true,
+                        rpc_context_slot: 1,
+                        result: json!({"err": null}),
+                    },
+                )
+                .unwrap();
+            let wallet = WalletAuthorizationReport {
+                accepted: true,
+                reason: "approved".into(),
+                wallet_pubkey: "payer".into(),
+                transaction_fee_payer: "payer".into(),
+            };
+            store
+                .record_wallet_authorization(&id, &wallet)
+                .unwrap();
+            store
+                .record_final_presign(
+                    &id,
+                    &PreparedUnsignedTransaction {
+                        transaction_base64: "prepared".into(),
+                        recent_blockhash: "blockhash".into(),
+                        last_valid_block_height: 123,
+                        rpc_context_slot: 2,
+                        signatures_all_default: true,
+                    },
+                    &guard,
+                    &wallet,
+                    &SimulationReport {
+                        succeeded: true,
+                        rpc_context_slot: 2,
+                        result: json!({"err": null}),
+                    },
+                )
+                .unwrap();
+            store.begin_signing(&id).unwrap();
+        }
+
+        let candidate = proposal(pool, Action::Enter);
+        let candidate_id = candidate.decision_id.to_string();
+        let request = DryRunExecutionRequest {
+            proposal: candidate,
+            transaction_base64: "candidate".into(),
+        };
+        let risk_config = RiskConfig {
+            max_capital_per_position_pct: 10.0,
+            max_total_deployed_pct: 50.0,
+            max_daily_drawdown_pct: 5.0,
+            min_expected_edge_pct: 0.0,
+            max_expected_downside_pct: 10.0,
+            max_data_age_seconds: 60,
+        };
+        store.register(&request, &risk_config).unwrap();
+
+        let report = evaluate_controlled_live_intent(
+            &pio_path,
+            &store,
+            &candidate_id,
+            &cfg,
+        )
+        .unwrap();
+
+        assert!(!report.accepted);
+        assert_eq!(
+            report.reason,
+            "daily_entry_submission_count_reached"
+        );
+        assert_eq!(
+            report.daily_submitted_entry_count,
+            cfg.max_daily_entry_submissions
+        );
+
+        let _ = std::fs::remove_file(pio_path);
+        let _ = std::fs::remove_file(execution_path);
     }
 
 }
