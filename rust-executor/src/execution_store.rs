@@ -271,6 +271,24 @@ impl ExecutionIntentStore {
         decision_id: &str,
         risk: &RiskCheckReport,
     ) -> Result<ExecutionIntentRecord> {
+        let current = self.load(decision_id)?;
+        if let Some(existing) = &current.risk {
+            let existing_json = serde_json::to_string(existing)?;
+            let incoming_json = serde_json::to_string(risk)?;
+            if existing_json == incoming_json {
+                return Ok(current);
+            }
+            anyhow::bail!(
+                "execution intent {decision_id} already has a different risk result"
+            );
+        }
+        if current.status != ExecutionIntentStatus::Received {
+            anyhow::bail!(
+                "risk evaluation requires RECEIVED status; current status is {:?}",
+                current.status
+            );
+        }
+
         let status = if risk.accepted {
             ExecutionIntentStatus::RiskApproved
         } else {
@@ -283,18 +301,25 @@ impl ExecutionIntentStore {
             r#"
             UPDATE execution_intents
             SET status = ?, risk_json = ?, updated_at_unix = ?, error = ?
-            WHERE decision_id = ?
+            WHERE decision_id = ? AND status = 'RECEIVED'
+              AND risk_json IS NULL
             "#,
             params![
                 status.as_str(),
                 payload,
                 now,
-                if risk.accepted { None::<String> } else { Some(risk.reason.clone()) },
+                if risk.accepted {
+                    None::<String>
+                } else {
+                    Some(risk.reason.clone())
+                },
                 decision_id,
             ],
         )?;
         if changed != 1 {
-            anyhow::bail!("unknown execution decision_id: {decision_id}");
+            anyhow::bail!(
+                "execution intent {decision_id} changed concurrently while recording risk"
+            );
         }
         self.load(decision_id)
     }
@@ -861,6 +886,66 @@ mod tests {
 
         assert_eq!(rejected.status, ExecutionIntentStatus::Rejected);
         assert!(store.record_simulation(&id, &simulation(true)).is_err());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn risk_replay_cannot_regress_progressed_intent() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let id = request.proposal.decision_id.to_string();
+        let accepted = risk(true, request.proposal.decision_id);
+
+        store.register(&request, &config()).unwrap();
+        store.record_risk(&id, &accepted).unwrap();
+        store.record_transaction_guard(&id, &guard(true)).unwrap();
+        store.record_simulation(&id, &simulation(true)).unwrap();
+
+        let replayed = store.record_risk(&id, &accepted).unwrap();
+        assert_eq!(
+            replayed.status,
+            ExecutionIntentStatus::SimulationPassed
+        );
+
+        let different = risk(false, request.proposal.decision_id);
+        assert!(store.record_risk(&id, &different).is_err());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::SimulationPassed
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn decision_id_cannot_reuse_different_transaction_policy() {
+        let path = db_path();
+        let store = ExecutionIntentStore::open(&path).unwrap();
+        let request = request();
+        let cfg = config();
+        let tx_cfg = crate::transaction_guard::TransactionGuardConfig {
+            expected_fee_payer: "11111111111111111111111111111111".into(),
+            allowed_program_ids: vec![
+                "11111111111111111111111111111111".into(),
+            ],
+            max_instructions: 4,
+            max_static_accounts: 16,
+            allow_address_lookup_tables: false,
+            require_unsigned: true,
+        };
+        store
+            .register_with_transaction_policy(&request, &cfg, &tx_cfg)
+            .unwrap();
+
+        let mut changed = tx_cfg.clone();
+        changed.max_instructions = 5;
+        assert!(
+            store
+                .register_with_transaction_policy(&request, &cfg, &changed)
+                .is_err()
+        );
 
         let _ = std::fs::remove_file(path);
     }
