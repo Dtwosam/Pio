@@ -594,12 +594,12 @@ def seed_static_hedge_lineage(storage, pool):
 
 
 def seed_ready(storage):
-    portfolio_lineage = seed_portfolio_candidate_lineage(storage)
     seed_retraining_dataset_evidence(
         storage,
         cycle_id="cycle",
     )
     promote_phase8(storage)
+    portfolio_lineage = seed_portfolio_candidate_lineage(storage)
     bandit = evaluate_cycle_contextual_bandit(
         storage,
         cycle_id="cycle",
