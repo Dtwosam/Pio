@@ -157,3 +157,37 @@ def test_rust_inspector_accepts_solana_rpc_url_env(tmp_path, monkeypatch):
 
     assert result["pool_address"] == "pool"
     assert "inspect-pool-env" in calls[0][0]
+
+
+
+def test_rust_inspector_prefers_prebuilt_binary(tmp_path, monkeypatch):
+    binary = tmp_path / "meteora-executor"
+    binary.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("SOLANA_RPC_URL", "https://rpc.example")
+    monkeypatch.setenv("PIO_RUST_EXECUTOR_BIN", str(binary))
+
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = '{"pool_address":"pool"}'
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return Result()
+
+    monkeypatch.setattr(
+        "meteora_learner.paper_chain_refresh.subprocess.run",
+        fake_run,
+    )
+
+    result = inspect_pool_with_rust("pool", 2)
+
+    assert result["pool_address"] == "pool"
+    assert calls[0][0] == [
+        str(binary),
+        "inspect-pool-env",
+        "pool",
+        "2",
+    ]
