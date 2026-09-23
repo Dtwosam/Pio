@@ -13,7 +13,11 @@ from .paper_portfolio import (
 )
 from .pool_safety import PoolSafetyConfig
 from .position_policy import PositionManagementConfig
-from .quote_registry import TokenQuoteStatus, load_fresh_quote_map
+from .quote_registry import (
+    TokenQuoteStatus,
+    load_fresh_quote_map,
+    required_paper_quote_mints,
+)
 from .storage import Storage
 
 
@@ -30,27 +34,6 @@ class PaperSupervisorReport:
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
-
-
-def _required_token_y_mints(
-    storage: Storage,
-    *,
-    account_id: str,
-) -> tuple[str, ...]:
-    with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT DISTINCT c.token_y_mint
-            FROM paper_positions p
-            JOIN paper_counterfactual_positions c
-              ON c.position_id = p.position_id
-            WHERE p.account_id = ?
-              AND p.status = 'OPEN'
-            ORDER BY c.token_y_mint ASC
-            """,
-            (account_id,),
-        ).fetchall()
-    return tuple(str(row[0]) for row in rows)
 
 
 def run_paper_supervisor(
@@ -82,7 +65,7 @@ def run_paper_supervisor(
         array_radius=array_radius,
         as_of=as_of,
     )
-    mints = _required_token_y_mints(storage, account_id=account_id)
+    mints = required_paper_quote_mints(storage, account_id=account_id)
     _, quote_statuses = load_fresh_quote_map(
         storage,
         token_mints=mints,
