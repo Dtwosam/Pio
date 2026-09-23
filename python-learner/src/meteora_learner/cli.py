@@ -169,6 +169,8 @@ def main() -> None:
     phase2_gate.add_argument("--min-amount-bins", required=True, type=int)
     phase2_gate.add_argument("--min-fee-intervals", required=True, type=int)
     phase2_gate.add_argument("--min-fee-bins", required=True, type=int)
+    phase2_gate.add_argument("--min-reward-intervals", required=True, type=int)
+    phase2_gate.add_argument("--min-reward-growth-bins", required=True, type=int)
     phase2_gate.add_argument(
         "--min-amount-coverage-rate",
         type=float,
@@ -374,6 +376,8 @@ def main() -> None:
                 min_amount_bins=args.min_amount_bins,
                 min_fee_intervals=args.min_fee_intervals,
                 min_fee_bins=args.min_fee_bins,
+                min_reward_intervals=args.min_reward_intervals,
+                min_reward_growth_bins=args.min_reward_growth_bins,
                 min_amount_coverage_rate=args.min_amount_coverage_rate,
             ),
             position_limit=args.position_limit,
