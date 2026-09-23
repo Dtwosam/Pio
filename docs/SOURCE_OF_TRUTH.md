@@ -1,6 +1,6 @@
 # Meteora Adaptive LP Bot — Source of Truth
 
-Status: v0.3
+Status: v0.4
 Date: 2026-09-23
 
 ## 1. Mission
@@ -167,6 +167,16 @@ The gate separates:
 A capability that is implemented but not independently reconciled remains blocked. Missing or legacy data is ineligible; it is never treated as a zero-error sample.
 
 For standard-SPL liquidity operations, the gate is evidence-driven. Composition-fee validation requires slot-bounded prestate whose pool and active-bin-array account histories prove no intervening state mutation, target-time fee-state replay, an exactly reconstructable active-bin allocation, and a positive emitted CompositionFee event. Add/rebalance execution calibration uses the transaction's own active-bin and token-amount guard bounds plus real Solana receipt costs.
+
+### Phase 3+ promotion source of truth
+
+Phase 2 and Phase 3 promotion decisions are persisted as qualified evidence records. Downstream ML qualification and deterministic paper entry read persisted promotion state; callers cannot bypass a gate by passing a readiness boolean.
+
+Phase 3 comparison uses equal requested notional and entry-value normalized economics across pools. Promotion requires no-lookahead multi-pool validation with explicit sample, positive-edge, average-excess and downside thresholds.
+
+ML challengers move through evidence-backed stages. Offline qualification requires persisted Phase 3 promotion and held-out challenger evidence. Champion promotion additionally requires qualified paper evidence.
+
+Paper mode maintains a persistent, idempotent ledger. For chain-bound counterfactual positions, inventory and fee/reward accrual are derived from real DLMM bin snapshots using the same validated liquidity-share and checkpoint formulas as the simulator. Unsupported reward valuation or token programs fail closed.
 
 ## 7. Decision flow
 
