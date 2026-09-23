@@ -12,6 +12,7 @@ use crate::events::{decode_event_cpi_data, DecodedDlmmEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TransactionEventRecord {
+    pub event_index: usize,
     pub parent_ix_index: u64,
     pub event: DecodedDlmmEvent,
 }
@@ -60,6 +61,7 @@ fn decode_inner_events(value: &Value) -> Result<Vec<TransactionEventRecord>> {
             };
             if let Some(event) = decode_event_cpi_data(&data)? {
                 out.push(TransactionEventRecord {
+                    event_index: out.len(),
                     parent_ix_index,
                     event,
                 });
@@ -144,6 +146,7 @@ mod tests {
 
         let events = decode_inner_events(&value).unwrap();
         assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_index, 0);
         assert_eq!(events[0].parent_ix_index, 2);
         assert_eq!(
             events[0].event,
