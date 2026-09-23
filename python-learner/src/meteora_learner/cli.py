@@ -113,6 +113,7 @@ from .live_execution_effects import apply_live_execution_effect
 from .live_position_ledger import apply_live_position_effect
 from .live_position_closure import finalize_live_position_closure
 from .live_position_outcome import build_live_position_outcome
+from .live_position_valuation import value_live_position_outcome
 from .live_execution_audit import audit_live_execution_ledger
 from .transaction_costs import build_transaction_cost_report
 
@@ -1024,6 +1025,17 @@ def main() -> None:
     )
     live_outcome_cmd.add_argument("--position", required=True)
 
+    live_value_cmd = subparsers.add_parser(
+        "value-live-position-outcome",
+        help="Value one CLOSED live outcome from historical no-lookahead quotes",
+    )
+    live_value_cmd.add_argument("--position", required=True)
+    live_value_cmd.add_argument(
+        "--max-age-seconds",
+        type=int,
+        default=300,
+    )
+
     live_close_cmd = subparsers.add_parser(
         "finalize-live-position-closure",
         help="Mark a liquidity-removed live position closed from confirmed Rust RPC proof",
@@ -1427,6 +1439,16 @@ def main() -> None:
         result = build_live_position_outcome(
             Storage(settings.database_path),
             position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "value-live-position-outcome":
+        settings = Settings.from_env()
+        result = value_live_position_outcome(
+            Storage(settings.database_path),
+            position_address=args.position,
+            max_age_seconds=args.max_age_seconds,
         )
         print(json.dumps(result.to_record(), indent=2))
         return
