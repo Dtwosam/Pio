@@ -947,49 +947,67 @@ def build_phase9_work_queue(
         "pool/bin price-path IDs" in reason
         for reason in bundle.reasons
     )
-    if hedge_lineage_invalid:
-        for pool in bundle.static_hedge.qualified_pools:
-            items.append(
-                Phase9WorkItem(
-                    task_type="STATIC_HEDGE_REPAIR",
-                    scope=pool,
-                    reason=(
-                        "qualified static-hedge evidence is not bound to "
-                        "valid immutable pool/bin price-path lineage; rerun "
-                        "the hedge study with the original explicit instrument "
-                        "and cost assumptions"
-                    ),
-                    shell_command=None,
-                )
-            )
-
     allocation_lineage_invalid = any(
         "immutable candidate-artifact lineage" in reason
         for reason in bundle.reasons
     )
-    if allocation_lineage_invalid:
-        items.append(
-            Phase9WorkItem(
-                task_type="PORTFOLIO_ALLOCATION_REPAIR",
-                scope="REPRODUCIBLE_CANDIDATE_PIPELINE",
-                reason=(
-                    "qualified portfolio-allocation evidence is missing "
-                    "valid immutable candidate-artifact lineage"
-                ),
-                shell_command=(
-                    "pio multi-pool-research "
-                    "--file <POOL_INPUTS_JSON> "
-                    "--equity <EQUITY> --cash <CASH> "
-                    "--deployed <DEPLOYED> --drawdown-bps <BPS> "
-                    "--persist-phase9-candidates "
-                    "> phase9-multi-pool.json && "
-                    "pio portfolio-allocation-research "
-                    "--file phase9-multi-pool.json "
-                    "--budget-quote <QUOTE> "
-                    "--persist --require-qualified"
-                ),
+    if hedge_lineage_invalid or allocation_lineage_invalid:
+        explicit_repair_audit = audit_phase9_explicit_inputs(storage)
+        repair_families = []
+        if hedge_lineage_invalid:
+            repair_families.append("static hedge")
+        if allocation_lineage_invalid:
+            repair_families.append("portfolio allocation")
+
+        if (
+            explicit_repair_audit.valid
+            and explicit_repair_audit.evidence_id is not None
+        ):
+            items.append(
+                Phase9WorkItem(
+                    task_type="EXPLICIT_RESEARCH_REPAIR",
+                    scope=str(explicit_repair_audit.evidence_id),
+                    reason=(
+                        "qualified "
+                        + " and ".join(repair_families)
+                        + " evidence has invalid lineage; rerun from the "
+                        "current checksum-bound explicit input artifact"
+                    ),
+                    shell_command=(
+                        "pio phase9-explicit-research-run "
+                        "--input-evidence-id "
+                        + _q(explicit_repair_audit.evidence_id)
+                        + " --persist --require-ready"
+                    ),
+                )
             )
-        )
+        else:
+            template_command = "pio phase9-research-input-template"
+            if pools:
+                template_command += " --pools " + _q(
+                    ",".join(pools[:3])
+                )
+            template_command += " > phase9-research-inputs.json"
+            items.append(
+                Phase9WorkItem(
+                    task_type="EXPLICIT_RESEARCH_INPUTS_REPAIR",
+                    scope="USER_ASSUMPTIONS_REQUIRED",
+                    reason=(
+                        "qualified "
+                        + " and ".join(repair_families)
+                        + " evidence has invalid lineage, but no valid "
+                        "checksum-bound explicit input artifact is available"
+                        + (
+                            ": " + "; ".join(
+                                explicit_repair_audit.reasons
+                            )
+                            if explicit_repair_audit.reasons
+                            else ""
+                        )
+                    ),
+                    shell_command=template_command,
+                )
+            )
 
     if (
         criteria.require_contextual_bandit
