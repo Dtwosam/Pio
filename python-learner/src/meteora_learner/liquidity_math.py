@@ -118,18 +118,35 @@ def amounts_from_liquidity_share(
     )
 
 
+def checkpoint_delta_amount(
+    *,
+    liquidity_share: int,
+    per_token_delta: int,
+) -> int:
+    """Mirror Meteora's Q64 fee/reward checkpoint accrual primitive."""
+    if liquidity_share < 0 or per_token_delta < 0:
+        raise ValueError("checkpoint inputs cannot be negative")
+    scaled_share = liquidity_share >> SCALE_OFFSET
+    return (scaled_share * per_token_delta) >> SCALE_OFFSET
+
+
 def fee_from_checkpoint_delta(
     *,
     liquidity_share: int,
     fee_per_token_delta: int,
 ) -> int:
-    """
-    Mirror DynamicPosition fee accrual for one bin, excluding pre-existing pending fees.
+    return checkpoint_delta_amount(
+        liquidity_share=liquidity_share,
+        per_token_delta=fee_per_token_delta,
+    )
 
-    scaled_share = liquidity_share >> 64
-    fee = (scaled_share * fee_per_token_delta) >> 64
-    """
-    if liquidity_share < 0 or fee_per_token_delta < 0:
-        raise ValueError("fee inputs cannot be negative")
-    scaled_share = liquidity_share >> SCALE_OFFSET
-    return (scaled_share * fee_per_token_delta) >> SCALE_OFFSET
+
+def reward_from_checkpoint_delta(
+    *,
+    liquidity_share: int,
+    reward_per_token_delta: int,
+) -> int:
+    return checkpoint_delta_amount(
+        liquidity_share=liquidity_share,
+        per_token_delta=reward_per_token_delta,
+    )
