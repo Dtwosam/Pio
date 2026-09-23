@@ -101,6 +101,14 @@ def _load_cycle_dataset(
             "retraining dataset evidence is missing output_file"
         )
     path = Path(output_file)
+    if not path.is_absolute():
+        raise ValueError(
+            "retraining dataset file path must be absolute"
+        )
+    if path.is_symlink():
+        raise ValueError(
+            "retraining dataset file must not be a symlink"
+        )
     if not path.is_file():
         raise ValueError(
             f"retraining dataset file does not exist: {path}"
