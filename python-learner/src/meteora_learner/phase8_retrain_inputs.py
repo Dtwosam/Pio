@@ -90,6 +90,10 @@ class Phase8RetrainBuildRun:
         }
 
 
+def _normalized(value: Any) -> Any:
+    return json.loads(json.dumps(value, sort_keys=True))
+
+
 def _canonical_sha256(payload: dict[str, Any]) -> str:
     canonical = json.dumps(
         payload,
@@ -294,7 +298,7 @@ def persist_phase8_retrain_inputs(
     if (
         latest is not None
         and str(latest["status"]) == "INPUTS_VALIDATED"
-        and latest.get("evidence") == evidence
+        and _normalized(latest.get("evidence")) == _normalized(evidence)
     ):
         evidence_id = int(latest["id"])
     else:
