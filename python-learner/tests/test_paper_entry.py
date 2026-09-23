@@ -121,11 +121,13 @@ def test_bound_entry_opens_and_initializes_chain_state_atomically(tmp_path):
 
     assert result.opened is True
     assert result.bound is True
-    assert result.position.opened_at == OBS
     assert result.counterfactual.entry_observed_at == OBS
     assert result.account.cash_quote == 900
 
     with storage.connect() as conn:
+        opened_at = conn.execute(
+            "SELECT opened_at FROM paper_positions WHERE position_id = 'pos'"
+        ).fetchone()[0]
         bound = conn.execute(
             """
             SELECT COUNT(*)
@@ -140,6 +142,7 @@ def test_bound_entry_opens_and_initializes_chain_state_atomically(tmp_path):
             WHERE event_key = 'enter-pos'
             """
         ).fetchone()[0]
+    assert opened_at == OBS
     assert bound == 1
     assert events == 1
 
