@@ -510,8 +510,18 @@ def build_phase9_work_queue(
             )
         ]
         if missing_mints:
-            rpc = rpc_url if rpc_url is not None else "<RPC_URL>"
             for mint in missing_mints:
+                inspect_command = (
+                    "meteora-executor inspect-mint "
+                    + _q(rpc_url)
+                    + " "
+                    + _q(mint)
+                    if rpc_url is not None
+                    else (
+                        "meteora-executor inspect-mint-env "
+                        + _q(mint)
+                    )
+                )
                 items.append(
                     Phase9WorkItem(
                         task_type="MINT_SNAPSHOT",
@@ -521,10 +531,7 @@ def build_phase9_work_queue(
                             "before mint-risk research can run"
                         ),
                         shell_command=(
-                            "meteora-executor inspect-mint "
-                            + _q(rpc)
-                            + " "
-                            + _q(mint)
+                            inspect_command
                             + " | pio ingest-mint-snapshot --file -"
                         ),
                     )
