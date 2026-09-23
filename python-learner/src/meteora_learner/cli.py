@@ -33,7 +33,6 @@ from .phase_promotion import (
     PHASE6,
     PHASE7,
     PHASE8,
-    PHASE8,
     persist_phase2_promotion,
     persist_phase5_promotion,
     persist_phase6_promotion,
@@ -2386,9 +2385,7 @@ def main() -> None:
             criteria=Phase8PromotionCriteria(
                 min_completed_cycles=args.min_completed_cycles,
                 min_live_labels=args.min_live_labels,
-                max_realized_drawdown_bps=(
-                    args.max_realized_drawdown_bps
-                ),
+                max_realized_drawdown_bps=args.max_drawdown_bps,
                 max_single_loss_bps=args.max_single_loss_bps,
                 min_win_rate=args.min_win_rate,
                 min_mean_return_bps=args.min_mean_return_bps,
