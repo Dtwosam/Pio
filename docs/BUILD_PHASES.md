@@ -345,6 +345,8 @@ Built:
 - explicit chain-history sampling cadence guard plus optional hardened systemd source-capture timer (70-minute activation, 3,600-second per-pool minimum) so retries cannot inflate observation depth with near-duplicate snapshots
 - replay-aware deterministic research-refresh pass for adaptive/regime, mint-risk, wallet-flow and checksum-bound contextual-bandit evidence, with storage/Phase-8 preflight, source gating, append-only dedup and ready-bundle persistence but no promotion
 - optional hardened systemd research-refresh timer offset behind source capture, with static tests preventing promotion, RPC capture, signing or LIVE-submit behavior from entering the scheduled research writer
+- shared SQLite Phase 9 maintenance lease serializing source capture and research refresh, with stale-lease recovery and a 30-minute lease around 20-minute bounded services
+- artifact-backed automatic refresh for static hedge and portfolio allocation when (and only when) a valid checksum-bound explicit-input artifact already exists; identical recomputations reuse evidence IDs instead of appending duplicates
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
