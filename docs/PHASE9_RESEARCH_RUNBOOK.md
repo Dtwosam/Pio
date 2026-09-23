@@ -468,3 +468,43 @@ Persisted shadow evidence uses
 A passing shadow report is **not** LIVE-policy authorization. It is only a
 separate post-promotion validation corpus that a future authorization design
 may consume.
+
+
+## Future LIVE-policy authorization evidence gate
+
+The separate authorization evidence gate consumes only persisted,
+deterministically replayable post-promotion shadow corpora:
+
+```bash
+pio phase9-policy-authorization-gate \
+  --persist \
+  --require-ready
+```
+
+Default requirements are intentionally stricter than one shadow run:
+
+- at least 3 unique shadow cycles;
+- at least 3 distinct checksum-bound dataset hashes;
+- at least 3 distinct post-promotion cutoffs;
+- at least 50 evaluated decisions per qualifying shadow run;
+- at least 3 pools and 2 selected arms per qualifying run;
+- at least 150 evaluated decisions across qualifying runs;
+- non-negative mean uplift versus baseline;
+- mean regret versus oracle no higher than 300 bps;
+- current Phase 9 promotion;
+- deterministic replay equality for every counted shadow report.
+
+Re-persisting the same cycle does not increase the qualifying run count.
+Shadow evidence evaluated under weaker criteria is not accepted by a stronger
+authorization gate.
+
+Even when `authorization_ready=true`, the report and persisted
+`PHASE9_LIVE_POLICY_AUTHORIZATION_GATE_V1` evidence remain:
+
+- `research_only=true`;
+- `policy_actionable=false`;
+- `execution_wired=false`.
+
+There is intentionally no executor or LIVE-policy code path that consumes this
+gate yet. A later explicit wiring change would need its own source-of-truth
+update, tests, rollback design and controlled validation.
