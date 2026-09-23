@@ -921,3 +921,35 @@ def test_tampered_bandit_dataset_file_blocks_bundle(tmp_path):
         "checksum-verified retraining dataset lineage" in reason
         for reason in report.reasons
     )
+
+
+def test_forged_mint_assessment_facts_block_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+    )
+    assert latest is not None
+    forged = dict(latest["evidence"])
+    assessments = [
+        dict(item) for item in forged["assessments"]
+    ]
+    assessments[0]["decimals"] = int(assessments[0]["decimals"]) + 1
+    forged["assessments"] = assessments
+    storage.save_advanced_edge_evidence(
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:10:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence=forged,
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "authoritative pool and mint snapshot IDs" in reason
+        for reason in report.reasons
+    )
