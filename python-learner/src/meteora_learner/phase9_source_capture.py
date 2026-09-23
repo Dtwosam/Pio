@@ -202,7 +202,6 @@ def run_phase9_source_capture(
                     api_ranking_max_age_seconds
                 ),
             ),
-            pool_addresses=mint_pools,
             rust_manifest_path=rust_manifest_path,
             rust_binary_path=rust_binary_path,
             timeout_seconds=timeout_seconds,
@@ -271,6 +270,7 @@ def run_phase9_source_capture(
                 ),
                 include_reward_mints=True,
             ),
+            pool_addresses=mint_pools,
             rust_manifest_path=rust_manifest_path,
             rust_binary_path=rust_binary_path,
             timeout_seconds=timeout_seconds,
