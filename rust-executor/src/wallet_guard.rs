@@ -58,6 +58,7 @@ mod tests {
             },
             fee_payer: payer.to_string(),
             pool_account_present: true,
+            required_accounts_present: true,
             instruction_count: 1,
             static_account_count: 3,
             required_signatures: 1,
