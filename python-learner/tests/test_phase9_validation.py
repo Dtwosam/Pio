@@ -242,7 +242,7 @@ def seed_mint_risk_lineage(storage, pool):
     x = f"{pool}-x"
     y = f"{pool}-y"
     with storage.connect() as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO chain_pool_snapshots(
                 observed_at, pool_address, active_bin_id, bin_step,
@@ -252,8 +252,22 @@ def seed_mint_risk_lineage(storage, pool):
             """,
             (observed_at, pool, x, y, token_program, token_program),
         )
+        pool_snapshot_id = int(cursor.lastrowid)
+        pool_source = conn.execute(
+            f"""
+            SELECT {", ".join(POOL_SOURCE_COLUMNS)}
+            FROM chain_pool_snapshots
+            WHERE id = ?
+            """,
+            (pool_snapshot_id,),
+        ).fetchone()
+        assert pool_source is not None
+        pool_snapshot_sha256 = mint_risk_source_sha256(
+            mint_risk_pool_source_record(pool_source)
+        )
 
-    for mint in (x, y):
+    assessment_rows = []
+    for mint, role in ((x, "TOKEN_X"), (y, "TOKEN_Y")):
         storage.save_token_mint_snapshot(
             {
                 "mint_address": mint,
@@ -271,14 +285,42 @@ def seed_mint_risk_lineage(storage, pool):
             },
             observed_at=observed_at,
         )
+        with storage.connect() as conn:
+            mint_source = conn.execute(
+                f"""
+                SELECT {", ".join(MINT_SOURCE_COLUMNS)}
+                FROM token_mint_snapshots
+                WHERE mint_address = ? AND observed_at = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (mint, observed_at),
+            ).fetchone()
+            assert mint_source is not None
+        mint_record = mint_risk_mint_source_record(mint_source)
+        assessment_rows.append(
+            {
+                "mint_address": mint,
+                "roles": [role],
+                "mint_snapshot_id": int(mint_record["id"]),
+                "mint_snapshot_sha256": mint_risk_source_sha256(
+                    mint_record
+                ),
+                "observed_at": observed_at,
+                "accepted": True,
+            }
+        )
 
-    report = research_pool_mint_risk(
+    evidence(
         storage,
-        pool_address=pool,
-        as_of=observed_at,
+        MINT_RISK_EVIDENCE_TYPE,
+        pool,
+        extra={
+            "pool_snapshot_id": pool_snapshot_id,
+            "pool_snapshot_sha256": pool_snapshot_sha256,
+            "assessments": assessment_rows,
+        },
     )
-    assert report.research_qualified is True
-    persist_pool_mint_risk(storage, report=report)
 
 
 def seed_adaptive_multi_pool_lineage(storage, pools):
@@ -755,6 +797,68 @@ def test_forged_mint_snapshot_lineage_blocks_bundle(tmp_path):
         for reason in report.reasons
     )
 
+
+
+def test_tampered_mint_snapshot_payload_blocks_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+    )
+    assert latest is not None
+    mint_id = int(
+        latest["evidence"]["assessments"][0]["mint_snapshot_id"]
+    )
+
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE token_mint_snapshots
+            SET mint_authority = 'tampered-authority'
+            WHERE id = ?
+            """,
+            (mint_id,),
+        )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "authoritative pool and mint snapshot IDs" in reason
+        for reason in report.reasons
+    )
+
+
+def test_tampered_pool_snapshot_payload_blocks_mint_bundle(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+    )
+    assert latest is not None
+    pool_snapshot_id = int(
+        latest["evidence"]["pool_snapshot_id"]
+    )
+
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE chain_pool_snapshots
+            SET bin_step = bin_step + 1
+            WHERE id = ?
+            """,
+            (pool_snapshot_id,),
+        )
+
+    report = evaluate_phase9_research_bundle(storage)
+
+    assert report.research_ready is False
+    assert any(
+        "authoritative pool and mint snapshot IDs" in reason
+        for reason in report.reasons
+    )
 
 def test_forged_wallet_flow_lineage_blocks_bundle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
