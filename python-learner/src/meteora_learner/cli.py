@@ -122,6 +122,7 @@ from .phase9_capture_plan import (
     Phase9ChainCaptureCriteria,
     build_phase9_chain_capture_plan,
 )
+from .phase9_history_plan import build_phase9_history_plan
 from .phase9_chain_capture import run_phase9_chain_capture_batch
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
 from .phase9_work_queue import (
@@ -2131,6 +2132,74 @@ def main() -> None:
         help="Rust read-only executor binary used in emitted inspect-pool commands",
     )
     phase9_capture_plan.add_argument(
+        "--require-ready",
+        action="store_true",
+    )
+
+    phase9_history_plan = subparsers.add_parser(
+        "phase9-chain-history-plan",
+        help="Calculate exact per-pool Phase 9 chain-history depth required by adaptive walk-forward and regime gates",
+    )
+    phase9_history_plan.add_argument("--min-pools", type=int, default=3)
+    phase9_history_plan.add_argument(
+        "--min-qualified-pools",
+        type=int,
+        default=2,
+    )
+    phase9_history_plan.add_argument(
+        "--min-qualified-pool-rate",
+        type=float,
+        default=0.67,
+    )
+    phase9_history_plan.add_argument(
+        "--lookback-observations",
+        type=int,
+        default=96,
+    )
+    phase9_history_plan.add_argument(
+        "--holding-observations",
+        type=int,
+        default=6,
+    )
+    phase9_history_plan.add_argument(
+        "--min-historical-windows",
+        type=int,
+        default=12,
+    )
+    phase9_history_plan.add_argument(
+        "--min-decisions",
+        type=int,
+        default=20,
+    )
+    phase9_history_plan.add_argument(
+        "--regime-lookback-observations",
+        type=int,
+        default=72,
+    )
+    phase9_history_plan.add_argument(
+        "--regime-recent-observations",
+        type=int,
+        default=8,
+    )
+    phase9_history_plan.add_argument(
+        "--regime-min-observations",
+        type=int,
+        default=16,
+    )
+    phase9_history_plan.add_argument(
+        "--rpc-url",
+        help="Optional Solana RPC URL inserted into emitted read-only one-snapshot capture commands",
+    )
+    phase9_history_plan.add_argument(
+        "--executor-bin",
+        default="meteora-executor",
+    )
+    phase9_history_plan.add_argument(
+        "--bin-array-radius",
+        type=int,
+        default=1,
+    )
+    phase9_history_plan.add_argument(
         "--require-ready",
         action="store_true",
     )
@@ -4660,6 +4729,40 @@ def main() -> None:
             ),
             rpc_url=args.rpc_url,
             executor_bin=args.executor_bin,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_ready and not result.plan_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase9-chain-history-plan":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_phase9_history_plan(
+            storage,
+            research_criteria=Phase9ResearchCriteria(
+                min_pools=args.min_pools,
+                min_qualified_pools=args.min_qualified_pools,
+                min_qualified_pool_rate=args.min_qualified_pool_rate,
+            ),
+            adaptive_criteria=AdaptiveRangeCriteria(
+                lookback_observations=args.lookback_observations,
+                holding_observations=args.holding_observations,
+                min_historical_windows=args.min_historical_windows,
+            ),
+            validation_criteria=AdaptiveRangeValidationCriteria(
+                min_decisions=args.min_decisions,
+            ),
+            regime_criteria=DLMMRegimeCriteria(
+                lookback_observations=(
+                    args.regime_lookback_observations
+                ),
+                recent_observations=args.regime_recent_observations,
+                min_observations=args.regime_min_observations,
+            ),
+            executor_bin=args.executor_bin,
+            rpc_url=args.rpc_url,
+            bin_array_radius=args.bin_array_radius,
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.plan_ready:
