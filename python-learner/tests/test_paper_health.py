@@ -2,7 +2,10 @@ from meteora_learner.chain_replay import STANDARD_SPL_TOKEN_PROGRAM
 from meteora_learner.liquidity_math import Q64
 from meteora_learner.paper_account import create_paper_account, open_paper_position
 from meteora_learner.paper_chain import bind_paper_position_to_chain
-from meteora_learner.paper_health import build_paper_health
+from meteora_learner.paper_health import (
+    build_paper_health,
+    render_paper_health_prometheus,
+)
 from meteora_learner.quote_registry import save_token_quote
 from meteora_learner.storage import Storage
 
@@ -202,3 +205,21 @@ def test_health_is_unhealthy_on_missed_ticks_and_failure_streak(tmp_path):
     assert report.status == "UNHEALTHY"
     assert any("stale" in reason for reason in report.reasons)
     assert any("failure threshold" in reason for reason in report.reasons)
+
+
+
+def test_health_prometheus_rendering_exposes_core_gauges(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    report = build_paper_health(
+        storage,
+        account_id="paper",
+        as_of=NOW,
+    )
+
+    text = render_paper_health_prometheus(report)
+
+    assert 'pio_paper_health_status{account="paper",status="IDLE"} 1' in text
+    assert 'pio_paper_open_positions{account="paper"} 0' in text
+    assert 'pio_paper_scheduler_consecutive_failures{account="paper"} 0' in text
+    assert 'pio_paper_chain_pools_needing_refresh{account="paper"} 0' in text
