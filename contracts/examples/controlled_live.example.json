@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "allowed_pool_addresses": [
+    "REPLACE_WITH_APPROVED_POOL"
+  ],
+  "max_open_positions": 1,
+  "max_capital_quote_per_entry": 50.0,
+  "max_daily_drawdown_pct": 2.0,
+  "allow_rebalance": true,
+  "allow_exit": true
+}
