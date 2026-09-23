@@ -1394,6 +1394,38 @@ def main() -> None:
         action="store_true",
     )
 
+    multi_pool = subparsers.add_parser(
+        "multi-pool-research",
+        help="Build comparable Phase 3 research plans and ranked cross-pool candidates",
+    )
+    multi_pool.add_argument(
+        "--file",
+        required=True,
+        help="JSON array with pool_address, amount_x, amount_y, requested_quote, network_cost_y_atomic",
+    )
+    multi_pool.add_argument("--equity", required=True, type=float)
+    multi_pool.add_argument("--cash", required=True, type=float)
+    multi_pool.add_argument("--deployed", required=True, type=float)
+    multi_pool.add_argument("--drawdown-bps", required=True, type=int)
+    multi_pool.add_argument("--observations", type=int, default=12)
+    multi_pool.add_argument(
+        "--half-widths",
+        type=_parse_int_csv,
+        default=(0, 1, 2, 5, 10),
+    )
+    multi_pool.add_argument(
+        "--center-offsets",
+        type=_parse_int_csv,
+        default=(0,),
+    )
+    multi_pool.add_argument(
+        "--strategies",
+        type=_parse_strategy_csv,
+        default=tuple(StrategyType),
+    )
+    multi_pool.add_argument("--max-share-bps", type=int, default=500)
+    multi_pool.add_argument("--favor-x-active", action="store_true")
+
     portfolio_allocation = subparsers.add_parser(
         "portfolio-allocation-research",
         help="Allocate a research-only quote budget across qualified pool candidates",
@@ -3337,16 +3369,64 @@ def main() -> None:
             raise SystemExit(2)
         return
 
+    if args.command == "multi-pool-research":
+        settings = Settings.from_env()
+        with open(args.file, "r", encoding="utf-8") as handle:
+            raw_inputs = json.load(handle)
+        if not isinstance(raw_inputs, list):
+            raise ValueError(
+                "multi-pool-research file must contain a JSON array"
+            )
+        inputs = tuple(
+            PoolResearchInput(
+                pool_address=str(item["pool_address"]),
+                amount_x=int(item["amount_x"]),
+                amount_y=int(item["amount_y"]),
+                requested_quote=float(item["requested_quote"]),
+                network_cost_y_atomic=int(
+                    item["network_cost_y_atomic"]
+                ),
+            )
+            for item in raw_inputs
+        )
+        result = build_multi_pool_research(
+            str(settings.database_path),
+            inputs=inputs,
+            account_equity_quote=args.equity,
+            cash_quote=args.cash,
+            current_deployed_quote=args.deployed,
+            portfolio_drawdown_bps=args.drawdown_bps,
+            phase2_gate=None,
+            observation_limit=args.observations,
+            half_widths=args.half_widths,
+            center_offsets=args.center_offsets,
+            strategies=args.strategies,
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
     if args.command == "portfolio-allocation-research":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
         with open(args.file, "r", encoding="utf-8") as handle:
             raw = json.load(handle)
-        raw_candidates = (
-            raw.get("candidates")
-            if isinstance(raw, dict)
-            else raw
-        )
+        if isinstance(raw, dict):
+            if isinstance(raw.get("candidates"), list):
+                raw_candidates = raw["candidates"]
+            elif (
+                isinstance(raw.get("comparison"), dict)
+                and isinstance(
+                    raw["comparison"].get("candidates"),
+                    list,
+                )
+            ):
+                raw_candidates = raw["comparison"]["candidates"]
+            else:
+                raw_candidates = None
+        else:
+            raw_candidates = raw
         if not isinstance(raw_candidates, list):
             raise ValueError(
                 "portfolio allocation file must contain a JSON candidate array"
