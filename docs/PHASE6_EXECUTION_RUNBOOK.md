@@ -1,6 +1,6 @@
 # Phase 6 Rust Execution Runbook
 
-Status: standard-SPL execution lifecycle implemented through unsigned construction, guarded presign, internal deterministic signing/submission, confirmation/receipt reconciliation, and live ledger mutation. Public live signing/sending remain disabled.
+Status: Phase 6 implementation is complete behind fail-closed gates, including standard-SPL and Token-2022 construction, guarded presign, internal deterministic signing/submission, recovery, receipts and live-ledger reconciliation. Controlled live validation is still pending. Public live signing/sending remain disabled.
 
 ## Purpose
 
@@ -174,9 +174,7 @@ Before producing the unsigned transaction, the builder verifies:
 - required bin arrays are real Meteora accounts;
 - the bitmap extension is included when it exists.
 
-The output is still unsigned. It should then pass the strict transaction guard
-and simulation pipeline. Token-2022 emergency exits remain fail-closed until
-their transfer-hook/remaining-account path is implemented and validated.
+The output is still unsigned and must pass the strict transaction guard and simulation pipeline. The Token-2022-aware exit path is implemented separately through `build-token-exit-from-chain`, including resolved transfer-hook remaining accounts.
 
 ## Settlement and confirmed close
 
@@ -188,9 +186,7 @@ account:
 meteora-executor build-standard-spl-settlement-from-chain <SETTLEMENT_REQUEST_JSON>
 ```
 
-The builder refuses non-zero position liquidity, wrong ownership, alternate
-fee owners, missing reward destinations, unsupported Token-2022 reward/pool
-mints and unsupported wide positions.
+The standard-SPL builder refuses non-zero position liquidity, wrong ownership, alternate fee owners, missing reward destinations and unsupported wide positions. Token-2022-aware fee/reward settlement is implemented separately through `build-token-settlement-from-chain`, including transfer-hook remaining accounts.
 
 After the settlement receipt is confirmed, final account closure must be
 proved independently:
@@ -310,16 +306,43 @@ It is idempotent:
 
 This does not resend the transaction.
 
-## Still required before live execution
+## Phase 6 readiness gate
 
-Phase 6 is not complete yet. Remaining work includes:
+Before any future public live-submit command is enabled, Rust must independently
+verify the persisted Phase 5 promotion evidence and bind it to the isolated
+executor wallet plus the strict action-bound transaction policy.
 
-- Token-2022/transfer-hook execution construction and validation;
-- quote-valued live PnL and final learning-label valuation from atomic outcomes;
-- explicit operational validation of the full executor lifecycle after Phase 5 promotion.
+Check Phase 5 evidence only:
 
-Live signing/sending must not be enabled merely because the preflight layer
-passes.
+```bash
+meteora-executor phase5-promotion-gate /absolute/path/to/pio.db
+```
+
+Check full Phase 6 deployment readiness:
+
+```bash
+meteora-executor phase6-readiness \
+  /absolute/path/to/pio.db \
+  contracts/examples/transaction_guard.phase6.example.json
+```
+
+The checked-in example policy is intentionally unusable until
+`REPLACE_WITH_EXECUTOR_PUBKEY` is replaced with the actual isolated executor
+wallet. Readiness fails if Phase 5 is unpromoted, the wallet differs from the
+policy fee payer, the Meteora program is absent, unsigned/pool/instruction
+binding is relaxed, lookup tables are enabled, or any ENTER/REBALANCE/EXIT
+instruction policy is missing.
+
+The internal submission coordinator also refuses to proceed without an
+accepted Phase 5 promotion gate.
+
+## Still required before controlled live execution
+
+Phase 6 implementation is complete. The remaining requirement is explicit
+end-to-end controlled executor validation after real Phase 5 promotion evidence
+exists.
+
+Public live signing/sending remain disabled until that validation is completed.
 
 
 ## Valued live outcomes and learning attribution
