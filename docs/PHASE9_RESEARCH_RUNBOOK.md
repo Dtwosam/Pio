@@ -786,6 +786,53 @@ reports whether the target chain-pool count was reached.
 This command is manual by design. The work queue emits the plan step, not the
 capture-run step, so evidence acquisition does not start implicitly.
 
+
+### Exact adaptive/regime history depth
+
+Distinct pool coverage is only the first requirement. Phase 9 adaptive
+walk-forward needs enough time-separated chain observations per selected pool.
+
+Inspect the exact current deficits with:
+
+```bash
+pio phase9-chain-history-plan
+```
+
+The planner derives the requirement from the same criteria used by the
+evaluator. For the defaults:
+
+- holding window = 6 observations;
+- minimum historical displacement windows = 12;
+- minimum walk-forward decisions = 20;
+- regime minimum = 16 observations.
+
+A valid adaptive decision first becomes possible after enough trailing history
+to form 12 six-observation displacement windows, and every evaluated decision
+also needs six future observations. The resulting minimum is:
+
+`20 + (2 × 6) + 12 - 1 = 43` chain observations per pool.
+
+The default multi-pool gate also requires at least 3 pools and a qualified-pool
+rate of 0.67. At the minimum 3-pool set, 2/3 is only 66.67%, so all 3 selected
+pools must be history-capable to satisfy that rate.
+
+Capture one fresh observation for each deficient selected pool with:
+
+```bash
+SOLANA_RPC_URL=<RPC_URL> \
+pio phase9-chain-history-run
+```
+
+One invocation takes at most one new read-only snapshot per deficient pool.
+Repeat it over real elapsed time until `phase9-chain-history-plan
+--require-ready` passes. An explicit `--observed-at` must be timezone-aware
+and strictly newer than the latest persisted snapshot for every captured pool;
+stale/equal timestamps fail closed instead of inflating history depth.
+
+Once exact history depth is ready, `phase9-work-queue` stops emitting
+`CHAIN_HISTORY_DEPTH` and unlocks the concrete
+`phase9-research-validate` command.
+
 Persisting the queue snapshot with `--persist-snapshot` records the new
 policy-evidence readiness fields as sanitized append-only state. No emitted
 shell commands, RPC URLs or secrets are stored. `pio phase9-progress` now
