@@ -161,6 +161,8 @@ mod tests {
             max_static_accounts: 16,
             allow_address_lookup_tables: false,
             require_unsigned: true,
+            require_instruction_policy: false,
+            instruction_policies: vec![],
         }
     }
 
