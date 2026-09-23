@@ -237,6 +237,37 @@ def _parse_strategy_csv(value: str) -> tuple[StrategyType, ...]:
     return parsed
 
 
+def _portfolio_candidate_records(raw: object) -> list[dict[str, Any]]:
+    if isinstance(raw, list):
+        records = raw
+    elif isinstance(raw, dict):
+        if isinstance(raw.get("candidates"), list):
+            records = raw["candidates"]
+        elif (
+            isinstance(raw.get("comparison"), dict)
+            and isinstance(
+                raw["comparison"].get("candidates"),
+                list,
+            )
+        ):
+            records = raw["comparison"]["candidates"]
+        else:
+            records = None
+    else:
+        records = None
+
+    if not isinstance(records, list):
+        raise ValueError(
+            "portfolio allocation file must contain a JSON candidate array "
+            "or a multi-pool report with comparison.candidates"
+        )
+    if any(not isinstance(item, dict) for item in records):
+        raise ValueError(
+            "portfolio allocation candidates must be JSON objects"
+        )
+    return records
+
+
 def _pool_safety_config_from_args(args: argparse.Namespace) -> PoolSafetyConfig:
     return PoolSafetyConfig(
         min_tvl_usd=args.min_tvl_usd,
@@ -3412,25 +3443,7 @@ def main() -> None:
         storage = Storage(settings.database_path)
         with open(args.file, "r", encoding="utf-8") as handle:
             raw = json.load(handle)
-        if isinstance(raw, dict):
-            if isinstance(raw.get("candidates"), list):
-                raw_candidates = raw["candidates"]
-            elif (
-                isinstance(raw.get("comparison"), dict)
-                and isinstance(
-                    raw["comparison"].get("candidates"),
-                    list,
-                )
-            ):
-                raw_candidates = raw["comparison"]["candidates"]
-            else:
-                raw_candidates = None
-        else:
-            raw_candidates = raw
-        if not isinstance(raw_candidates, list):
-            raise ValueError(
-                "portfolio allocation file must contain a JSON candidate array"
-            )
+        raw_candidates = _portfolio_candidate_records(raw)
         candidates = tuple(
             CrossPoolResearchCandidate(
                 rank=int(item["rank"]),
