@@ -123,6 +123,12 @@ from .live_position_outcome import build_live_position_outcome
 from .live_position_valuation import value_live_position_outcome
 from .live_learning_label import build_live_learning_label
 from .live_execution_audit import audit_live_execution_ledger
+from .live_champion_monitor import (
+    LiveChampionCriteria,
+    evaluate_live_champion,
+    persist_live_champion_report,
+    rollback_live_champion,
+)
 from .transaction_costs import build_transaction_cost_report
 
 
@@ -995,6 +1001,41 @@ def main() -> None:
         help="Move an offline-qualified model into PAPER_CHALLENGER state",
     )
     ml_start_paper.add_argument("--model-id", required=True)
+
+    ml_live_monitor = subparsers.add_parser(
+        "ml-live-monitor",
+        help="Evaluate persisted live labels for champion rollback safety",
+    )
+    ml_live_monitor.add_argument("--model-id")
+    ml_live_monitor.add_argument("--min-live-labels", type=int, default=10)
+    ml_live_monitor.add_argument(
+        "--max-drawdown-bps",
+        type=int,
+        default=2000,
+    )
+    ml_live_monitor.add_argument(
+        "--max-single-loss-bps",
+        type=int,
+        default=1500,
+    )
+    ml_live_monitor.add_argument(
+        "--min-win-rate",
+        type=float,
+        default=0.30,
+    )
+    ml_live_monitor.add_argument(
+        "--min-mean-return-bps",
+        type=float,
+        default=-100.0,
+    )
+    ml_live_monitor.add_argument(
+        "--max-mean-abs-prediction-error-bps",
+        type=float,
+        default=1500.0,
+    )
+    ml_live_monitor.add_argument("--persist", action="store_true")
+    ml_live_monitor.add_argument("--rollback", action="store_true")
+    ml_live_monitor.add_argument("--require-healthy", action="store_true")
 
     ml_status = subparsers.add_parser(
         "ml-model-status",
@@ -2071,6 +2112,49 @@ def main() -> None:
             model_id=args.model_id,
         )
         print(json.dumps(record.__dict__, indent=2))
+        return
+
+    if args.command == "ml-live-monitor":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_live_champion(
+            storage,
+            model_id=args.model_id,
+            criteria=LiveChampionCriteria(
+                min_live_labels=args.min_live_labels,
+                max_realized_drawdown_bps=args.max_drawdown_bps,
+                max_single_loss_bps=args.max_single_loss_bps,
+                min_win_rate=args.min_win_rate,
+                min_mean_return_bps=args.min_mean_return_bps,
+                max_mean_abs_prediction_error_bps=(
+                    args.max_mean_abs_prediction_error_bps
+                ),
+            ),
+        )
+        output = result.to_record()
+        output["persisted_evidence_id"] = None
+        output["rolled_back_model"] = None
+        if args.persist or args.rollback:
+            output["persisted_evidence_id"] = (
+                persist_live_champion_report(
+                    storage,
+                    report=result,
+                )
+            )
+        if args.rollback:
+            if not result.rollback_recommended:
+                raise ValueError(
+                    "rollback requested but live monitor does not recommend rollback"
+                )
+            rolled = rollback_live_champion(
+                storage,
+                model_id=result.model_id,
+                notes="live champion safety rollback",
+            )
+            output["rolled_back_model"] = rolled.__dict__
+        print(json.dumps(output, indent=2))
+        if args.require_healthy and result.status != "HEALTHY":
+            raise SystemExit(2)
         return
 
     if args.command == "ml-model-status":
