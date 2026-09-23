@@ -12,6 +12,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - docs/SIMULATOR_DESIGN.md
 - docs/PHASE2_VALIDATION_RUNBOOK.md
 - docs/PHASE3_POLICY.md
+- docs/PHASE5_VALIDATION_RUNBOOK.md
 
 ## Current status
 
@@ -20,7 +21,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 2: standard-SPL simulator implementation complete; real promotion evidence pending
 - Phase 3: deterministic policy + persisted validation/promotion workflow implemented; real promotion evidence pending
 - Phase 4: reproducible no-lookahead ML challenger workflow implemented; not promoted
-- Phase 5: unattended chain-driven PAPER scheduler implemented; extended live validation pending
+- Phase 5: unattended chain-driven PAPER scheduler + health/endurance evidence framework implemented; real endurance validation pending
 - Default mode: PAPER
 - Live signing: not implemented
 
@@ -93,6 +94,8 @@ pio paper-tick --account paper --tick-id <ID> --refresh-jupiter-quotes
 pio paper-scheduler-run --account paper --interval-seconds 300 --lease-seconds 900 \
   --refresh-jupiter-quotes
 pio paper-scheduler-status --account paper
+pio paper-health --account paper --require-healthy
+pio paper-endurance-report --account paper --require-passing
 
 # Persisted promotion / ML workflow
 pio phase-status
