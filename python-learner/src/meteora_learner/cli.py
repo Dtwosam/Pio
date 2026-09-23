@@ -5,6 +5,8 @@ import json
 import sys
 
 from .add_execution import build_add_execution_calibration
+from .baseline_policy import BaselinePolicyConfig
+from .baseline_walk_forward import walk_forward_baseline
 from .calibration_queue import build_calibration_work_queue
 from .calibration_status import build_phase2_calibration_evidence
 from .chain_ingest import ingest_chain_snapshot
@@ -328,6 +330,58 @@ def main() -> None:
         help="Put the active bin on the X/ask side",
     )
 
+    baseline_walk = subparsers.add_parser(
+        "baseline-walk-forward",
+        help="Research-only deterministic baseline walk-forward on chain snapshots",
+    )
+    baseline_walk.add_argument("--pool", required=True, help="Meteora pool address")
+    baseline_walk.add_argument("--amount-x", required=True, type=int)
+    baseline_walk.add_argument("--amount-y", required=True, type=int)
+    baseline_walk.add_argument("--lookback-observations", type=int, default=12)
+    baseline_walk.add_argument("--forward-observations", type=int, default=2)
+    baseline_walk.add_argument("--step-observations", type=int, default=None)
+    baseline_walk.add_argument(
+        "--half-widths",
+        type=_parse_int_csv,
+        default=(0, 1, 2, 5, 10),
+    )
+    baseline_walk.add_argument(
+        "--center-offsets",
+        type=_parse_int_csv,
+        default=(0,),
+    )
+    baseline_walk.add_argument(
+        "--strategies",
+        type=_parse_strategy_csv,
+        default=(
+            StrategyType.SPOT,
+            StrategyType.CURVE,
+            StrategyType.BID_ASK,
+        ),
+    )
+    baseline_walk.add_argument("--max-share-bps", type=int, default=500)
+    baseline_walk.add_argument("--favor-x-active", action="store_true")
+    baseline_walk.add_argument(
+        "--network-cost-y-atomic",
+        required=True,
+        type=int,
+        help="Conservative per-entry network cost expressed in token-Y atomic units",
+    )
+    baseline_walk.add_argument(
+        "--min-range-survival",
+        type=float,
+        default=0.75,
+    )
+    baseline_walk.add_argument(
+        "--min-excess-vs-hold-bps",
+        type=int,
+        default=0,
+    )
+    baseline_walk.add_argument(
+        "--allow-unrecovered-entry-cost",
+        action="store_true",
+    )
+
     backtest = subparsers.add_parser(
         "backtest-inventory",
         help="Compare range candidates on stored candles without simulated fee income",
@@ -585,6 +639,32 @@ def main() -> None:
             amount_x=args.amount_x,
             amount_y=args.amount_y,
             observation_limit=args.observations,
+            half_widths=args.half_widths,
+            center_offsets=args.center_offsets,
+            strategies=args.strategies,
+            max_share_bps=args.max_share_bps,
+            favor_x_in_active_bin=args.favor_x_active,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "baseline-walk-forward":
+        settings = Settings.from_env()
+        result = walk_forward_baseline(
+            str(settings.database_path),
+            pool_address=args.pool,
+            amount_x=args.amount_x,
+            amount_y=args.amount_y,
+            phase2_gate=None,
+            config=BaselinePolicyConfig(
+                min_range_survival_ratio=args.min_range_survival,
+                min_excess_vs_hold_bps=args.min_excess_vs_hold_bps,
+                require_fee_cost_recovery=not args.allow_unrecovered_entry_cost,
+                estimated_network_cost_y_atomic=args.network_cost_y_atomic,
+            ),
+            lookback_observations=args.lookback_observations,
+            forward_observations=args.forward_observations,
+            step_observations=args.step_observations,
             half_widths=args.half_widths,
             center_offsets=args.center_offsets,
             strategies=args.strategies,
