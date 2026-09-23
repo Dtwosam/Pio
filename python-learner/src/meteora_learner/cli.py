@@ -103,7 +103,9 @@ from .ml_retraining_dataset import MLRetrainPoolSpec
 from .retraining_workflow import (
     start_retraining_cycle_with_dataset,
     train_retraining_cycle_challenger,
+    evaluate_retraining_cycle_walk_forward,
 )
+from .ml_walk_forward import MLWalkForwardCriteria
 from .ml_workflow import (
     evaluate_registered_offline_challenger,
     qualify_registered_offline_challenger,
@@ -1130,6 +1132,65 @@ def main() -> None:
         default=0.8,
     )
     ml_retrain_train.add_argument("--min-rows", type=int, default=50)
+
+    ml_retrain_walk = subparsers.add_parser(
+        "ml-retrain-walk-forward",
+        help="Run and persist no-lookahead walk-forward validation for a cycle challenger",
+    )
+    ml_retrain_walk.add_argument("--cycle-id", required=True)
+    ml_retrain_walk.add_argument("--file", required=True)
+    ml_retrain_walk.add_argument(
+        "--min-train-decision-times",
+        type=int,
+        default=30,
+    )
+    ml_retrain_walk.add_argument(
+        "--validation-decision-times",
+        type=int,
+        default=10,
+    )
+    ml_retrain_walk.add_argument(
+        "--step-decision-times",
+        type=int,
+        default=10,
+    )
+    ml_retrain_walk.add_argument("--min-folds", type=int, default=3)
+    ml_retrain_walk.add_argument(
+        "--min-total-comparable-decisions",
+        type=int,
+        default=30,
+    )
+    ml_retrain_walk.add_argument(
+        "--min-qualified-fold-rate",
+        type=float,
+        default=0.67,
+    )
+    ml_retrain_walk.add_argument(
+        "--min-mean-fold-uplift-bps",
+        type=float,
+        default=0.0,
+    )
+    ml_retrain_walk.add_argument(
+        "--min-positive-fold-rate",
+        type=float,
+        default=0.50,
+    )
+    ml_retrain_walk.add_argument(
+        "--max-worst-fold-uplift-loss-bps",
+        type=float,
+        default=250.0,
+    )
+    ml_retrain_walk.add_argument(
+        "--training-split-fraction",
+        type=float,
+        default=0.8,
+    )
+    ml_retrain_walk.add_argument(
+        "--training-min-rows",
+        type=int,
+        default=50,
+    )
+    ml_retrain_walk.add_argument("--require-qualified", action="store_true")
 
     ml_retrain_start = subparsers.add_parser(
         "ml-retrain-start",
@@ -2429,6 +2490,50 @@ def main() -> None:
             min_rows=args.min_rows,
         )
         print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "ml-retrain-walk-forward":
+        settings = Settings.from_env()
+        result = evaluate_retraining_cycle_walk_forward(
+            Storage(settings.database_path),
+            cycle_id=args.cycle_id,
+            dataset_file=args.file,
+            criteria=MLWalkForwardCriteria(
+                min_train_decision_times=(
+                    args.min_train_decision_times
+                ),
+                validation_decision_times=(
+                    args.validation_decision_times
+                ),
+                step_decision_times=args.step_decision_times,
+                min_folds=args.min_folds,
+                min_total_comparable_decisions=(
+                    args.min_total_comparable_decisions
+                ),
+                min_qualified_fold_rate=(
+                    args.min_qualified_fold_rate
+                ),
+                min_mean_fold_uplift_bps=(
+                    args.min_mean_fold_uplift_bps
+                ),
+                min_positive_fold_rate=(
+                    args.min_positive_fold_rate
+                ),
+                max_worst_fold_mean_uplift_loss_bps=(
+                    args.max_worst_fold_uplift_loss_bps
+                ),
+                training_split_fraction=(
+                    args.training_split_fraction
+                ),
+                training_min_rows=args.training_min_rows,
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if (
+            args.require_qualified
+            and not result.report.walk_forward_qualified
+        ):
+            raise SystemExit(2)
         return
 
     if args.command == "ml-retrain-start":
