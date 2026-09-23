@@ -18,6 +18,7 @@ from .paper_policy import (
     evaluate_paper_position_policy,
 )
 from .phase3_plan import Phase3ResearchPlan
+from .phase_promotion import PHASE3, PHASE3_EVIDENCE_TYPE
 from .position_policy import PositionManagementConfig
 from .storage import Storage
 
@@ -53,7 +54,6 @@ def open_deterministic_paper_plan(
     position_id: str,
     event_key: str,
     plan: Phase3ResearchPlan,
-    phase3_ready: bool,
     entry_cost_quote: float = 0.0,
 ) -> PaperEntryResult:
     """
@@ -63,6 +63,10 @@ def open_deterministic_paper_plan(
     sizing authorization. No transaction is built, signed or sent.
     """
     account = paper_account_snapshot(storage, account_id=account_id)
+    phase3_ready = storage.phase_is_promoted(
+        PHASE3,
+        evidence_type=PHASE3_EVIDENCE_TYPE,
+    )
 
     if not phase3_ready:
         return PaperEntryResult(
