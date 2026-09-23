@@ -45,6 +45,7 @@ class Phase9ChainCapturePlan:
     current_chain_pool_count: int
     target_chain_pool_count: int
     additional_chain_pools_needed: int
+    capture_required: bool
     api_pool_count: int
     candidates_available: int
     plan_ready: bool
@@ -178,7 +179,8 @@ def build_phase9_chain_capture_plan(
             "still needed to reach the target chain-pool count"
         )
 
-    plan_ready = needed > 0 and bool(candidates)
+    capture_required = needed > 0
+    plan_ready = needed == 0 or len(candidates) >= needed
 
     return Phase9ChainCapturePlan(
         research_only=True,
@@ -188,6 +190,7 @@ def build_phase9_chain_capture_plan(
         current_chain_pool_count=len(chain_pools),
         target_chain_pool_count=criteria.target_chain_pools,
         additional_chain_pools_needed=needed,
+        capture_required=capture_required,
         api_pool_count=len(api_pools),
         candidates_available=len(available),
         plan_ready=plan_ready,
