@@ -3990,7 +3990,6 @@ def main() -> None:
                 activity_percentile=args.activity_percentile,
                 quiet_percentile=args.quiet_percentile,
             ),
-            pool_addresses=mint_pools,
             as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
@@ -4902,6 +4901,7 @@ def main() -> None:
                     not args.exclude_reward_mints
                 ),
             ),
+            pool_addresses=mint_pools,
             as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
