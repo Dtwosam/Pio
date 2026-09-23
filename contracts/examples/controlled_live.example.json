@@ -7,6 +7,7 @@
   "max_rebalances_per_position": 3,
   "max_capital_quote_per_entry": 50,
   "max_daily_entry_capital_quote": 100,
+  "max_daily_entry_submissions": 3,
   "max_daily_realized_loss_quote": 20,
   "max_daily_drawdown_pct": 2,
   "allow_rebalance": true,
