@@ -576,6 +576,18 @@ readiness, because that still requires a separate cutoff-safe evaluator for live
 labels, continuous-promotion evidence, completed-cycle lineage and the complete
 promotion criteria.
 
+The `phase8-historical-promotion` command is that separate read-only evaluator.
+For a cutoff at or after the transition-history watermark it evaluates the same
+Phase 8 promotion criteria from reconstructed journal state, Phase 7 promotion
+history, matching continuous-champion promotion evidence persisted no later than
+the cutoff, and live-learning labels created no later than the cutoff. Live
+learning labels are database-immutable; update/delete attempts must fail at the
+SQLite boundary. Future promotion evidence or future labels must never
+retroactively repair or invalidate an earlier cutoff. A historically ready
+report is descriptive evidence only: it does not insert or rewrite
+`PHASE8_PROMOTION_V1`, authorize policy, start PAPER, rotate/rollback a
+champion, or grant LIVE execution authority.
+
 Phase 9 quantitative evidence planning is advisory and deterministic. The
 `phase9-evidence-plan` view may rank evidence debt and emit only existing
 research/read-only commands. It must not execute shell commands itself, fill
