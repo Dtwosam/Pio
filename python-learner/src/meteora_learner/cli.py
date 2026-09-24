@@ -5370,6 +5370,16 @@ def main() -> None:
         storage = Storage(settings.database_path)
         with open(args.file, "r", encoding="utf-8") as handle:
             payload = json.load(handle)
+        preflight = check_phase8_retrain_inputs(
+            storage,
+            payload,
+            min_pools=args.min_pools,
+        )
+        if not preflight.valid:
+            raise ValueError(
+                "Phase 8 retrain input preflight failed: "
+                + "; ".join(preflight.reasons)
+            )
         inputs = parse_phase8_retrain_inputs(
             payload,
             min_pools=args.min_pools,
