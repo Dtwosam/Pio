@@ -566,6 +566,16 @@ watermark are inherently unreconstructible, and cutoffs after it remain
 unsupported until the promotion/status evaluator is explicitly changed and
 tested to consume the transition journals plus time-bounded labels/evidence.
 
+The `phase8-transition-snapshot` command may reconstruct journal-backed model
+and retraining-cycle state for a timezone-aware cutoff at or after the journal
+start watermark. It also reports the latest Phase 7 promotion-history state at
+that cutoff and fails consistency when more than one model appears CHAMPION or
+more than one cycle appears ACTIVE. This snapshot is descriptive state
+reconstruction only. It must not be interpreted as historical Phase 8 promotion
+readiness, because that still requires a separate cutoff-safe evaluator for live
+labels, continuous-promotion evidence, completed-cycle lineage and the complete
+promotion criteria.
+
 Phase 9 quantitative evidence planning is advisory and deterministic. The
 `phase9-evidence-plan` view may rank evidence debt and emit only existing
 research/read-only commands. It must not execute shell commands itself, fill
