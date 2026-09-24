@@ -113,6 +113,7 @@ def list_phase9_maintenance_events(
     *,
     operation_key: str = "phase9-research-maintenance",
     activity: str | None = None,
+    as_of: str | None = None,
     limit: int = 20,
 ) -> tuple[Phase9MaintenanceEvent, ...]:
     key = _normalize_text(operation_key, field="operation_key")
@@ -123,6 +124,7 @@ def list_phase9_maintenance_events(
         if activity is not None
         else None
     )
+    as_of_text = _normalize_time(as_of) if as_of is not None else None
 
     query = """
         SELECT
@@ -141,6 +143,9 @@ def list_phase9_maintenance_events(
     if activity_text is not None:
         query += " AND activity = ?"
         params.append(activity_text)
+    if as_of_text is not None:
+        query += " AND event_time <= ?"
+        params.append(as_of_text)
     query += " ORDER BY id DESC LIMIT ?"
     params.append(limit)
 
