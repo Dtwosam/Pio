@@ -515,6 +515,18 @@ continuous-learning stage and show existing CLI commands, but any step requiring
 dataset economics, model/artifact identity, PAPER account selection, champion
 rotation, rollback or Phase 8 promotion remains explicit and operator-owned.
 
+The separate Phase 8 evidence runners may execute only planner-selected stages
+that are both marked operator-free and explicitly allowlisted in code:
+checksum-bound retraining dataset/cycle build from an already-valid input
+artifact, deterministic offline challenger training using the default derived
+model/artifact identity, and checksum-verified offline validation. The bounded
+runner may chain those debt-reducing stages, but it must stop on real-evidence
+waits, non-qualification, no-progress, failure, or any operator-required
+boundary. It must not parse planner shell text, synthesize retraining economics,
+start PAPER, promote a challenger/champion, roll back a champion, persist Phase
+8 promotion, or invoke LIVE execution. No unattended systemd schedule is
+authorized for this runner.
+
 Phase 9 quantitative evidence planning is advisory and deterministic. The
 `phase9-evidence-plan` view may rank evidence debt and emit only existing
 research/read-only commands. It must not execute shell commands itself, fill
