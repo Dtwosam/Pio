@@ -118,6 +118,7 @@ pio ml-model-status --model-id <MODEL>
 
 pio phase8-evidence-status
 pio phase8-evidence-plan
+pio phase8-operator-handoff  # exact automatic/waiting/manual Phase 8 boundary
 pio phase8-evidence-step-run  # one safe offline planner-selected step
 pio phase8-evidence-run --max-steps 4  # dataset build -> offline train -> offline validate; stops before PAPER/promotion
 pio phase8-retrain-input-template > phase8-retrain-inputs.json
