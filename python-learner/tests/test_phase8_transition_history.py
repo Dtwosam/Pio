@@ -144,6 +144,17 @@ def test_phase8_transition_history_is_immutable(tmp_path):
             )
 
 
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                UPDATE phase8_transition_history_meta
+                SET started_at = '2099-01-01T00:00:00+00:00'
+                WHERE singleton = 1
+                """
+            )
+
+
 def test_phase8_transition_history_backfills_legacy_current_rows(tmp_path):
     path = tmp_path / "pio.db"
     storage = Storage(path)
