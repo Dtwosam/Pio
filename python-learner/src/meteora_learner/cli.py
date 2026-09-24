@@ -65,6 +65,7 @@ from .phase8_evidence_step import run_phase8_evidence_step
 from .phase8_evidence_run import run_phase8_evidence_until_blocked
 from .phase8_retrain_inputs import (
     audit_phase8_retrain_inputs,
+    check_phase8_retrain_inputs,
     build_phase8_retrain_input_template,
     load_phase8_retrain_inputs,
     parse_phase8_retrain_inputs,
@@ -1610,6 +1611,21 @@ def main() -> None:
         "--min-pools",
         type=int,
         default=3,
+    )
+
+    phase8_retrain_check = subparsers.add_parser(
+        "phase8-retrain-inputs-check",
+        help="Validate current-champion Phase 8 retraining inputs and compute the checksum without persistence",
+    )
+    phase8_retrain_check.add_argument("--file", required=True)
+    phase8_retrain_check.add_argument(
+        "--min-pools",
+        type=int,
+        default=3,
+    )
+    phase8_retrain_check.add_argument(
+        "--require-valid",
+        action="store_true",
     )
 
     phase8_retrain_ingest = subparsers.add_parser(
@@ -5229,6 +5245,21 @@ def main() -> None:
             min_pools=args.min_pools,
         )
         print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "phase8-retrain-inputs-check":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        with open(args.file, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        result = check_phase8_retrain_inputs(
+            storage,
+            payload,
+            min_pools=args.min_pools,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_valid and not result.valid:
+            raise SystemExit(2)
         return
 
     if args.command == "phase8-retrain-inputs-ingest":
