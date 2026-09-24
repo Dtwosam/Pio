@@ -55,17 +55,23 @@ def _time(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _latest_valid_explicit_input(storage: Storage):
+def _explicit_input_state(storage: Storage):
     audit = audit_phase9_explicit_inputs(storage)
-    if not audit.valid or audit.evidence_id is None:
-        return None
-    try:
-        return load_phase9_explicit_inputs(
-            storage,
-            evidence_id=audit.evidence_id,
-        )
-    except ValueError:
-        return None
+    artifact = None
+    if audit.valid and audit.evidence_id is not None:
+        try:
+            artifact = load_phase9_explicit_inputs(
+                storage,
+                evidence_id=audit.evidence_id,
+            )
+        except ValueError:
+            artifact = None
+    return audit, artifact
+
+
+def _latest_valid_explicit_input(storage: Storage):
+    _, artifact = _explicit_input_state(storage)
+    return artifact
 
 
 def _latest_rows(
@@ -647,7 +653,16 @@ def _static_hedge_current(storage: Storage) -> Phase9SourceFreshnessItem:
             current=False,
             reason="qualified static-hedge evidence is missing",
         )
-    explicit = _latest_valid_explicit_input(storage)
+    explicit_audit, explicit = _explicit_input_state(storage)
+    if explicit_audit.exists and not explicit_audit.valid:
+        return Phase9SourceFreshnessItem(
+            family="static_hedge",
+            current=False,
+            reason=(
+                "latest explicit input artifact is invalid: "
+                + "; ".join(explicit_audit.reasons)
+            ),
+        )
     for row in rows:
         evidence = row["evidence"]
         if explicit is not None:
@@ -843,7 +858,16 @@ def _portfolio_current(storage: Storage) -> Phase9SourceFreshnessItem:
         )
 
     assumptions = candidate.get("assumptions")
-    explicit = _latest_valid_explicit_input(storage)
+    explicit_audit, explicit = _explicit_input_state(storage)
+    if explicit_audit.exists and not explicit_audit.valid:
+        return Phase9SourceFreshnessItem(
+            family="portfolio_allocation",
+            current=False,
+            reason=(
+                "latest explicit input artifact is invalid: "
+                + "; ".join(explicit_audit.reasons)
+            ),
+        )
     if explicit is not None:
         if not isinstance(assumptions, dict):
             return Phase9SourceFreshnessItem(
@@ -1067,7 +1091,16 @@ def _bandit_current(storage: Storage) -> Phase9SourceFreshnessItem:
             )
         except ValueError:
             artifact = None
-        latest_explicit = _latest_valid_explicit_input(storage)
+        explicit_audit, latest_explicit = _explicit_input_state(storage)
+        if explicit_audit.exists and not explicit_audit.valid:
+            return Phase9SourceFreshnessItem(
+                family="contextual_bandit",
+                current=False,
+                reason=(
+                    "latest explicit input artifact is invalid: "
+                    + "; ".join(explicit_audit.reasons)
+                ),
+            )
         if latest_explicit is not None:
             lineage_sha = str(
                 lineage.get("explicit_input_artifact_sha256", "")
