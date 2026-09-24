@@ -23,6 +23,50 @@ class DummyAudit:
         }
 
 
+class DummyDatasetResult:
+    def __init__(self, *, cutoff, qualified=True, reasons=()):
+        self.lineage = SimpleNamespace(
+            source_type="PHASE9_BANDIT_DATASET_V1",
+            dataset_evidence_id=88,
+            dataset_artifact_sha256="b" * 64,
+            dataset_version="ML_ACTION_DATASET_V1:shadow",
+            dataset_sha256="c" * 64,
+            cutoff=cutoff,
+            output_file="/tmp/phase9-shadow.csv",
+            explicit_input_evidence_id=77,
+            explicit_input_artifact_sha256="d" * 64,
+        )
+        self.report = SimpleNamespace(
+            research_qualified=qualified,
+            reasons=tuple(reasons),
+        )
+
+    def to_record(self):
+        return {
+            "lineage": {
+                "source_type": self.lineage.source_type,
+                "dataset_evidence_id": self.lineage.dataset_evidence_id,
+                "dataset_artifact_sha256": (
+                    self.lineage.dataset_artifact_sha256
+                ),
+                "dataset_version": self.lineage.dataset_version,
+                "dataset_sha256": self.lineage.dataset_sha256,
+                "cutoff": self.lineage.cutoff,
+                "output_file": self.lineage.output_file,
+                "explicit_input_evidence_id": (
+                    self.lineage.explicit_input_evidence_id
+                ),
+                "explicit_input_artifact_sha256": (
+                    self.lineage.explicit_input_artifact_sha256
+                ),
+            },
+            "report": {
+                "research_qualified": self.report.research_qualified,
+                "reasons": list(self.report.reasons),
+            },
+        }
+
+
 class DummyCycleResult:
     def __init__(self, *, cutoff, qualified=True, reasons=()):
         self.lineage = SimpleNamespace(
@@ -216,3 +260,62 @@ def test_shadow_persistence_stays_non_actionable(monkeypatch, tmp_path):
         assert "must not grant policy authority" in str(exc)
     else:
         raise AssertionError("expected policy-actionable shadow refusal")
+
+
+def test_post_promotion_shadow_can_use_phase9_bandit_dataset(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    patch_context(monkeypatch)
+    monkeypatch.setattr(
+        shadow_module,
+        "evaluate_phase9_contextual_bandit_from_dataset",
+        lambda storage, dataset_evidence_id, criteria: DummyDatasetResult(
+            cutoff="2026-09-23T13:00:00+00:00",
+        ),
+    )
+
+    report = evaluate_phase9_shadow(
+        storage,
+        dataset_evidence_id=88,
+        criteria=Phase9ShadowCriteria(
+            min_decisions=1,
+            min_pools=1,
+            min_selected_arms=1,
+        ),
+    )
+
+    assert report.shadow_ready is True
+    assert report.cycle_id == "phase9-dataset:88"
+    assert report.dataset_source_type == "PHASE9_BANDIT_DATASET_V1"
+    assert report.dataset_evidence_id == 88
+    assert report.dataset_sha256 == "c" * 64
+    assert report.dataset_cutoff == "2026-09-23T13:00:00+00:00"
+    assert report.cutoff_after_promotion is True
+    assert report.bandit_research_qualified is True
+    assert report.policy_actionable is False
+
+
+def test_shadow_requires_exactly_one_dataset_source(monkeypatch, tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    patch_context(monkeypatch)
+
+    for kwargs in (
+        {},
+        {"cycle_id": "cycle-a", "dataset_evidence_id": 88},
+    ):
+        try:
+            evaluate_phase9_shadow(
+                storage,
+                criteria=Phase9ShadowCriteria(
+                    min_decisions=1,
+                    min_pools=1,
+                    min_selected_arms=1,
+                ),
+                **kwargs,
+            )
+        except ValueError as exc:
+            assert "exactly one" in str(exc)
+        else:
+            raise AssertionError("expected shadow source validation failure")
