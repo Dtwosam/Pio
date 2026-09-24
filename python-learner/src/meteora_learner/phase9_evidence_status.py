@@ -7,7 +7,10 @@ from .phase8_historical_promotion import (
     audit_persisted_phase8_promotion_at,
 )
 from .phase8_validation import audit_persisted_phase8_promotion
-from .phase9_explicit_inputs import audit_phase9_explicit_inputs
+from .phase9_explicit_inputs import (
+    audit_phase9_explicit_inputs,
+    audit_phase9_explicit_inputs_at,
+)
 from .phase9_mint_capture import (
     Phase9MintCaptureCriteria,
     build_phase9_mint_capture_plan,
@@ -140,7 +143,14 @@ def evaluate_phase9_evidence_status(
         required_mint_pools=criteria.min_mint_risk_pools,
         required_wallet_pools=criteria.min_wallet_flow_pools,
     )
-    explicit = audit_phase9_explicit_inputs(storage)
+    explicit = (
+        audit_phase9_explicit_inputs(storage)
+        if as_of is None
+        else audit_phase9_explicit_inputs_at(
+            storage,
+            as_of=evaluation_time,
+        )
+    )
     bundle = evaluate_phase9_research_bundle(
         storage,
         criteria=criteria,
