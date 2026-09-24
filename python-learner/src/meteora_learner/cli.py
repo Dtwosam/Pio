@@ -2289,7 +2289,15 @@ def main() -> None:
         "phase9-shadow-validate",
         help="Validate a post-promotion checksum-bound Phase 9 shadow corpus without granting LIVE policy authority",
     )
-    phase9_shadow.add_argument("--cycle-id", required=True)
+    phase9_shadow_source = phase9_shadow.add_mutually_exclusive_group(
+        required=True,
+    )
+    phase9_shadow_source.add_argument("--cycle-id")
+    phase9_shadow_source.add_argument(
+        "--dataset-evidence-id",
+        type=int,
+        help="Persisted PHASE9_BANDIT_DATASET_V1 evidence ID",
+    )
     phase9_shadow.add_argument(
         "--warmup-decisions-per-context",
         type=int,
@@ -5717,6 +5725,7 @@ def main() -> None:
         result = evaluate_phase9_shadow(
             storage,
             cycle_id=args.cycle_id,
+            dataset_evidence_id=args.dataset_evidence_id,
             criteria=Phase9ShadowCriteria(
                 warmup_decisions_per_context=(
                     args.warmup_decisions_per_context
