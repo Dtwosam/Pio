@@ -44,6 +44,23 @@ class Phase8RetrainInputs:
 
 
 @dataclass(frozen=True)
+class Phase8RetrainInputsCheck:
+    valid: bool
+    research_only: bool
+    policy_actionable: bool
+    execution_wired: bool
+    artifact_sha256: str | None
+    champion_model_id: str | None
+    champion_dataset_version: str | None
+    champion_matches_current: bool
+    pool_addresses: tuple[str, ...]
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Phase8RetrainInputsArtifact:
     evidence_id: int
     artifact_sha256: str
@@ -260,6 +277,67 @@ def parse_phase8_retrain_inputs(
         champion_model_id=champion_model_id,
         champion_dataset_version=champion_dataset_version,
         pools=tuple(pools),
+    )
+
+
+def check_phase8_retrain_inputs(
+    storage: Storage,
+    payload: Any,
+    *,
+    min_pools: int = 3,
+) -> Phase8RetrainInputsCheck:
+    try:
+        inputs = parse_phase8_retrain_inputs(
+            payload,
+            min_pools=min_pools,
+        )
+    except (TypeError, ValueError) as exc:
+        return Phase8RetrainInputsCheck(
+            valid=False,
+            research_only=True,
+            policy_actionable=False,
+            execution_wired=False,
+            artifact_sha256=None,
+            champion_model_id=None,
+            champion_dataset_version=None,
+            champion_matches_current=False,
+            pool_addresses=(),
+            reasons=(f"{type(exc).__name__}: {exc}",),
+        )
+
+    record = inputs.to_record()
+    digest = _canonical_sha256(record)
+    champion = storage.current_model_champion()
+    reasons: list[str] = []
+    champion_matches = False
+    if champion is None:
+        reasons.append("current champion is missing")
+    else:
+        current_model_id = str(champion["model_id"])
+        current_dataset_version = str(champion["dataset_version"])
+        champion_matches = bool(
+            inputs.champion_model_id == current_model_id
+            and inputs.champion_dataset_version
+            == current_dataset_version
+        )
+        if not champion_matches:
+            reasons.append(
+                "retrain inputs do not match current champion lineage"
+            )
+
+    return Phase8RetrainInputsCheck(
+        valid=not reasons,
+        research_only=True,
+        policy_actionable=False,
+        execution_wired=False,
+        artifact_sha256=digest,
+        champion_model_id=inputs.champion_model_id,
+        champion_dataset_version=inputs.champion_dataset_version,
+        champion_matches_current=champion_matches,
+        pool_addresses=tuple(
+            item.pool_address for item in inputs.pools
+        ),
+        reasons=tuple(reasons),
     )
 
 
