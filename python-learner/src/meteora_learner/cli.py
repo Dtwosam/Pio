@@ -182,6 +182,7 @@ from .phase9_operator_handoff import (
 )
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
+    check_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
     load_phase9_explicit_inputs,
     parse_phase9_explicit_inputs,
@@ -3129,6 +3130,16 @@ def main() -> None:
     phase9_input_template.add_argument(
         "--pools",
         help="Optional comma-separated pool set; defaults to current highest-depth chain pools",
+    )
+
+    phase9_inputs_check = subparsers.add_parser(
+        "phase9-research-inputs-check",
+        help="Validate Phase 9 explicit research assumptions and compute the checksum without persistence",
+    )
+    phase9_inputs_check.add_argument("--file", required=True)
+    phase9_inputs_check.add_argument(
+        "--require-valid",
+        action="store_true",
     )
 
     phase9_inputs_ingest = subparsers.add_parser(
@@ -6728,6 +6739,15 @@ def main() -> None:
             pool_addresses=template_pools,
         )
         print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "phase9-research-inputs-check":
+        with open(args.file, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        result = check_phase9_explicit_inputs(payload)
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_valid and not result.valid:
+            raise SystemExit(2)
         return
 
     if args.command == "phase9-research-inputs-ingest":
