@@ -374,6 +374,7 @@ next evidence tasks without inventing missing assumptions. It stages
 authoritative Rust mint inspection before mint-risk research, uses observed
 chain pools for adaptive/wallet-flow tasks, and leaves hedge, allocation and
 bandit artifacts explicit when they cannot be derived safely.
+The direct evidence runner may execute planner-selected automatic debt operations under the shared Phase 9 maintenance lease, but it must stop at any explicit-assumption requirement. A bounded multi-step run may continue only while each completed step demonstrably reduces debt; it must stop on cadence wait, failure, no-progress, READY or the configured max-step bound. Neither runner may persist Phase 9 promotion, policy authorization, rollout, rollback or LIVE execution state.
 
 Phase 9 research promotion is additionally bound to an immutable persisted
 research-bundle record. If newer component evidence appears, the prior bundle is
