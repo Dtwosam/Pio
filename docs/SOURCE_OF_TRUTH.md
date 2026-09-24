@@ -500,8 +500,13 @@ boundary used elsewhere in the project. Retraining may rank/select persisted
 chain pools, but per-pool token amounts and network-cost assumptions must never
 be synthesized. They may be persisted only in a checksum-bound
 `PHASE8_RETRAIN_INPUTS_V1` artifact tied to the current champion model ID and
-dataset version. Champion rotation invalidates the artifact. A valid artifact
-may be used to build the no-lookahead retraining dataset and start a retraining
+dataset version. Champion rotation invalidates the artifact. Before append-only
+persistence, retraining inputs should be dry-run parsed, checked against the
+current champion lineage and normalized to their deterministic artifact
+SHA-256. A valid preflight checksum for identical normalized inputs must equal
+the checksum later stored by persistence; stale champion lineage must fail
+preflight closed without writing evidence. A valid persisted artifact may be
+used to build the no-lookahead retraining dataset and start a retraining
 cycle. Once that cycle has persisted checksum-valid dataset evidence, offline
 challenger training may use a deterministic model ID/artifact directory, and
 offline qualification may run only after the dataset bytes/version/cutoff
