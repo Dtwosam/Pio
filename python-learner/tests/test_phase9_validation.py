@@ -1,9 +1,15 @@
+import json
+import sys
+
 import sqlite3
 import hashlib
 from types import SimpleNamespace
 from pathlib import Path
 from dataclasses import asdict, replace
 
+import pytest
+
+from meteora_learner import cli
 from meteora_learner.adaptive_range import AdaptiveRangeCriteria
 from meteora_learner.adaptive_range_validation import (
     AdaptiveRangeValidationCriteria,
@@ -1827,3 +1833,83 @@ def test_historical_phase9_bundle_ignores_future_replacement_evidence(
     assert later.static_hedge.latest_records == 1
     assert later.static_hedge.qualified_records == 0
     assert later.research_ready is False
+
+
+def test_phase9_research_bundle_cli_passes_historical_cutoff(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seen = {}
+    report = SimpleNamespace(
+        research_ready=False,
+        to_record=lambda: {
+            "status": "RESEARCH_BUNDLE_INCOMPLETE",
+            "research_ready": False,
+        },
+    )
+
+    def fake_bundle(storage, *, criteria, as_of=None):
+        seen["as_of"] = as_of
+        return report
+
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "evaluate_phase9_research_bundle",
+        fake_bundle,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase9-research-bundle",
+            "--as-of",
+            "2026-09-24T11:00:00+00:00",
+        ],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert seen["as_of"] == "2026-09-24T11:00:00+00:00"
+    assert payload["research_ready"] is False
+    assert payload["persisted_evidence_id"] is None
+
+
+def test_phase9_research_bundle_cli_rejects_historical_persistence(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    called = []
+
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: called.append("evaluate"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "persist_phase9_research_bundle",
+        lambda *args, **kwargs: called.append("persist"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase9-research-bundle",
+            "--as-of",
+            "2026-09-24T11:00:00+00:00",
+            "--persist",
+        ],
+    )
+
+    with pytest.raises(ValueError, match="historical.*read-only"):
+        cli.main()
+
+    assert called == []
