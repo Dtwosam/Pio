@@ -247,3 +247,5 @@ history, a missing terminal journal event, or an expired orphaned lease fails
 `--require-healthy` with a non-zero exit status. This gives systemd/external
 monitoring a stable signal without making maintenance history count as research
 qualification evidence.
+
+When health reports `BLOCKED_MANUAL`, inspect `pio phase9-operator-handoff` rather than changing the unattended service. The handoff preserves the explicit-input boundary and, for economic assumptions, routes through `phase9-research-inputs-check` before append-only ingestion.
