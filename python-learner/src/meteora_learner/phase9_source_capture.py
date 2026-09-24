@@ -253,14 +253,29 @@ def run_phase9_source_capture(
             f"{type(exc).__name__}: {str(exc)[:1000]}"
         )
 
+    post_history_as_of = utc_now_iso()
+    cohort_after_history = evaluate_phase9_pool_cohort(
+        storage,
+        criteria=Phase9PoolCohortCriteria(
+            min_research_pools=chain_pool_target,
+            target_pools=cohort_target_pools,
+            max_sampling_pools=cohort_max_sampling_pools,
+            max_api_snapshot_age_seconds=(
+                api_ranking_max_age_seconds
+            ),
+        ),
+        as_of=post_history_as_of,
+    )
+    cohort_record = cohort_after_history.to_record()
+
     mint_pools = _cohort_source_pools(
         storage,
-        cohort=cohort_after_chain,
+        cohort=cohort_after_history,
         limit=criteria.min_mint_risk_pools,
     )
     wallet_pools = _cohort_source_pools(
         storage,
-        cohort=cohort_after_chain,
+        cohort=cohort_after_history,
         limit=criteria.min_wallet_flow_pools,
     )
 
@@ -351,18 +366,23 @@ def run_phase9_source_capture(
         ),
         pool_addresses=final_mint_pools,
     )
+    final_wallet_pools = _cohort_source_pools(
+        storage,
+        cohort=final_cohort,
+        limit=criteria.min_wallet_flow_pools,
+    )
     wallet_ready = sum(
         wallet_flow_source_state(
             storage,
             pool_address=pool,
             criteria=WalletFlowCriteria(),
         ).ready
-        for pool in wallet_pools
+        for pool in final_wallet_pools
     )
     automatic_ready = (
         history_plan.plan_ready
         and mint_plan.inputs_ready
-        and len(wallet_pools) >= criteria.min_wallet_flow_pools
+        and len(final_wallet_pools) >= criteria.min_wallet_flow_pools
         and wallet_ready >= criteria.min_wallet_flow_pools
     )
 
