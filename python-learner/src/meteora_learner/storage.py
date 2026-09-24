@@ -746,6 +746,30 @@ CREATE TABLE IF NOT EXISTS phase9_operation_leases (
 CREATE INDEX IF NOT EXISTS idx_phase9_operation_leases_until
 ON phase9_operation_leases(lease_until);
 
+CREATE TABLE IF NOT EXISTS phase9_maintenance_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_time TEXT NOT NULL,
+    operation_key TEXT NOT NULL,
+    activity TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK(
+        event_type IN (
+            'LEASE_ACQUIRED',
+            'LEASE_BUSY',
+            'LEASE_RECOVERED',
+            'RUN_FINISHED'
+        )
+    ),
+    status TEXT,
+    details_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase9_maintenance_events_key_time
+ON phase9_maintenance_events(operation_key, event_time, id);
+
+CREATE INDEX IF NOT EXISTS idx_phase9_maintenance_events_activity_time
+ON phase9_maintenance_events(activity, event_time, id);
+
 CREATE TABLE IF NOT EXISTS phase9_pool_activity_scan_state (
     pool_address TEXT PRIMARY KEY,
     backfill_before_signature TEXT,
