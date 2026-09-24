@@ -104,6 +104,7 @@ sudo systemctl status pio-phase9-source-capture.timer
 journalctl -u pio-phase9-source-capture.service
 cd /opt/pio/python-learner
 .venv/bin/pio phase9-maintenance-status
+.venv/bin/pio phase9-maintenance-history --limit 20
 .venv/bin/pio phase9-source-freshness
 ```
 
@@ -190,6 +191,12 @@ maintenance commands. Every completed automatic step must reduce the planner's
 current evidence debt. The run stops on READY, explicit manual assumptions,
 history-cadence wait, collector failure, no-progress or the hard max-step
 bound.
+
+Every leased Phase 9 maintenance command now writes an immutable lifecycle
+journal for lease acquisition, BUSY overlap, stale-lease recovery and run
+completion/failure. `phase9-maintenance-history` reads that journal newest
+first, so scheduled evidence collection can be audited across process restarts
+without treating system logs as research evidence.
 
 This timer is an optional alternative to enabling both
 `pio-phase9-source-capture.timer` and
