@@ -177,6 +177,9 @@ from .phase9_evidence_status import evaluate_phase9_evidence_status
 from .phase9_evidence_plan import build_phase9_evidence_plan
 from .phase9_evidence_step import run_phase9_evidence_step
 from .phase9_evidence_run import run_phase9_evidence_until_blocked
+from .phase9_operator_handoff import (
+    build_phase9_operator_handoff,
+)
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
@@ -2993,6 +2996,35 @@ def main() -> None:
     phase9_evidence_run.add_argument(
         "--require-bundle-ready",
         action="store_true",
+    )
+
+    phase9_operator_handoff = subparsers.add_parser(
+        "phase9-operator-handoff",
+        help="Show the next Phase 9 operator handoff without inventing explicit research assumptions",
+    )
+    phase9_operator_handoff.add_argument(
+        "--as-of",
+        help="Optional timezone-aware evaluation cutoff",
+    )
+    phase9_operator_handoff.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_operator_handoff.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_operator_handoff.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_operator_handoff.add_argument(
+        "--history-interval-seconds",
+        type=int,
+        default=3600,
     )
 
     phase9_maintenance_status = subparsers.add_parser(
@@ -6421,6 +6453,22 @@ def main() -> None:
                 operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
                 owner_id=lease.owner_id,
             )
+        return
+
+    if args.command == "phase9-operator-handoff":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_phase9_operator_handoff(
+            storage,
+            criteria=Phase9ResearchBundleCriteria(
+                min_mint_risk_pools=args.min_mint_risk_pools,
+                min_wallet_flow_pools=args.min_wallet_flow_pools,
+                min_static_hedge_pools=args.min_static_hedge_pools,
+            ),
+            history_interval_seconds=args.history_interval_seconds,
+            as_of=args.as_of,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "phase9-maintenance-status":
