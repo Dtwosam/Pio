@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from meteora_learner.phase9_maintenance_history import (
@@ -102,3 +104,34 @@ def test_phase9_maintenance_event_validation(tmp_path):
 
     with pytest.raises(ValueError, match="limit"):
         list_phase9_maintenance_events(storage, limit=0)
+
+
+def test_phase9_maintenance_event_rows_are_immutable(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    event = record_phase9_maintenance_event(
+        storage,
+        operation_key="phase9-research-maintenance",
+        activity="evidence-run",
+        owner_id="owner-a",
+        event_type="LEASE_ACQUIRED",
+        status="RUNNING",
+        event_time="2026-09-24T10:00:00+00:00",
+    )
+
+    with storage.connect() as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            conn.execute(
+                """
+                UPDATE phase9_maintenance_events
+                SET status = 'EDITED'
+                WHERE id = ?
+                """,
+                (event.event_id,),
+            )
+
+    with storage.connect() as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            conn.execute(
+                "DELETE FROM phase9_maintenance_events WHERE id = ?",
+                (event.event_id,),
+            )
