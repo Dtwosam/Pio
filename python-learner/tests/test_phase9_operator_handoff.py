@@ -69,6 +69,7 @@ def test_operator_handoff_reports_ready_without_actions(monkeypatch, tmp_path):
     assert report.status == "READY"
     assert report.research_bundle_ready is True
     assert report.suggested_command is None
+    assert report.operator_action_required is False
     assert report.manual_input_required is False
 
 
@@ -85,6 +86,7 @@ def test_operator_handoff_preserves_automatic_action(monkeypatch, tmp_path):
 
     assert report.status == "AUTOMATIC_ACTION"
     assert report.automatic_action_available is True
+    assert report.operator_action_required is False
     assert report.manual_input_required is False
     assert report.suggested_command == "pio safe-command"
     assert report.explicit_input_template is None
@@ -116,6 +118,7 @@ def test_operator_handoff_builds_non_inventing_explicit_input_handoff(
     report = build_phase9_operator_handoff(storage)
 
     assert report.status == "MANUAL_REQUIRED"
+    assert report.operator_action_required is True
     assert report.manual_input_required is True
     assert report.automatic_action_available is False
     assert report.suggested_command == (
@@ -155,7 +158,8 @@ def test_operator_handoff_surfaces_non_actionable_upstream_blocker(
     report = build_phase9_operator_handoff(storage)
 
     assert report.status == "MANUAL_REQUIRED"
-    assert report.manual_input_required is True
+    assert report.operator_action_required is True
+    assert report.manual_input_required is False
     assert report.automatic_action_available is False
     assert report.suggested_command == "pio phase8-evidence-plan"
     assert report.blockers[0]["debt_type"] == "PHASE8_DEPENDENCY"
@@ -185,7 +189,8 @@ def test_operator_handoff_cli_prints_manual_handoff(
         scope=next_action.scope,
         reason=next_action.reason,
         automatic_action_available=False,
-        manual_input_required=True,
+        operator_action_required=True,
+        manual_input_required=False,
         suggested_command=next_action.shell_command,
         explicit_input_template=None,
         required_manual_fields=(),
