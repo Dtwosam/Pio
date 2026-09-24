@@ -22,6 +22,7 @@ HEALTHY_TERMINAL_STATUSES = {
     "COMPLETE",
     "READY",
     "WAITING_INTERVAL",
+    "WAITING_SOURCE_ACTIVITY",
     "MANUAL_REQUIRED",
     "MAX_STEPS",
 }
@@ -244,6 +245,14 @@ def evaluate_phase9_maintenance_health(
             status = "WAITING_INTERVAL"
             healthy = True
             attention_required = False
+        elif terminal_status == "WAITING_SOURCE_ACTIVITY":
+            status = "WAITING_SOURCE_ACTIVITY"
+            healthy = True
+            attention_required = False
+            reasons.append(
+                "bounded wallet-flow sources are exhausted for the current "
+                "snapshot; maintenance is waiting for new source activity"
+            )
         elif terminal_status in HEALTHY_TERMINAL_STATUSES:
             status = "HEALTHY"
             healthy = True
