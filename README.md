@@ -149,6 +149,7 @@ pio phase9-maintenance-health --require-healthy  # fail-able unattended maintena
 pio phase9-source-freshness  # replay-valid evidence vs latest persisted source observations
 pio phase9-evidence-status  # quantitative ranked-cohort/source/family readiness
 # Historical Phase 9 --as-of views exclude future evidence, chain depth, assumptions, source freshness and Phase 8 promotion state
+# Omitting --as-of uses true live/current audits; explicit --as-of plans/handoffs are inspection-only and emit no live collector/template commands
 pio phase9-evidence-plan  # ranked evidence debt + one deterministic next safe action
 pio phase9-evidence-step-run  # execute exactly one planner-selected safe evidence step
 pio phase9-evidence-run --max-steps 8  # bounded safe steps until ready/manual/wait/failure/no-progress
