@@ -627,4 +627,15 @@ bundle and future replacement evidence must not spoil an earlier bundle.
 Historical bundle evaluation is inspection-only: supplying `--as-of` together
 with `--persist` must fail before any evidence write.
 
+Historical explicit-input validity and source freshness must follow the same
+cutoff. The explicit-input audit selects the latest checksum-valid artifact
+persisted no later than the cutoff; future assumptions cannot satisfy or stale
+an earlier snapshot. Ranked cohort chain-history counts and fallback pool
+selection ignore future chain snapshots. Adaptive, mint, wallet, portfolio,
+static-hedge and contextual-bandit freshness must select evidence that existed
+by the cutoff and compare it only with pool/mint/event, explicit-input and
+retraining-dataset sources available by that same cutoff. Historical latest-row
+selection is ordered by `created_at` and then ID, not by ID alone, so
+backfilled rows cannot distort chronology.
+
 The Phase 9 policy-authorization gate consumes both the persisted promotion audit and live research-source currentness. Therefore stale research can never remain operationally authorized merely because its original promotion row still exists. Controlled validation, rollout/rollback simulation and prewire inherit this revocation through their authorization audits. This remains simulation/research control only and does not itself grant transaction-signing or LIVE execution authority.
