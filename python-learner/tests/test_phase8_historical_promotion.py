@@ -1,3 +1,8 @@
+import json
+import sys
+from types import SimpleNamespace
+
+from meteora_learner import cli
 from datetime import datetime, timedelta, timezone
 import json
 
@@ -342,3 +347,44 @@ def test_historical_promotion_rejects_prejournal_cutoff(tmp_path):
             as_of=text(started - timedelta(seconds=1)),
             criteria=criteria(),
         )
+
+
+def test_historical_phase8_promotion_cli_require_ready(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = SimpleNamespace(
+        promotion_ready=False,
+        to_record=lambda: {
+            "as_of": "2026-09-24T12:00:00+00:00",
+            "promotion_ready": False,
+            "reasons": ["insufficient historical evidence"],
+        },
+    )
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "evaluate_phase8_historical_promotion",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase8-historical-promotion",
+            "--as-of",
+            "2026-09-24T12:00:00+00:00",
+            "--require-ready",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["promotion_ready"] is False
+    assert payload["as_of"] == "2026-09-24T12:00:00+00:00"
