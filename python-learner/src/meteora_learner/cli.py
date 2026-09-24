@@ -1305,7 +1305,7 @@ def main() -> None:
     )
     phase8_evidence_status.add_argument(
         "--as-of",
-        help="Optional timezone-aware evaluation cutoff; defaults to current time",
+        help="Historical consolidated Phase 8 evaluation is unsupported; omit this option for current-state status",
     )
     phase8_evidence_status.add_argument(
         "--min-new-chain-observations",
@@ -1384,7 +1384,7 @@ def main() -> None:
     )
     phase8_evidence_plan.add_argument(
         "--as-of",
-        help="Optional timezone-aware evaluation cutoff; defaults to current time",
+        help="Historical consolidated Phase 8 evaluation is unsupported; omit this option for current-state planning",
     )
     phase8_evidence_plan.add_argument(
         "--min-new-chain-observations",
@@ -1605,7 +1605,7 @@ def main() -> None:
     )
     phase8_operator_handoff.add_argument(
         "--as-of",
-        help="Optional timezone-aware evaluation cutoff",
+        help="Historical consolidated Phase 8 evaluation is unsupported; omit this option for current-state handoff",
     )
     phase8_operator_handoff.add_argument(
         "--min-new-chain-observations",
