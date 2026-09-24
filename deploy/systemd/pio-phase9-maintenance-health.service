@@ -1,0 +1,18 @@
+[Unit]
+Description=Pio Phase 9 maintenance health check
+After=pio-phase9-evidence-run.service
+
+[Service]
+Type=oneshot
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/pio phase9-maintenance-health --max-event-age-seconds 10800 --history-limit 100 --require-healthy
+TimeoutStartSec=2min
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pio/data
