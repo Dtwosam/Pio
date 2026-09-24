@@ -130,9 +130,13 @@ class Phase9ResearchBundleReport:
     contextual_bandit: Phase9EvidenceSummary
     research_ready: bool
     reasons: tuple[str, ...]
+    evaluation_as_of: str | None = None
 
     def to_record(self) -> dict[str, Any]:
-        return asdict(self)
+        record = asdict(self)
+        if self.evaluation_as_of is None:
+            record.pop("evaluation_as_of", None)
+        return record
 
 
 def _latest_by_pool(
@@ -1220,6 +1224,7 @@ def evaluate_phase9_research_bundle(
         contextual_bandit=bandit,
         research_ready=ready,
         reasons=tuple(reasons),
+        evaluation_as_of=as_of,
     )
 
 
@@ -1240,6 +1245,11 @@ def persist_phase9_research_bundle(
     *,
     report: Phase9ResearchBundleReport,
 ) -> int:
+    if report.evaluation_as_of is not None:
+        raise ValueError(
+            "historical Phase 9 research bundles are read-only and "
+            "cannot be persisted"
+        )
     if report.policy_actionable or not report.research_only:
         raise ValueError(
             "Phase 9 research bundle must remain non-actionable"
@@ -1327,6 +1337,11 @@ def evaluate_phase9_promotion(
             criteria=criteria,
         )
     )
+    if bundle.evaluation_as_of is not None:
+        raise ValueError(
+            "historical Phase 9 research bundle cannot be used for "
+            "current promotion"
+        )
     if bundle.criteria != criteria:
         raise ValueError(
             "precomputed Phase 9 research bundle criteria do not match"
