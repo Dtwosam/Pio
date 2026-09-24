@@ -169,6 +169,7 @@ def run_phase9_source_capture(
     wallet_records: list[dict[str, Any]] = []
     cohort_record = None
     cohort_after_chain = None
+    cohort_evaluation_failed = False
 
     if refresh_api:
         try:
@@ -254,19 +255,27 @@ def run_phase9_source_capture(
         )
 
     post_history_as_of = utc_now_iso()
-    cohort_after_history = evaluate_phase9_pool_cohort(
-        storage,
-        criteria=Phase9PoolCohortCriteria(
-            min_research_pools=chain_pool_target,
-            target_pools=cohort_target_pools,
-            max_sampling_pools=cohort_max_sampling_pools,
-            max_api_snapshot_age_seconds=(
-                api_ranking_max_age_seconds
+    try:
+        cohort_after_history = evaluate_phase9_pool_cohort(
+            storage,
+            criteria=Phase9PoolCohortCriteria(
+                min_research_pools=chain_pool_target,
+                target_pools=cohort_target_pools,
+                max_sampling_pools=cohort_max_sampling_pools,
+                max_api_snapshot_age_seconds=(
+                    api_ranking_max_age_seconds
+                ),
             ),
-        ),
-        as_of=post_history_as_of,
-    )
-    cohort_record = cohort_after_history.to_record()
+            as_of=post_history_as_of,
+        )
+        cohort_record = cohort_after_history.to_record()
+    except Exception as exc:
+        cohort_evaluation_failed = True
+        cohort_after_history = cohort_after_chain
+        errors.append(
+            "post-history cohort evaluation failed: "
+            f"{type(exc).__name__}: {str(exc)[:1000]}"
+        )
 
     mint_pools = _cohort_source_pools(
         storage,
@@ -331,25 +340,37 @@ def run_phase9_source_capture(
             )
 
     final_as_of = utc_now_iso()
-    final_cohort = evaluate_phase9_pool_cohort(
-        storage,
-        criteria=Phase9PoolCohortCriteria(
-            min_research_pools=chain_pool_target,
-            target_pools=cohort_target_pools,
-            max_sampling_pools=cohort_max_sampling_pools,
-            max_api_snapshot_age_seconds=(
-                api_ranking_max_age_seconds
+    try:
+        final_cohort = evaluate_phase9_pool_cohort(
+            storage,
+            criteria=Phase9PoolCohortCriteria(
+                min_research_pools=chain_pool_target,
+                target_pools=cohort_target_pools,
+                max_sampling_pools=cohort_max_sampling_pools,
+                max_api_snapshot_age_seconds=(
+                    api_ranking_max_age_seconds
+                ),
             ),
-        ),
-        as_of=final_as_of,
+            as_of=final_as_of,
+        )
+        cohort_record = final_cohort.to_record()
+    except Exception as exc:
+        cohort_evaluation_failed = True
+        final_cohort = cohort_after_history or cohort_after_chain
+        errors.append(
+            "final cohort evaluation failed: "
+            f"{type(exc).__name__}: {str(exc)[:1000]}"
+        )
+
+    final_research_pools = tuple(
+        getattr(final_cohort, "research_pools", ())
     )
-    cohort_record = final_cohort.to_record()
     history_plan = (
         build_phase9_history_plan(
             storage,
-            pool_addresses=final_cohort.research_pools,
+            pool_addresses=final_research_pools,
         )
-        if final_cohort.research_pools
+        if final_research_pools
         else build_phase9_history_plan(storage)
     )
     final_mint_pools = _cohort_source_pools(
@@ -380,7 +401,8 @@ def run_phase9_source_capture(
         for pool in final_wallet_pools
     )
     automatic_ready = (
-        history_plan.plan_ready
+        not cohort_evaluation_failed
+        and history_plan.plan_ready
         and mint_plan.inputs_ready
         and len(final_wallet_pools) >= criteria.min_wallet_flow_pools
         and wallet_ready >= criteria.min_wallet_flow_pools
