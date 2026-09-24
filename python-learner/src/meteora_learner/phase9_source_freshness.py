@@ -846,7 +846,10 @@ def _static_hedge_current(
             current=False,
             reason="qualified static-hedge evidence is missing",
         )
-    explicit_audit, explicit = _explicit_input_state(storage)
+    explicit_audit, explicit = _explicit_input_state(
+        storage,
+        as_of=as_of,
+    )
     if explicit_audit.exists and not explicit_audit.valid:
         return Phase9SourceFreshnessItem(
             family="static_hedge",
@@ -951,9 +954,22 @@ def _static_hedge_current(
                 reason="static-hedge source snapshot metadata is invalid",
             )
         pool = str(row["pool_address"])
+        if _source_after_cutoff(
+            source_at=used[2],
+            as_of=as_of,
+        ):
+            return Phase9SourceFreshnessItem(
+                family="static_hedge",
+                current=False,
+                reason=(
+                    f"pool {pool} hedge evidence uses source "
+                    f"{used[2]} after cutoff {as_of}"
+                ),
+            )
         latest_pool = _latest_pool_source(
             storage,
             pool_address=pool,
+            as_of=as_of,
         )
         if latest_pool is None:
             return Phase9SourceFreshnessItem(
@@ -1039,6 +1055,15 @@ def _portfolio_current(
             reason="portfolio candidate artifact is missing",
         )
     created_at = str(row[0])
+    if _source_after_cutoff(source_at=created_at, as_of=as_of):
+        return Phase9SourceFreshnessItem(
+            family="portfolio_allocation",
+            current=False,
+            reason=(
+                "portfolio candidate artifact was created after "
+                f"historical cutoff {as_of}"
+            ),
+        )
     try:
         candidate = json.loads(str(row[1]))
     except (TypeError, ValueError, json.JSONDecodeError):
@@ -1056,7 +1081,10 @@ def _portfolio_current(
         )
 
     assumptions = candidate.get("assumptions")
-    explicit_audit, explicit = _explicit_input_state(storage)
+    explicit_audit, explicit = _explicit_input_state(
+        storage,
+        as_of=as_of,
+    )
     if explicit_audit.exists and not explicit_audit.valid:
         return Phase9SourceFreshnessItem(
             family="portfolio_allocation",
@@ -1123,9 +1151,22 @@ def _portfolio_current(
                     current=False,
                     reason="portfolio source watermark is invalid",
                 )
+            if _source_after_cutoff(
+                source_at=used_at,
+                as_of=as_of,
+            ):
+                return Phase9SourceFreshnessItem(
+                    family="portfolio_allocation",
+                    current=False,
+                    reason=(
+                        f"portfolio source pool {pool} uses source "
+                        f"{used_at} after cutoff {as_of}"
+                    ),
+                )
             current_source = _latest_pool_source(
                 storage,
                 pool_address=pool,
+                as_of=as_of,
             )
             if not pool or current_source is None:
                 return Phase9SourceFreshnessItem(
@@ -1175,6 +1216,7 @@ def _portfolio_current(
         latest = _latest_pool_observed_at(
             storage,
             pool_address=pool,
+            as_of=as_of,
         )
         if not pool or latest is None:
             return Phase9SourceFreshnessItem(
@@ -1294,7 +1336,10 @@ def _bandit_current(
             )
         except ValueError:
             artifact = None
-        explicit_audit, latest_explicit = _explicit_input_state(storage)
+        explicit_audit, latest_explicit = _explicit_input_state(
+            storage,
+            as_of=as_of,
+        )
         if explicit_audit.exists and not explicit_audit.valid:
             return Phase9SourceFreshnessItem(
                 family="contextual_bandit",
@@ -1308,7 +1353,10 @@ def _bandit_current(
             lineage_sha = str(
                 lineage.get("explicit_input_artifact_sha256", "")
             )
-            if lineage_sha != latest_explicit.artifact_sha256:
+            if (
+                explicit_id != latest_explicit.evidence_id
+                or lineage_sha != latest_explicit.artifact_sha256
+            ):
                 return Phase9SourceFreshnessItem(
                     family="contextual_bandit",
                     current=False,
