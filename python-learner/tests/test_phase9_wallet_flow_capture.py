@@ -347,8 +347,15 @@ def test_wallet_flow_capture_round_robins_owners_before_extra_positions(
     )
 
     assert report.positions_attempted == 4
+    assert report.candidate_positions_total == 6
+    assert report.candidate_positions_selected == 4
+    assert report.candidate_positions_deferred == 2
     assert calls[:2] == ["position-a", "position-b"]
     assert set(calls[2:]) == {"closed-a-1", "closed-b-1"}
+    assert any(
+        "2 wallet-flow candidate position(s) were deferred" in reason
+        for reason in report.reasons
+    )
 
 
 def test_wallet_flow_capture_isolates_owner_expansion_failure(tmp_path):
@@ -586,6 +593,9 @@ def test_wallet_flow_capture_noops_when_source_is_already_ready(tmp_path):
     assert report.source_after.ready is True
     assert calls == []
     assert report.positions_attempted == 0
+    assert report.candidate_positions_total == 0
+    assert report.candidate_positions_selected == 0
+    assert report.candidate_positions_deferred == 0
 
 
 def test_wallet_flow_source_state_uses_same_latest_event_window_as_research(
