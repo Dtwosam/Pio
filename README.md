@@ -137,6 +137,7 @@ pio phase9-source-freshness  # replay-valid evidence vs latest persisted source 
 pio phase9-evidence-status  # quantitative ranked-cohort/source/family readiness
 pio phase9-evidence-plan  # ranked evidence debt + one deterministic next safe action
 pio phase9-evidence-step-run  # execute exactly one planner-selected safe evidence step
+pio phase9-evidence-run --max-steps 8  # bounded safe steps until ready/manual/wait/failure/no-progress
 pio phase9-research-refresh-run  # replay-aware automatic research refresh; no promotion
 pio phase9-chain-capture-plan --rpc-url <RPC_URL> --require-ready
 pio phase9-chain-capture-run --require-target  # uses SOLANA_RPC_URL; read-only inspect + local ingest
