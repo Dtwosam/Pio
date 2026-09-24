@@ -1,3 +1,7 @@
+import json
+import sys
+
+from meteora_learner import cli
 import sqlite3
 
 import pytest
@@ -208,3 +212,33 @@ def test_phase8_transition_history_validates_limits(tmp_path):
         list_phase8_model_status_history(storage, limit=0)
     with pytest.raises(ValueError, match="limit"):
         list_phase8_cycle_status_history(storage, limit=501)
+
+
+def test_phase8_transition_history_cli_reports_ready_journal(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    register_model(storage)
+    insert_cycle(storage)
+
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase8-transition-history",
+            "--require-ready",
+        ],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["audit"]["journal_ready"] is True
+    assert len(payload["model_events"]) == 1
+    assert len(payload["cycle_events"]) == 1
+    assert payload["model_events"][0]["model_id"] == "model-a"
+    assert payload["cycle_events"][0]["cycle_id"] == "cycle-a"
