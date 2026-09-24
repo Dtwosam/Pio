@@ -290,6 +290,7 @@ Built:
 - checksum-bound current-champion retraining input artifacts with non-inventing pool templates and a direct dataset/cycle builder; explicit token amounts and network costs remain operator-supplied while model training/promotion stay separate stages
 - checksum-verified offline retraining workflow that resolves the cycle dataset evidence/file, trains a deterministic challenger artifact, requires cycle walk-forward plus held-out offline qualification, and stops at OFFLINE_QUALIFIED before PAPER/champion promotion
 - direct one-step and bounded Phase 8 offline evidence runners that dispatch only dataset build, deterministic offline challenger training and offline validation, stopping on real-evidence waits or any operator/PAPER/promotion boundary without shell execution
+- non-persisting Phase 8 retraining-input preflight that validates the current champion lineage and computes the exact normalized artifact checksum before append-only input evidence is written
 
 Still needed:
 - real Phase 7 promotion evidence
