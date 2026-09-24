@@ -648,6 +648,11 @@ def run_phase9_wallet_flow_capture(
             "no current on-chain PositionV2 accounts were discovered "
             "for the pool"
         )
+    if candidate_positions_deferred:
+        reasons.append(
+            f"{candidate_positions_deferred} wallet-flow candidate "
+            "position(s) were deferred by the per-run position cap"
+        )
     if expansion_failures:
         reasons.append(
             f"{expansion_failures} owner position expansion(s) failed: "
