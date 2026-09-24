@@ -582,3 +582,120 @@ def test_phase9_historical_status_excludes_future_explicit_inputs(
         "explicit research inputs are not valid" in reason
         for reason in report.reasons
     )
+
+
+def test_phase9_live_status_exposes_wallet_backfill_scan_state(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    cohort = SimpleNamespace(
+        api_pools_seen=3,
+        stale_api_pools_excluded=0,
+        criteria=SimpleNamespace(min_research_pools=3),
+        required_observations=43,
+        desired_pools=("pool-a", "pool-b", "pool-c"),
+        research_pools=("pool-a", "pool-b", "pool-c"),
+        sampling_pools=("pool-a", "pool-b", "pool-c"),
+        missing_chain_pools=(),
+        research_ready=True,
+        items=tuple(
+            SimpleNamespace(
+                pool_address=pool,
+                rank=index,
+                chain_observations=43,
+                history_ready=True,
+            )
+            for index, pool in enumerate(
+                ("pool-a", "pool-b", "pool-c"),
+                start=1,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "evaluate_phase9_pool_cohort",
+        lambda *args, **kwargs: cohort,
+    )
+    monkeypatch.setattr(
+        status_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: SimpleNamespace(current=True),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "audit_phase9_explicit_inputs",
+        lambda storage: SimpleNamespace(
+            valid=True,
+            evidence_id=88,
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "evaluate_phase9_source_freshness",
+        lambda *args, **kwargs: SimpleNamespace(
+            current=True,
+            families=(),
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "build_phase9_mint_capture_plan",
+        lambda *args, **kwargs: SimpleNamespace(
+            inputs_ready=True,
+            captures_required=0,
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "wallet_flow_source_state",
+        lambda *args, **kwargs: SimpleNamespace(
+            events=12,
+            unique_users=3,
+            ready=False,
+        ),
+    )
+
+    def scan_state(storage, *, pool_address):
+        return SimpleNamespace(
+            backfill_exhausted=(pool_address == "pool-b"),
+            pages_scanned=(7 if pool_address == "pool-b" else 2),
+            updated_at=(
+                "2026-09-24T10:00:00+00:00"
+                if pool_address == "pool-b"
+                else "2026-09-24T09:00:00+00:00"
+            ),
+        )
+
+    monkeypatch.setattr(
+        status_module,
+        "phase9_pool_activity_scan_state",
+        scan_state,
+    )
+    monkeypatch.setattr(
+        status_module,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: SimpleNamespace(
+            adaptive_multi_pool=summary(1, ("__MULTI_POOL__",)),
+            mint_risk=summary(2, ("pool-a", "pool-b")),
+            wallet_flow=summary(0),
+            portfolio_allocation=summary(1, ("__PORTFOLIO__",)),
+            static_hedge=summary(1, ("pool-a",)),
+            contextual_bandit=summary(1, ("__CONTEXTUAL_BANDIT__",)),
+            research_ready=False,
+            reasons=("wallet flow incomplete",),
+        ),
+    )
+
+    report = evaluate_phase9_evidence_status(storage)
+
+    by_pool = {item.pool_address: item for item in report.pools}
+    assert by_pool["pool-a"].wallet_backfill_exhausted is False
+    assert by_pool["pool-a"].wallet_backfill_pages_scanned == 2
+    assert by_pool["pool-b"].wallet_backfill_exhausted is True
+    assert by_pool["pool-b"].wallet_backfill_pages_scanned == 7
+    assert by_pool["pool-b"].wallet_scan_updated_at == (
+        "2026-09-24T10:00:00+00:00"
+    )
+    assert by_pool["pool-c"].wallet_backfill_exhausted is None
+    assert by_pool["pool-c"].wallet_backfill_pages_scanned is None
