@@ -9,6 +9,34 @@ from meteora_learner.phase9_validation import Phase9ResearchBundleCriteria
 from meteora_learner.storage import Storage
 
 
+def seed_chain_observation(
+    storage,
+    *,
+    pool,
+    observed_at,
+):
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO chain_pool_snapshots(
+                observed_at,
+                pool_address,
+                active_bin_id,
+                bin_step,
+                token_x_mint,
+                token_y_mint,
+                raw_json
+            ) VALUES (?, ?, 0, 25, ?, ?, '{}')
+            """,
+            (
+                observed_at,
+                pool,
+                f"{pool}-x",
+                f"{pool}-y",
+            ),
+        )
+
+
 def family(name, ready):
     return SimpleNamespace(
         family=name,
@@ -371,3 +399,198 @@ def test_evidence_plan_stops_at_phase8_after_independent_debt_is_clear(
     assert refresh.shell_command is None
     assert "blocked until Phase 8" in refresh.reason
     assert "contextual_bandit" in refresh.reason
+
+
+def test_evidence_plan_uses_independent_source_debt_during_history_cadence_wait(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool_name in ("pool-a", "pool-b", "pool-c"):
+        seed_chain_observation(
+            storage,
+            pool=pool_name,
+            observed_at="2026-09-24T10:00:00+00:00",
+        )
+    report = status(
+        chain_history_ready=False,
+        max_history_samples_remaining=12,
+        mint_ready_pools=1,
+        research_sources_current=False,
+        research_bundle_ready=False,
+        pools=(
+            pool(
+                "pool-a",
+                1,
+                remaining=12,
+                mint_target=True,
+                mint_ready=False,
+                mint_captures=1,
+                wallet_target=True,
+                wallet_ready=True,
+                wallet_events=20,
+                wallet_users=5,
+            ),
+            pool(
+                "pool-b",
+                2,
+                remaining=12,
+                mint_target=True,
+                mint_ready=True,
+                wallet_target=True,
+                wallet_ready=True,
+                wallet_events=20,
+                wallet_users=5,
+            ),
+            pool("pool-c", 3, remaining=12),
+        ),
+        families=(
+            family("adaptive_regime", False),
+            family("mint_risk", False),
+            family("wallet_flow", True),
+            family("portfolio_allocation", True),
+            family("static_hedge", True),
+            family("contextual_bandit", True),
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase9_evidence_status",
+        lambda *args, **kwargs: report,
+    )
+
+    plan = build_phase9_evidence_plan(
+        storage,
+        as_of="2026-09-24T10:30:00+00:00",
+        history_interval_seconds=3600,
+    )
+
+    cadence = next(
+        item for item in plan.items
+        if item.debt_type == "CHAIN_HISTORY_CADENCE_WAIT"
+    )
+    assert cadence.actionable is False
+    assert cadence.shell_command is None
+    assert "inside the 3600-second history cadence window" in cadence.reason
+    assert plan.next_action is not None
+    assert plan.next_action.debt_type == "MINT_INPUTS"
+
+
+def test_evidence_plan_waits_on_history_before_futile_research_refresh(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool_name in ("pool-a", "pool-b", "pool-c"):
+        seed_chain_observation(
+            storage,
+            pool=pool_name,
+            observed_at="2026-09-24T10:00:00+00:00",
+        )
+    report = status(
+        chain_history_ready=False,
+        max_history_samples_remaining=7,
+        research_sources_current=False,
+        research_bundle_ready=False,
+        pools=(
+            pool(
+                "pool-a",
+                1,
+                remaining=7,
+                mint_target=True,
+                mint_ready=True,
+                wallet_target=True,
+                wallet_ready=True,
+                wallet_events=20,
+                wallet_users=5,
+            ),
+            pool(
+                "pool-b",
+                2,
+                remaining=7,
+                mint_target=True,
+                mint_ready=True,
+                wallet_target=True,
+                wallet_ready=True,
+                wallet_events=20,
+                wallet_users=5,
+            ),
+            pool("pool-c", 3, remaining=7),
+        ),
+        families=(
+            family("adaptive_regime", False),
+            family("mint_risk", True),
+            family("wallet_flow", True),
+            family("portfolio_allocation", True),
+            family("static_hedge", True),
+            family("contextual_bandit", True),
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase9_evidence_status",
+        lambda *args, **kwargs: report,
+    )
+
+    plan = build_phase9_evidence_plan(
+        storage,
+        as_of="2026-09-24T10:30:00+00:00",
+        history_interval_seconds=3600,
+    )
+
+    assert any(
+        item.debt_type == "RESEARCH_REFRESH"
+        and item.actionable
+        for item in plan.items
+    )
+    assert plan.next_action is not None
+    assert plan.next_action.debt_type == "CHAIN_HISTORY_CADENCE_WAIT"
+    assert plan.next_action.actionable is False
+
+
+def test_evidence_plan_keeps_history_actionable_after_cadence_elapsed(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool_name in ("pool-a", "pool-b", "pool-c"):
+        seed_chain_observation(
+            storage,
+            pool=pool_name,
+            observed_at="2026-09-24T08:00:00+00:00",
+        )
+    report = status(
+        chain_history_ready=False,
+        max_history_samples_remaining=5,
+        research_sources_current=False,
+        research_bundle_ready=False,
+        pools=(
+            pool("pool-a", 1, remaining=5),
+            pool("pool-b", 2, remaining=5),
+            pool("pool-c", 3, remaining=5),
+        ),
+        families=(
+            family("adaptive_regime", False),
+            family("mint_risk", True),
+            family("wallet_flow", True),
+            family("portfolio_allocation", True),
+            family("static_hedge", True),
+            family("contextual_bandit", True),
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase9_evidence_status",
+        lambda *args, **kwargs: report,
+    )
+
+    plan = build_phase9_evidence_plan(
+        storage,
+        as_of="2026-09-24T10:00:00+00:00",
+        history_interval_seconds=3600,
+    )
+
+    assert plan.next_action is not None
+    assert plan.next_action.debt_type == "CHAIN_HISTORY_DEPTH"
+    assert plan.next_action.actionable is True
+    assert plan.next_action.scope == "pool-a,pool-b,pool-c"
