@@ -28,6 +28,7 @@ class Phase9OperatorHandoff:
     scope: str | None
     reason: str | None
     automatic_action_available: bool
+    operator_action_required: bool
     manual_input_required: bool
     suggested_command: str | None
     explicit_input_template: dict[str, Any] | None
@@ -102,7 +103,13 @@ def _manual_blockers(
             "inspection_command": item.shell_command,
         }
         for item in items
-        if item.blocking and not item.actionable
+        if (
+            item.blocking
+            and (
+                not item.actionable
+                or item.debt_type == "EXPLICIT_RESEARCH_INPUTS"
+            )
+        )
     )
 
 
@@ -145,6 +152,7 @@ def build_phase9_operator_handoff(
             scope=None,
             reason=None,
             automatic_action_available=False,
+            operator_action_required=False,
             manual_input_required=False,
             suggested_command=None,
             explicit_input_template=None,
@@ -168,7 +176,8 @@ def build_phase9_operator_handoff(
             scope=None,
             reason=None,
             automatic_action_available=False,
-            manual_input_required=bool(blockers),
+            operator_action_required=bool(blockers),
+            manual_input_required=False,
             suggested_command=None,
             explicit_input_template=None,
             required_manual_fields=(),
@@ -180,13 +189,15 @@ def build_phase9_operator_handoff(
     explicit_template = None
     required_fields: tuple[str, ...] = ()
     followups: tuple[str, ...] = ()
-    manual_required = not action.actionable
+    operator_action_required = not action.actionable
+    manual_input_required = False
     status = "AUTOMATIC_ACTION"
     suggested_command = action.shell_command
 
     if action.debt_type == "EXPLICIT_RESEARCH_INPUTS":
         status = "MANUAL_REQUIRED"
-        manual_required = True
+        operator_action_required = True
+        manual_input_required = True
         evidence_status = evaluate_phase9_evidence_status(
             storage,
             criteria=criteria,
@@ -220,6 +231,7 @@ def build_phase9_operator_handoff(
         )
     elif not action.actionable:
         status = "MANUAL_REQUIRED"
+        operator_action_required = True
 
     automatic_action_available = bool(
         action.actionable
@@ -241,7 +253,8 @@ def build_phase9_operator_handoff(
         scope=action.scope,
         reason=action.reason,
         automatic_action_available=automatic_action_available,
-        manual_input_required=manual_required,
+        operator_action_required=operator_action_required,
+        manual_input_required=manual_input_required,
         suggested_command=suggested_command,
         explicit_input_template=explicit_template,
         required_manual_fields=required_fields,
