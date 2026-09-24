@@ -1,0 +1,18 @@
+[Unit]
+Description=Pio Phase 9 bounded evidence debt runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/pio phase9-evidence-run --max-steps 8 --history-interval-seconds 3600 --lease-seconds 1800 $PIO_PHASE9_EVIDENCE_RUN_EXTRA_ARGS
+TimeoutStartSec=20min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pio/data
