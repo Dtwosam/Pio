@@ -588,6 +588,16 @@ report is descriptive evidence only: it does not insert or rewrite
 `PHASE8_PROMOTION_V1`, authorize policy, start PAPER, rotate/rollback a
 champion, or grant LIVE execution authority.
 
+The `phase8-historical-promotion-audit` command answers the separate persisted
+question. It selects the latest immutable Phase 8 promotion-history row whose
+`promoted_at` is no later than the cutoff, reconstructs the criteria embedded
+in that row, re-evaluates cutoff-safe promotion readiness under those exact
+criteria, and requires the persisted champion model, completed cycle and
+continuous-promotion evidence ID to match the reconstructed lineage. A future
+promotion row, future criteria change or future model/evidence state must never
+make an earlier cutoff valid. The audit is read-only and does not establish
+current Phase 8 promotion.
+
 Phase 9 quantitative evidence planning is advisory and deterministic. The
 `phase9-evidence-plan` view may rank evidence debt and emit only existing
 research/read-only commands. It must not execute shell commands itself, fill
