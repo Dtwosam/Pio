@@ -170,6 +170,9 @@ from .phase9_maintenance_history import (
     list_phase9_maintenance_events,
     record_phase9_maintenance_event,
 )
+from .phase9_maintenance_health import (
+    evaluate_phase9_maintenance_health,
+)
 from .phase9_evidence_status import evaluate_phase9_evidence_status
 from .phase9_evidence_plan import build_phase9_evidence_plan
 from .phase9_evidence_step import run_phase9_evidence_step
@@ -3014,6 +3017,32 @@ def main() -> None:
         type=int,
         default=20,
         help="Maximum events to return, from 1 to 500",
+    )
+
+    phase9_maintenance_health = subparsers.add_parser(
+        "phase9-maintenance-health",
+        help="Evaluate unattended Phase 9 maintenance health from the lease and immutable lifecycle journal",
+    )
+    phase9_maintenance_health.add_argument(
+        "--max-event-age-seconds",
+        type=int,
+        default=10_800,
+        help="Maximum age of the latest maintenance lifecycle event before health fails",
+    )
+    phase9_maintenance_health.add_argument(
+        "--history-limit",
+        type=int,
+        default=100,
+        help="Maximum recent lifecycle events to inspect, from 1 to 500",
+    )
+    phase9_maintenance_health.add_argument(
+        "--as-of",
+        help="Optional timezone-aware evaluation time for deterministic health inspection",
+    )
+    phase9_maintenance_health.add_argument(
+        "--require-healthy",
+        action="store_true",
+        help="Exit non-zero unless unattended Phase 9 maintenance is healthy",
     )
 
     phase9_research_refresh = subparsers.add_parser(
@@ -6416,6 +6445,21 @@ def main() -> None:
             "count": len(events),
             "events": [event.to_record() for event in events],
         }, indent=2))
+        return
+
+    if args.command == "phase9-maintenance-health":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = evaluate_phase9_maintenance_health(
+            storage,
+            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
+            as_of=args.as_of,
+            max_event_age_seconds=args.max_event_age_seconds,
+            history_limit=args.history_limit,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_healthy and not result.healthy:
+            raise SystemExit(2)
         return
 
     if args.command == "phase9-source-capture-run":
