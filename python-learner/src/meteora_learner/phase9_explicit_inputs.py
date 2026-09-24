@@ -670,13 +670,9 @@ def persist_phase9_explicit_inputs(
     )
 
 
-def audit_phase9_explicit_inputs(
-    storage: Storage,
+def _audit_phase9_explicit_inputs_row(
+    latest: dict[str, Any] | None,
 ) -> Phase9ExplicitInputsAudit:
-    latest = storage.latest_advanced_edge_evidence(
-        edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
-        pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
-    )
     if latest is None:
         return Phase9ExplicitInputsAudit(
             exists=False,
@@ -744,6 +740,58 @@ def audit_phase9_explicit_inputs(
         artifact_sha256=digest,
         reasons=tuple(reasons),
     )
+
+
+def audit_phase9_explicit_inputs(
+    storage: Storage,
+) -> Phase9ExplicitInputsAudit:
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+        pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
+    )
+    return _audit_phase9_explicit_inputs_row(latest)
+
+
+def audit_phase9_explicit_inputs_at(
+    storage: Storage,
+    *,
+    as_of: str,
+) -> Phase9ExplicitInputsAudit:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                created_at,
+                status,
+                qualified,
+                evidence_json
+            FROM advanced_edge_evidence
+            WHERE edge_type = ?
+              AND pool_address = ?
+              AND julianday(created_at) <= julianday(?)
+            ORDER BY julianday(created_at) DESC, id DESC
+            LIMIT 1
+            """,
+            (
+                PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+                PHASE9_EXPLICIT_INPUTS_SCOPE,
+                as_of,
+            ),
+        ).fetchone()
+
+    latest = (
+        {
+            "id": int(row[0]),
+            "created_at": str(row[1]),
+            "status": str(row[2]),
+            "qualified": bool(row[3]),
+            "evidence": json.loads(str(row[4])),
+        }
+        if row is not None
+        else None
+    )
+    return _audit_phase9_explicit_inputs_row(latest)
 
 
 def load_phase9_explicit_inputs(
