@@ -284,9 +284,11 @@ def test_mint_freshness_detects_new_mint_snapshot(tmp_path):
         "pool-a-x",
         "2026-09-23T10:00:00+00:00",
     )
-    storage.save_advanced_edge_evidence(
+    save_advanced_at(
+        storage,
         edge_type=MINT_RISK_EVIDENCE_TYPE,
         pool_address="pool-a",
+        created_at="2026-09-23T10:30:00+00:00",
         as_of="2026-09-23T10:00:00+00:00",
         status="QUALIFIED_RESEARCH",
         qualified=True,
@@ -324,9 +326,11 @@ def test_wallet_freshness_detects_new_event(tmp_path):
         "one",
         "2026-09-23T10:00:00+00:00",
     )
-    storage.save_advanced_edge_evidence(
+    save_advanced_at(
+        storage,
         edge_type=WALLET_FLOW_EVIDENCE_TYPE,
         pool_address="pool-a",
+        created_at="2026-09-23T10:30:00+00:00",
         as_of=None,
         status="QUALIFIED_RESEARCH",
         qualified=True,
