@@ -233,7 +233,7 @@ def build_phase9_operator_handoff(
                 mint_max_snapshot_age_seconds
             ),
             wallet_criteria=wallet_criteria,
-            as_of=evaluation_time,
+            as_of=as_of,
         )
         template_pools = tuple(evidence_status.sampling_pools[:3])
         explicit_template = build_phase9_explicit_input_template(
