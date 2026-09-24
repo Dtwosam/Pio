@@ -543,6 +543,16 @@ follow-up sequence, but it must not fill retraining economics, start PAPER,
 promote or roll back a champion, persist Phase 8 promotion, or invoke LIVE
 execution.
 
+Consolidated Phase 8 status, planning and operator handoff are current-state only.
+An explicit historical `as_of` cutoff must fail closed because model-registry
+status and continuous-learning cycle status are mutable and do not yet have
+immutable transition histories sufficient to reconstruct the champion/cycle
+state at an arbitrary past instant. The lower-level continuous-learning trigger
+may still time-bound chain observations and live labels for its own retraining
+calculation, but that does not make the combined Phase 8 promotion view
+historically reconstructible. Later state must never be presented as if it were
+a verified historical Phase 8 snapshot.
+
 Phase 9 quantitative evidence planning is advisory and deterministic. The
 `phase9-evidence-plan` view may rank evidence debt and emit only existing
 research/read-only commands. It must not execute shell commands itself, fill
