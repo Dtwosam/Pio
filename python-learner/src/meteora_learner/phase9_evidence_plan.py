@@ -383,6 +383,14 @@ def build_phase9_evidence_plan(
                     f"wallet-flow source deficit for {pool.pool_address}: "
                     f"events {event_deficit} remaining, unique users "
                     f"{user_deficit} remaining"
+                    + (
+                        "; historical pool-activity backfill is exhausted "
+                        f"after {pool.wallet_backfill_pages_scanned or 0} "
+                        "page(s), so further progress depends on current/"
+                        "recent activity or newly discovered owner positions"
+                        if pool.wallet_backfill_exhausted is True
+                        else ""
+                    )
                 ),
             )
         )
