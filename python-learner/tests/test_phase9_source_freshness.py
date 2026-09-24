@@ -1069,3 +1069,184 @@ def test_explicit_backed_freshness_fails_closed_on_invalid_latest_artifact(
         assert "latest explicit input artifact is invalid" in (
             by_family[family].reason
         )
+
+
+def test_historical_source_freshness_ignores_rows_after_cutoff(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    pool_id = save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    mint_id = save_mint(
+        storage,
+        "pool-a-x",
+        "2026-09-23T10:00:00+00:00",
+    )
+    event_id = save_wallet_event(
+        storage,
+        "pool-a",
+        "historical",
+        "2026-09-23T10:00:00+00:00",
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+        as_of="2026-09-23T10:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "pools": [
+                {
+                    "pool_address": "pool-a",
+                    "adaptive": {
+                        "source_snapshot_ids": [pool_id],
+                    },
+                }
+            ],
+        },
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T10:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "pool_snapshot_id": pool_id,
+            "assessments": [
+                {
+                    "mint_address": "pool-a-x",
+                    "mint_snapshot_id": mint_id,
+                }
+            ],
+        },
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T10:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "source_event_ids": [event_id],
+        },
+    )
+
+    save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T12:00:00+00:00",
+    )
+    save_mint(
+        storage,
+        "pool-a-x",
+        "2026-09-23T12:00:00+00:00",
+    )
+    save_wallet_event(
+        storage,
+        "pool-a",
+        "future",
+        "2026-09-23T12:00:00+00:00",
+    )
+
+    report = evaluate_phase9_source_freshness(
+        storage,
+        as_of="2026-09-23T11:00:00+00:00",
+    )
+    by_family = {item.family: item for item in report.families}
+
+    assert by_family["adaptive_regime"].current is True
+    assert by_family["mint_risk"].current is True
+    assert by_family["wallet_flow"].current is True
+
+
+def test_historical_source_freshness_rejects_evidence_after_cutoff(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    pool_id = save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T12:00:00+00:00",
+    )
+    mint_id = save_mint(
+        storage,
+        "pool-a-x",
+        "2026-09-23T12:00:00+00:00",
+    )
+    event_id = save_wallet_event(
+        storage,
+        "pool-a",
+        "future-evidence",
+        "2026-09-23T12:00:00+00:00",
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        pool_address="__MULTI_POOL__",
+        as_of="2026-09-23T12:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "pools": [
+                {
+                    "pool_address": "pool-a",
+                    "adaptive": {
+                        "source_snapshot_ids": [pool_id],
+                    },
+                }
+            ],
+        },
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "pool_snapshot_id": pool_id,
+            "assessments": [
+                {
+                    "mint_address": "pool-a-x",
+                    "mint_snapshot_id": mint_id,
+                }
+            ],
+        },
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of="2026-09-23T12:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "source_event_ids": [event_id],
+        },
+    )
+
+    report = evaluate_phase9_source_freshness(
+        storage,
+        as_of="2026-09-23T11:00:00+00:00",
+    )
+    by_family = {item.family: item for item in report.families}
+
+    for family in ("adaptive_regime", "mint_risk", "wallet_flow"):
+        assert by_family[family].current is False
+        assert "after cutoff" in by_family[family].reason
