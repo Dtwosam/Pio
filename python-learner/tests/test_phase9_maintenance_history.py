@@ -1,6 +1,10 @@
+import json
 import sqlite3
+import sys
 
 import pytest
+
+from meteora_learner import cli
 
 from meteora_learner.phase9_maintenance_history import (
     list_phase9_maintenance_events,
@@ -135,3 +139,43 @@ def test_phase9_maintenance_event_rows_are_immutable(tmp_path):
                 "DELETE FROM phase9_maintenance_events WHERE id = ?",
                 (event.event_id,),
             )
+
+
+def test_phase9_maintenance_history_cli_returns_recent_events(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    record_phase9_maintenance_event(
+        storage,
+        operation_key="phase9-research-maintenance",
+        activity="evidence-run",
+        owner_id="owner-a",
+        event_type="RUN_FINISHED",
+        status="WAITING_INTERVAL",
+        event_time="2026-09-24T10:00:00+00:00",
+        details={"steps_attempted": 1},
+    )
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase9-maintenance-history",
+            "--activity",
+            "evidence-run",
+            "--limit",
+            "1",
+        ],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["operation_key"] == "phase9-research-maintenance"
+    assert payload["activity"] == "evidence-run"
+    assert payload["count"] == 1
+    assert payload["events"][0]["status"] == "WAITING_INTERVAL"
+    assert payload["events"][0]["details"]["steps_attempted"] == 1
