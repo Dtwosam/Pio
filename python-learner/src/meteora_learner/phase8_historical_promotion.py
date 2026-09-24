@@ -12,7 +12,27 @@ from .phase8_historical_state import (
     build_phase8_historical_state_snapshot,
 )
 from .phase8_validation import Phase8PromotionCriteria
+from .phase_promotion import PHASE8, PHASE8_EVIDENCE_TYPE
 from .storage import Storage
+
+
+@dataclass(frozen=True)
+class Phase8HistoricalPersistedPromotionAudit:
+    as_of: str
+    exists: bool
+    history_id: int | None
+    promoted_at: str | None
+    qualified: bool
+    evidence_type_valid: bool
+    persisted_report_ready: bool
+    criteria_valid: bool
+    historical_promotion_ready: bool
+    champion_lineage_matches: bool
+    valid_at_cutoff: bool
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -306,4 +326,139 @@ def evaluate_phase8_historical_promotion(
         criteria=criteria,
         promotion_ready=not reasons,
         reasons=tuple(dict.fromkeys(reasons)),
+    )
+
+
+
+def audit_persisted_phase8_promotion_at(
+    storage: Storage,
+    *,
+    as_of: str,
+) -> Phase8HistoricalPersistedPromotionAudit:
+    snapshot = build_phase8_historical_state_snapshot(
+        storage,
+        as_of=as_of,
+    )
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                promoted_at,
+                evidence_type,
+                qualified,
+                evidence_json
+            FROM phase_promotion_evidence_history
+            WHERE phase_name = ?
+              AND julianday(promoted_at) <= julianday(?)
+            ORDER BY julianday(promoted_at) DESC, id DESC
+            LIMIT 1
+            """,
+            (PHASE8, snapshot.as_of),
+        ).fetchone()
+
+    if row is None:
+        return Phase8HistoricalPersistedPromotionAudit(
+            as_of=snapshot.as_of,
+            exists=False,
+            history_id=None,
+            promoted_at=None,
+            qualified=False,
+            evidence_type_valid=False,
+            persisted_report_ready=False,
+            criteria_valid=False,
+            historical_promotion_ready=False,
+            champion_lineage_matches=False,
+            valid_at_cutoff=False,
+            reasons=(
+                "persisted Phase 8 promotion history is missing at cutoff",
+            ),
+        )
+
+    history_id = int(row[0])
+    promoted_at = str(row[1])
+    evidence_type_valid = str(row[2]) == PHASE8_EVIDENCE_TYPE
+    qualified = bool(row[3])
+    try:
+        persisted = json.loads(str(row[4]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        persisted = None
+
+    persisted_report_ready = bool(
+        isinstance(persisted, dict)
+        and persisted.get("promotion_ready") is True
+    )
+    criteria = None
+    if isinstance(persisted, dict):
+        raw_criteria = persisted.get("criteria")
+        if isinstance(raw_criteria, dict):
+            try:
+                criteria = Phase8PromotionCriteria(**raw_criteria)
+                criteria.validate()
+            except (TypeError, ValueError):
+                criteria = None
+
+    historical_report = (
+        evaluate_phase8_historical_promotion(
+            storage,
+            as_of=snapshot.as_of,
+            criteria=criteria,
+        )
+        if criteria is not None
+        else None
+    )
+    historical_ready = bool(
+        historical_report is not None
+        and historical_report.promotion_ready
+    )
+    champion_lineage_matches = False
+    if isinstance(persisted, dict) and historical_report is not None:
+        champion_lineage_matches = (
+            persisted.get("champion_model_id")
+            == historical_report.champion_model_id
+            and persisted.get("champion_cycle_id")
+            == historical_report.champion_cycle_id
+            and persisted.get("continuous_promotion_evidence_id")
+            == historical_report.continuous_promotion_evidence_id
+        )
+
+    reasons: list[str] = []
+    if not evidence_type_valid:
+        reasons.append(
+            "historical Phase 8 promotion evidence type is invalid"
+        )
+    if not qualified:
+        reasons.append(
+            "historical Phase 8 promotion evidence is not qualified"
+        )
+    if not persisted_report_ready:
+        reasons.append(
+            "historical persisted Phase 8 report was not promotion-ready"
+        )
+    if criteria is None:
+        reasons.append(
+            "historical persisted Phase 8 promotion criteria are invalid"
+        )
+    if not historical_ready:
+        reasons.append(
+            "Phase 8 promotion gate does not pass at the historical cutoff"
+        )
+    if not champion_lineage_matches:
+        reasons.append(
+            "historical Phase 8 champion lineage differs from persisted promotion"
+        )
+
+    return Phase8HistoricalPersistedPromotionAudit(
+        as_of=snapshot.as_of,
+        exists=True,
+        history_id=history_id,
+        promoted_at=promoted_at,
+        qualified=qualified,
+        evidence_type_valid=evidence_type_valid,
+        persisted_report_ready=persisted_report_ready,
+        criteria_valid=criteria is not None,
+        historical_promotion_ready=historical_ready,
+        champion_lineage_matches=champion_lineage_matches,
+        valid_at_cutoff=not reasons,
+        reasons=tuple(reasons),
     )
