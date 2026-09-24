@@ -87,7 +87,6 @@ def test_phase8_evidence_status_consolidates_learning_cycle_and_live_gate(
             min_live_labels=10,
             min_live_pools=2,
         ),
-        as_of="2026-09-24T00:00:00+00:00",
     )
 
     assert report.research_only is True
@@ -273,14 +272,44 @@ def test_phase8_evidence_status_uses_requested_criteria(
         storage,
         learning_criteria=learning_criteria,
         promotion_criteria=promotion_criteria,
-        as_of="2026-09-24T01:00:00+00:00",
     )
 
     assert seen["learning"] is learning_criteria
     assert seen["promotion"] is promotion_criteria
-    assert seen["as_of"] == "2026-09-24T01:00:00+00:00"
+    assert seen["as_of"] is None
     assert report.required_new_chain_observations == 100
     assert report.required_new_chain_pools == 2
     assert report.retrain_live_label_trigger == 3
     assert report.required_live_labels == 20
     assert report.required_live_pools == 3
+
+
+def test_phase8_evidence_status_rejects_historical_cutoff(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    called = []
+
+    monkeypatch.setattr(
+        status_module,
+        "build_continuous_learning_plan",
+        lambda *args, **kwargs: called.append("learning"),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "evaluate_phase8_promotion",
+        lambda *args, **kwargs: called.append("promotion"),
+    )
+
+    try:
+        evaluate_phase8_evidence_status(
+            storage,
+            as_of="2026-09-23T12:00:00+00:00",
+        )
+    except ValueError as exc:
+        assert "historical Phase 8 evidence status is unsupported" in str(exc)
+    else:
+        raise AssertionError("expected historical cutoff rejection")
+
+    assert called == []
