@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .phase9_evidence_status import (
@@ -44,6 +45,7 @@ class Phase9EvidencePlan:
     next_action: Phase9EvidenceDebtItem | None
     items: tuple[Phase9EvidenceDebtItem, ...]
     reasons: tuple[str, ...]
+    history_next_eligible_at: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -68,37 +70,59 @@ def _source_ready(status: Phase9EvidenceStatus) -> bool:
     )
 
 
-def _history_capture_eligible_pools(
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError(
+            "Phase 9 evidence-plan timestamps must be timezone-aware"
+        )
+    return parsed.astimezone(timezone.utc)
+
+
+def _history_capture_cadence(
     storage: Storage,
     *,
     pool_addresses: tuple[str, ...],
     evaluation_time: str,
     history_interval_seconds: int,
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], str | None]:
     if history_interval_seconds <= 0:
-        return pool_addresses
+        return pool_addresses, None
 
+    evaluation = _parse_time(evaluation_time)
     eligible: list[str] = []
+    future_eligible_at: list[datetime] = []
     with storage.connect() as conn:
         for pool in pool_addresses:
             row = conn.execute(
                 """
-                SELECT
-                    (julianday(?) - julianday(observed_at)) * 86400.0
+                SELECT observed_at
                 FROM chain_pool_snapshots
                 WHERE pool_address = ?
                   AND julianday(observed_at) <= julianday(?)
                 ORDER BY julianday(observed_at) DESC, id DESC
                 LIMIT 1
                 """,
-                (evaluation_time, pool, evaluation_time),
+                (pool, evaluation_time),
             ).fetchone()
             if row is None or row[0] is None:
                 eligible.append(pool)
                 continue
-            if float(row[0]) + 1e-6 >= history_interval_seconds:
+
+            next_eligible = _parse_time(str(row[0])) + timedelta(
+                seconds=history_interval_seconds
+            )
+            if evaluation >= next_eligible:
                 eligible.append(pool)
-    return tuple(eligible)
+            else:
+                future_eligible_at.append(next_eligible)
+
+    earliest = (
+        min(future_eligible_at).isoformat()
+        if future_eligible_at
+        else None
+    )
+    return tuple(eligible), earliest
 
 
 def build_phase9_evidence_plan(
@@ -198,6 +222,7 @@ def build_phase9_evidence_plan(
             )
         )
 
+    history_next_eligible_at: str | None = None
     history_deficits = tuple(
         item
         for item in status.pools
@@ -210,7 +235,10 @@ def build_phase9_evidence_plan(
         deficit_pools = tuple(
             item.pool_address for item in history_deficits
         )
-        eligible_history_pools = _history_capture_eligible_pools(
+        (
+            eligible_history_pools,
+            history_next_eligible_at,
+        ) = _history_capture_cadence(
             storage,
             pool_addresses=deficit_pools,
             evaluation_time=evaluation_time,
@@ -262,8 +290,14 @@ def build_phase9_evidence_plan(
                         "depth, but every deficient pool is still inside the "
                         f"{history_interval_seconds}-second history cadence "
                         "window; independent source debts may proceed before "
-                        "the next history sample; additional observations by "
-                        "pool: "
+                        "the next history sample"
+                        + (
+                            "; next eligible history capture at "
+                            + history_next_eligible_at
+                            if history_next_eligible_at is not None
+                            else ""
+                        )
+                        + "; additional observations by pool: "
                         + details
                     )
                 ),
@@ -515,4 +549,5 @@ def build_phase9_evidence_plan(
         next_action=next_action,
         items=tuple(items),
         reasons=reasons,
+        history_next_eligible_at=history_next_eligible_at,
     )
