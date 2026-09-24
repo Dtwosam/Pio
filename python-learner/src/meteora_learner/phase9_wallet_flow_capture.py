@@ -94,6 +94,9 @@ class Phase9WalletFlowCaptureReport:
     positions_failed: int
     items: tuple[Phase9WalletFlowCaptureItem, ...]
     reasons: tuple[str, ...]
+    candidate_positions_total: int = 0
+    candidate_positions_selected: int = 0
+    candidate_positions_deferred: int = 0
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -323,6 +326,9 @@ def run_phase9_wallet_flow_capture(
             positions_failed=0,
             items=(),
             reasons=("wallet-flow source thresholds are already satisfied",),
+            candidate_positions_total=0,
+            candidate_positions_selected=0,
+            candidate_positions_deferred=0,
         )
 
     production_capture_path = (
@@ -574,11 +580,18 @@ def run_phase9_wallet_flow_capture(
                     f"{type(exc).__name__}: {str(exc)[:1000]}"
                 )
 
-        candidates = _diversity_order(
+        ordered_candidates = _diversity_order(
             list(candidate_map.values()),
             existing_positions=existing_positions,
             existing_users=existing_users,
-        )[:max_positions_per_run]
+        )
+        candidate_positions_total = len(ordered_candidates)
+        candidates = ordered_candidates[:max_positions_per_run]
+        candidate_positions_selected = len(candidates)
+        candidate_positions_deferred = max(
+            0,
+            candidate_positions_total - candidate_positions_selected,
+        )
 
         for candidate in candidates:
             current = wallet_flow_source_state(
@@ -705,4 +718,7 @@ def run_phase9_wallet_flow_capture(
         positions_failed=failed,
         items=tuple(items),
         reasons=tuple(reasons),
+        candidate_positions_total=candidate_positions_total,
+        candidate_positions_selected=candidate_positions_selected,
+        candidate_positions_deferred=candidate_positions_deferred,
     )
