@@ -204,7 +204,6 @@ def test_evidence_plan_prioritizes_first_actionable_source_debt(
         cohort_criteria=Phase9PoolCohortCriteria(
             min_research_pools=3,
         ),
-        as_of="2026-09-24T00:00:00+00:00",
     )
 
     assert plan.research_only is True
@@ -410,6 +409,11 @@ def test_evidence_plan_uses_independent_source_debt_during_history_cadence_wait(
     tmp_path,
 ):
     storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        plan_module,
+        "utc_now_iso",
+        lambda: "2026-09-24T10:30:00+00:00",
+    )
     for pool_name in ("pool-a", "pool-b", "pool-c"):
         seed_chain_observation(
             storage,
@@ -465,7 +469,6 @@ def test_evidence_plan_uses_independent_source_debt_during_history_cadence_wait(
 
     plan = build_phase9_evidence_plan(
         storage,
-        as_of="2026-09-24T10:30:00+00:00",
         history_interval_seconds=3600,
     )
 
@@ -488,6 +491,11 @@ def test_evidence_plan_waits_on_history_before_futile_research_refresh(
     tmp_path,
 ):
     storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        plan_module,
+        "utc_now_iso",
+        lambda: "2026-09-24T10:30:00+00:00",
+    )
     for pool_name in ("pool-a", "pool-b", "pool-c"):
         seed_chain_observation(
             storage,
@@ -541,7 +549,6 @@ def test_evidence_plan_waits_on_history_before_futile_research_refresh(
 
     plan = build_phase9_evidence_plan(
         storage,
-        as_of="2026-09-24T10:30:00+00:00",
         history_interval_seconds=3600,
     )
 
@@ -560,6 +567,11 @@ def test_evidence_plan_keeps_history_actionable_after_cadence_elapsed(
     tmp_path,
 ):
     storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        plan_module,
+        "utc_now_iso",
+        lambda: "2026-09-24T10:00:00+00:00",
+    )
     for pool_name in ("pool-a", "pool-b", "pool-c"):
         seed_chain_observation(
             storage,
@@ -593,7 +605,6 @@ def test_evidence_plan_keeps_history_actionable_after_cadence_elapsed(
 
     plan = build_phase9_evidence_plan(
         storage,
-        as_of="2026-09-24T10:00:00+00:00",
         history_interval_seconds=3600,
     )
 
@@ -608,6 +619,11 @@ def test_evidence_plan_reports_earliest_future_history_eligibility(
     tmp_path,
 ):
     storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        plan_module,
+        "utc_now_iso",
+        lambda: "2026-09-24T10:00:00+00:00",
+    )
     seed_chain_observation(
         storage,
         pool="pool-a",
@@ -650,7 +666,6 @@ def test_evidence_plan_reports_earliest_future_history_eligibility(
 
     plan = build_phase9_evidence_plan(
         storage,
-        as_of="2026-09-24T10:00:00+00:00",
         history_interval_seconds=3600,
     )
 
@@ -722,3 +737,44 @@ def test_evidence_plan_explains_exhausted_wallet_backfill_without_disabling_retr
     assert wallet.actionable is True
     assert "backfill is exhausted after 7 page(s)" in wallet.reason
     assert "current/recent activity" in wallet.reason
+
+
+def test_historical_evidence_plan_suppresses_live_actions(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = status(
+        fresh_api_pools=1,
+        research_sources_current=False,
+        research_bundle_ready=False,
+        families=(
+            family("adaptive_regime", False),
+            family("mint_risk", False),
+            family("wallet_flow", False),
+            family("portfolio_allocation", False),
+            family("static_hedge", False),
+            family("contextual_bandit", False),
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase9_evidence_status",
+        lambda *args, **kwargs: report,
+    )
+
+    plan = build_phase9_evidence_plan(
+        storage,
+        as_of="2026-09-23T12:00:00+00:00",
+    )
+
+    assert plan.inspection_only is True
+    assert plan.next_action is not None
+    assert plan.next_action.actionable is False
+    assert plan.next_action.shell_command is None
+    assert all(item.actionable is False for item in plan.items)
+    assert all(item.shell_command is None for item in plan.items)
+    assert any(
+        "inspection-only" in reason
+        for reason in plan.reasons
+    )
