@@ -967,6 +967,25 @@ def test_persisted_phase9_promotion_audit_detects_staleness(tmp_path):
         for reason in audit.reasons
     )
 
+def test_current_phase9_promotion_serializes_canonical_bundle(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(storage, report=bundle)
+
+    report = evaluate_phase9_promotion(storage)
+    record = report.to_record()
+
+    assert report.promotion_ready is True
+    assert report.research_bundle.evaluation_as_of is None
+    assert "evaluation_as_of" not in record["research_bundle"]
+    assert phase9_research_bundle_sha256(
+        record["research_bundle"]
+    ) == report.research_bundle_sha256
+
+
 def test_phase9_promotion_baseline_remains_valid_after_new_research(
     tmp_path,
 ):
