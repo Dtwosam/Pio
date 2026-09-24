@@ -363,6 +363,7 @@ Built:
 - deterministic Phase 9 evidence-debt planner that ranks Phase 8 dependency, fresh API coverage, chain onboarding/history depth, mint freshness, wallet-flow source deficits, explicit inputs and research refresh, emitting one executable next safe action while remaining research-only
 - lease-protected one-debt evidence runner that directly dispatches exactly one planner-selected API/chain/history/mint/wallet/research-refresh operation without shell execution, while returning manual blockers unchanged and remaining disconnected from promotion or LIVE policy
 - lease-protected bounded evidence runner that chains only successful debt-reducing automatic steps and stops on READY, manual assumptions, cadence wait, collector failure, no-progress or a hard max-step bound
+- optional hardened systemd evidence-runner timer that advances only bounded planner-selected source/research debt under the shared maintenance lease and cannot promote, authorize policy, sign or submit
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
