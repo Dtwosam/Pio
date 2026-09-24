@@ -1,3 +1,10 @@
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+from meteora_learner import cli
 from types import SimpleNamespace
 
 import meteora_learner.phase8_evidence_run as run_module
@@ -281,3 +288,96 @@ def test_phase8_run_validates_max_steps(tmp_path):
         assert "max_steps" in str(exc)
     else:
         raise AssertionError("expected invalid max_steps failure")
+
+
+def test_phase8_runner_sources_exclude_manual_state_transitions():
+    root = Path(__file__).resolve().parents[1] / "src" / "meteora_learner"
+    source = (
+        (root / "phase8_evidence_step.py").read_text(encoding="utf-8")
+        + (root / "phase8_evidence_run.py").read_text(encoding="utf-8")
+    )
+
+    forbidden = (
+        "ml-start-paper",
+        "promote_continuous_challenger",
+        "rollback_live_champion",
+        "persist_phase8_promotion",
+        "phase8-validate --persist-ready",
+    )
+    for value in forbidden:
+        assert value not in source
+
+
+def test_phase8_evidence_run_cli_prints_bounded_report(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = SimpleNamespace(
+        persisted_phase8_current=False,
+        to_record=lambda: {
+            "status": "MANUAL_REQUIRED",
+            "offline_only": True,
+            "policy_actionable": False,
+            "execution_wired": False,
+            "steps_attempted": 1,
+            "terminal_debt_type": "PAPER_CHALLENGER_START_REQUIRED",
+        },
+    )
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "run_phase8_evidence_until_blocked",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pio", "phase8-evidence-run", "--max-steps", "4"],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "MANUAL_REQUIRED"
+    assert payload["offline_only"] is True
+    assert payload["terminal_debt_type"] == (
+        "PAPER_CHALLENGER_START_REQUIRED"
+    )
+
+
+def test_phase8_evidence_run_cli_require_current_fails_closed(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = SimpleNamespace(
+        persisted_phase8_current=False,
+        to_record=lambda: {
+            "status": "WAITING",
+            "persisted_phase8_current": False,
+        },
+    )
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "run_phase8_evidence_until_blocked",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase8-evidence-run",
+            "--require-current",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 2
+    assert json.loads(capsys.readouterr().out)["status"] == "WAITING"
