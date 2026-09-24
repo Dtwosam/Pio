@@ -10,6 +10,11 @@ from .contextual_bandit_cycle import (
     CycleContextualBanditResult,
     evaluate_cycle_contextual_bandit,
 )
+from .phase9_bandit_dataset import (
+    PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+    Phase9BanditResearchResult,
+    evaluate_phase9_contextual_bandit_from_dataset,
+)
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
     audit_persisted_phase9_promotion,
@@ -77,6 +82,8 @@ class Phase9ShadowReport:
     phase9_audit: dict[str, Any] | None
     cycle_result: dict[str, Any] | None
     reasons: tuple[str, ...]
+    dataset_source_type: str = "CONTINUOUS_RETRAIN_DATASET_V1"
+    dataset_evidence_id: int | None = None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -152,11 +159,15 @@ def _persisted_phase9_context(
 def evaluate_phase9_shadow(
     storage: Storage,
     *,
-    cycle_id: str,
+    cycle_id: str | None = None,
+    dataset_evidence_id: int | None = None,
     criteria: Phase9ShadowCriteria = Phase9ShadowCriteria(),
 ) -> Phase9ShadowReport:
-    if not cycle_id.strip():
-        raise ValueError("cycle_id is required")
+    cycle = (cycle_id or "").strip()
+    if (bool(cycle) + (dataset_evidence_id is not None)) != 1:
+        raise ValueError(
+            "exactly one of cycle_id or dataset_evidence_id is required"
+        )
     criteria.validate()
 
     promoted_at, promotion_criteria, context_reasons = (
@@ -181,14 +192,33 @@ def evaluate_phase9_shadow(
             )
 
     cycle_result: CycleContextualBanditResult | None = None
-    try:
-        cycle_result = evaluate_cycle_contextual_bandit(
-            storage,
-            cycle_id=cycle_id,
-            criteria=criteria.bandit_criteria(),
-        )
-    except (ValueError, FileNotFoundError) as exc:
-        reasons.append(f"shadow cycle replay unavailable: {exc}")
+    dataset_result: Phase9BanditResearchResult | None = None
+    dataset_source_type = "CONTINUOUS_RETRAIN_DATASET_V1"
+    source_evidence_id: int | None = None
+    source_key = cycle
+    if cycle:
+        try:
+            cycle_result = evaluate_cycle_contextual_bandit(
+                storage,
+                cycle_id=cycle,
+                criteria=criteria.bandit_criteria(),
+            )
+        except (ValueError, FileNotFoundError) as exc:
+            reasons.append(f"shadow cycle replay unavailable: {exc}")
+    else:
+        dataset_source_type = PHASE9_BANDIT_DATASET_EVIDENCE_TYPE
+        source_evidence_id = int(dataset_evidence_id)
+        source_key = f"phase9-dataset:{source_evidence_id}"
+        try:
+            dataset_result = (
+                evaluate_phase9_contextual_bandit_from_dataset(
+                    storage,
+                    dataset_evidence_id=source_evidence_id,
+                    criteria=criteria.bandit_criteria(),
+                )
+            )
+        except (ValueError, FileNotFoundError) as exc:
+            reasons.append(f"shadow dataset replay unavailable: {exc}")
 
     dataset_version = None
     dataset_sha256 = None
@@ -197,11 +227,12 @@ def evaluate_phase9_shadow(
     seconds_after_promotion = None
     bandit_qualified = False
 
-    if cycle_result is not None:
-        dataset_version = cycle_result.lineage.dataset_version
-        dataset_sha256 = cycle_result.lineage.dataset_sha256
-        dataset_cutoff = cycle_result.lineage.cutoff
-        bandit_qualified = cycle_result.report.research_qualified
+    replay_result = cycle_result or dataset_result
+    if replay_result is not None:
+        dataset_version = replay_result.lineage.dataset_version
+        dataset_sha256 = replay_result.lineage.dataset_sha256
+        dataset_cutoff = replay_result.lineage.cutoff
+        bandit_qualified = replay_result.report.research_qualified
 
         if promoted_at is not None:
             try:
@@ -226,13 +257,13 @@ def evaluate_phase9_shadow(
         if not bandit_qualified:
             reasons.extend(
                 f"shadow bandit: {reason}"
-                for reason in cycle_result.report.reasons
+                for reason in replay_result.report.reasons
             )
 
     shadow_ready = (
         promotion_exists
         and phase9_current
-        and cycle_result is not None
+        and replay_result is not None
         and cutoff_after_promotion
         and bandit_qualified
         and not reasons
@@ -244,7 +275,7 @@ def evaluate_phase9_shadow(
         phase9_promotion_exists=promotion_exists,
         phase9_current=phase9_current,
         phase9_promoted_at=promoted_at,
-        cycle_id=cycle_id,
+        cycle_id=source_key,
         dataset_version=dataset_version,
         dataset_sha256=dataset_sha256,
         dataset_cutoff=dataset_cutoff,
@@ -255,11 +286,13 @@ def evaluate_phase9_shadow(
         criteria=criteria,
         phase9_audit=phase9_audit,
         cycle_result=(
-            cycle_result.to_record()
-            if cycle_result is not None
+            replay_result.to_record()
+            if replay_result is not None
             else None
         ),
         reasons=tuple(reasons),
+        dataset_source_type=dataset_source_type,
+        dataset_evidence_id=source_evidence_id,
     )
 
 
