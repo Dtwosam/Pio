@@ -13,7 +13,10 @@ from .phase9_shadow import (
 from .phase9_bandit_dataset import (
     PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
 )
-from .phase9_validation import audit_persisted_phase9_promotion
+from .phase9_validation import (
+    audit_persisted_phase9_promotion,
+    audit_persisted_phase9_promotion_baseline,
+)
 from .phase9_source_freshness import (
     evaluate_phase9_source_freshness,
 )
