@@ -5252,7 +5252,12 @@ def main() -> None:
                 ),
             ),
         )
-        print(json.dumps(result.to_record(), indent=2))
+        output = result.to_record()
+        if result.status not in {"READY", "COMPLETE"}:
+            output["operator_handoff_command"] = (
+                "pio phase8-operator-handoff"
+            )
+        print(json.dumps(output, indent=2))
         if args.require_progress and not (
             result.progressed or result.status == "READY"
         ):
@@ -5293,7 +5298,12 @@ def main() -> None:
             ),
             max_steps=args.max_steps,
         )
-        print(json.dumps(result.to_record(), indent=2))
+        output = result.to_record()
+        if result.status != "READY":
+            output["operator_handoff_command"] = (
+                "pio phase8-operator-handoff"
+            )
+        print(json.dumps(output, indent=2))
         if args.require_current and not result.persisted_phase8_current:
             raise SystemExit(2)
         return
