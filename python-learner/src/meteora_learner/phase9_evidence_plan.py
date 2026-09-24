@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -46,6 +46,7 @@ class Phase9EvidencePlan:
     items: tuple[Phase9EvidenceDebtItem, ...]
     reasons: tuple[str, ...]
     history_next_eligible_at: str | None = None
+    inspection_only: bool = False
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -142,6 +143,7 @@ def build_phase9_evidence_plan(
     if history_interval_seconds < 0:
         raise ValueError("history_interval_seconds cannot be negative")
 
+    inspection_only = as_of is not None
     evaluation_time = as_of or utc_now_iso()
     status = evaluate_phase9_evidence_status(
         storage,
@@ -543,10 +545,34 @@ def build_phase9_evidence_plan(
         )
     )
 
+    if inspection_only:
+        items = [
+            replace(
+                item,
+                actionable=False,
+                shell_command=None,
+            )
+            for item in items
+        ]
+        if next_action is not None:
+            next_action = replace(
+                next_action,
+                actionable=False,
+                shell_command=None,
+            )
+
     source_ready = _source_ready(status)
     reasons = tuple(dict.fromkeys(
         tuple(status.reasons)
         + tuple(item.reason for item in items)
+        + (
+            (
+                "historical Phase 9 evidence planning is inspection-only; "
+                "live collection commands are suppressed"
+            )
+            if inspection_only
+            else ()
+        )
     ))
 
     return Phase9EvidencePlan(
@@ -565,4 +591,5 @@ def build_phase9_evidence_plan(
         items=tuple(items),
         reasons=reasons,
         history_next_eligible_at=history_next_eligible_at,
+        inspection_only=inspection_only,
     )
