@@ -504,3 +504,47 @@ def test_historical_persisted_phase8_promotion_rejects_invalid_criteria(
     assert audit.historical_promotion_ready is False
     assert audit.valid_at_cutoff is False
     assert any("criteria are invalid" in reason for reason in audit.reasons)
+
+
+def test_historical_phase8_promotion_audit_cli_require_valid(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = SimpleNamespace(
+        valid_at_cutoff=False,
+        to_record=lambda: {
+            "as_of": "2026-09-24T12:00:00+00:00",
+            "exists": False,
+            "valid_at_cutoff": False,
+            "reasons": [
+                "persisted Phase 8 promotion history is missing at cutoff"
+            ],
+        },
+    )
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "audit_persisted_phase8_promotion_at",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase8-historical-promotion-audit",
+            "--as-of",
+            "2026-09-24T12:00:00+00:00",
+            "--require-valid",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["valid_at_cutoff"] is False
+    assert payload["exists"] is False
