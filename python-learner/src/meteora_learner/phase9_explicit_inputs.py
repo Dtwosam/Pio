@@ -590,17 +590,30 @@ def persist_phase9_explicit_inputs(
 ) -> Phase9ExplicitInputsArtifact:
     payload = inputs.to_record()
     digest = _canonical_sha256(payload)
-    evidence_id = storage.save_advanced_edge_evidence(
+    evidence = {
+        "artifact_sha256": digest,
+        "inputs": payload,
+    }
+    latest = storage.latest_advanced_edge_evidence(
         edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
         pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
-        as_of=None,
-        status="INPUTS_VALIDATED",
-        qualified=False,
-        evidence={
-            "artifact_sha256": digest,
-            "inputs": payload,
-        },
     )
+    if (
+        latest is not None
+        and str(latest.get("status", "")) == "INPUTS_VALIDATED"
+        and not bool(latest.get("qualified"))
+        and _normalized(latest.get("evidence")) == _normalized(evidence)
+    ):
+        evidence_id = int(latest["id"])
+    else:
+        evidence_id = storage.save_advanced_edge_evidence(
+            edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+            pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
+            as_of=None,
+            status="INPUTS_VALIDATED",
+            qualified=False,
+            evidence=evidence,
+        )
     return Phase9ExplicitInputsArtifact(
         evidence_id=evidence_id,
         artifact_sha256=digest,
