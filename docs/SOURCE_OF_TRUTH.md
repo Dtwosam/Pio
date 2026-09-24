@@ -375,6 +375,7 @@ authoritative Rust mint inspection before mint-risk research, uses observed
 chain pools for adaptive/wallet-flow tasks, and leaves hedge, allocation and
 bandit artifacts explicit when they cannot be derived safely.
 The direct evidence runner may execute planner-selected automatic debt operations under the shared Phase 9 maintenance lease, but it must stop at any explicit-assumption requirement. A bounded multi-step run may continue only while each completed step demonstrably reduces debt; it must stop on cadence wait, failure, no-progress, READY or the configured max-step bound. Neither runner may persist Phase 9 promotion, policy authorization, rollout, rollback or LIVE execution state.
+An optional hardened systemd timer may invoke the bounded runner no more frequently than the configured evidence cadence. It is an orchestration convenience only: it inherits the same shared lease and non-actionable boundary, must stop rather than invent explicit assumptions, and should normally be deployed instead of—not alongside—the separate source-capture plus research-refresh timers to avoid redundant maintenance contention.
 
 Phase 9 research promotion is additionally bound to an immutable persisted
 research-bundle record. If newer component evidence appears, the prior bundle is
