@@ -1,5 +1,6 @@
 import sqlite3
 import hashlib
+from types import SimpleNamespace
 from pathlib import Path
 from dataclasses import asdict, replace
 
@@ -33,6 +34,7 @@ from meteora_learner.phase8_validation import (
     Phase8PromotionCriteria,
     evaluate_phase8_promotion,
 )
+import meteora_learner.phase9_validation as validation_module
 from meteora_learner.phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
     Phase9ResearchCriteria,
@@ -81,6 +83,52 @@ from meteora_learner.wallet_flow import (
     research_wallet_flow,
     wallet_flow_source_sha256,
 )
+
+
+def insert_simple_phase9_evidence(
+    storage,
+    *,
+    edge_type,
+    pool_address,
+    created_at,
+    qualified,
+):
+    payload = {
+        "research_qualified": qualified,
+        "research_only": True,
+        "policy_actionable": False,
+    }
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO advanced_edge_evidence(
+                created_at,
+                edge_type,
+                pool_address,
+                as_of,
+                status,
+                qualified,
+                evidence_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                created_at,
+                edge_type,
+                pool_address,
+                created_at,
+                (
+                    "QUALIFIED_RESEARCH"
+                    if qualified
+                    else "NOT_QUALIFIED"
+                ),
+                int(qualified),
+                __import__("json").dumps(
+                    payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
 
 
 def promote_phase8(storage):
@@ -1621,3 +1669,161 @@ def test_phase9_bundle_requires_verified_storage_integrity(tmp_path):
         and "advanced_edge_evidence_no_delete" in reason
         for reason in report.reasons
     )
+
+
+def test_historical_phase9_bundle_ignores_future_qualified_evidence(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        validation_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: (_ for _ in ()).throw(
+            AssertionError("current Phase 8 audit must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "audit_persisted_phase8_promotion_at",
+        lambda storage, *, as_of: SimpleNamespace(
+            valid_at_cutoff=True,
+            reasons=(),
+        ),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "evaluate_phase9_storage_integrity",
+        lambda storage: SimpleNamespace(
+            verified=True,
+            reasons=(),
+        ),
+    )
+    insert_simple_phase9_evidence(
+        storage,
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        created_at="2026-09-24T10:00:00+00:00",
+        qualified=True,
+    )
+    insert_simple_phase9_evidence(
+        storage,
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        created_at="2026-09-24T10:00:00+00:00",
+        qualified=True,
+    )
+    insert_simple_phase9_evidence(
+        storage,
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        created_at="2026-09-24T12:00:00+00:00",
+        qualified=True,
+    )
+    bundle_criteria = Phase9ResearchBundleCriteria(
+        min_mint_risk_pools=1,
+        min_wallet_flow_pools=1,
+        require_wallet_flow_lineage=False,
+        require_mint_snapshot_lineage=False,
+        min_static_hedge_pools=1,
+        require_static_hedge_lineage=False,
+        require_adaptive_multi_pool=False,
+        require_adaptive_snapshot_lineage=False,
+        require_portfolio_allocation=False,
+        require_portfolio_allocation_lineage=False,
+        require_contextual_bandit=False,
+        require_contextual_bandit_lineage=False,
+    )
+
+    earlier = evaluate_phase9_research_bundle(
+        storage,
+        criteria=bundle_criteria,
+        as_of="2026-09-24T11:00:00+00:00",
+    )
+    later = evaluate_phase9_research_bundle(
+        storage,
+        criteria=bundle_criteria,
+        as_of="2026-09-24T13:00:00+00:00",
+    )
+
+    assert earlier.static_hedge.qualified_records == 0
+    assert earlier.research_ready is False
+    assert any(
+        "qualified static-hedge pools 0 are below 1" in reason
+        for reason in earlier.reasons
+    )
+    assert later.static_hedge.qualified_records == 1
+    assert later.research_ready is True
+
+
+def test_historical_phase9_bundle_ignores_future_replacement_evidence(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        validation_module,
+        "audit_persisted_phase8_promotion_at",
+        lambda storage, *, as_of: SimpleNamespace(
+            valid_at_cutoff=True,
+            reasons=(),
+        ),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "evaluate_phase9_storage_integrity",
+        lambda storage: SimpleNamespace(
+            verified=True,
+            reasons=(),
+        ),
+    )
+    for edge_type in (
+        MINT_RISK_EVIDENCE_TYPE,
+        WALLET_FLOW_EVIDENCE_TYPE,
+        STATIC_HEDGE_EVIDENCE_TYPE,
+    ):
+        insert_simple_phase9_evidence(
+            storage,
+            edge_type=edge_type,
+            pool_address="pool-a",
+            created_at="2026-09-24T10:00:00+00:00",
+            qualified=True,
+        )
+    insert_simple_phase9_evidence(
+        storage,
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        created_at="2026-09-24T12:00:00+00:00",
+        qualified=False,
+    )
+    bundle_criteria = Phase9ResearchBundleCriteria(
+        min_mint_risk_pools=1,
+        min_wallet_flow_pools=1,
+        require_wallet_flow_lineage=False,
+        require_mint_snapshot_lineage=False,
+        min_static_hedge_pools=1,
+        require_static_hedge_lineage=False,
+        require_adaptive_multi_pool=False,
+        require_adaptive_snapshot_lineage=False,
+        require_portfolio_allocation=False,
+        require_portfolio_allocation_lineage=False,
+        require_contextual_bandit=False,
+        require_contextual_bandit_lineage=False,
+    )
+
+    earlier = evaluate_phase9_research_bundle(
+        storage,
+        criteria=bundle_criteria,
+        as_of="2026-09-24T11:00:00+00:00",
+    )
+    later = evaluate_phase9_research_bundle(
+        storage,
+        criteria=bundle_criteria,
+        as_of="2026-09-24T13:00:00+00:00",
+    )
+
+    assert earlier.static_hedge.qualified_records == 1
+    assert earlier.research_ready is True
+    assert later.static_hedge.latest_records == 1
+    assert later.static_hedge.qualified_records == 0
+    assert later.research_ready is False
