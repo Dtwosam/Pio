@@ -36,6 +36,7 @@ class Phase9OperatorHandoff:
     followup_commands: tuple[str, ...]
     blockers: tuple[dict[str, Any], ...]
     reasons: tuple[str, ...]
+    inspection_only: bool = False
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -127,7 +128,6 @@ def build_phase9_operator_handoff(
     history_interval_seconds: int = 3600,
     as_of: str | None = None,
 ) -> Phase9OperatorHandoff:
-    evaluation_time = as_of or utc_now_iso()
     plan = build_phase9_evidence_plan(
         storage,
         criteria=criteria,
@@ -135,8 +135,9 @@ def build_phase9_operator_handoff(
         wallet_criteria=wallet_criteria,
         mint_max_snapshot_age_seconds=mint_max_snapshot_age_seconds,
         history_interval_seconds=history_interval_seconds,
-        as_of=evaluation_time,
+        as_of=as_of,
     )
+    evaluation_time = plan.as_of
     blockers = _manual_blockers(plan.items)
 
     if plan.research_bundle_ready:
@@ -160,6 +161,7 @@ def build_phase9_operator_handoff(
             followup_commands=(),
             blockers=blockers,
             reasons=plan.reasons,
+            inspection_only=plan.inspection_only,
         )
 
     action = plan.next_action
@@ -184,6 +186,31 @@ def build_phase9_operator_handoff(
             followup_commands=(),
             blockers=blockers,
             reasons=plan.reasons,
+            inspection_only=plan.inspection_only,
+        )
+
+    if plan.inspection_only:
+        return Phase9OperatorHandoff(
+            research_only=True,
+            read_only=True,
+            policy_actionable=False,
+            execution_wired=False,
+            as_of=evaluation_time,
+            status="INSPECTION_ONLY",
+            research_bundle_ready=False,
+            debt_type=action.debt_type,
+            scope=action.scope,
+            reason=action.reason,
+            automatic_action_available=False,
+            operator_action_required=False,
+            manual_input_required=False,
+            suggested_command=None,
+            explicit_input_template=None,
+            required_manual_fields=(),
+            followup_commands=(),
+            blockers=blockers,
+            reasons=plan.reasons,
+            inspection_only=True,
         )
 
     explicit_template = None
@@ -273,4 +300,5 @@ def build_phase9_operator_handoff(
         followup_commands=followups,
         blockers=blockers,
         reasons=plan.reasons,
+        inspection_only=plan.inspection_only,
     )
