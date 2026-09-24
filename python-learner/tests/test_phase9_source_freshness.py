@@ -906,3 +906,166 @@ def test_phase9_bandit_freshness_detects_new_explicit_assumptions(
     assert item.current is False
     assert str(artifact_a.evidence_id) in item.reason
     assert str(artifact_b.evidence_id) in item.reason
+
+
+def test_explicit_backed_freshness_fails_closed_on_invalid_latest_artifact(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_pool(
+            storage,
+            pool,
+            "2026-09-23T10:00:00+00:00",
+        )
+
+    artifact = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(explicit_payload()),
+    )
+    spec = artifact.inputs.static_hedges[0]
+    first_pool = int(
+        storage.connect()
+        .execute(
+            """
+            SELECT id
+            FROM chain_pool_snapshots
+            WHERE pool_address = 'pool-a'
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        )
+        .fetchone()[0]
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "amount_x": spec.amount_x,
+            "amount_y": spec.amount_y,
+            "instrument": {
+                "instrument_id": spec.instrument.instrument_id,
+                "venue": spec.instrument.venue,
+                "available_liquidity_y_atomic": (
+                    spec.instrument.available_liquidity_y_atomic
+                ),
+                "max_liquidity_share_bps": (
+                    spec.instrument.max_liquidity_share_bps
+                ),
+                "max_leverage": spec.instrument.max_leverage,
+                "funding_bps_per_holding_window": (
+                    spec.instrument.funding_bps_per_holding_window
+                ),
+            },
+            "criteria": {
+                "observation_limit": spec.criteria.observation_limit,
+                "holding_observations": spec.criteria.holding_observations,
+                "hedge_fraction": spec.criteria.hedge_fraction,
+                "hedge_round_trip_cost_bps": (
+                    spec.criteria.hedge_round_trip_cost_bps
+                ),
+                "min_windows": spec.criteria.min_windows,
+                "min_mean_abs_return_reduction_bps": (
+                    spec.criteria.min_mean_abs_return_reduction_bps
+                ),
+                "min_worst_loss_improvement_bps": (
+                    spec.criteria.min_worst_loss_improvement_bps
+                ),
+                "max_mean_return_drag_bps": (
+                    spec.criteria.max_mean_return_drag_bps
+                ),
+            },
+            "as_of": None,
+            "source_observations": [
+                {
+                    "pool_snapshot_id": first_pool,
+                    "observed_at": "2026-09-23T10:00:00+00:00",
+                }
+            ],
+        },
+    )
+
+    candidate_id = storage.save_advanced_edge_evidence(
+        edge_type=PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO_CANDIDATES__",
+        as_of=None,
+        status="BUILT",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "source_inputs": [
+                {"pool_address": pool}
+                for pool in ("pool-a", "pool-b", "pool-c")
+            ],
+            "assumptions": {
+                "explicit_input_evidence_id": artifact.evidence_id,
+                "explicit_input_artifact_sha256": artifact.artifact_sha256,
+            },
+        },
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO__",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "candidate_lineage": {
+                "candidate_evidence_id": candidate_id,
+                "candidate_evidence_sha256": "a" * 64,
+            },
+        },
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+        as_of="2026-09-23T10:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "dataset_lineage": {
+                "source_type": PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+                "explicit_input_evidence_id": artifact.evidence_id,
+                "explicit_input_artifact_sha256": artifact.artifact_sha256,
+                "cutoff": "2026-09-23T10:00:00+00:00",
+            },
+        },
+    )
+
+    storage.save_advanced_edge_evidence(
+        edge_type="PHASE9_EXPLICIT_RESEARCH_INPUTS_V1",
+        pool_address="__PHASE9_EXPLICIT_RESEARCH_INPUTS__",
+        as_of=None,
+        status="INPUTS_VALIDATED",
+        qualified=False,
+        evidence={
+            "artifact_sha256": "0" * 64,
+            "inputs": artifact.inputs.to_record(),
+        },
+    )
+
+    report = evaluate_phase9_source_freshness(storage)
+    by_family = {item.family: item for item in report.families}
+
+    for family in (
+        "static_hedge",
+        "portfolio_allocation",
+        "contextual_bandit",
+    ):
+        assert by_family[family].current is False
+        assert "latest explicit input artifact is invalid" in (
+            by_family[family].reason
+        )
