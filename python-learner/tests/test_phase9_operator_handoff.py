@@ -117,7 +117,7 @@ def test_operator_handoff_builds_non_inventing_explicit_input_handoff(
 
     assert report.status == "MANUAL_REQUIRED"
     assert report.manual_input_required is True
-    assert report.automatic_action_available is True
+    assert report.automatic_action_available is False
     assert report.suggested_command == (
         "pio phase9-research-input-template "
         "--pools pool-a,pool-b,pool-c "
