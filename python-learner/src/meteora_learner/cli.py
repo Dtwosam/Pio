@@ -2505,6 +2505,10 @@ def main() -> None:
         type=int,
         default=1,
     )
+    phase9_bundle.add_argument(
+        "--as-of",
+        help="Optional timezone-aware historical cutoff; historical bundle evaluation is read-only and cannot be persisted",
+    )
     phase9_bundle.add_argument("--persist", action="store_true")
     phase9_bundle.add_argument(
         "--require-ready",
@@ -6231,6 +6235,11 @@ def main() -> None:
     if args.command == "phase9-research-bundle":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
+        if args.as_of is not None and args.persist:
+            raise ValueError(
+                "historical Phase 9 research-bundle evaluation is read-only; "
+                "omit --persist when --as-of is supplied"
+            )
         result = evaluate_phase9_research_bundle(
             storage,
             criteria=Phase9ResearchBundleCriteria(
@@ -6238,6 +6247,7 @@ def main() -> None:
                 min_wallet_flow_pools=args.min_wallet_flow_pools,
                 min_static_hedge_pools=args.min_static_hedge_pools,
             ),
+            as_of=args.as_of,
         )
         output = result.to_record()
         output["persisted_evidence_id"] = None
