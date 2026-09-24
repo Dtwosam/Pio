@@ -118,25 +118,32 @@ def _latest_rows(
         else:
             rows = conn.execute(
                 """
-                SELECT e.id, e.created_at, e.pool_address,
-                       e.as_of, e.qualified, e.evidence_json
-                FROM advanced_edge_evidence e
-                JOIN (
-                    SELECT pool_address, MAX(id) AS max_id
-                    FROM advanced_edge_evidence
-                    WHERE edge_type = ?
-                      AND julianday(created_at) <= julianday(?)
+                SELECT
+                    id,
+                    created_at,
+                    pool_address,
+                    as_of,
+                    qualified,
+                    evidence_json
+                FROM (
+                    SELECT
+                        e.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY e.pool_address
+                            ORDER BY julianday(e.created_at) DESC, e.id DESC
+                        ) AS row_rank
+                    FROM advanced_edge_evidence e
+                    WHERE e.edge_type = ?
+                      AND julianday(e.created_at) <= julianday(?)
                       AND (
-                          as_of IS NULL
-                          OR julianday(as_of) <= julianday(?)
+                          e.as_of IS NULL
+                          OR julianday(e.as_of) <= julianday(?)
                       )
-                    GROUP BY pool_address
-                ) latest
-                  ON latest.max_id = e.id
-                WHERE e.edge_type = ?
-                ORDER BY e.pool_address ASC
+                )
+                WHERE row_rank = 1
+                ORDER BY pool_address ASC
                 """,
-                (edge_type, as_of, as_of, edge_type),
+                (edge_type, as_of, as_of),
             ).fetchall()
 
     output: list[dict[str, Any]] = []
