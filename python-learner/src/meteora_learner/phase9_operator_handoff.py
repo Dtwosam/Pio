@@ -221,6 +221,14 @@ def build_phase9_operator_handoff(
     elif not action.actionable:
         status = "MANUAL_REQUIRED"
 
+    automatic_action_available = bool(
+        action.actionable
+        and action.debt_type not in {
+            "PHASE8_DEPENDENCY",
+            "EXPLICIT_RESEARCH_INPUTS",
+        }
+    )
+
     return Phase9OperatorHandoff(
         research_only=True,
         read_only=True,
@@ -232,7 +240,7 @@ def build_phase9_operator_handoff(
         debt_type=action.debt_type,
         scope=action.scope,
         reason=action.reason,
-        automatic_action_available=bool(action.actionable),
+        automatic_action_available=automatic_action_available,
         manual_input_required=manual_required,
         suggested_command=suggested_command,
         explicit_input_template=explicit_template,
