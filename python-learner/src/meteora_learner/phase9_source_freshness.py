@@ -115,6 +115,17 @@ def _latest_rows(
     return output
 
 
+def _source_after_cutoff(
+    *,
+    source_at: str,
+    as_of: str | None,
+) -> bool:
+    return (
+        as_of is not None
+        and _time(source_at) > _time(as_of)
+    )
+
+
 def _source_advanced(
     *,
     current_id: int,
@@ -137,18 +148,32 @@ def _latest_pool_source(
     storage: Storage,
     *,
     pool_address: str,
+    as_of: str | None = None,
 ) -> tuple[int, str] | None:
     with storage.connect() as conn:
-        row = conn.execute(
-            """
-            SELECT id, observed_at
-            FROM chain_pool_snapshots
-            WHERE pool_address = ?
-            ORDER BY julianday(observed_at) DESC, id DESC
-            LIMIT 1
-            """,
-            (pool_address,),
-        ).fetchone()
+        if as_of is None:
+            row = conn.execute(
+                """
+                SELECT id, observed_at
+                FROM chain_pool_snapshots
+                WHERE pool_address = ?
+                ORDER BY julianday(observed_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (pool_address,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT id, observed_at
+                FROM chain_pool_snapshots
+                WHERE pool_address = ?
+                  AND julianday(observed_at) <= julianday(?)
+                ORDER BY julianday(observed_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (pool_address, as_of),
+            ).fetchone()
     return (
         (int(row[0]), str(row[1]))
         if row is not None
@@ -160,10 +185,12 @@ def _latest_pool_observed_at(
     storage: Storage,
     *,
     pool_address: str,
+    as_of: str | None = None,
 ) -> str | None:
     source = _latest_pool_source(
         storage,
         pool_address=pool_address,
+        as_of=as_of,
     )
     return source[1] if source is not None else None
 
@@ -200,18 +227,32 @@ def _latest_mint_source(
     storage: Storage,
     *,
     mint_address: str,
+    as_of: str | None = None,
 ) -> tuple[int, str] | None:
     with storage.connect() as conn:
-        row = conn.execute(
-            """
-            SELECT id, observed_at
-            FROM token_mint_snapshots
-            WHERE mint_address = ?
-            ORDER BY julianday(observed_at) DESC, id DESC
-            LIMIT 1
-            """,
-            (mint_address,),
-        ).fetchone()
+        if as_of is None:
+            row = conn.execute(
+                """
+                SELECT id, observed_at
+                FROM token_mint_snapshots
+                WHERE mint_address = ?
+                ORDER BY julianday(observed_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (mint_address,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT id, observed_at
+                FROM token_mint_snapshots
+                WHERE mint_address = ?
+                  AND julianday(observed_at) <= julianday(?)
+                ORDER BY julianday(observed_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (mint_address, as_of),
+            ).fetchone()
     return (
         (int(row[0]), str(row[1]))
         if row is not None
@@ -245,18 +286,32 @@ def _latest_wallet_source(
     storage: Storage,
     *,
     pool_address: str,
+    as_of: str | None = None,
 ) -> tuple[int, str] | None:
     with storage.connect() as conn:
-        row = conn.execute(
-            """
-            SELECT id, created_at
-            FROM position_event_history
-            WHERE pool_address = ?
-            ORDER BY julianday(created_at) DESC, id DESC
-            LIMIT 1
-            """,
-            (pool_address,),
-        ).fetchone()
+        if as_of is None:
+            row = conn.execute(
+                """
+                SELECT id, created_at
+                FROM position_event_history
+                WHERE pool_address = ?
+                ORDER BY julianday(created_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (pool_address,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT id, created_at
+                FROM position_event_history
+                WHERE pool_address = ?
+                  AND julianday(created_at) <= julianday(?)
+                ORDER BY julianday(created_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (pool_address, as_of),
+            ).fetchone()
     return (
         (int(row[0]), str(row[1]))
         if row is not None
@@ -376,12 +431,25 @@ def _adaptive_current(
         current_source = _latest_pool_source(
             storage,
             pool_address=pool,
+            as_of=as_of,
         )
         if used_source is None or current_source is None:
             return Phase9SourceFreshnessItem(
                 family="adaptive_regime",
                 current=False,
                 reason=f"pool {pool} source snapshot lineage is unavailable",
+            )
+        if _source_after_cutoff(
+            source_at=used_source[1],
+            as_of=as_of,
+        ):
+            return Phase9SourceFreshnessItem(
+                family="adaptive_regime",
+                current=False,
+                reason=(
+                    f"pool {pool} adaptive evidence uses source "
+                    f"{used_source[1]} after cutoff {as_of}"
+                ),
             )
         if _source_advanced(
             current_id=current_source[0],
@@ -409,6 +477,7 @@ def _mint_current(
     storage: Storage,
     *,
     target_pools: tuple[str, ...] = (),
+    as_of: str | None = None,
 ) -> Phase9SourceFreshnessItem:
     rows = [
         row
@@ -465,12 +534,25 @@ def _mint_current(
         latest_pool_source = _latest_pool_source(
             storage,
             pool_address=pool,
+            as_of=as_of,
         )
         if used_pool_source is None or latest_pool_source is None:
             return Phase9SourceFreshnessItem(
                 family="mint_risk",
                 current=False,
                 reason=f"pool {pool} source snapshot lineage is unavailable",
+            )
+        if _source_after_cutoff(
+            source_at=used_pool_source[1],
+            as_of=as_of,
+        ):
+            return Phase9SourceFreshnessItem(
+                family="mint_risk",
+                current=False,
+                reason=(
+                    f"pool {pool} mint-risk evidence uses pool source "
+                    f"{used_pool_source[1]} after cutoff {as_of}"
+                ),
             )
         if _source_advanced(
             current_id=latest_pool_source[0],
@@ -518,12 +600,25 @@ def _mint_current(
             latest_mint_source = _latest_mint_source(
                 storage,
                 mint_address=mint,
+                as_of=as_of,
             )
             if used_mint_source is None or latest_mint_source is None:
                 return Phase9SourceFreshnessItem(
                     family="mint_risk",
                     current=False,
                     reason=f"mint {mint} snapshot lineage is unavailable",
+                )
+            if _source_after_cutoff(
+                source_at=used_mint_source[1],
+                as_of=as_of,
+            ):
+                return Phase9SourceFreshnessItem(
+                    family="mint_risk",
+                    current=False,
+                    reason=(
+                        f"mint {mint} evidence uses source "
+                        f"{used_mint_source[1]} after cutoff {as_of}"
+                    ),
                 )
             if _source_advanced(
                 current_id=latest_mint_source[0],
@@ -551,6 +646,7 @@ def _wallet_current(
     storage: Storage,
     *,
     target_pools: tuple[str, ...] = (),
+    as_of: str | None = None,
 ) -> Phase9SourceFreshnessItem:
     rows = [
         row
@@ -612,12 +708,25 @@ def _wallet_current(
         latest_source = _latest_wallet_source(
             storage,
             pool_address=pool,
+            as_of=as_of,
         )
         if used_source is None or latest_source is None:
             return Phase9SourceFreshnessItem(
                 family="wallet_flow",
                 current=False,
                 reason=f"pool {pool} wallet-flow source lineage is unavailable",
+            )
+        if _source_after_cutoff(
+            source_at=used_source[1],
+            as_of=as_of,
+        ):
+            return Phase9SourceFreshnessItem(
+                family="wallet_flow",
+                current=False,
+                reason=(
+                    f"pool {pool} wallet-flow evidence uses source "
+                    f"{used_source[1]} after cutoff {as_of}"
+                ),
             )
         if _source_advanced(
             current_id=latest_source[0],
@@ -1208,8 +1317,16 @@ def evaluate_phase9_source_freshness(
 
     families = (
         _adaptive_current(storage, as_of=as_of),
-        _mint_current(storage, target_pools=mint_targets),
-        _wallet_current(storage, target_pools=wallet_targets),
+        _mint_current(
+            storage,
+            target_pools=mint_targets,
+            as_of=as_of,
+        ),
+        _wallet_current(
+            storage,
+            target_pools=wallet_targets,
+            as_of=as_of,
+        ),
         _portfolio_current(storage),
         _static_hedge_current(storage),
         _bandit_current(storage),
