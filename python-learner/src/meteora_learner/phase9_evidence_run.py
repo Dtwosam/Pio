@@ -103,6 +103,7 @@ def run_phase9_evidence_until_blocked(
         if step.status in {
             "MANUAL_REQUIRED",
             "WAITING_INTERVAL",
+            "WAITING_SOURCE_ACTIVITY",
             "FAILED",
         }:
             terminal_status = step.status
