@@ -463,6 +463,34 @@ def _record_phase9_run_finished(
     )
 
 
+def _acquire_phase9_maintenance_lease(
+    storage: Storage,
+    *,
+    activity: str,
+    lease_seconds: int,
+):
+    lease = acquire_phase9_operation_lease(
+        storage,
+        operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
+        lease_seconds=lease_seconds,
+    )
+    try:
+        _record_phase9_lease_event(
+            storage,
+            activity=activity,
+            lease=lease,
+        )
+    except Exception:
+        if lease.acquired:
+            release_phase9_operation_lease(
+                storage,
+                operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
+                owner_id=lease.owner_id,
+            )
+        raise
+    return lease
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="pio")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -6211,15 +6239,10 @@ def main() -> None:
     if args.command == "phase9-evidence-step-run":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
-        lease = acquire_phase9_operation_lease(
-            storage,
-            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
-            lease_seconds=args.lease_seconds,
-        )
-        _record_phase9_lease_event(
+        lease = _acquire_phase9_maintenance_lease(
             storage,
             activity="evidence-step",
-            lease=lease,
+            lease_seconds=args.lease_seconds,
         )
         if not lease.acquired:
             print(json.dumps({
@@ -6295,15 +6318,10 @@ def main() -> None:
     if args.command == "phase9-evidence-run":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
-        lease = acquire_phase9_operation_lease(
-            storage,
-            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
-            lease_seconds=args.lease_seconds,
-        )
-        _record_phase9_lease_event(
+        lease = _acquire_phase9_maintenance_lease(
             storage,
             activity="evidence-run",
-            lease=lease,
+            lease_seconds=args.lease_seconds,
         )
         if not lease.acquired:
             print(json.dumps({
@@ -6403,15 +6421,10 @@ def main() -> None:
     if args.command == "phase9-source-capture-run":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
-        lease = acquire_phase9_operation_lease(
-            storage,
-            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
-            lease_seconds=args.lease_seconds,
-        )
-        _record_phase9_lease_event(
+        lease = _acquire_phase9_maintenance_lease(
             storage,
             activity="source-capture",
-            lease=lease,
+            lease_seconds=args.lease_seconds,
         )
         if not lease.acquired:
             print(json.dumps({
@@ -6515,15 +6528,10 @@ def main() -> None:
     if args.command == "phase9-research-refresh-run":
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
-        lease = acquire_phase9_operation_lease(
-            storage,
-            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
-            lease_seconds=args.lease_seconds,
-        )
-        _record_phase9_lease_event(
+        lease = _acquire_phase9_maintenance_lease(
             storage,
             activity="research-refresh",
-            lease=lease,
+            lease_seconds=args.lease_seconds,
         )
         if not lease.acquired:
             print(json.dumps({
