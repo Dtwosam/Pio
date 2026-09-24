@@ -770,6 +770,18 @@ ON phase9_maintenance_events(operation_key, event_time, id);
 CREATE INDEX IF NOT EXISTS idx_phase9_maintenance_events_activity_time
 ON phase9_maintenance_events(activity, event_time, id);
 
+CREATE TRIGGER IF NOT EXISTS phase9_maintenance_events_no_update
+BEFORE UPDATE ON phase9_maintenance_events
+BEGIN
+    SELECT RAISE(ABORT, 'phase9_maintenance_events is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase9_maintenance_events_no_delete
+BEFORE DELETE ON phase9_maintenance_events
+BEGIN
+    SELECT RAISE(ABORT, 'phase9_maintenance_events is immutable');
+END;
+
 CREATE TABLE IF NOT EXISTS phase9_pool_activity_scan_state (
     pool_address TEXT PRIMARY KEY,
     backfill_before_signature TEXT,
