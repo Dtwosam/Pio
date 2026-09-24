@@ -29,6 +29,7 @@ class Phase9EvidenceRunReport:
     research_bundle_ready: bool
     steps: tuple[Phase9EvidenceStepReport, ...]
     reasons: tuple[str, ...]
+    next_retry_at: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -148,4 +149,12 @@ def run_phase9_evidence_until_blocked(
         ),
         steps=tuple(steps),
         reasons=tuple(dict.fromkeys(reasons)),
+        next_retry_at=(
+            final_plan.history_next_eligible_at
+            if (
+                final_plan is not None
+                and terminal_status == "WAITING_INTERVAL"
+            )
+            else None
+        ),
     )
