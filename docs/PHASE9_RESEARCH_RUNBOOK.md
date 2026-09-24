@@ -1289,6 +1289,8 @@ evidence debt:
 ```bash
 sudo systemctl enable --now pio-phase9-evidence-run.timer
 journalctl -u pio-phase9-evidence-run.service
+pio phase9-maintenance-status
+pio phase9-maintenance-history --limit 20
 ```
 
 The service invokes:
@@ -1317,3 +1319,10 @@ existing planner-selected read-only/public-source acquisition and deterministic
 research-refresh operations. It cannot create explicit economic assumptions,
 persist Phase 9 promotion, create policy authorization, run rollout/rollback
 state changes, sign transactions or submit LIVE execution.
+
+The maintenance history is a separate operational audit trail. Each leased
+source-capture, research-refresh, one-step evidence or bounded evidence run
+records lease acquisition/BUSY/recovery and a terminal outcome when execution
+starts. Rows are immutable at the SQLite boundary. They are useful for
+diagnosing unattended collection and restart behavior, but they are never
+counted as Phase 9 research evidence.
