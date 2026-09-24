@@ -1913,3 +1913,83 @@ def test_phase9_research_bundle_cli_rejects_historical_persistence(
         cli.main()
 
     assert called == []
+
+
+def test_historical_phase9_bundle_is_programmatically_read_only(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        validation_module,
+        "audit_persisted_phase8_promotion_at",
+        lambda storage, *, as_of: SimpleNamespace(
+            valid_at_cutoff=False,
+            reasons=("not promoted yet",),
+        ),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "evaluate_phase9_storage_integrity",
+        lambda storage: SimpleNamespace(
+            verified=True,
+            reasons=(),
+        ),
+    )
+
+    cutoff = "2026-09-24T11:00:00+00:00"
+    report = evaluate_phase9_research_bundle(
+        storage,
+        as_of=cutoff,
+    )
+
+    assert report.evaluation_as_of == cutoff
+    assert report.to_record()["evaluation_as_of"] == cutoff
+
+    with pytest.raises(
+        ValueError,
+        match="historical Phase 9 research bundles are read-only",
+    ):
+        persist_phase9_research_bundle(
+            storage,
+            report=report,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="historical Phase 9 research bundle cannot be used",
+    ):
+        evaluate_phase9_promotion(
+            storage,
+            criteria=report.criteria,
+            research_bundle=report,
+        )
+
+
+def test_current_phase9_bundle_serialization_remains_backward_compatible(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        validation_module,
+        "audit_persisted_phase8_promotion",
+        lambda storage: SimpleNamespace(
+            current=False,
+            reasons=("not current",),
+        ),
+    )
+    monkeypatch.setattr(
+        validation_module,
+        "evaluate_phase9_storage_integrity",
+        lambda storage: SimpleNamespace(
+            verified=True,
+            reasons=(),
+        ),
+    )
+
+    report = evaluate_phase9_research_bundle(storage)
+    record = report.to_record()
+
+    assert report.evaluation_as_of is None
+    assert "evaluation_as_of" not in record
