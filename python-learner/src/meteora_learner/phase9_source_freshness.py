@@ -8,7 +8,10 @@ from typing import Any
 from .contextual_bandit import CONTEXTUAL_BANDIT_EVIDENCE_TYPE
 from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .phase9_bandit_dataset import PHASE9_BANDIT_DATASET_EVIDENCE_TYPE
-from .phase9_explicit_inputs import load_phase9_explicit_inputs
+from .phase9_explicit_inputs import (
+    audit_phase9_explicit_inputs,
+    load_phase9_explicit_inputs,
+)
 from .phase9_research import PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE
 from .phase9_pool_cohort import (
     evaluate_phase9_pool_cohort,
@@ -50,6 +53,19 @@ def _time(value: str) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError("Phase 9 source freshness timestamps require timezone")
     return parsed.astimezone(timezone.utc)
+
+
+def _latest_valid_explicit_input(storage: Storage):
+    audit = audit_phase9_explicit_inputs(storage)
+    if not audit.valid or audit.evidence_id is None:
+        return None
+    try:
+        return load_phase9_explicit_inputs(
+            storage,
+            evidence_id=audit.evidence_id,
+        )
+    except ValueError:
+        return None
 
 
 def _latest_rows(
@@ -631,8 +647,71 @@ def _static_hedge_current(storage: Storage) -> Phase9SourceFreshnessItem:
             current=False,
             reason="qualified static-hedge evidence is missing",
         )
+    explicit = _latest_valid_explicit_input(storage)
     for row in rows:
         evidence = row["evidence"]
+        if explicit is not None:
+            pool = str(row["pool_address"])
+            matching = [
+                spec
+                for spec in explicit.inputs.static_hedges
+                if spec.pool_address == pool
+            ]
+            if not matching:
+                return Phase9SourceFreshnessItem(
+                    family="static_hedge",
+                    current=False,
+                    reason=(
+                        f"latest explicit input artifact {explicit.evidence_id} "
+                        f"no longer contains hedge assumptions for pool {pool}"
+                    ),
+                )
+            spec = matching[0]
+            expected = {
+                "amount_x": spec.amount_x,
+                "amount_y": spec.amount_y,
+                "instrument": asdict(spec.instrument),
+                "criteria": asdict(spec.criteria),
+                "as_of": spec.as_of,
+            }
+            observed = {
+                "amount_x": (
+                    evidence.get("amount_x")
+                    if isinstance(evidence, dict)
+                    else None
+                ),
+                "amount_y": (
+                    evidence.get("amount_y")
+                    if isinstance(evidence, dict)
+                    else None
+                ),
+                "instrument": (
+                    evidence.get("instrument")
+                    if isinstance(evidence, dict)
+                    else None
+                ),
+                "criteria": (
+                    evidence.get("criteria")
+                    if isinstance(evidence, dict)
+                    else None
+                ),
+                "as_of": (
+                    evidence.get("as_of")
+                    if isinstance(evidence, dict)
+                    else None
+                ),
+            }
+            if json.loads(json.dumps(observed, sort_keys=True)) != json.loads(
+                json.dumps(expected, sort_keys=True)
+            ):
+                return Phase9SourceFreshnessItem(
+                    family="static_hedge",
+                    current=False,
+                    reason=(
+                        "static-hedge assumptions no longer match latest "
+                        f"explicit input artifact {explicit.evidence_id}"
+                    ),
+                )
         observations = (
             evidence.get("source_observations")
             if isinstance(evidence, dict)
@@ -764,6 +843,43 @@ def _portfolio_current(storage: Storage) -> Phase9SourceFreshnessItem:
         )
 
     assumptions = candidate.get("assumptions")
+    explicit = _latest_valid_explicit_input(storage)
+    if explicit is not None:
+        if not isinstance(assumptions, dict):
+            return Phase9SourceFreshnessItem(
+                family="portfolio_allocation",
+                current=False,
+                reason=(
+                    "portfolio candidate assumptions are missing explicit "
+                    "input lineage"
+                ),
+            )
+        try:
+            used_input_id = int(assumptions["explicit_input_evidence_id"])
+            used_input_sha = str(
+                assumptions["explicit_input_artifact_sha256"]
+            )
+        except (KeyError, TypeError, ValueError):
+            return Phase9SourceFreshnessItem(
+                family="portfolio_allocation",
+                current=False,
+                reason=(
+                    "portfolio candidate explicit input lineage is incomplete"
+                ),
+            )
+        if (
+            used_input_id != explicit.evidence_id
+            or used_input_sha != explicit.artifact_sha256
+        ):
+            return Phase9SourceFreshnessItem(
+                family="portfolio_allocation",
+                current=False,
+                reason=(
+                    "portfolio assumptions were derived from explicit input "
+                    f"artifact {used_input_id}, but latest valid artifact is "
+                    f"{explicit.evidence_id}"
+                ),
+            )
     watermarks = (
         assumptions.get("source_chain_watermarks")
         if isinstance(assumptions, dict)
@@ -954,6 +1070,24 @@ def _bandit_current(storage: Storage) -> Phase9SourceFreshnessItem:
             )
         except ValueError:
             artifact = None
+        latest_explicit = _latest_valid_explicit_input(storage)
+        if latest_explicit is not None:
+            lineage_sha = str(
+                lineage.get("explicit_input_artifact_sha256", "")
+            )
+            if (
+                explicit_id != latest_explicit.evidence_id
+                or lineage_sha != latest_explicit.artifact_sha256
+            ):
+                return Phase9SourceFreshnessItem(
+                    family="contextual_bandit",
+                    current=False,
+                    reason=(
+                        "Phase 9 bandit dataset uses explicit input artifact "
+                        f"{explicit_id}, but latest valid artifact is "
+                        f"{latest_explicit.evidence_id}"
+                    ),
+                )
         if artifact is None:
             return Phase9SourceFreshnessItem(
                 family="contextual_bandit",
