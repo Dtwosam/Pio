@@ -19,6 +19,9 @@ from .phase9_pool_cohort import (
     Phase9PoolCohortCriteria,
     evaluate_phase9_pool_cohort,
 )
+from .phase9_pool_activity_scan_state import (
+    phase9_pool_activity_scan_state,
+)
 from .phase9_source_freshness import evaluate_phase9_source_freshness
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
@@ -44,6 +47,9 @@ class Phase9PoolEvidenceStatus:
     wallet_events: int | None
     wallet_unique_users: int | None
     wallet_source_ready: bool | None
+    wallet_backfill_exhausted: bool | None = None
+    wallet_backfill_pages_scanned: int | None = None
+    wallet_scan_updated_at: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -196,6 +202,9 @@ def evaluate_phase9_evidence_status(
         wallet_events: int | None = None
         wallet_unique_users: int | None = None
         wallet_source_ready: bool | None = None
+        wallet_backfill_exhausted: bool | None = None
+        wallet_backfill_pages_scanned: int | None = None
+        wallet_scan_updated_at: str | None = None
         if wallet_target:
             wallet = wallet_flow_source_state(
                 storage,
@@ -208,6 +217,14 @@ def evaluate_phase9_evidence_status(
             wallet_source_ready = wallet.ready
             if wallet_source_ready:
                 wallet_ready += 1
+            if as_of is None:
+                scan = phase9_pool_activity_scan_state(
+                    storage,
+                    pool_address=pool,
+                )
+                wallet_backfill_exhausted = scan.backfill_exhausted
+                wallet_backfill_pages_scanned = scan.pages_scanned
+                wallet_scan_updated_at = scan.updated_at
 
         pool_items.append(
             Phase9PoolEvidenceStatus(
@@ -230,6 +247,9 @@ def evaluate_phase9_evidence_status(
                 wallet_events=wallet_events,
                 wallet_unique_users=wallet_unique_users,
                 wallet_source_ready=wallet_source_ready,
+                wallet_backfill_exhausted=wallet_backfill_exhausted,
+                wallet_backfill_pages_scanned=wallet_backfill_pages_scanned,
+                wallet_scan_updated_at=wallet_scan_updated_at,
             )
         )
 
