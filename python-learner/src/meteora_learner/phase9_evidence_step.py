@@ -162,6 +162,22 @@ def run_phase9_evidence_step(
             plan_after=before,
         )
 
+    if action.debt_type == "CHAIN_HISTORY_CADENCE_WAIT":
+        return Phase9EvidenceStepReport(
+            research_only=True,
+            read_only_external=True,
+            policy_actionable=False,
+            execution_wired=False,
+            status="WAITING_INTERVAL",
+            debt_type=action.debt_type,
+            scope=action.scope,
+            progressed=False,
+            operation=None,
+            error=None,
+            plan_before=before,
+            plan_after=before,
+        )
+
     operation: dict[str, Any] | None = None
     error: str | None = None
     status = "COMPLETE"
