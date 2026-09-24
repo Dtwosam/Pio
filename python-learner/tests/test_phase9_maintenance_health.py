@@ -20,7 +20,13 @@ KEY = "phase9-research-maintenance"
 NOW = "2026-09-24T12:00:00+00:00"
 
 
-def finish(storage, status, *, event_time="2026-09-24T11:30:00+00:00"):
+def finish(
+    storage,
+    status,
+    *,
+    event_time="2026-09-24T11:30:00+00:00",
+    details=None,
+):
     record_phase9_maintenance_event(
         storage,
         operation_key=KEY,
@@ -29,6 +35,7 @@ def finish(storage, status, *, event_time="2026-09-24T11:30:00+00:00"):
         event_type="RUN_FINISHED",
         status=status,
         event_time=event_time,
+        details=details,
     )
 
 
@@ -239,3 +246,86 @@ def test_phase9_maintenance_health_ignores_future_events_at_cutoff(tmp_path):
     assert report.status == "HEALTHY"
     assert report.latest_terminal_status == "COMPLETE"
     assert report.recent_failure_events == 0
+
+
+def test_phase9_maintenance_health_waits_until_persisted_retry_window(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    finish(
+        storage,
+        "WAITING_INTERVAL",
+        event_time="2026-09-24T08:00:00+00:00",
+        details={
+            "next_retry_at": "2026-09-24T20:00:00+00:00",
+        },
+    )
+
+    report = evaluate_phase9_maintenance_health(
+        storage,
+        as_of=NOW,
+        max_event_age_seconds=10_800,
+    )
+
+    assert report.healthy is True
+    assert report.attention_required is False
+    assert report.status == "WAITING_INTERVAL"
+    assert report.latest_next_retry_at == (
+        "2026-09-24T20:00:00+00:00"
+    )
+    assert report.seconds_until_next_retry == 28_800
+    assert report.seconds_since_latest_event == 14_400
+
+
+def test_phase9_maintenance_health_marks_wait_stale_after_retry_grace(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    finish(
+        storage,
+        "WAITING_INTERVAL",
+        event_time="2026-09-24T08:00:00+00:00",
+        details={
+            "next_retry_at": "2026-09-24T09:00:00+00:00",
+        },
+    )
+
+    report = evaluate_phase9_maintenance_health(
+        storage,
+        as_of="2026-09-24T13:00:00+00:00",
+        max_event_age_seconds=10_800,
+    )
+
+    assert report.healthy is False
+    assert report.attention_required is True
+    assert report.status == "STALE"
+    assert report.latest_next_retry_at == (
+        "2026-09-24T09:00:00+00:00"
+    )
+    assert report.seconds_until_next_retry == -14_400
+    assert any(
+        "next_retry_at plus 10800 seconds" in reason
+        for reason in report.reasons
+    )
+
+
+def test_phase9_maintenance_health_old_wait_without_retry_uses_event_age(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    finish(
+        storage,
+        "WAITING_INTERVAL",
+        event_time="2026-09-24T08:00:00+00:00",
+    )
+
+    report = evaluate_phase9_maintenance_health(
+        storage,
+        as_of=NOW,
+        max_event_age_seconds=10_800,
+    )
+
+    assert report.healthy is False
+    assert report.status == "STALE"
+    assert report.latest_next_retry_at is None
+    assert report.seconds_until_next_retry is None
