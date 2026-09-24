@@ -292,6 +292,7 @@ Built:
 - direct one-step and bounded Phase 8 offline evidence runners that dispatch only dataset build, deterministic offline challenger training and offline validation, stopping on real-evidence waits or any operator/PAPER/promotion boundary without shell execution
 - non-persisting Phase 8 retraining-input preflight that validates the current champion lineage and computes the exact normalized artifact checksum before append-only input evidence is written
 - deterministic Phase 8 operator handoff that separates safe offline automation, passive real-evidence waits, explicit retraining economics, and operator-owned PAPER/promotion/safety actions without performing those manual transitions
+- current-only consolidated Phase 8 status/planning/handoff semantics that reject historical cutoffs until immutable model/cycle transition history exists, avoiding mixed-time promotion answers
 
 Still needed:
 - real Phase 7 promotion evidence
