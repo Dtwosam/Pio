@@ -324,3 +324,100 @@ def test_evidence_step_validates_bounds(tmp_path):
         assert "chain_max_candidates" in str(exc)
     else:
         raise AssertionError("expected invalid candidate count failure")
+
+
+def wallet_capture_result(*, deferred=0):
+    before = SimpleNamespace(
+        events=12,
+        unique_users=3,
+        ready=False,
+    )
+    after = SimpleNamespace(
+        events=12,
+        unique_users=3,
+        ready=False,
+    )
+    scan = SimpleNamespace(backfill_exhausted=True)
+    values = {
+        "source_before": before,
+        "source_after": after,
+        "historical_scan_state": scan,
+        "discovery_truncated": False,
+        "owner_expansion_deferred": 0,
+        "candidate_positions_deferred": deferred,
+        "owner_expansion_failures": 0,
+        "historical_scan_failures": 0,
+        "positions_failed": 0,
+        "positions_attempted": 2,
+        "candidate_positions_selected": 2,
+    }
+    return SimpleNamespace(
+        **values,
+        to_record=lambda: {
+            "source_before": {
+                "events": before.events,
+                "unique_users": before.unique_users,
+            },
+            "source_after": {
+                "events": after.events,
+                "unique_users": after.unique_users,
+            },
+            "candidate_positions_deferred": deferred,
+        },
+    )
+
+
+def test_evidence_step_waits_for_new_wallet_activity_when_sources_exhausted(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    action = debt("WALLET_FLOW_SOURCE", "pool-a")
+    plans = iter((plan(action), plan(action)))
+    monkeypatch.setattr(
+        step_module,
+        "build_phase9_evidence_plan",
+        lambda *args, **kwargs: next(plans),
+    )
+    monkeypatch.setattr(
+        step_module,
+        "run_phase9_wallet_flow_capture",
+        lambda *args, **kwargs: wallet_capture_result(),
+    )
+
+    report = run_phase9_evidence_step(
+        storage,
+        settings=Settings(database_path=storage.path),
+    )
+
+    assert report.status == "WAITING_SOURCE_ACTIVITY"
+    assert report.progressed is False
+    assert report.error is None
+    assert report.operation["candidate_positions_deferred"] == 0
+
+
+def test_evidence_step_does_not_wait_when_wallet_candidates_are_deferred(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    action = debt("WALLET_FLOW_SOURCE", "pool-a")
+    plans = iter((plan(action), plan(action)))
+    monkeypatch.setattr(
+        step_module,
+        "build_phase9_evidence_plan",
+        lambda *args, **kwargs: next(plans),
+    )
+    monkeypatch.setattr(
+        step_module,
+        "run_phase9_wallet_flow_capture",
+        lambda *args, **kwargs: wallet_capture_result(deferred=1),
+    )
+
+    report = run_phase9_evidence_step(
+        storage,
+        settings=Settings(database_path=storage.path),
+    )
+
+    assert report.status == "COMPLETE"
+    assert report.progressed is False
