@@ -474,6 +474,9 @@ def test_evidence_plan_uses_independent_source_debt_during_history_cadence_wait(
     assert "inside the 3600-second history cadence window" in cadence.reason
     assert plan.next_action is not None
     assert plan.next_action.debt_type == "MINT_INPUTS"
+    assert plan.history_next_eligible_at == (
+        "2026-09-24T11:00:00+00:00"
+    )
 
 
 def test_evidence_plan_waits_on_history_before_futile_research_refresh(
@@ -594,3 +597,62 @@ def test_evidence_plan_keeps_history_actionable_after_cadence_elapsed(
     assert plan.next_action.debt_type == "CHAIN_HISTORY_DEPTH"
     assert plan.next_action.actionable is True
     assert plan.next_action.scope == "pool-a,pool-b,pool-c"
+
+
+def test_evidence_plan_reports_earliest_future_history_eligibility(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_chain_observation(
+        storage,
+        pool="pool-a",
+        observed_at="2026-09-24T09:00:00+00:00",
+    )
+    seed_chain_observation(
+        storage,
+        pool="pool-b",
+        observed_at="2026-09-24T09:45:00+00:00",
+    )
+    seed_chain_observation(
+        storage,
+        pool="pool-c",
+        observed_at="2026-09-24T09:50:00+00:00",
+    )
+    report = status(
+        chain_history_ready=False,
+        max_history_samples_remaining=4,
+        research_sources_current=False,
+        research_bundle_ready=False,
+        pools=(
+            pool("pool-a", 1, remaining=4),
+            pool("pool-b", 2, remaining=4),
+            pool("pool-c", 3, remaining=4),
+        ),
+        families=(
+            family("adaptive_regime", False),
+            family("mint_risk", True),
+            family("wallet_flow", True),
+            family("portfolio_allocation", True),
+            family("static_hedge", True),
+            family("contextual_bandit", True),
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase9_evidence_status",
+        lambda *args, **kwargs: report,
+    )
+
+    plan = build_phase9_evidence_plan(
+        storage,
+        as_of="2026-09-24T10:00:00+00:00",
+        history_interval_seconds=3600,
+    )
+
+    assert plan.next_action is not None
+    assert plan.next_action.debt_type == "CHAIN_HISTORY_DEPTH"
+    assert plan.next_action.scope == "pool-a"
+    assert plan.history_next_eligible_at == (
+        "2026-09-24T10:45:00+00:00"
+    )
