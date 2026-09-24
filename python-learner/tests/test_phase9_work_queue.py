@@ -1759,6 +1759,62 @@ def test_work_queue_advances_to_shadow_after_current_phase9(
     assert "phase9-shadow-validate --cycle-id cycle" in task.shell_command
 
 
+def test_work_queue_uses_phase9_dataset_shadow_without_cycle(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(
+            current=False,
+            exists=False,
+            reasons=("authorization evidence is missing",),
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_policy_authorization",
+        lambda storage: DummyAuthorizationReport(
+            ready=False,
+            reasons=("qualifying shadow runs 0 are below 3",),
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "_latest_retraining_dataset_cycle",
+        lambda storage: None,
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "_latest_phase9_bandit_dataset_id",
+        lambda storage: 88,
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_shadow",
+        lambda storage, dataset_evidence_id=None, **kwargs: (
+            DummyShadowReport(ready=(dataset_evidence_id == 88))
+        ),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "PHASE9_SHADOW_VALIDATION"
+    )
+    assert task.scope == "phase9-dataset:88"
+    assert task.shell_command == (
+        "pio phase9-shadow-validate --dataset-evidence-id 88 "
+        "--persist --require-ready"
+    )
+    assert "Phase 9 bandit dataset" in task.reason
+
+
 def test_work_queue_persists_ready_authorization_gate(
     monkeypatch,
     tmp_path,
