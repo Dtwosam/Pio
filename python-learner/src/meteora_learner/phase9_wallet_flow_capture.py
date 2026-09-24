@@ -97,6 +97,8 @@ class Phase9WalletFlowCaptureReport:
     candidate_positions_total: int = 0
     candidate_positions_selected: int = 0
     candidate_positions_deferred: int = 0
+    owner_expansion_candidates: int = 0
+    owner_expansion_deferred: int = 0
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -329,6 +331,8 @@ def run_phase9_wallet_flow_capture(
             candidate_positions_total=0,
             candidate_positions_selected=0,
             candidate_positions_deferred=0,
+            owner_expansion_candidates=0,
+            owner_expansion_deferred=0,
         )
 
     production_capture_path = (
@@ -387,6 +391,8 @@ def run_phase9_wallet_flow_capture(
     refreshed = 0
     failed = 0
     owners_expanded = 0
+    owner_expansion_candidates = 0
+    owner_expansion_deferred = 0
     expansion_failures = 0
     expanded_positions_added = 0
     expansion_errors: list[str] = []
@@ -439,13 +445,19 @@ def run_phase9_wallet_flow_capture(
 
     try:
         if can_expand:
-            owners = sorted(
+            owner_candidates = sorted(
                 {item.owner for item in discovery.positions},
                 key=lambda owner: (
                     owner in existing_users,
                     owner,
                 ),
-            )[:owner_expansion_limit]
+            )
+            owner_expansion_candidates = len(owner_candidates)
+            owners = owner_candidates[:owner_expansion_limit]
+            owner_expansion_deferred = max(
+                0,
+                owner_expansion_candidates - len(owners),
+            )
             for owner in owners:
                 try:
                     addresses = expand(pool_address, owner)
@@ -653,6 +665,11 @@ def run_phase9_wallet_flow_capture(
             f"{candidate_positions_deferred} wallet-flow candidate "
             "position(s) were deferred by the per-run position cap"
         )
+    if owner_expansion_deferred:
+        reasons.append(
+            f"{owner_expansion_deferred} wallet-flow owner expansion(s) "
+            "were deferred by the per-run owner cap"
+        )
     if expansion_failures:
         reasons.append(
             f"{expansion_failures} owner position expansion(s) failed: "
@@ -726,4 +743,6 @@ def run_phase9_wallet_flow_capture(
         candidate_positions_total=candidate_positions_total,
         candidate_positions_selected=candidate_positions_selected,
         candidate_positions_deferred=candidate_positions_deferred,
+        owner_expansion_candidates=owner_expansion_candidates,
+        owner_expansion_deferred=owner_expansion_deferred,
     )
