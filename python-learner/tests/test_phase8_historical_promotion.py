@@ -12,6 +12,7 @@ from meteora_learner.continuous_promotion import (
     CONTINUOUS_PROMOTION_EVIDENCE_TYPE,
 )
 from meteora_learner.phase8_historical_promotion import (
+    audit_persisted_phase8_promotion_at,
     evaluate_phase8_historical_promotion,
 )
 from meteora_learner.phase8_transition_history import (
@@ -204,6 +205,34 @@ def criteria():
     )
 
 
+def seed_phase8_promotion_history(
+    storage,
+    *,
+    promoted_at,
+    report,
+):
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO phase_promotion_evidence_history(
+                phase_name,
+                promoted_at,
+                evidence_type,
+                qualified,
+                evidence_json
+            ) VALUES ('PHASE8', ?, 'PHASE8_PROMOTION_V1', 1, ?)
+            """,
+            (
+                text(promoted_at),
+                json.dumps(
+                    report.to_record(),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+
+
 def seed_ready_history(storage, base):
     seed_phase7(storage, base)
     seed_champion_and_completed_cycle(storage, base)
@@ -388,3 +417,90 @@ def test_historical_phase8_promotion_cli_require_ready(
     payload = json.loads(capsys.readouterr().out)
     assert payload["promotion_ready"] is False
     assert payload["as_of"] == "2026-09-24T12:00:00+00:00"
+
+
+def test_historical_persisted_phase8_promotion_becomes_valid_at_promotion_time(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    base = journal_base(storage)
+    seed_ready_history(storage, base)
+    report = evaluate_phase8_historical_promotion(
+        storage,
+        as_of=text(base + timedelta(minutes=10)),
+        criteria=criteria(),
+    )
+    assert report.promotion_ready is True
+    seed_phase8_promotion_history(
+        storage,
+        promoted_at=base + timedelta(minutes=12),
+        report=report,
+    )
+
+    before = audit_persisted_phase8_promotion_at(
+        storage,
+        as_of=text(base + timedelta(minutes=11)),
+    )
+    after = audit_persisted_phase8_promotion_at(
+        storage,
+        as_of=text(base + timedelta(minutes=13)),
+    )
+
+    assert before.exists is False
+    assert before.valid_at_cutoff is False
+    assert after.exists is True
+    assert after.qualified is True
+    assert after.evidence_type_valid is True
+    assert after.criteria_valid is True
+    assert after.persisted_report_ready is True
+    assert after.historical_promotion_ready is True
+    assert after.champion_lineage_matches is True
+    assert after.valid_at_cutoff is True
+    assert after.reasons == ()
+
+
+def test_historical_persisted_phase8_promotion_rejects_invalid_criteria(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    base = journal_base(storage)
+    seed_ready_history(storage, base)
+    report = evaluate_phase8_historical_promotion(
+        storage,
+        as_of=text(base + timedelta(minutes=10)),
+        criteria=criteria(),
+    )
+    payload = report.to_record()
+    payload["criteria"]["min_completed_cycles"] = 0
+
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO phase_promotion_evidence_history(
+                phase_name,
+                promoted_at,
+                evidence_type,
+                qualified,
+                evidence_json
+            ) VALUES ('PHASE8', ?, 'PHASE8_PROMOTION_V1', 1, ?)
+            """,
+            (
+                text(base + timedelta(minutes=11)),
+                json.dumps(
+                    payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+
+    audit = audit_persisted_phase8_promotion_at(
+        storage,
+        as_of=text(base + timedelta(minutes=12)),
+    )
+
+    assert audit.exists is True
+    assert audit.criteria_valid is False
+    assert audit.historical_promotion_ready is False
+    assert audit.valid_at_cutoff is False
+    assert any("criteria are invalid" in reason for reason in audit.reasons)
