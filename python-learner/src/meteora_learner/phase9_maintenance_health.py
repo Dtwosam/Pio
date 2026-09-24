@@ -103,6 +103,7 @@ def evaluate_phase9_maintenance_health(
     events = list_phase9_maintenance_events(
         storage,
         operation_key=operation_key,
+        as_of=now_text,
         limit=history_limit,
     )
 
