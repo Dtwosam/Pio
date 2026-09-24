@@ -236,13 +236,10 @@ def evaluate_phase9_policy_authorization(
     phase9_audit = None
     phase9_current = False
     if promotion_criteria is not None:
-        audit = audit_persisted_phase9_promotion(
-            storage,
-            criteria=promotion_criteria,
-        )
+        audit = audit_persisted_phase9_promotion_baseline(storage)
         phase9_audit = audit.to_record()
-        phase9_current = audit.current
-        if not audit.current:
+        phase9_current = audit.valid
+        if not audit.valid:
             reasons.extend(
                 f"Phase 9 currentness: {reason}"
                 for reason in audit.reasons
