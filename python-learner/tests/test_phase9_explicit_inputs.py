@@ -708,3 +708,37 @@ def test_portfolio_source_watermarks_bind_decision_snapshot(tmp_path):
             "observed_at": "2026-09-23T10:00:00+00:00",
         }
     ]
+
+
+def test_explicit_input_persistence_reuses_identical_artifact(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    inputs = parse_phase9_explicit_inputs(filled_payload())
+
+    first = persist_phase9_explicit_inputs(
+        storage,
+        inputs=inputs,
+    )
+    second = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(filled_payload()),
+    )
+
+    assert second.evidence_id == first.evidence_id
+    assert second.artifact_sha256 == first.artifact_sha256
+
+    with storage.connect() as conn:
+        count = int(
+            conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM advanced_edge_evidence
+                WHERE edge_type = ?
+                  AND pool_address = ?
+                """,
+                (
+                    PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+                    PHASE9_EXPLICIT_INPUTS_SCOPE,
+                ),
+            ).fetchone()[0]
+        )
+    assert count == 1
