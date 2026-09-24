@@ -6951,6 +6951,11 @@ def main() -> None:
                     "research_bundle_ready": (
                         result.plan_after.research_bundle_ready
                     ),
+                    "next_retry_at": (
+                        result.plan_after.history_next_eligible_at
+                        if result.status == "WAITING_INTERVAL"
+                        else None
+                    ),
                 },
             )
             if args.require_progress and not (
@@ -7036,6 +7041,7 @@ def main() -> None:
                     "terminal_debt_type": result.terminal_debt_type,
                     "terminal_scope": result.terminal_scope,
                     "research_bundle_ready": result.research_bundle_ready,
+                    "next_retry_at": result.next_retry_at,
                 },
             )
             if (
