@@ -343,6 +343,37 @@ def _latest_phase9_bandit_dataset_id(
     return int(latest["id"])
 
 
+def _shadow_source_already_persisted(
+    storage: Storage,
+    *,
+    source_key: str,
+) -> bool:
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT evidence_json
+            FROM advanced_edge_evidence
+            WHERE edge_type = ?
+              AND pool_address = ?
+            ORDER BY id DESC
+            """,
+            (
+                PHASE9_SHADOW_EVIDENCE_TYPE,
+                "__PHASE9_SHADOW__",
+            ),
+        ).fetchall()
+    for (raw_json,) in rows:
+        try:
+            evidence = json.loads(str(raw_json))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(evidence, dict):
+            continue
+        if str(evidence.get("cycle_id", "")).strip() == source_key:
+            return True
+    return False
+
+
 def _latest_controlled_validation_cycle(
     storage: Storage,
 ) -> str | None:
@@ -1519,9 +1550,18 @@ def build_phase9_work_queue(
                         "or refresh qualifying post-promotion shadow evidence"
                     )
 
+                candidate_reused = (
+                    candidate_report is not None
+                    and candidate_scope is not None
+                    and _shadow_source_already_persisted(
+                        storage,
+                        source_key=str(candidate_scope),
+                    )
+                )
                 if (
                     candidate_report is not None
                     and candidate_report.shadow_ready
+                    and not candidate_reused
                 ):
                     items.append(
                         Phase9WorkItem(
@@ -1535,6 +1575,11 @@ def build_phase9_work_queue(
                     details = list(authorization.reasons)
                     if candidate_report is not None:
                         details.extend(candidate_report.reasons)
+                    if candidate_reused:
+                        details.append(
+                            "latest checksum-bound shadow source is already "
+                            "represented in persisted shadow evidence"
+                        )
                     items.append(
                         Phase9WorkItem(
                             task_type="POST_PROMOTION_SHADOW_REQUIRED",
