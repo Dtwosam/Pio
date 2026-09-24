@@ -1,4 +1,5 @@
 import json
+import sqlite3
 
 import pytest
 
@@ -218,3 +219,31 @@ def test_opening_context_must_be_confirmed_enter(tmp_path):
             storage,
             position_address="position",
         )
+
+
+def test_live_learning_labels_are_database_immutable(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed(storage)
+    build_live_learning_label(
+        storage,
+        position_address="position",
+    )
+
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                UPDATE live_learning_labels
+                SET realized_return_bps = 0
+                WHERE position_address = 'position'
+                """
+            )
+
+    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM live_learning_labels
+                WHERE position_address = 'position'
+                """
+            )
