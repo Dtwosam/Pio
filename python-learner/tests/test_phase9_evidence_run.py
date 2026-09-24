@@ -251,3 +251,30 @@ def test_evidence_run_validates_max_steps(tmp_path):
         assert "max_steps" in str(exc)
     else:
         raise AssertionError("expected invalid max_steps failure")
+
+
+def test_evidence_run_stops_on_source_activity_wait(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    action = debt("WALLET_FLOW_SOURCE", "pool-a")
+    monkeypatch.setattr(
+        run_module,
+        "run_phase9_evidence_step",
+        lambda *args, **kwargs: step(
+            "WAITING_SOURCE_ACTIVITY",
+            action=action,
+        ),
+    )
+
+    report = run_phase9_evidence_until_blocked(
+        storage,
+        settings=Settings(database_path=storage.path),
+    )
+
+    assert report.status == "WAITING_SOURCE_ACTIVITY"
+    assert report.steps_attempted == 1
+    assert report.steps_progressed == 0
+    assert report.terminal_debt_type == "WALLET_FLOW_SOURCE"
+    assert report.next_retry_at is None
