@@ -161,3 +161,50 @@ policy authorization, rollout, signing or transaction submission.
 Optional flags may be supplied with
 `PIO_PHASE9_RESEARCH_REFRESH_EXTRA_ARGS`. Keep promotion commands and any
 future LIVE wiring outside this service.
+
+
+## Phase 9 bounded evidence runner
+
+For a single bounded orchestrator instead of the separate source-capture and
+research-refresh timers, enable:
+
+```bash
+sudo systemctl enable --now pio-phase9-evidence-run.timer
+```
+
+Inspect it with:
+
+```bash
+sudo systemctl status pio-phase9-evidence-run.timer
+journalctl -u pio-phase9-evidence-run.service
+cd /opt/pio/python-learner
+.venv/bin/pio phase9-evidence-status
+.venv/bin/pio phase9-evidence-plan
+.venv/bin/pio phase9-maintenance-status
+```
+
+The timer runs every 70 minutes and invokes only
+`phase9-evidence-run --max-steps 8 --history-interval-seconds 3600` under the
+same 30-minute SQLite maintenance lease used by the existing Phase 9
+maintenance commands. Every completed automatic step must reduce the planner's
+current evidence debt. The run stops on READY, explicit manual assumptions,
+history-cadence wait, collector failure, no-progress or the hard max-step
+bound.
+
+This timer is an optional alternative to enabling both
+`pio-phase9-source-capture.timer` and
+`pio-phase9-research-refresh.timer`. Do not normally enable all three:
+the shared lease prevents simultaneous writers, but duplicate timers create
+unnecessary maintenance contention.
+
+The service may use `SOLANA_RPC_URL` and public Meteora/Solana data through
+`/etc/pio/pio.env` when the planner selects a read-only source-acquisition
+step. It has no wallet key and cannot persist Phase 9 promotion, policy
+authorization, rollout/rollback state, signing or transaction submission.
+When the next debt requires checksum-bound economic assumptions, it reports the
+manual blocker and stops rather than inventing inputs.
+
+Optional bounded runner arguments may be supplied with
+`PIO_PHASE9_EVIDENCE_RUN_EXTRA_ARGS`. Keep the history interval at or above
+the experiment's chosen evidence cadence and keep all promotion or future LIVE
+wiring outside this service.
