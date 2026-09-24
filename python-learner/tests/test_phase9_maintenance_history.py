@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -179,3 +180,94 @@ def test_phase9_maintenance_history_cli_returns_recent_events(
     assert payload["count"] == 1
     assert payload["events"][0]["status"] == "WAITING_INTERVAL"
     assert payload["events"][0]["details"]["steps_attempted"] == 1
+
+
+def test_phase9_maintenance_lease_is_released_if_journal_write_fails(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    lease = SimpleNamespace(
+        operation_key="phase9-research-maintenance",
+        owner_id="owner-a",
+        acquired=True,
+        recovered_stale_lease=False,
+        lease_until="2026-09-24T10:30:00+00:00",
+        existing_owner_id=None,
+        existing_lease_until=None,
+    )
+    released = []
+
+    monkeypatch.setattr(
+        cli,
+        "acquire_phase9_operation_lease",
+        lambda *args, **kwargs: lease,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_record_phase9_lease_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("journal unavailable")
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "release_phase9_operation_lease",
+        lambda *args, **kwargs: released.append(kwargs) or True,
+    )
+
+    with pytest.raises(RuntimeError, match="journal unavailable"):
+        cli._acquire_phase9_maintenance_lease(
+            storage,
+            activity="evidence-run",
+            lease_seconds=1800,
+        )
+
+    assert released == [{
+        "operation_key": "phase9-research-maintenance",
+        "owner_id": "owner-a",
+    }]
+
+
+def test_phase9_busy_lease_needs_no_release_if_journal_write_fails(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    lease = SimpleNamespace(
+        operation_key="phase9-research-maintenance",
+        owner_id="owner-b",
+        acquired=False,
+        recovered_stale_lease=False,
+        lease_until=None,
+        existing_owner_id="owner-a",
+        existing_lease_until="2026-09-24T10:30:00+00:00",
+    )
+    released = []
+
+    monkeypatch.setattr(
+        cli,
+        "acquire_phase9_operation_lease",
+        lambda *args, **kwargs: lease,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_record_phase9_lease_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("journal unavailable")
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "release_phase9_operation_lease",
+        lambda *args, **kwargs: released.append(kwargs) or True,
+    )
+
+    with pytest.raises(RuntimeError, match="journal unavailable"):
+        cli._acquire_phase9_maintenance_lease(
+            storage,
+            activity="evidence-step",
+            lease_seconds=1800,
+        )
+
+    assert released == []
