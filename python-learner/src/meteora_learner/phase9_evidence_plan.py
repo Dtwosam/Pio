@@ -568,7 +568,7 @@ def build_phase9_evidence_plan(
         + (
             (
                 "historical Phase 9 evidence planning is inspection-only; "
-                "live collection commands are suppressed"
+                "live collection commands are suppressed",
             )
             if inspection_only
             else ()
