@@ -133,6 +133,10 @@ def test_operator_handoff_builds_non_inventing_explicit_input_handoff(
     assert "static_hedges[0].amount_x" in report.required_manual_fields
     assert "static_hedges[0].as_of" not in report.required_manual_fields
     assert "portfolio.budget_quote" in report.required_manual_fields
+    assert report.followup_commands[0] == (
+        "pio phase9-research-inputs-check "
+        "--file phase9-research-inputs.json --require-valid"
+    )
     assert report.followup_commands[-1] == (
         "pio phase9-evidence-run --max-steps 8"
     )
