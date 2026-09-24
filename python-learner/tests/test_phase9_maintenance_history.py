@@ -271,3 +271,76 @@ def test_phase9_busy_lease_needs_no_release_if_journal_write_fails(
         )
 
     assert released == []
+
+
+def test_phase9_maintenance_history_cutoff_excludes_future_events(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    record_phase9_maintenance_event(
+        storage,
+        operation_key="phase9-research-maintenance",
+        activity="evidence-run",
+        owner_id="owner-a",
+        event_type="RUN_FINISHED",
+        status="COMPLETE",
+        event_time="2026-09-24T10:00:00+00:00",
+    )
+    record_phase9_maintenance_event(
+        storage,
+        operation_key="phase9-research-maintenance",
+        activity="evidence-run",
+        owner_id="owner-b",
+        event_type="RUN_FINISHED",
+        status="FAILED",
+        event_time="2026-09-24T12:00:00+00:00",
+    )
+
+    events = list_phase9_maintenance_events(
+        storage,
+        as_of="2026-09-24T11:00:00+00:00",
+    )
+
+    assert len(events) == 1
+    assert events[0].status == "COMPLETE"
+
+
+def test_phase9_maintenance_history_cli_honors_cutoff(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    record_phase9_maintenance_event(
+        storage,
+        operation_key="phase9-research-maintenance",
+        activity="evidence-run",
+        owner_id="owner-a",
+        event_type="RUN_FINISHED",
+        status="COMPLETE",
+        event_time="2026-09-24T10:00:00+00:00",
+    )
+    record_phase9_maintenance_event(
+        storage,
+        operation_key="phase9-research-maintenance",
+        activity="evidence-run",
+        owner_id="owner-b",
+        event_type="RUN_FINISHED",
+        status="FAILED",
+        event_time="2026-09-24T12:00:00+00:00",
+    )
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase9-maintenance-history",
+            "--as-of",
+            "2026-09-24T11:00:00+00:00",
+        ],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["count"] == 1
+    assert payload["events"][0]["status"] == "COMPLETE"
