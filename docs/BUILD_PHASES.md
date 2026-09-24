@@ -364,6 +364,7 @@ Built:
 - lease-protected one-debt evidence runner that directly dispatches exactly one planner-selected API/chain/history/mint/wallet/research-refresh operation without shell execution, while returning manual blockers unchanged and remaining disconnected from promotion or LIVE policy
 - lease-protected bounded evidence runner that chains only successful debt-reducing automatic steps and stops on READY, manual assumptions, cadence wait, collector failure, no-progress or a hard max-step bound
 - optional hardened systemd evidence-runner timer that advances only bounded planner-selected source/research debt under the shared maintenance lease and cannot promote, authorize policy, sign or submit
+- immutable Phase 9 maintenance lifecycle journal covering acquired/busy/recovered leases and finished outcomes for unattended source, refresh and evidence-run operations, with bounded CLI history inspection
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
