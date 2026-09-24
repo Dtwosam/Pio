@@ -133,6 +133,7 @@ pio phase9-promotion-audit --require-current
 pio phase9-operational-audit --require-verified
 pio phase9-source-capture-run --history-min-observation-interval-seconds 3600 --api-ranking-max-age-seconds 10800  # bounded read-only pass
 pio phase9-maintenance-status  # shared source/research lease state
+pio phase9-maintenance-history --limit 20  # immutable unattended maintenance lifecycle
 pio phase9-source-freshness  # replay-valid evidence vs latest persisted source observations
 pio phase9-evidence-status  # quantitative ranked-cohort/source/family readiness
 pio phase9-evidence-plan  # ranked evidence debt + one deterministic next safe action
