@@ -505,7 +505,10 @@ persistence, retraining inputs should be dry-run parsed, checked against the
 current champion lineage and normalized to their deterministic artifact
 SHA-256. A valid preflight checksum for identical normalized inputs must equal
 the checksum later stored by persistence; stale champion lineage must fail
-preflight closed without writing evidence. A valid persisted artifact may be
+preflight closed without writing evidence.
+ Ingestion must re-run the same Phase 8 retraining-input preflight before
+persistence, so malformed inputs or stale champion lineage cannot bypass the
+standalone check command and reach append-only evidence storage. A valid persisted artifact may be
 used to build the no-lookahead retraining dataset and start a retraining
 cycle. Once that cycle has persisted checksum-valid dataset evidence, offline
 challenger training may use a deterministic model ID/artifact directory, and
@@ -531,6 +534,14 @@ boundary. It must not parse planner shell text, synthesize retraining economics,
 start PAPER, promote a challenger/champion, roll back a champion, persist Phase
 8 promotion, or invoke LIVE execution. No unattended systemd schedule is
 authorized for this runner.
+
+The `phase8-operator-handoff` view is read-only. It may classify the next
+planner debt as an allowlisted automatic offline action, a passive real-evidence
+wait, an explicit-input requirement, or an operator-owned state transition. It
+may emit the existing safe runner/template/inspection command and deterministic
+follow-up sequence, but it must not fill retraining economics, start PAPER,
+promote or roll back a champion, persist Phase 8 promotion, or invoke LIVE
+execution.
 
 Phase 9 quantitative evidence planning is advisory and deterministic. The
 `phase9-evidence-plan` view may rank evidence debt and emit only existing
