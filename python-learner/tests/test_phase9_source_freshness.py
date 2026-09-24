@@ -924,19 +924,18 @@ def test_explicit_backed_freshness_fails_closed_on_invalid_latest_artifact(
         inputs=parse_phase9_explicit_inputs(explicit_payload()),
     )
     spec = artifact.inputs.static_hedges[0]
-    first_pool = int(
-        storage.connect()
-        .execute(
-            """
-            SELECT id
-            FROM chain_pool_snapshots
-            WHERE pool_address = 'pool-a'
-            ORDER BY id ASC
-            LIMIT 1
-            """
+    with storage.connect() as conn:
+        first_pool = int(
+            conn.execute(
+                """
+                SELECT id
+                FROM chain_pool_snapshots
+                WHERE pool_address = 'pool-a'
+                ORDER BY id ASC
+                LIMIT 1
+                """
+            ).fetchone()[0]
         )
-        .fetchone()[0]
-    )
     storage.save_advanced_edge_evidence(
         edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
         pool_address="pool-a",
