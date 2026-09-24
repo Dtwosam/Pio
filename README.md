@@ -191,6 +191,7 @@ pio static-hedge-research --pool <POOL> --amount-x <ATOMIC_X> --amount-y <ATOMIC
   --hedge-available-liquidity-y-atomic <LIQUIDITY> --persist
 pio contextual-bandit-research --file <ML_ACTION_DATASET_CSV> --persist
 pio phase9-research-bundle --persist --require-ready
+pio phase9-research-bundle --as-of <TIME> --require-ready  # historical inspection only; --persist is rejected
 pio phase9-validate --persist-ready --require-ready
 ```
 
