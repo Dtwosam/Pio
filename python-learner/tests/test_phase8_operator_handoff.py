@@ -1,3 +1,7 @@
+import json
+import sys
+
+from meteora_learner import cli
 from types import SimpleNamespace
 
 import meteora_learner.phase8_operator_handoff as handoff_module
@@ -239,4 +243,54 @@ def test_phase8_handoff_keeps_live_monitor_persistence_operator_owned(
     assert report.operator_action_required is True
     assert report.suggested_command == (
         "pio ml-live-monitor --model-id champion-1 --persist"
+    )
+
+
+def test_phase8_operator_handoff_cli_prints_manual_boundary(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = handoff_module.Phase8OperatorHandoff(
+        research_only=True,
+        read_only=True,
+        policy_actionable=False,
+        execution_wired=False,
+        as_of="2026-09-24T12:00:00+00:00",
+        status="MANUAL_REQUIRED",
+        promotion_ready=False,
+        persisted_phase8_current=False,
+        debt_type="PAPER_CHALLENGER_START_REQUIRED",
+        scope="challenger-1",
+        reason="paper start requires operator action",
+        automatic_action_available=False,
+        operator_action_required=True,
+        manual_input_required=False,
+        suggested_command="pio ml-start-paper --model-id challenger-1",
+        retrain_input_template=None,
+        required_manual_fields=(),
+        followup_commands=("pio phase8-evidence-plan",),
+        operator_blockers=(),
+        reasons=("plan reason",),
+    )
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "build_phase8_operator_handoff",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pio", "phase8-operator-handoff"],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "MANUAL_REQUIRED"
+    assert payload["debt_type"] == "PAPER_CHALLENGER_START_REQUIRED"
+    assert payload["suggested_command"] == (
+        "pio ml-start-paper --model-id challenger-1"
     )
