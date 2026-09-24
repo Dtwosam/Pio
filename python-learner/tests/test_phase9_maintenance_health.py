@@ -329,3 +329,20 @@ def test_phase9_maintenance_health_old_wait_without_retry_uses_event_age(
     assert report.status == "STALE"
     assert report.latest_next_retry_at is None
     assert report.seconds_until_next_retry is None
+
+
+def test_phase9_maintenance_health_treats_source_activity_wait_as_healthy(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    finish(storage, "WAITING_SOURCE_ACTIVITY")
+
+    report = evaluate_phase9_maintenance_health(storage, as_of=NOW)
+
+    assert report.healthy is True
+    assert report.attention_required is False
+    assert report.status == "WAITING_SOURCE_ACTIVITY"
+    assert any(
+        "waiting for new source activity" in reason
+        for reason in report.reasons
+    )
