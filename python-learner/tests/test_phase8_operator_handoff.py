@@ -294,3 +294,36 @@ def test_phase8_operator_handoff_cli_prints_manual_boundary(
     assert payload["suggested_command"] == (
         "pio ml-start-paper --model-id challenger-1"
     )
+
+
+def test_phase8_handoff_rejects_historical_cutoff(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    called = []
+
+    monkeypatch.setattr(
+        handoff_module,
+        "build_phase8_evidence_plan",
+        lambda *args, **kwargs: (
+            called.append(kwargs)
+            or (_ for _ in ()).throw(
+                ValueError(
+                    "historical Phase 8 evidence planning is unsupported"
+                )
+            )
+        ),
+    )
+
+    try:
+        build_phase8_operator_handoff(
+            storage,
+            as_of="2026-09-23T12:00:00+00:00",
+        )
+    except ValueError as exc:
+        assert "historical Phase 8 evidence planning is unsupported" in str(exc)
+    else:
+        raise AssertionError("expected historical cutoff rejection")
+
+    assert called[0]["as_of"] == "2026-09-23T12:00:00+00:00"
