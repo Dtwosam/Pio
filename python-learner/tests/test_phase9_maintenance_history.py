@@ -344,3 +344,70 @@ def test_phase9_maintenance_history_cli_honors_cutoff(
     payload = json.loads(capsys.readouterr().out)
     assert payload["count"] == 1
     assert payload["events"][0]["status"] == "COMPLETE"
+
+
+def test_phase9_evidence_run_journals_next_retry_at(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    lease = SimpleNamespace(
+        acquired=True,
+        owner_id="owner-a",
+        to_record=lambda: {
+            "acquired": True,
+            "owner_id": "owner-a",
+        },
+    )
+    report = SimpleNamespace(
+        status="WAITING_INTERVAL",
+        max_steps=8,
+        steps_attempted=1,
+        steps_progressed=0,
+        terminal_debt_type="CHAIN_HISTORY_CADENCE_WAIT",
+        terminal_scope="pool-a,pool-b",
+        research_bundle_ready=False,
+        next_retry_at="2026-09-24T11:00:00+00:00",
+        to_record=lambda: {
+            "status": "WAITING_INTERVAL",
+            "next_retry_at": "2026-09-24T11:00:00+00:00",
+        },
+    )
+
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "_acquire_phase9_maintenance_lease",
+        lambda *args, **kwargs: lease,
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_phase9_evidence_until_blocked",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        cli,
+        "release_phase9_operation_lease",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pio", "phase9-evidence-run", "--max-steps", "8"],
+    )
+
+    cli.main()
+    capsys.readouterr()
+
+    events = list_phase9_maintenance_events(
+        storage,
+        activity="evidence-run",
+        limit=1,
+    )
+    assert len(events) == 1
+    assert events[0].event_type == "RUN_FINISHED"
+    assert events[0].status == "WAITING_INTERVAL"
+    assert events[0].details["next_retry_at"] == (
+        "2026-09-24T11:00:00+00:00"
+    )
