@@ -318,13 +318,14 @@ def test_phase9_historical_status_uses_cutoff_phase8_audit_only(
             AssertionError("current Phase 8 audit must not run")
         ),
     )
+    def historical_phase8_audit(storage, *, as_of):
+        seen["as_of"] = as_of
+        return SimpleNamespace(valid_at_cutoff=False)
+
     monkeypatch.setattr(
         status_module,
         "audit_persisted_phase8_promotion_at",
-        lambda storage, *, as_of: (
-            seen.setdefault("as_of", as_of)
-            or SimpleNamespace(valid_at_cutoff=False)
-        ),
+        historical_phase8_audit,
     )
     cohort = SimpleNamespace(
         api_pools_seen=0,
