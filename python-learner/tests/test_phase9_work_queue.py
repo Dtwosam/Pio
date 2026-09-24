@@ -1815,6 +1815,76 @@ def test_work_queue_uses_phase9_dataset_shadow_without_cycle(
     assert "Phase 9 bandit dataset" in task.reason
 
 
+def test_work_queue_requires_fresh_shadow_source_after_dataset_used(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+    storage.save_advanced_edge_evidence(
+        edge_type="PHASE9_POST_PROMOTION_SHADOW_V1",
+        pool_address="__PHASE9_SHADOW__",
+        as_of="2026-09-23T13:00:00+00:00",
+        status="SHADOW_READY",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "cycle_id": "phase9-dataset:88",
+        },
+    )
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(
+            current=False,
+            exists=False,
+            reasons=("authorization evidence is missing",),
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_policy_authorization",
+        lambda storage: DummyAuthorizationReport(
+            ready=False,
+            reasons=("qualifying shadow runs 1 are below 3",),
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "_latest_retraining_dataset_cycle",
+        lambda storage: None,
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "_latest_phase9_bandit_dataset_id",
+        lambda storage: 88,
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_shadow",
+        lambda storage, dataset_evidence_id=None, **kwargs: (
+            DummyShadowReport(ready=(dataset_evidence_id == 88))
+        ),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    blocker = next(
+        item for item in queue.items
+        if item.task_type == "POST_PROMOTION_SHADOW_REQUIRED"
+    )
+    assert blocker.scope == "FRESH_CHECKSUM_BOUND_DATASET"
+    assert blocker.shell_command is None
+    assert "already represented" in blocker.reason
+    assert not any(
+        item.task_type == "PHASE9_SHADOW_VALIDATION"
+        and item.scope == "phase9-dataset:88"
+        for item in queue.items
+    )
+
+
 def test_work_queue_persists_ready_authorization_gate(
     monkeypatch,
     tmp_path,
