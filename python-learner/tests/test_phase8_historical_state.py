@@ -1,3 +1,7 @@
+import json
+import sys
+
+from meteora_learner import cli
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -265,3 +269,37 @@ def test_phase8_historical_snapshot_requires_timezone(tmp_path):
             storage,
             as_of="2026-09-24T12:00:00",
         )
+
+
+def test_phase8_transition_snapshot_cli_reports_consistent_state(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    audit = audit_phase8_transition_history(storage)
+    assert audit.started_at is not None
+    started = datetime.fromisoformat(
+        audit.started_at.replace("Z", "+00:00")
+    ).astimezone(timezone.utc)
+    cutoff = text(started + timedelta(seconds=1))
+
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase8-transition-snapshot",
+            "--as-of",
+            cutoff,
+            "--require-consistent",
+        ],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["consistent"] is True
+    assert payload["as_of"] == cutoff
+    assert payload["journal_started_at"] == audit.started_at
