@@ -867,17 +867,14 @@ def _portfolio_current(storage: Storage) -> Phase9SourceFreshnessItem:
                     "portfolio candidate explicit input lineage is incomplete"
                 ),
             )
-        if (
-            used_input_id != explicit.evidence_id
-            or used_input_sha != explicit.artifact_sha256
-        ):
+        if used_input_sha != explicit.artifact_sha256:
             return Phase9SourceFreshnessItem(
                 family="portfolio_allocation",
                 current=False,
                 reason=(
                     "portfolio assumptions were derived from explicit input "
-                    f"artifact {used_input_id}, but latest valid artifact is "
-                    f"{explicit.evidence_id}"
+                    f"artifact {used_input_id}, but latest valid artifact "
+                    f"{explicit.evidence_id} has a different SHA-256"
                 ),
             )
     watermarks = (
@@ -1075,17 +1072,15 @@ def _bandit_current(storage: Storage) -> Phase9SourceFreshnessItem:
             lineage_sha = str(
                 lineage.get("explicit_input_artifact_sha256", "")
             )
-            if (
-                explicit_id != latest_explicit.evidence_id
-                or lineage_sha != latest_explicit.artifact_sha256
-            ):
+            if lineage_sha != latest_explicit.artifact_sha256:
                 return Phase9SourceFreshnessItem(
                     family="contextual_bandit",
                     current=False,
                     reason=(
                         "Phase 9 bandit dataset uses explicit input artifact "
-                        f"{explicit_id}, but latest valid artifact is "
-                        f"{latest_explicit.evidence_id}"
+                        f"{explicit_id}, but latest valid artifact "
+                        f"{latest_explicit.evidence_id} has a different "
+                        "SHA-256"
                     ),
                 )
         if artifact is None:
