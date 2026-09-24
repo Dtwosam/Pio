@@ -169,6 +169,7 @@ from .phase9_operation_lease import (
 from .phase9_evidence_status import evaluate_phase9_evidence_status
 from .phase9_evidence_plan import build_phase9_evidence_plan
 from .phase9_evidence_step import run_phase9_evidence_step
+from .phase9_evidence_run import run_phase9_evidence_until_blocked
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
@@ -2864,6 +2865,45 @@ def main() -> None:
         action="store_true",
     )
     phase9_evidence_step.add_argument(
+        "--require-bundle-ready",
+        action="store_true",
+    )
+
+    phase9_evidence_run = subparsers.add_parser(
+        "phase9-evidence-run",
+        help="Run bounded planner-selected Phase 9 evidence steps until ready, manual input, cadence wait, failure or no-progress",
+    )
+    phase9_evidence_run.add_argument(
+        "--max-steps",
+        type=int,
+        default=8,
+    )
+    phase9_evidence_run.add_argument(
+        "--min-mint-risk-pools",
+        type=int,
+        default=2,
+    )
+    phase9_evidence_run.add_argument(
+        "--min-wallet-flow-pools",
+        type=int,
+        default=2,
+    )
+    phase9_evidence_run.add_argument(
+        "--min-static-hedge-pools",
+        type=int,
+        default=1,
+    )
+    phase9_evidence_run.add_argument(
+        "--history-interval-seconds",
+        type=int,
+        default=3600,
+    )
+    phase9_evidence_run.add_argument(
+        "--lease-seconds",
+        type=int,
+        default=1800,
+    )
+    phase9_evidence_run.add_argument(
         "--require-bundle-ready",
         action="store_true",
     )
@@ -6139,6 +6179,54 @@ def main() -> None:
             if (
                 args.require_bundle_ready
                 and not result.plan_after.research_bundle_ready
+            ):
+                raise SystemExit(2)
+        finally:
+            release_phase9_operation_lease(
+                storage,
+                operation_key="phase9-research-maintenance",
+                owner_id=lease.owner_id,
+            )
+        return
+
+    if args.command == "phase9-evidence-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        lease = acquire_phase9_operation_lease(
+            storage,
+            operation_key="phase9-research-maintenance",
+            lease_seconds=args.lease_seconds,
+        )
+        if not lease.acquired:
+            print(json.dumps({
+                "status": "BUSY",
+                "research_only": True,
+                "policy_actionable": False,
+                "execution_wired": False,
+                "lease": lease.to_record(),
+            }, indent=2))
+            if args.require_bundle_ready:
+                raise SystemExit(2)
+            return
+        try:
+            result = run_phase9_evidence_until_blocked(
+                storage,
+                settings=settings,
+                criteria=Phase9ResearchBundleCriteria(
+                    min_mint_risk_pools=args.min_mint_risk_pools,
+                    min_wallet_flow_pools=args.min_wallet_flow_pools,
+                    min_static_hedge_pools=args.min_static_hedge_pools,
+                ),
+                max_steps=args.max_steps,
+                history_interval_seconds=args.history_interval_seconds,
+            )
+            print(json.dumps({
+                "lease": lease.to_record(),
+                "report": result.to_record(),
+            }, indent=2))
+            if (
+                args.require_bundle_ready
+                and not result.research_bundle_ready
             ):
                 raise SystemExit(2)
         finally:
