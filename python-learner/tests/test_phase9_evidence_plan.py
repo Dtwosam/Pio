@@ -778,3 +778,32 @@ def test_historical_evidence_plan_suppresses_live_actions(
         "inspection-only" in reason
         for reason in plan.reasons
     )
+
+
+def test_live_evidence_plan_preserves_none_cutoff_for_status(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seen = {}
+    monkeypatch.setattr(
+        plan_module,
+        "utc_now_iso",
+        lambda: "2026-09-24T12:00:00+00:00",
+    )
+
+    def evaluate(*args, **kwargs):
+        seen["as_of"] = kwargs["as_of"]
+        return status()
+
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase9_evidence_status",
+        evaluate,
+    )
+
+    plan = build_phase9_evidence_plan(storage)
+
+    assert seen["as_of"] is None
+    assert plan.as_of == "2026-09-24T12:00:00+00:00"
+    assert plan.inspection_only is False
