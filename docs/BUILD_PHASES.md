@@ -293,6 +293,7 @@ Built:
 - non-persisting Phase 8 retraining-input preflight that validates the current champion lineage and computes the exact normalized artifact checksum before append-only input evidence is written
 - deterministic Phase 8 operator handoff that separates safe offline automation, passive real-evidence waits, explicit retraining economics, and operator-owned PAPER/promotion/safety actions without performing those manual transitions
 - current-only consolidated Phase 8 status/planning/handoff semantics that reject historical cutoffs until immutable model/cycle transition history exists, avoiding mixed-time promotion answers
+- append-only Phase 8 model/cycle transition journals with immutable SQLite triggers, migration-start watermark, legacy-row baseline backfill and fail-able coverage/trigger audit; historical consolidated evaluation remains disabled until it is explicitly rebuilt on this journal
 
 Still needed:
 - real Phase 7 promotion evidence
