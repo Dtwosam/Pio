@@ -1,3 +1,9 @@
+import json
+import sys
+
+import pytest
+
+from meteora_learner import cli
 from meteora_learner.phase9_maintenance_health import (
     evaluate_phase9_maintenance_health,
 )
@@ -153,3 +159,59 @@ def test_phase9_maintenance_health_requires_history(tmp_path):
     assert report.healthy is False
     assert report.status == "NO_HISTORY"
     assert report.attention_required is True
+
+
+def test_phase9_maintenance_health_cli_require_healthy(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    finish(storage, "COMPLETE")
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase9-maintenance-health",
+            "--as-of",
+            NOW,
+            "--require-healthy",
+        ],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["healthy"] is True
+    assert payload["status"] == "HEALTHY"
+
+
+def test_phase9_maintenance_health_cli_exits_nonzero_when_unhealthy(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    finish(storage, "FAILED")
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase9-maintenance-health",
+            "--as-of",
+            NOW,
+            "--require-healthy",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["healthy"] is False
+    assert payload["status"] == "DEGRADED"
