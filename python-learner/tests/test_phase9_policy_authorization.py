@@ -19,10 +19,11 @@ from meteora_learner.storage import Storage
 
 class DummyAudit:
     current = True
+    valid = True
     reasons = ()
 
     def to_record(self):
-        return {"current": True, "reasons": []}
+        return {"current": True, "valid": True, "reasons": []}
 
 
 def shadow_report(
@@ -91,8 +92,8 @@ def patch_phase9(monkeypatch, reports):
     )
     monkeypatch.setattr(
         gate_module,
-        "audit_persisted_phase9_promotion",
-        lambda storage, criteria: DummyAudit(),
+        "audit_persisted_phase9_promotion_baseline",
+        lambda storage: DummyAudit(),
     )
     monkeypatch.setattr(
         gate_module,
