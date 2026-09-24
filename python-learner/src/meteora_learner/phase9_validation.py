@@ -1284,7 +1284,9 @@ class Phase9PromotionReport:
     reasons: tuple[str, ...]
 
     def to_record(self) -> dict[str, Any]:
-        return asdict(self)
+        record = asdict(self)
+        record["research_bundle"] = self.research_bundle.to_record()
+        return record
 
 
 @dataclass(frozen=True)
@@ -1530,6 +1532,8 @@ def audit_persisted_phase9_promotion_baseline(
             normalized_bundle = json.loads(
                 json.dumps(bundle, sort_keys=True)
             )
+            if normalized_bundle.get("evaluation_as_of") is None:
+                normalized_bundle.pop("evaluation_as_of", None)
             recomputed = phase9_research_bundle_sha256(
                 normalized_bundle
             )
