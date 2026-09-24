@@ -2136,7 +2136,17 @@ def main() -> None:
         "phase9-policy-controlled-validate",
         help="Run a fresh simulation-only holdout validation after current Phase 9 policy authorization evidence",
     )
-    phase9_policy_controlled.add_argument("--cycle-id", required=True)
+    phase9_policy_controlled_source = (
+        phase9_policy_controlled.add_mutually_exclusive_group(
+            required=True,
+        )
+    )
+    phase9_policy_controlled_source.add_argument("--cycle-id")
+    phase9_policy_controlled_source.add_argument(
+        "--dataset-evidence-id",
+        type=int,
+        help="Persisted PHASE9_BANDIT_DATASET_V1 evidence ID",
+    )
     phase9_policy_controlled.add_argument(
         "--warmup-decisions-per-context",
         type=int,
@@ -5515,6 +5525,7 @@ def main() -> None:
         result = evaluate_phase9_policy_controlled_validation(
             storage,
             cycle_id=args.cycle_id,
+            dataset_evidence_id=args.dataset_evidence_id,
             criteria=Phase9PolicyControlledValidationCriteria(
                 warmup_decisions_per_context=(
                     args.warmup_decisions_per_context
