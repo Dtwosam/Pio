@@ -10,6 +10,7 @@ from .mint_risk import MINT_RISK_EVIDENCE_TYPE
 from .phase9_bandit_dataset import PHASE9_BANDIT_DATASET_EVIDENCE_TYPE
 from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
+    audit_phase9_explicit_inputs_at,
     load_phase9_explicit_inputs,
 )
 from .phase9_research import PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE
@@ -55,8 +56,19 @@ def _time(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _explicit_input_state(storage: Storage):
-    audit = audit_phase9_explicit_inputs(storage)
+def _explicit_input_state(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+):
+    audit = (
+        audit_phase9_explicit_inputs(storage)
+        if as_of is None
+        else audit_phase9_explicit_inputs_at(
+            storage,
+            as_of=as_of,
+        )
+    )
     artifact = None
     if audit.valid and audit.evidence_id is not None:
         try:
@@ -69,8 +81,12 @@ def _explicit_input_state(storage: Storage):
     return audit, artifact
 
 
-def _latest_valid_explicit_input(storage: Storage):
-    _, artifact = _explicit_input_state(storage)
+def _latest_valid_explicit_input(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+):
+    _, artifact = _explicit_input_state(storage, as_of=as_of)
     return artifact
 
 
@@ -78,29 +94,55 @@ def _latest_rows(
     storage: Storage,
     *,
     edge_type: str,
+    as_of: str | None = None,
 ) -> list[dict[str, Any]]:
     with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT e.id, e.created_at, e.pool_address,
-                   e.qualified, e.evidence_json
-            FROM advanced_edge_evidence e
-            JOIN (
-                SELECT pool_address, MAX(id) AS max_id
-                FROM advanced_edge_evidence
-                WHERE edge_type = ?
-                GROUP BY pool_address
-            ) latest
-              ON latest.max_id = e.id
-            WHERE e.edge_type = ?
-            ORDER BY e.pool_address ASC
-            """,
-            (edge_type, edge_type),
-        ).fetchall()
+        if as_of is None:
+            rows = conn.execute(
+                """
+                SELECT e.id, e.created_at, e.pool_address,
+                       e.as_of, e.qualified, e.evidence_json
+                FROM advanced_edge_evidence e
+                JOIN (
+                    SELECT pool_address, MAX(id) AS max_id
+                    FROM advanced_edge_evidence
+                    WHERE edge_type = ?
+                    GROUP BY pool_address
+                ) latest
+                  ON latest.max_id = e.id
+                WHERE e.edge_type = ?
+                ORDER BY e.pool_address ASC
+                """,
+                (edge_type, edge_type),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT e.id, e.created_at, e.pool_address,
+                       e.as_of, e.qualified, e.evidence_json
+                FROM advanced_edge_evidence e
+                JOIN (
+                    SELECT pool_address, MAX(id) AS max_id
+                    FROM advanced_edge_evidence
+                    WHERE edge_type = ?
+                      AND julianday(created_at) <= julianday(?)
+                      AND (
+                          as_of IS NULL
+                          OR julianday(as_of) <= julianday(?)
+                      )
+                    GROUP BY pool_address
+                ) latest
+                  ON latest.max_id = e.id
+                WHERE e.edge_type = ?
+                ORDER BY e.pool_address ASC
+                """,
+                (edge_type, as_of, as_of, edge_type),
+            ).fetchall()
+
     output: list[dict[str, Any]] = []
     for row in rows:
         try:
-            evidence = json.loads(str(row[4]))
+            evidence = json.loads(str(row[5]))
         except (TypeError, ValueError, json.JSONDecodeError):
             evidence = None
         output.append(
@@ -108,7 +150,8 @@ def _latest_rows(
                 "id": int(row[0]),
                 "created_at": str(row[1]),
                 "pool_address": str(row[2]),
-                "qualified": bool(row[3]),
+                "as_of": str(row[3]) if row[3] is not None else None,
+                "qualified": bool(row[4]),
                 "evidence": evidence,
             }
         )
