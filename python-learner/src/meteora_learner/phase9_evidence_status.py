@@ -144,6 +144,7 @@ def evaluate_phase9_evidence_status(
     bundle = evaluate_phase9_research_bundle(
         storage,
         criteria=criteria,
+        as_of=as_of,
     )
 
     mint_targets = tuple(
