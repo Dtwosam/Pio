@@ -67,3 +67,36 @@ def test_phase9_research_refresh_timer_runs_after_source_capture_offset():
     assert "Persistent=true" in timer
     assert "Unit=pio-phase9-research-refresh.service" in timer
     assert "After=pio-phase9-source-capture.service" in service
+
+
+def test_phase9_evidence_run_service_is_bounded_and_non_actionable():
+    service = (
+        SYSTEMD / "pio-phase9-evidence-run.service"
+    ).read_text(encoding="utf-8")
+
+    assert "phase9-evidence-run" in service
+    assert "--max-steps 8" in service
+    assert "--history-interval-seconds 3600" in service
+    assert "--lease-seconds 1800" in service
+    assert "phase9-validate" not in service
+    assert "phase9-policy" not in service
+    assert "rollout" not in service.lower()
+    assert "rollback" not in service.lower()
+    assert "live-submit" not in service
+    assert "sign" not in service.lower()
+    assert "private key" not in service.lower()
+    assert "NoNewPrivileges=true" in service
+    assert "ProtectSystem=strict" in service
+    assert "ProtectHome=true" in service
+    assert "ReadWritePaths=/opt/pio/data" in service
+
+
+def test_phase9_evidence_run_timer_respects_history_cadence():
+    timer = (
+        SYSTEMD / "pio-phase9-evidence-run.timer"
+    ).read_text(encoding="utf-8")
+
+    assert "OnBootSec=20min" in timer
+    assert "OnUnitActiveSec=70min" in timer
+    assert "Persistent=true" in timer
+    assert "Unit=pio-phase9-evidence-run.service" in timer
