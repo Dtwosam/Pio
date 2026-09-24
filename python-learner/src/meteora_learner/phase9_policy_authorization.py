@@ -10,6 +10,9 @@ from .phase9_shadow import (
     _persisted_phase9_context,
     evaluate_phase9_shadow,
 )
+from .phase9_bandit_dataset import (
+    PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+)
 from .phase9_validation import audit_persisted_phase9_promotion
 from .phase9_source_freshness import (
     evaluate_phase9_source_freshness,
@@ -332,11 +335,32 @@ def evaluate_phase9_policy_authorization(
             )
             item_reasons.extend(criteria_reasons)
             try:
-                replay = evaluate_phase9_shadow(
-                    storage,
-                    cycle_id=cycle_id,
-                    criteria=shadow_criteria,
+                source_type = str(
+                    persisted.get(
+                        "dataset_source_type",
+                        "CONTINUOUS_RETRAIN_DATASET_V1",
+                    )
                 )
+                if source_type == PHASE9_BANDIT_DATASET_EVIDENCE_TYPE:
+                    dataset_evidence_id = persisted.get(
+                        "dataset_evidence_id"
+                    )
+                    if dataset_evidence_id is None:
+                        raise ValueError(
+                            "Phase 9 dataset-backed shadow is missing "
+                            "dataset_evidence_id"
+                        )
+                    replay = evaluate_phase9_shadow(
+                        storage,
+                        dataset_evidence_id=int(dataset_evidence_id),
+                        criteria=shadow_criteria,
+                    )
+                else:
+                    replay = evaluate_phase9_shadow(
+                        storage,
+                        cycle_id=cycle_id,
+                        criteria=shadow_criteria,
+                    )
                 persisted_normalized = json.loads(
                     json.dumps(persisted, sort_keys=True)
                 )
