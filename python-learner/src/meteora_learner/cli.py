@@ -3013,6 +3013,10 @@ def main() -> None:
         help="Optional activity filter such as evidence-run, source-capture or research-refresh",
     )
     phase9_maintenance_history.add_argument(
+        "--as-of",
+        help="Optional timezone-aware cutoff; later lifecycle events are excluded",
+    )
+    phase9_maintenance_history.add_argument(
         "--limit",
         type=int,
         default=20,
@@ -6437,6 +6441,7 @@ def main() -> None:
             storage,
             operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
             activity=args.activity,
+            as_of=args.as_of,
             limit=args.limit,
         )
         print(json.dumps({
