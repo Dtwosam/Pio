@@ -1260,6 +1260,8 @@ pio phase9-chain-history-run
 
 One invocation takes at most one new read-only snapshot per deficient pool.
 When `phase9-evidence-step-run` reaches this debt before the configured sampling interval has elapsed, it returns `WAITING_INTERVAL`; this is a normal retry-later state, not a collector failure and it does not increment evidence depth.
+
+For operator or scheduler-driven catch-up, `pio phase9-evidence-run --max-steps 8` repeatedly executes only the planner-selected safe debt operation under the shared Phase 9 maintenance lease. It stops immediately on `READY`, `MANUAL_REQUIRED`, `WAITING_INTERVAL`, `FAILED`, a completed step that did not reduce debt (`NO_PROGRESS`), or the configured max-step bound. It never executes the explicit-input template/ingest step automatically and never persists Phase 9 promotion or any LIVE-policy authorization.
 Repeat it over real elapsed time until `phase9-chain-history-plan
 --require-ready` passes. An explicit `--observed-at` must be timezone-aware
 and strictly newer than the latest persisted snapshot for every captured pool;
