@@ -6,6 +6,11 @@ from typing import Any
 from .storage import Storage
 
 
+META_HISTORY_TRIGGERS = (
+    "phase8_transition_history_meta_no_update",
+    "phase8_transition_history_meta_no_delete",
+)
+
 MODEL_HISTORY_TRIGGERS = (
     "phase8_model_status_history_no_update",
     "phase8_model_status_history_no_delete",
@@ -189,7 +194,11 @@ def list_phase8_cycle_status_history(
 def audit_phase8_transition_history(
     storage: Storage,
 ) -> Phase8TransitionHistoryAudit:
-    required = MODEL_HISTORY_TRIGGERS + CYCLE_HISTORY_TRIGGERS
+    required = (
+        META_HISTORY_TRIGGERS
+        + MODEL_HISTORY_TRIGGERS
+        + CYCLE_HISTORY_TRIGGERS
+    )
     with storage.connect() as conn:
         meta = conn.execute(
             """
@@ -248,7 +257,7 @@ def audit_phase8_transition_history(
             FROM sqlite_master
             WHERE type = 'trigger'
               AND name IN (
-                ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
               )
             ORDER BY name ASC
             """,
