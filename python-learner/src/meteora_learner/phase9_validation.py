@@ -1177,6 +1177,24 @@ class Phase9PromotionReport:
 
 
 @dataclass(frozen=True)
+class Phase9PromotionBaselineAudit:
+    exists: bool
+    history_exists: bool
+    qualified: bool
+    evidence_type_valid: bool
+    current_row_matches_latest_history: bool
+    boundary_valid: bool
+    bundle_checksum_valid: bool
+    promotion_report_valid: bool
+    valid: bool
+    promoted_at: str | None
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Phase9PersistedPromotionAudit:
     exists: bool
     history_exists: bool
@@ -1297,6 +1315,154 @@ def evaluate_phase9_promotion(
         persisted_bundle_hash_valid=persisted_bundle_hash_valid,
         persisted_bundle_matches_current=persisted_matches_current,
         promotion_ready=not reasons,
+        reasons=tuple(reasons),
+    )
+
+
+def audit_persisted_phase9_promotion_baseline(
+    storage: Storage,
+) -> Phase9PromotionBaselineAudit:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT promoted_at, evidence_type, qualified, evidence_json
+            FROM phase_promotion_evidence
+            WHERE phase_name = ?
+            LIMIT 1
+            """,
+            (PHASE9,),
+        ).fetchone()
+        history_row = conn.execute(
+            """
+            SELECT promoted_at, evidence_type, qualified, evidence_json
+            FROM phase_promotion_evidence_history
+            WHERE phase_name = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (PHASE9,),
+        ).fetchone()
+
+    if row is None:
+        return Phase9PromotionBaselineAudit(
+            exists=False,
+            history_exists=history_row is not None,
+            qualified=False,
+            evidence_type_valid=False,
+            current_row_matches_latest_history=False,
+            boundary_valid=False,
+            bundle_checksum_valid=False,
+            promotion_report_valid=False,
+            valid=False,
+            promoted_at=None,
+            reasons=("persisted Phase 9 promotion evidence is missing",),
+        )
+
+    reasons: list[str] = []
+    promoted_at = str(row[0])
+    try:
+        parsed_promoted_at = datetime.fromisoformat(
+            promoted_at.replace("Z", "+00:00")
+        )
+        if parsed_promoted_at.tzinfo is None:
+            raise ValueError("timezone is required")
+    except ValueError:
+        reasons.append("persisted Phase 9 promoted_at is invalid")
+
+    history_exists = history_row is not None
+    current_row_matches_latest_history = (
+        history_row is not None
+        and tuple(row) == tuple(history_row)
+    )
+    if not history_exists:
+        reasons.append("immutable Phase 9 promotion history is missing")
+    elif not current_row_matches_latest_history:
+        reasons.append(
+            "current Phase 9 promotion row differs from immutable history"
+        )
+
+    evidence_type_valid = str(row[1]) == PHASE9_EVIDENCE_TYPE
+    if not evidence_type_valid:
+        reasons.append("persisted Phase 9 promotion evidence type is invalid")
+
+    qualified = bool(row[2])
+    if not qualified:
+        reasons.append("persisted Phase 9 promotion evidence is not qualified")
+
+    try:
+        evidence = json.loads(str(row[3]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        evidence = None
+        reasons.append("persisted Phase 9 promotion evidence JSON is invalid")
+
+    boundary_valid = False
+    bundle_checksum_valid = False
+    promotion_report_valid = False
+    if isinstance(evidence, dict):
+        boundary_valid = (
+            evidence.get("research_only") is True
+            and evidence.get("policy_actionable") is False
+        )
+        if not boundary_valid:
+            reasons.append(
+                "persisted Phase 9 promotion violates the research-only "
+                "non-actionable boundary"
+            )
+
+        bundle = evidence.get("research_bundle")
+        if isinstance(bundle, dict):
+            normalized_bundle = json.loads(
+                json.dumps(bundle, sort_keys=True)
+            )
+            recomputed = phase9_research_bundle_sha256(
+                normalized_bundle
+            )
+            current_sha = str(
+                evidence.get("research_bundle_sha256", "")
+            ).strip()
+            persisted_sha = str(
+                evidence.get("persisted_bundle_sha256", "")
+            ).strip()
+            bundle_checksum_valid = (
+                bool(current_sha)
+                and current_sha == recomputed
+                and persisted_sha == recomputed
+                and evidence.get("persisted_bundle_hash_valid") is True
+                and evidence.get("persisted_bundle_matches_current") is True
+            )
+        if not bundle_checksum_valid:
+            reasons.append(
+                "persisted Phase 9 promotion research-bundle checksum "
+                "is invalid"
+            )
+
+        promotion_report_valid = (
+            evidence.get("promotion_ready") is True
+            and evidence.get("phase8_promoted") is True
+            and evidence.get("research_bundle_evidence_id") is not None
+            and isinstance(bundle, dict)
+            and bundle.get("research_ready") is True
+            and bundle.get("research_only") is True
+            and bundle.get("policy_actionable") is False
+        )
+        if not promotion_report_valid:
+            reasons.append(
+                "persisted Phase 9 promotion report was not a valid "
+                "ready research-only promotion"
+            )
+
+    valid = not reasons
+    return Phase9PromotionBaselineAudit(
+        exists=True,
+        history_exists=history_exists,
+        qualified=qualified,
+        evidence_type_valid=evidence_type_valid,
+        current_row_matches_latest_history=current_row_matches_latest_history,
+        boundary_valid=boundary_valid,
+        bundle_checksum_valid=bundle_checksum_valid,
+        promotion_report_valid=promotion_report_valid,
+        valid=valid,
+        promoted_at=promoted_at,
         reasons=tuple(reasons),
     )
 
