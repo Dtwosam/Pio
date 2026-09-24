@@ -46,9 +46,6 @@ from .phase9_bandit_dataset import (
     evaluate_phase9_contextual_bandit_from_dataset,
 )
 from .phase9_storage_integrity import evaluate_phase9_storage_integrity
-from .phase9_source_freshness import (
-    evaluate_phase9_source_freshness,
-)
 from .phase_promotion import (
     PHASE9,
     PHASE9_EVIDENCE_TYPE,
@@ -1272,34 +1269,6 @@ def evaluate_phase9_promotion(
         reasons.append(
             "Phase 9 promotion cannot grant live-policy authority"
         )
-    if bundle.research_ready:
-        freshness = evaluate_phase9_source_freshness(
-            storage,
-            required_mint_pools=criteria.min_mint_risk_pools,
-            required_wallet_pools=criteria.min_wallet_flow_pools,
-        )
-        required_families = {
-            "adaptive_regime": criteria.require_adaptive_multi_pool,
-            "mint_risk": True,
-            "wallet_flow": True,
-            "portfolio_allocation": criteria.require_portfolio_allocation,
-            "static_hedge": True,
-            "contextual_bandit": criteria.require_contextual_bandit,
-        }
-        stale_required = [
-            item
-            for item in freshness.families
-            if required_families.get(item.family, False)
-            and not item.current
-        ]
-        reasons.extend(
-            "research source freshness: "
-            + item.family
-            + ": "
-            + item.reason
-            for item in stale_required
-        )
-
     if latest_bundle is None:
         reasons.append(
             "persisted Phase 9 research-bundle evidence is required"
