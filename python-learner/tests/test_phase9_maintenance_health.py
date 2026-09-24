@@ -215,3 +215,27 @@ def test_phase9_maintenance_health_cli_exits_nonzero_when_unhealthy(
     payload = json.loads(capsys.readouterr().out)
     assert payload["healthy"] is False
     assert payload["status"] == "DEGRADED"
+
+
+def test_phase9_maintenance_health_ignores_future_events_at_cutoff(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    finish(
+        storage,
+        "COMPLETE",
+        event_time="2026-09-24T10:30:00+00:00",
+    )
+    finish(
+        storage,
+        "FAILED",
+        event_time="2026-09-24T12:30:00+00:00",
+    )
+
+    report = evaluate_phase9_maintenance_health(
+        storage,
+        as_of="2026-09-24T11:00:00+00:00",
+    )
+
+    assert report.healthy is True
+    assert report.status == "HEALTHY"
+    assert report.latest_terminal_status == "COMPLETE"
+    assert report.recent_failure_events == 0
