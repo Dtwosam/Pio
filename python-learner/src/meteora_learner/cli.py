@@ -166,6 +166,10 @@ from .phase9_operation_lease import (
     phase9_operation_lease_status,
     release_phase9_operation_lease,
 )
+from .phase9_maintenance_history import (
+    list_phase9_maintenance_events,
+    record_phase9_maintenance_event,
+)
 from .phase9_evidence_status import evaluate_phase9_evidence_status
 from .phase9_evidence_plan import build_phase9_evidence_plan
 from .phase9_evidence_step import run_phase9_evidence_step
@@ -404,6 +408,58 @@ def _pool_safety_config_from_args(args: argparse.Namespace) -> PoolSafetyConfig:
         min_pool_age_hours=args.min_pool_age_hours,
         min_chain_observations=args.min_chain_observations,
         max_dynamic_fee_pct=args.max_dynamic_fee_pct,
+    )
+
+
+PHASE9_MAINTENANCE_OPERATION_KEY = "phase9-research-maintenance"
+
+
+def _record_phase9_lease_event(
+    storage: Storage,
+    *,
+    activity: str,
+    lease,
+) -> None:
+    event_type = (
+        "LEASE_BUSY"
+        if not lease.acquired
+        else (
+            "LEASE_RECOVERED"
+            if lease.recovered_stale_lease
+            else "LEASE_ACQUIRED"
+        )
+    )
+    record_phase9_maintenance_event(
+        storage,
+        operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
+        activity=activity,
+        owner_id=lease.owner_id,
+        event_type=event_type,
+        status=("RUNNING" if lease.acquired else "BUSY"),
+        details={
+            "lease_until": lease.lease_until,
+            "existing_owner_id": lease.existing_owner_id,
+            "existing_lease_until": lease.existing_lease_until,
+        },
+    )
+
+
+def _record_phase9_run_finished(
+    storage: Storage,
+    *,
+    activity: str,
+    owner_id: str,
+    status: str,
+    details: dict | None = None,
+) -> None:
+    record_phase9_maintenance_event(
+        storage,
+        operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
+        activity=activity,
+        owner_id=owner_id,
+        event_type="RUN_FINISHED",
+        status=status,
+        details=details,
     )
 
 
@@ -2915,6 +2971,21 @@ def main() -> None:
     phase9_maintenance_status.add_argument(
         "--as-of",
         help="Optional timezone-aware evaluation time for deterministic lease inspection",
+    )
+
+    phase9_maintenance_history = subparsers.add_parser(
+        "phase9-maintenance-history",
+        help="Show recent append-only Phase 9 maintenance lifecycle events",
+    )
+    phase9_maintenance_history.add_argument(
+        "--activity",
+        help="Optional activity filter such as evidence-run, source-capture or research-refresh",
+    )
+    phase9_maintenance_history.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum events to return, from 1 to 500",
     )
 
     phase9_research_refresh = subparsers.add_parser(
@@ -6142,8 +6213,13 @@ def main() -> None:
         storage = Storage(settings.database_path)
         lease = acquire_phase9_operation_lease(
             storage,
-            operation_key="phase9-research-maintenance",
+            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
             lease_seconds=args.lease_seconds,
+        )
+        _record_phase9_lease_event(
+            storage,
+            activity="evidence-step",
+            lease=lease,
         )
         if not lease.acquired:
             print(json.dumps({
@@ -6171,6 +6247,20 @@ def main() -> None:
                 "lease": lease.to_record(),
                 "report": result.to_record(),
             }, indent=2))
+            _record_phase9_run_finished(
+                storage,
+                activity="evidence-step",
+                owner_id=lease.owner_id,
+                status=result.status,
+                details={
+                    "debt_type": result.debt_type,
+                    "scope": result.scope,
+                    "progressed": result.progressed,
+                    "research_bundle_ready": (
+                        result.plan_after.research_bundle_ready
+                    ),
+                },
+            )
             if args.require_progress and not (
                 result.progressed
                 or result.status == "READY"
@@ -6181,10 +6271,23 @@ def main() -> None:
                 and not result.plan_after.research_bundle_ready
             ):
                 raise SystemExit(2)
+        except Exception as exc:
+            _record_phase9_run_finished(
+                storage,
+                activity="evidence-step",
+                owner_id=lease.owner_id,
+                status="FAILED",
+                details={
+                    "error": (
+                        f"{type(exc).__name__}: {str(exc)[:1000]}"
+                    ),
+                },
+            )
+            raise
         finally:
             release_phase9_operation_lease(
                 storage,
-                operation_key="phase9-research-maintenance",
+                operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
                 owner_id=lease.owner_id,
             )
         return
@@ -6194,8 +6297,13 @@ def main() -> None:
         storage = Storage(settings.database_path)
         lease = acquire_phase9_operation_lease(
             storage,
-            operation_key="phase9-research-maintenance",
+            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
             lease_seconds=args.lease_seconds,
+        )
+        _record_phase9_lease_event(
+            storage,
+            activity="evidence-run",
+            lease=lease,
         )
         if not lease.acquired:
             print(json.dumps({
@@ -6224,15 +6332,42 @@ def main() -> None:
                 "lease": lease.to_record(),
                 "report": result.to_record(),
             }, indent=2))
+            _record_phase9_run_finished(
+                storage,
+                activity="evidence-run",
+                owner_id=lease.owner_id,
+                status=result.status,
+                details={
+                    "max_steps": result.max_steps,
+                    "steps_attempted": result.steps_attempted,
+                    "steps_progressed": result.steps_progressed,
+                    "terminal_debt_type": result.terminal_debt_type,
+                    "terminal_scope": result.terminal_scope,
+                    "research_bundle_ready": result.research_bundle_ready,
+                },
+            )
             if (
                 args.require_bundle_ready
                 and not result.research_bundle_ready
             ):
                 raise SystemExit(2)
+        except Exception as exc:
+            _record_phase9_run_finished(
+                storage,
+                activity="evidence-run",
+                owner_id=lease.owner_id,
+                status="FAILED",
+                details={
+                    "error": (
+                        f"{type(exc).__name__}: {str(exc)[:1000]}"
+                    ),
+                },
+            )
+            raise
         finally:
             release_phase9_operation_lease(
                 storage,
-                operation_key="phase9-research-maintenance",
+                operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
                 owner_id=lease.owner_id,
             )
         return
@@ -6242,10 +6377,27 @@ def main() -> None:
         storage = Storage(settings.database_path)
         result = phase9_operation_lease_status(
             storage,
-            operation_key="phase9-research-maintenance",
+            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
             as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase9-maintenance-history":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        events = list_phase9_maintenance_events(
+            storage,
+            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
+            activity=args.activity,
+            limit=args.limit,
+        )
+        print(json.dumps({
+            "operation_key": PHASE9_MAINTENANCE_OPERATION_KEY,
+            "activity": args.activity,
+            "count": len(events),
+            "events": [event.to_record() for event in events],
+        }, indent=2))
         return
 
     if args.command == "phase9-source-capture-run":
@@ -6253,8 +6405,13 @@ def main() -> None:
         storage = Storage(settings.database_path)
         lease = acquire_phase9_operation_lease(
             storage,
-            operation_key="phase9-research-maintenance",
+            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
             lease_seconds=args.lease_seconds,
+        )
+        _record_phase9_lease_event(
+            storage,
+            activity="source-capture",
+            lease=lease,
         )
         if not lease.acquired:
             print(json.dumps({
@@ -6311,15 +6468,46 @@ def main() -> None:
                 "lease": lease.to_record(),
                 "report": result.to_record(),
             }, indent=2))
+            _record_phase9_run_finished(
+                storage,
+                activity="source-capture",
+                owner_id=lease.owner_id,
+                status=("PARTIAL" if result.errors else "COMPLETE"),
+                details={
+                    "automatic_source_ready": result.automatic_source_ready,
+                    "chain_history_ready": result.chain_history_ready,
+                    "mint_inputs_ready": result.mint_inputs_ready,
+                    "wallet_source_ready_pools": (
+                        result.wallet_source_ready_pools
+                    ),
+                    "wallet_source_required_pools": (
+                        result.wallet_source_required_pools
+                    ),
+                    "error_count": len(result.errors),
+                },
+            )
             if (
                 args.require_automatic_ready
                 and not result.automatic_source_ready
             ):
                 raise SystemExit(2)
+        except Exception as exc:
+            _record_phase9_run_finished(
+                storage,
+                activity="source-capture",
+                owner_id=lease.owner_id,
+                status="FAILED",
+                details={
+                    "error": (
+                        f"{type(exc).__name__}: {str(exc)[:1000]}"
+                    ),
+                },
+            )
+            raise
         finally:
             release_phase9_operation_lease(
                 storage,
-                operation_key="phase9-research-maintenance",
+                operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
                 owner_id=lease.owner_id,
             )
         return
@@ -6329,8 +6517,13 @@ def main() -> None:
         storage = Storage(settings.database_path)
         lease = acquire_phase9_operation_lease(
             storage,
-            operation_key="phase9-research-maintenance",
+            operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
             lease_seconds=args.lease_seconds,
+        )
+        _record_phase9_lease_event(
+            storage,
+            activity="research-refresh",
+            lease=lease,
         )
         if not lease.acquired:
             print(json.dumps({
@@ -6356,6 +6549,22 @@ def main() -> None:
                 "lease": lease.to_record(),
                 "report": result.to_record(),
             }, indent=2))
+            _record_phase9_run_finished(
+                storage,
+                activity="research-refresh",
+                owner_id=lease.owner_id,
+                status="COMPLETE",
+                details={
+                    "automatic_families_ready": (
+                        result.automatic_families_ready
+                    ),
+                    "bundle_ready_after": result.bundle_ready_after,
+                    "bundle_persisted_evidence_id": (
+                        result.bundle_persisted_evidence_id
+                    ),
+                    "item_count": len(result.items),
+                },
+            )
             if (
                 args.require_automatic_ready
                 and not result.automatic_families_ready
@@ -6366,10 +6575,23 @@ def main() -> None:
                 and not result.bundle_ready_after
             ):
                 raise SystemExit(2)
+        except Exception as exc:
+            _record_phase9_run_finished(
+                storage,
+                activity="research-refresh",
+                owner_id=lease.owner_id,
+                status="FAILED",
+                details={
+                    "error": (
+                        f"{type(exc).__name__}: {str(exc)[:1000]}"
+                    ),
+                },
+            )
+            raise
         finally:
             release_phase9_operation_lease(
                 storage,
-                operation_key="phase9-research-maintenance",
+                operation_key=PHASE9_MAINTENANCE_OPERATION_KEY,
                 owner_id=lease.owner_id,
             )
         return
