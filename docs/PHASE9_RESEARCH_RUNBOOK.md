@@ -1291,6 +1291,7 @@ sudo systemctl enable --now pio-phase9-evidence-run.timer
 journalctl -u pio-phase9-evidence-run.service
 pio phase9-maintenance-status
 pio phase9-maintenance-history --limit 20
+pio phase9-maintenance-health --require-healthy
 ```
 
 The service invokes:
@@ -1326,3 +1327,11 @@ records lease acquisition/BUSY/recovery and a terminal outcome when execution
 starts. Rows are immutable at the SQLite boundary. They are useful for
 diagnosing unattended collection and restart behavior, but they are never
 counted as Phase 9 research evidence.
+
+The maintenance-health view adds an operational fail-able check over that same
+journal and the shared lease. A recent healthy terminal state or active lease
+passes; `MANUAL_REQUIRED` passes with operator attention flagged; failures,
+partial/no-progress results, stale history, missing terminal history and
+expired orphaned leases fail closed. The optional
+`pio-phase9-maintenance-health.timer` runs this check every 15 minutes with
+network access disabled.
