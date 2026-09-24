@@ -6331,10 +6331,15 @@ def main() -> None:
                 ),
                 history_interval_seconds=args.history_interval_seconds,
             )
-            print(json.dumps({
+            output = {
                 "lease": lease.to_record(),
                 "report": result.to_record(),
-            }, indent=2))
+            }
+            if result.status == "MANUAL_REQUIRED":
+                output["operator_handoff_command"] = (
+                    "pio phase9-operator-handoff"
+                )
+            print(json.dumps(output, indent=2))
             _record_phase9_run_finished(
                 storage,
                 activity="evidence-step",
@@ -6411,10 +6416,15 @@ def main() -> None:
                 max_steps=args.max_steps,
                 history_interval_seconds=args.history_interval_seconds,
             )
-            print(json.dumps({
+            output = {
                 "lease": lease.to_record(),
                 "report": result.to_record(),
-            }, indent=2))
+            }
+            if result.status == "MANUAL_REQUIRED":
+                output["operator_handoff_command"] = (
+                    "pio phase9-operator-handoff"
+                )
+            print(json.dumps(output, indent=2))
             _record_phase9_run_finished(
                 storage,
                 activity="evidence-run",
