@@ -294,6 +294,7 @@ Built:
 - deterministic Phase 8 operator handoff that separates safe offline automation, passive real-evidence waits, explicit retraining economics, and operator-owned PAPER/promotion/safety actions without performing those manual transitions
 - current-only consolidated Phase 8 status/planning/handoff semantics that reject historical cutoffs until immutable model/cycle transition history exists, avoiding mixed-time promotion answers
 - append-only Phase 8 model/cycle transition journals with immutable SQLite triggers, migration-start watermark, legacy-row baseline backfill and fail-able coverage/trigger audit; historical consolidated evaluation remains disabled until it is explicitly rebuilt on this journal
+- journal-backed Phase 8 historical state snapshot for cutoffs at/after the migration watermark, reconstructing Phase 7 promotion visibility plus per-model and per-cycle state while detecting impossible multiple-champion/active-cycle states; this is state reconstruction only, not historical promotion readiness
 
 Still needed:
 - real Phase 7 promotion evidence
