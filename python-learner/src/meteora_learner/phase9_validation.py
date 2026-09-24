@@ -35,6 +35,9 @@ from .mint_snapshot_lineage import (
     mint_risk_pool_source_record,
     mint_risk_source_sha256,
 )
+from .phase8_historical_promotion import (
+    audit_persisted_phase8_promotion_at,
+)
 from .phase8_validation import audit_persisted_phase8_promotion
 from .phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
@@ -136,25 +139,50 @@ def _latest_by_pool(
     storage: Storage,
     *,
     edge_type: str,
+    as_of: str | None = None,
 ) -> list[dict[str, Any]]:
     with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT e.id, e.created_at, e.edge_type, e.pool_address,
-                   e.as_of, e.status, e.qualified, e.evidence_json
-            FROM advanced_edge_evidence e
-            JOIN (
-                SELECT pool_address, MAX(id) AS max_id
-                FROM advanced_edge_evidence
-                WHERE edge_type = ?
-                GROUP BY pool_address
-            ) latest
-              ON latest.max_id = e.id
-            WHERE e.edge_type = ?
-            ORDER BY e.pool_address ASC
-            """,
-            (edge_type, edge_type),
-        ).fetchall()
+        if as_of is None:
+            rows = conn.execute(
+                """
+                SELECT e.id, e.created_at, e.edge_type, e.pool_address,
+                       e.as_of, e.status, e.qualified, e.evidence_json
+                FROM advanced_edge_evidence e
+                JOIN (
+                    SELECT pool_address, MAX(id) AS max_id
+                    FROM advanced_edge_evidence
+                    WHERE edge_type = ?
+                    GROUP BY pool_address
+                ) latest
+                  ON latest.max_id = e.id
+                WHERE e.edge_type = ?
+                ORDER BY e.pool_address ASC
+                """,
+                (edge_type, edge_type),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT e.id, e.created_at, e.edge_type, e.pool_address,
+                       e.as_of, e.status, e.qualified, e.evidence_json
+                FROM advanced_edge_evidence e
+                JOIN (
+                    SELECT pool_address, MAX(id) AS max_id
+                    FROM advanced_edge_evidence
+                    WHERE edge_type = ?
+                      AND julianday(created_at) <= julianday(?)
+                      AND (
+                          as_of IS NULL
+                          OR julianday(as_of) <= julianday(?)
+                      )
+                    GROUP BY pool_address
+                ) latest
+                  ON latest.max_id = e.id
+                WHERE e.edge_type = ?
+                ORDER BY e.pool_address ASC
+                """,
+                (edge_type, as_of, as_of, edge_type),
+            ).fetchall()
 
     import json
 
@@ -177,8 +205,13 @@ def _summary(
     storage: Storage,
     *,
     edge_type: str,
+    as_of: str | None = None,
 ) -> Phase9EvidenceSummary:
-    rows = _latest_by_pool(storage, edge_type=edge_type)
+    rows = _latest_by_pool(
+        storage,
+        edge_type=edge_type,
+        as_of=as_of,
+    )
     boundary_valid = all(
         row["evidence"].get("research_only") is True
         and row["evidence"].get("policy_actionable") is False
@@ -206,10 +239,13 @@ def _summary(
 
 def _adaptive_snapshot_lineage_valid(
     storage: Storage,
+    *,
+    as_of: str | None = None,
 ) -> bool:
     rows = _latest_by_pool(
         storage,
         edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        as_of=as_of,
     )
     qualified = [row for row in rows if row["qualified"]]
     if not qualified:
@@ -329,10 +365,15 @@ def _adaptive_snapshot_lineage_valid(
     return True
 
 
-def _mint_lineage_valid(storage: Storage) -> bool:
+def _mint_lineage_valid(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> bool:
     rows = _latest_by_pool(
         storage,
         edge_type=MINT_RISK_EVIDENCE_TYPE,
+        as_of=as_of,
     )
     qualified = [row for row in rows if row["qualified"]]
     if not qualified:
@@ -440,10 +481,15 @@ def _mint_lineage_valid(storage: Storage) -> bool:
     return True
 
 
-def _wallet_flow_lineage_valid(storage: Storage) -> bool:
+def _wallet_flow_lineage_valid(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> bool:
     rows = _latest_by_pool(
         storage,
         edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        as_of=as_of,
     )
     qualified = [row for row in rows if row["qualified"]]
     if not qualified:
@@ -533,10 +579,15 @@ def _wallet_flow_lineage_valid(storage: Storage) -> bool:
     return True
 
 
-def _allocation_lineage_valid(storage: Storage) -> bool:
+def _allocation_lineage_valid(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> bool:
     rows = _latest_by_pool(
         storage,
         edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        as_of=as_of,
     )
     if not rows:
         return False
@@ -652,10 +703,13 @@ def _allocation_lineage_valid(storage: Storage) -> bool:
 
 def _static_hedge_lineage_valid(
     storage: Storage,
+    *,
+    as_of: str | None = None,
 ) -> bool:
     rows = _latest_by_pool(
         storage,
         edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        as_of=as_of,
     )
     qualified = [row for row in rows if row["qualified"]]
     if not qualified:
@@ -790,10 +844,15 @@ def _static_hedge_lineage_valid(
     return True
 
 
-def _bandit_lineage_valid(storage: Storage) -> bool:
+def _bandit_lineage_valid(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> bool:
     rows = _latest_by_pool(
         storage,
         edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        as_of=as_of,
     )
     if not rows:
         return False
@@ -953,35 +1012,68 @@ def evaluate_phase9_research_bundle(
     criteria: Phase9ResearchBundleCriteria = (
         Phase9ResearchBundleCriteria()
     ),
+    as_of: str | None = None,
 ) -> Phase9ResearchBundleReport:
-    phase8_audit = audit_persisted_phase8_promotion(storage)
-    phase8_promoted = phase8_audit.current
+    if as_of is None:
+        phase8_audit = audit_persisted_phase8_promotion(storage)
+        phase8_promoted = phase8_audit.current
+        phase8_reasons = phase8_audit.reasons
+    else:
+        phase8_audit = audit_persisted_phase8_promotion_at(
+            storage,
+            as_of=as_of,
+        )
+        phase8_promoted = phase8_audit.valid_at_cutoff
+        phase8_reasons = phase8_audit.reasons
     storage_integrity = evaluate_phase9_storage_integrity(storage)
 
     adaptive = _summary(
         storage,
         edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        as_of=as_of,
     )
-    mint = _summary(storage, edge_type=MINT_RISK_EVIDENCE_TYPE)
-    wallet = _summary(storage, edge_type=WALLET_FLOW_EVIDENCE_TYPE)
+    mint = _summary(
+        storage,
+        edge_type=MINT_RISK_EVIDENCE_TYPE,
+        as_of=as_of,
+    )
+    wallet = _summary(
+        storage,
+        edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+        as_of=as_of,
+    )
     allocation = _summary(
         storage,
         edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        as_of=as_of,
     )
-    hedge = _summary(storage, edge_type=STATIC_HEDGE_EVIDENCE_TYPE)
+    hedge = _summary(
+        storage,
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        as_of=as_of,
+    )
     bandit = _summary(
         storage,
         edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        as_of=as_of,
     )
 
     reasons: list[str] = []
     if not phase8_promoted:
         reasons.append(
-            "Phase 8 promotion must still be current before Phase 9 research can be ready"
+            (
+                "Phase 8 promotion must still be current before Phase 9 research can be ready"
+                if as_of is None
+                else "Phase 8 promotion was not valid at the historical cutoff"
+            )
         )
         reasons.extend(
-            f"Phase 8 currentness: {reason}"
-            for reason in phase8_audit.reasons
+            (
+                f"Phase 8 currentness: {reason}"
+                if as_of is None
+                else f"Phase 8 historical validity: {reason}"
+            )
+            for reason in phase8_reasons
         )
     if not storage_integrity.verified:
         reasons.extend(
@@ -1013,7 +1105,7 @@ def evaluate_phase9_research_bundle(
         criteria.require_adaptive_multi_pool
         and criteria.require_adaptive_snapshot_lineage
         and adaptive.qualified_records >= 1
-        and not _adaptive_snapshot_lineage_valid(storage)
+        and not _adaptive_snapshot_lineage_valid(storage, as_of=as_of)
     ):
         reasons.append(
             "qualified adaptive/regime evidence must resolve to immutable "
@@ -1027,7 +1119,7 @@ def evaluate_phase9_research_bundle(
     if (
         criteria.require_mint_snapshot_lineage
         and mint.qualified_records >= criteria.min_mint_risk_pools
-        and not _mint_lineage_valid(storage)
+        and not _mint_lineage_valid(storage, as_of=as_of)
     ):
         reasons.append(
             "qualified mint-risk evidence must resolve to authoritative "
@@ -1041,7 +1133,7 @@ def evaluate_phase9_research_bundle(
     if (
         criteria.require_wallet_flow_lineage
         and wallet.qualified_records >= criteria.min_wallet_flow_pools
-        and not _wallet_flow_lineage_valid(storage)
+        and not _wallet_flow_lineage_valid(storage, as_of=as_of)
     ):
         reasons.append(
             "qualified wallet-flow evidence must resolve to immutable "
@@ -1058,7 +1150,7 @@ def evaluate_phase9_research_bundle(
         criteria.require_portfolio_allocation
         and criteria.require_portfolio_allocation_lineage
         and allocation.qualified_records >= 1
-        and not _allocation_lineage_valid(storage)
+        and not _allocation_lineage_valid(storage, as_of=as_of)
     ):
         reasons.append(
             "qualified portfolio-allocation evidence must be bound to "
@@ -1072,7 +1164,7 @@ def evaluate_phase9_research_bundle(
     if (
         criteria.require_static_hedge_lineage
         and hedge.qualified_records >= criteria.min_static_hedge_pools
-        and not _static_hedge_lineage_valid(storage)
+        and not _static_hedge_lineage_valid(storage, as_of=as_of)
     ):
         reasons.append(
             "qualified static-hedge evidence must resolve to immutable "
@@ -1089,7 +1181,7 @@ def evaluate_phase9_research_bundle(
         criteria.require_contextual_bandit
         and criteria.require_contextual_bandit_lineage
         and bandit.qualified_records >= 1
-        and not _bandit_lineage_valid(storage)
+        and not _bandit_lineage_valid(storage, as_of=as_of)
     ):
         reasons.append(
             "qualified contextual-bandit evidence must be bound to a "
