@@ -1560,14 +1560,40 @@ def build_phase9_work_queue(
             )
             controlled_validation_current = controlled_audit.current
             if not controlled_validation_current:
-                controlled_cycle = _latest_controlled_validation_cycle(
+                controlled_key = _latest_controlled_validation_cycle(
                     storage,
                 )
-                if controlled_cycle is None:
+                controlled_cycle = None
+                controlled_dataset_id = None
+                if controlled_key is not None:
+                    if controlled_key.startswith("phase9-dataset:"):
+                        try:
+                            controlled_dataset_id = int(
+                                controlled_key.split(":", 1)[1]
+                            )
+                        except (TypeError, ValueError):
+                            controlled_dataset_id = None
+                    else:
+                        controlled_cycle = controlled_key
+
+                if (
+                    controlled_cycle is None
+                    and controlled_dataset_id is None
+                ):
                     controlled_cycle = _latest_retraining_dataset_cycle(
                         storage,
                     )
+                if (
+                    controlled_cycle is None
+                    and controlled_dataset_id is None
+                ):
+                    controlled_dataset_id = (
+                        _latest_phase9_bandit_dataset_id(storage)
+                    )
+
                 controlled_report = None
+                controlled_scope = None
+                controlled_command = None
                 if controlled_cycle is not None:
                     controlled_report = (
                         evaluate_phase9_policy_controlled_validation(
@@ -1575,26 +1601,44 @@ def build_phase9_work_queue(
                             cycle_id=controlled_cycle,
                         )
                     )
+                    controlled_scope = controlled_cycle
+                    controlled_command = (
+                        "pio phase9-policy-controlled-validate "
+                        "--cycle-id "
+                        + _q(controlled_cycle)
+                        + " --persist --require-ready"
+                    )
+                elif controlled_dataset_id is not None:
+                    controlled_report = (
+                        evaluate_phase9_policy_controlled_validation(
+                            storage,
+                            dataset_evidence_id=controlled_dataset_id,
+                        )
+                    )
+                    controlled_scope = (
+                        f"phase9-dataset:{controlled_dataset_id}"
+                    )
+                    controlled_command = (
+                        "pio phase9-policy-controlled-validate "
+                        "--dataset-evidence-id "
+                        + _q(controlled_dataset_id)
+                        + " --persist --require-ready"
+                    )
+
                 if (
-                    controlled_cycle is not None
-                    and controlled_report is not None
+                    controlled_report is not None
                     and controlled_report.controlled_validation_ready
                 ):
                     items.append(
                         Phase9WorkItem(
                             task_type="PERSIST_CONTROLLED_VALIDATION",
-                            scope=controlled_cycle,
+                            scope=str(controlled_scope),
                             reason=(
-                                "a fresh independent holdout passes current "
-                                "controlled validation but persisted evidence "
-                                "is missing or stale"
+                                "a fresh independent checksum-bound holdout "
+                                "passes current controlled validation but "
+                                "persisted evidence is missing or stale"
                             ),
-                            shell_command=(
-                                "pio phase9-policy-controlled-validate "
-                                "--cycle-id "
-                                + _q(controlled_cycle)
-                                + " --persist --require-ready"
-                            ),
+                            shell_command=controlled_command,
                         )
                     )
                 else:
@@ -1606,11 +1650,11 @@ def build_phase9_work_queue(
                     items.append(
                         Phase9WorkItem(
                             task_type="FRESH_CONTROLLED_HOLDOUT_REQUIRED",
-                            scope="FRESH_RETRAINING_CYCLE",
+                            scope="FRESH_CHECKSUM_BOUND_DATASET",
                             reason=(
                                 "controlled validation requires a fresh "
-                                "checksum-bound cycle independent of the "
-                                "authorization corpus"
+                                "checksum-bound dataset source independent "
+                                "of the authorization corpus"
                                 + (
                                     ": " + "; ".join(dict.fromkeys(details))
                                     if details
