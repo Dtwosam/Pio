@@ -184,7 +184,11 @@ def test_evidence_step_runs_only_history_capture_for_history_debt(
     assert report.status == "COMPLETE"
     assert report.debt_type == "CHAIN_HISTORY_DEPTH"
     assert report.progressed is True
-    assert report.operation == {"pools_captured": 2}
+    assert report.operation == {
+        "pools_captured": 2,
+        "pools_skipped_interval": 0,
+        "pools_failed": 0,
+    }
     assert len(calls) == 1
     assert calls[0]["pool_addresses"] == ("pool-a", "pool-b")
     assert calls[0]["min_observation_interval_seconds"] == 3600
