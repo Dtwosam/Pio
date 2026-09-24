@@ -27,6 +27,9 @@ from .phase9_explicit_inputs import (
     audit_phase9_explicit_inputs,
     load_phase9_explicit_inputs,
 )
+from .phase9_bandit_dataset import (
+    PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+)
 from .phase9_wallet_flow_capture import wallet_flow_source_state
 from .phase9_pool_activity_scan_state import (
     phase9_pool_activity_scan_state,
@@ -316,6 +319,28 @@ def _latest_retraining_dataset_cycle(
     ):
         return None
     return cycle_id
+
+
+def _latest_phase9_bandit_dataset_id(
+    storage: Storage,
+) -> int | None:
+    latest = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT_DATASET__",
+    )
+    if latest is None:
+        return None
+    evidence = latest.get("evidence")
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("research_only") is not True
+        or evidence.get("policy_actionable") is not False
+        or evidence.get("execution_wired") is not False
+        or str(latest.get("status", "")) != "BUILT"
+        or bool(latest.get("qualified"))
+    ):
+        return None
+    return int(latest["id"])
 
 
 def _latest_controlled_validation_cycle(
@@ -1452,31 +1477,58 @@ def build_phase9_work_queue(
                 )
             else:
                 latest_cycle = _latest_retraining_dataset_cycle(storage)
+                latest_dataset_id = (
+                    None
+                    if latest_cycle is not None
+                    else _latest_phase9_bandit_dataset_id(storage)
+                )
                 candidate_report = None
+                candidate_scope = None
+                candidate_command = None
+                candidate_reason = None
                 if latest_cycle is not None:
                     candidate_report = evaluate_phase9_shadow(
                         storage,
                         cycle_id=latest_cycle,
                     )
+                    candidate_scope = latest_cycle
+                    candidate_command = (
+                        "pio phase9-shadow-validate --cycle-id "
+                        + _q(latest_cycle)
+                        + " --persist --require-ready"
+                    )
+                    candidate_reason = (
+                        "authorization evidence is not ready; the latest "
+                        "checksum-bound retraining cycle can supply or "
+                        "refresh qualifying shadow evidence"
+                    )
+                elif latest_dataset_id is not None:
+                    candidate_report = evaluate_phase9_shadow(
+                        storage,
+                        dataset_evidence_id=latest_dataset_id,
+                    )
+                    candidate_scope = f"phase9-dataset:{latest_dataset_id}"
+                    candidate_command = (
+                        "pio phase9-shadow-validate --dataset-evidence-id "
+                        + _q(latest_dataset_id)
+                        + " --persist --require-ready"
+                    )
+                    candidate_reason = (
+                        "authorization evidence is not ready; the latest "
+                        "checksum-bound Phase 9 bandit dataset can supply "
+                        "or refresh qualifying post-promotion shadow evidence"
+                    )
+
                 if (
-                    latest_cycle is not None
-                    and candidate_report is not None
+                    candidate_report is not None
                     and candidate_report.shadow_ready
                 ):
                     items.append(
                         Phase9WorkItem(
                             task_type="PHASE9_SHADOW_VALIDATION",
-                            scope=latest_cycle,
-                            reason=(
-                                "authorization evidence is not ready; the "
-                                "latest checksum-bound retraining cycle can "
-                                "supply or refresh qualifying shadow evidence"
-                            ),
-                            shell_command=(
-                                "pio phase9-shadow-validate --cycle-id "
-                                + _q(latest_cycle)
-                                + " --persist --require-ready"
-                            ),
+                            scope=str(candidate_scope),
+                            reason=str(candidate_reason),
+                            shell_command=candidate_command,
                         )
                     )
                 else:
@@ -1486,7 +1538,7 @@ def build_phase9_work_queue(
                     items.append(
                         Phase9WorkItem(
                             task_type="POST_PROMOTION_SHADOW_REQUIRED",
-                            scope="FRESH_RETRAINING_CYCLE",
+                            scope="FRESH_CHECKSUM_BOUND_DATASET",
                             reason=(
                                 "additional independent post-promotion shadow "
                                 "evidence is required"
