@@ -69,6 +69,9 @@ from .phase8_transition_history import (
     list_phase8_cycle_status_history,
     list_phase8_model_status_history,
 )
+from .phase8_historical_state import (
+    build_phase8_historical_state_snapshot,
+)
 from .phase8_retrain_inputs import (
     audit_phase8_retrain_inputs,
     check_phase8_retrain_inputs,
@@ -1695,6 +1698,21 @@ def main() -> None:
         "--require-ready",
         action="store_true",
         help="Exit non-zero unless journal triggers, baseline coverage and start watermark are intact",
+    )
+
+    phase8_transition_snapshot = subparsers.add_parser(
+        "phase8-transition-snapshot",
+        help="Reconstruct journal-backed Phase 8 model/cycle state at a cutoff at or after the transition-history watermark",
+    )
+    phase8_transition_snapshot.add_argument(
+        "--as-of",
+        required=True,
+        help="Timezone-aware cutoff at or after the transition-history start watermark",
+    )
+    phase8_transition_snapshot.add_argument(
+        "--require-consistent",
+        action="store_true",
+        help="Exit non-zero if the reconstructed model/cycle state is internally inconsistent",
     )
 
 
@@ -5393,6 +5411,18 @@ def main() -> None:
             ],
         }, indent=2))
         if args.require_ready and not audit.journal_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase8-transition-snapshot":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_phase8_historical_state_snapshot(
+            storage,
+            as_of=args.as_of,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_consistent and not result.consistent:
             raise SystemExit(2)
         return
 
