@@ -1,4 +1,6 @@
+import json
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 from meteora_learner.contextual_bandit import (
     CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
@@ -163,6 +165,74 @@ def save_wallet_event(storage, pool, suffix, created_at):
             ),
         )
         return int(cursor.lastrowid)
+
+
+def save_advanced_at(
+    storage,
+    *,
+    edge_type,
+    pool_address,
+    created_at,
+    as_of,
+    status,
+    qualified,
+    evidence,
+):
+    with storage.connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO advanced_edge_evidence(
+                created_at,
+                edge_type,
+                pool_address,
+                as_of,
+                status,
+                qualified,
+                evidence_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                created_at,
+                edge_type,
+                pool_address,
+                as_of,
+                status,
+                int(qualified),
+                json.dumps(
+                    evidence,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def save_explicit_at(storage, *, created_at, payload):
+    inputs = parse_phase9_explicit_inputs(payload)
+    record = inputs.to_record()
+    digest = __import__(
+        "meteora_learner.phase9_explicit_inputs",
+        fromlist=["_canonical_sha256"],
+    )._canonical_sha256(record)
+    evidence_id = save_advanced_at(
+        storage,
+        edge_type="PHASE9_EXPLICIT_RESEARCH_INPUTS_V1",
+        pool_address="__PHASE9_EXPLICIT_RESEARCH_INPUTS__",
+        created_at=created_at,
+        as_of=None,
+        status="INPUTS_VALIDATED",
+        qualified=False,
+        evidence={
+            "artifact_sha256": digest,
+            "inputs": record,
+        },
+    )
+    return SimpleNamespace(
+        evidence_id=evidence_id,
+        artifact_sha256=digest,
+        inputs=inputs,
+    )
 
 
 def freshness(storage, family):
@@ -1088,9 +1158,11 @@ def test_historical_source_freshness_ignores_rows_after_cutoff(tmp_path):
         "historical",
         "2026-09-23T10:00:00+00:00",
     )
-    storage.save_advanced_edge_evidence(
+    save_advanced_at(
+        storage,
         edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
         pool_address="__MULTI_POOL__",
+        created_at="2026-09-23T10:00:00+00:00",
         as_of="2026-09-23T10:00:00+00:00",
         status="QUALIFIED_RESEARCH",
         qualified=True,
@@ -1108,9 +1180,11 @@ def test_historical_source_freshness_ignores_rows_after_cutoff(tmp_path):
             ],
         },
     )
-    storage.save_advanced_edge_evidence(
+    save_advanced_at(
+        storage,
         edge_type=MINT_RISK_EVIDENCE_TYPE,
         pool_address="pool-a",
+        created_at="2026-09-23T10:00:00+00:00",
         as_of="2026-09-23T10:00:00+00:00",
         status="QUALIFIED_RESEARCH",
         qualified=True,
@@ -1127,9 +1201,11 @@ def test_historical_source_freshness_ignores_rows_after_cutoff(tmp_path):
             ],
         },
     )
-    storage.save_advanced_edge_evidence(
+    save_advanced_at(
+        storage,
         edge_type=WALLET_FLOW_EVIDENCE_TYPE,
         pool_address="pool-a",
+        created_at="2026-09-23T10:00:00+00:00",
         as_of="2026-09-23T10:00:00+00:00",
         status="QUALIFIED_RESEARCH",
         qualified=True,
@@ -1187,9 +1263,11 @@ def test_historical_source_freshness_rejects_evidence_after_cutoff(tmp_path):
         "future-evidence",
         "2026-09-23T12:00:00+00:00",
     )
-    storage.save_advanced_edge_evidence(
+    save_advanced_at(
+        storage,
         edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
         pool_address="__MULTI_POOL__",
+        created_at="2026-09-23T12:00:00+00:00",
         as_of="2026-09-23T12:00:00+00:00",
         status="QUALIFIED_RESEARCH",
         qualified=True,
@@ -1207,9 +1285,11 @@ def test_historical_source_freshness_rejects_evidence_after_cutoff(tmp_path):
             ],
         },
     )
-    storage.save_advanced_edge_evidence(
+    save_advanced_at(
+        storage,
         edge_type=MINT_RISK_EVIDENCE_TYPE,
         pool_address="pool-a",
+        created_at="2026-09-23T12:00:00+00:00",
         as_of="2026-09-23T12:00:00+00:00",
         status="QUALIFIED_RESEARCH",
         qualified=True,
@@ -1226,9 +1306,11 @@ def test_historical_source_freshness_rejects_evidence_after_cutoff(tmp_path):
             ],
         },
     )
-    storage.save_advanced_edge_evidence(
+    save_advanced_at(
+        storage,
         edge_type=WALLET_FLOW_EVIDENCE_TYPE,
         pool_address="pool-a",
+        created_at="2026-09-23T12:00:00+00:00",
         as_of="2026-09-23T12:00:00+00:00",
         status="QUALIFIED_RESEARCH",
         qualified=True,
@@ -1248,4 +1330,195 @@ def test_historical_source_freshness_rejects_evidence_after_cutoff(tmp_path):
 
     for family in ("adaptive_regime", "mint_risk", "wallet_flow"):
         assert by_family[family].current is False
-        assert "after cutoff" in by_family[family].reason
+        assert "missing" in by_family[family].reason
+
+
+def test_historical_explicit_backed_freshness_ignores_future_assumptions(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    pool_id = save_pool(
+        storage,
+        "pool-a",
+        "2026-09-24T10:00:00+00:00",
+    )
+    for pool in ("pool-b", "pool-c"):
+        save_pool(
+            storage,
+            pool,
+            "2026-09-24T10:00:00+00:00",
+        )
+    artifact_a = save_explicit_at(
+        storage,
+        created_at="2026-09-24T10:00:00+00:00",
+        payload=explicit_payload(),
+    )
+    spec = artifact_a.inputs.static_hedges[0]
+    save_advanced_at(
+        storage,
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        created_at="2026-09-24T10:05:00+00:00",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "amount_x": spec.amount_x,
+            "amount_y": spec.amount_y,
+            "instrument": {
+                "instrument_id": spec.instrument.instrument_id,
+                "venue": spec.instrument.venue,
+                "available_liquidity_y_atomic": (
+                    spec.instrument.available_liquidity_y_atomic
+                ),
+                "max_liquidity_share_bps": (
+                    spec.instrument.max_liquidity_share_bps
+                ),
+                "max_leverage": spec.instrument.max_leverage,
+                "funding_bps_per_holding_window": (
+                    spec.instrument.funding_bps_per_holding_window
+                ),
+            },
+            "criteria": {
+                "observation_limit": spec.criteria.observation_limit,
+                "holding_observations": spec.criteria.holding_observations,
+                "hedge_fraction": spec.criteria.hedge_fraction,
+                "hedge_round_trip_cost_bps": (
+                    spec.criteria.hedge_round_trip_cost_bps
+                ),
+                "min_windows": spec.criteria.min_windows,
+                "min_mean_abs_return_reduction_bps": (
+                    spec.criteria.min_mean_abs_return_reduction_bps
+                ),
+                "min_worst_loss_improvement_bps": (
+                    spec.criteria.min_worst_loss_improvement_bps
+                ),
+                "max_mean_return_drag_bps": (
+                    spec.criteria.max_mean_return_drag_bps
+                ),
+            },
+            "as_of": None,
+            "source_observations": [
+                {
+                    "pool_snapshot_id": pool_id,
+                    "observed_at": "2026-09-24T10:00:00+00:00",
+                }
+            ],
+        },
+    )
+    save_advanced_at(
+        storage,
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+        created_at="2026-09-24T10:06:00+00:00",
+        as_of="2026-09-24T10:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "dataset_lineage": {
+                "source_type": PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+                "explicit_input_evidence_id": artifact_a.evidence_id,
+                "explicit_input_artifact_sha256": artifact_a.artifact_sha256,
+                "cutoff": "2026-09-24T10:00:00+00:00",
+            },
+        },
+    )
+    artifact_b = save_explicit_at(
+        storage,
+        created_at="2026-09-24T12:00:00+00:00",
+        payload=explicit_payload(hedge_cost=25.0, budget=300.0),
+    )
+
+    historical = evaluate_phase9_source_freshness(
+        storage,
+        as_of="2026-09-24T11:00:00+00:00",
+    )
+    current = evaluate_phase9_source_freshness(storage)
+    historical_by_family = {
+        item.family: item for item in historical.families
+    }
+    current_by_family = {
+        item.family: item for item in current.families
+    }
+
+    assert historical_by_family["static_hedge"].current is True
+    assert historical_by_family["contextual_bandit"].current is True
+
+    assert current_by_family["static_hedge"].current is False
+    assert current_by_family["contextual_bandit"].current is False
+    assert str(artifact_b.evidence_id) in (
+        current_by_family["contextual_bandit"].reason
+    )
+
+
+def test_historical_bandit_freshness_ignores_future_retraining_dataset(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    save_advanced_at(
+        storage,
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+        created_at="2026-09-24T10:05:00+00:00",
+        as_of="2026-09-24T10:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "dataset_lineage": {
+                "cycle_id": "cycle-a",
+            },
+        },
+    )
+    with storage.connect() as conn:
+        for cycle_id, created_at in (
+            ("cycle-a", "2026-09-24T10:00:00+00:00"),
+            ("cycle-b", "2026-09-24T12:00:00+00:00"),
+        ):
+            conn.execute(
+                """
+                INSERT INTO model_live_evidence(
+                    model_id,
+                    created_at,
+                    evidence_type,
+                    status,
+                    evidence_json
+                ) VALUES ('champion', ?, 'CONTINUOUS_RETRAIN_DATASET_V1',
+                          'BUILT', ?)
+                """,
+                (
+                    created_at,
+                    json.dumps(
+                        {"cycle_id": cycle_id},
+                        separators=(",", ":"),
+                    ),
+                ),
+            )
+
+    historical = evaluate_phase9_source_freshness(
+        storage,
+        as_of="2026-09-24T11:00:00+00:00",
+    )
+    current = evaluate_phase9_source_freshness(storage)
+    historical_bandit = next(
+        item
+        for item in historical.families
+        if item.family == "contextual_bandit"
+    )
+    current_bandit = next(
+        item
+        for item in current.families
+        if item.family == "contextual_bandit"
+    )
+
+    assert historical_bandit.current is True
+    assert current_bandit.current is False
+    assert "newer retraining dataset cycle cycle-b" in current_bandit.reason
