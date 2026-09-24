@@ -420,3 +420,38 @@ def test_phase8_retrain_input_check_cli_fails_closed_without_persistence(
         )
         is None
     )
+
+
+def test_phase8_retrain_input_ingest_runs_preflight_before_persistence(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_champion(storage)
+    payload = filled_payload()
+    payload["champion_dataset_version"] = "stale-dataset"
+    input_file = tmp_path / "phase8-retrain-inputs.json"
+    input_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase8-retrain-inputs-ingest",
+            "--file",
+            str(input_file),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="preflight failed"):
+        cli.main()
+
+    assert (
+        storage.latest_model_live_evidence(
+            "champion-1",
+            evidence_type=PHASE8_RETRAIN_INPUTS_EVIDENCE_TYPE,
+        )
+        is None
+    )
