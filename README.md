@@ -153,6 +153,7 @@ pio phase9-evidence-status  # quantitative ranked-cohort/source/family readiness
 pio phase9-evidence-plan  # ranked evidence debt + one deterministic next safe action
 pio phase9-evidence-step-run  # execute exactly one planner-selected safe evidence step
 pio phase9-evidence-run --max-steps 8  # bounded safe steps until ready/manual/wait/failure/no-progress
+# WAITING_SOURCE_ACTIVITY requires exhausted wallet backfill + zero deferred owner/position work + no collector failures
 # WAITING_INTERVAL includes deterministic next_retry_at from persisted pool cadence
 pio phase9-operator-handoff  # exact operator-owned blocker + non-inventing follow-up
 pio phase9-research-refresh-run  # replay-aware automatic research refresh; no promotion
