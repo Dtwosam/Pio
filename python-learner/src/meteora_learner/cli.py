@@ -73,6 +73,7 @@ from .phase8_historical_state import (
     build_phase8_historical_state_snapshot,
 )
 from .phase8_historical_promotion import (
+    audit_persisted_phase8_promotion_at,
     evaluate_phase8_historical_promotion,
 )
 from .phase8_retrain_inputs import (
@@ -1772,6 +1773,22 @@ def main() -> None:
         "--require-ready",
         action="store_true",
         help="Exit non-zero unless Phase 8 promotion would have been ready at the historical cutoff",
+    )
+
+
+    phase8_historical_promotion_audit = subparsers.add_parser(
+        "phase8-historical-promotion-audit",
+        help="Audit whether persisted Phase 8 promotion history was valid at a historical cutoff",
+    )
+    phase8_historical_promotion_audit.add_argument(
+        "--as-of",
+        required=True,
+        help="Timezone-aware cutoff at or after the Phase 8 transition-history watermark",
+    )
+    phase8_historical_promotion_audit.add_argument(
+        "--require-valid",
+        action="store_true",
+        help="Exit non-zero unless persisted Phase 8 promotion was valid at the cutoff",
     )
 
 
@@ -5508,6 +5525,18 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.promotion_ready:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase8-historical-promotion-audit":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = audit_persisted_phase8_promotion_at(
+            storage,
+            as_of=args.as_of,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_valid and not result.valid_at_cutoff:
             raise SystemExit(2)
         return
 
