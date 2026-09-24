@@ -1717,6 +1717,50 @@ def seed_current_phase9(storage):
     persist_phase9_promotion(storage, report=report)
 
 
+def test_work_queue_does_not_repromote_after_new_research(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    with storage.connect() as conn:
+        promoted_at_before = str(
+            conn.execute(
+                """
+                SELECT promoted_at
+                FROM phase_promotion_evidence
+                WHERE phase_name = 'PHASE9'
+                """
+            ).fetchone()[0]
+        )
+
+    seed_mint_risk_lineage(storage, "pool-c")
+
+    queue = build_phase9_work_queue(storage)
+
+    assert queue.phase9_current is True
+    assert any(
+        item.task_type == "REFRESH_RESEARCH_BUNDLE"
+        for item in queue.items
+    )
+    assert not any(
+        item.task_type == "PERSIST_PHASE9_PROMOTION"
+        for item in queue.items
+    )
+
+    with storage.connect() as conn:
+        promoted_at_after = str(
+            conn.execute(
+                """
+                SELECT promoted_at
+                FROM phase_promotion_evidence
+                WHERE phase_name = 'PHASE9'
+                """
+            ).fetchone()[0]
+        )
+    assert promoted_at_after == promoted_at_before
+
+
 def test_work_queue_advances_to_shadow_after_current_phase9(
     monkeypatch,
     tmp_path,
