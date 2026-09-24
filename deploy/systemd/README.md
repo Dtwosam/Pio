@@ -215,3 +215,35 @@ Optional bounded runner arguments may be supplied with
 `PIO_PHASE9_EVIDENCE_RUN_EXTRA_ARGS`. Keep the history interval at or above
 the experiment's chosen evidence cadence and keep all promotion or future LIVE
 wiring outside this service.
+
+
+### Phase 9 maintenance health
+
+When the bounded evidence-runner timer is enabled, also enable the local health
+check:
+
+```bash
+sudo systemctl enable --now pio-phase9-maintenance-health.timer
+```
+
+Inspect it with:
+
+```bash
+sudo systemctl status pio-phase9-maintenance-health.timer
+journalctl -u pio-phase9-maintenance-health.service
+cd /opt/pio/python-learner
+.venv/bin/pio phase9-maintenance-health --require-healthy
+```
+
+The health timer starts after the first normal evidence-run window and checks
+every 15 minutes. It evaluates only the SQLite maintenance lease plus immutable
+maintenance lifecycle journal. It has `PrivateNetwork=true`, so it cannot use
+RPC/API access even though the shared environment file is loaded.
+
+A recent COMPLETE/READY/MAX_STEPS result, a cadence WAITING_INTERVAL state, or
+an active non-stale lease is healthy. MANUAL_REQUIRED is operationally healthy
+but reports `attention_required=true`. FAILED, PARTIAL, NO_PROGRESS, stale
+history, a missing terminal journal event, or an expired orphaned lease fails
+`--require-healthy` with a non-zero exit status. This gives systemd/external
+monitoring a stable signal without making maintenance history count as research
+qualification evidence.
