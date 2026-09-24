@@ -101,13 +101,13 @@ def build_phase8_operator_handoff(
     ),
     as_of: str | None = None,
 ) -> Phase8OperatorHandoff:
-    evaluation_time = as_of or utc_now_iso()
     plan = build_phase8_evidence_plan(
         storage,
         learning_criteria=learning_criteria,
         promotion_criteria=promotion_criteria,
-        as_of=evaluation_time,
+        as_of=as_of,
     )
+    evaluation_time = plan.as_of
     blockers = _operator_blockers(plan.items)
 
     if plan.persisted_phase8_current:
