@@ -79,6 +79,14 @@ def test_phase9_evidence_status_reports_quantitative_source_gaps(
     )
     monkeypatch.setattr(
         status_module,
+        "audit_phase9_explicit_inputs_at",
+        lambda storage, *, as_of: SimpleNamespace(
+            valid=True,
+            evidence_id=77,
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
         "evaluate_phase9_source_freshness",
         lambda *args, **kwargs: SimpleNamespace(
             current=False,
@@ -252,6 +260,14 @@ def test_phase9_evidence_status_reports_ready_counts(
     )
     monkeypatch.setattr(
         status_module,
+        "audit_phase9_explicit_inputs_at",
+        lambda storage, *, as_of: SimpleNamespace(
+            valid=True,
+            evidence_id=88,
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
         "evaluate_phase9_source_freshness",
         lambda *args, **kwargs: SimpleNamespace(
             current=True,
@@ -355,7 +371,14 @@ def test_phase9_historical_status_uses_cutoff_phase8_audit_only(
     monkeypatch.setattr(
         status_module,
         "audit_phase9_explicit_inputs",
-        lambda storage: SimpleNamespace(
+        lambda storage: (_ for _ in ()).throw(
+            AssertionError("current explicit-input audit must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "audit_phase9_explicit_inputs_at",
+        lambda storage, *, as_of: SimpleNamespace(
             valid=False,
             evidence_id=None,
         ),
@@ -442,6 +465,13 @@ def test_phase9_current_status_uses_live_phase8_audit_only(
     )
     monkeypatch.setattr(
         status_module,
+        "audit_phase9_explicit_inputs_at",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("historical explicit-input audit must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
         "evaluate_phase9_research_bundle",
         lambda *args, **kwargs: SimpleNamespace(
             adaptive_multi_pool=summary(0),
@@ -460,5 +490,95 @@ def test_phase9_current_status_uses_live_phase8_audit_only(
     assert report.phase8_current is False
     assert any(
         reason == "Phase 8 promotion is not current"
+        for reason in report.reasons
+    )
+
+
+def test_phase9_historical_status_excludes_future_explicit_inputs(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+
+    monkeypatch.setattr(
+        status_module,
+        "audit_persisted_phase8_promotion_at",
+        lambda storage, *, as_of: SimpleNamespace(
+            valid_at_cutoff=True
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "audit_phase9_explicit_inputs",
+        lambda storage: (_ for _ in ()).throw(
+            AssertionError("current explicit-input audit must not run")
+        ),
+    )
+
+    seen = {}
+
+    def historical_explicit(storage, *, as_of):
+        seen["as_of"] = as_of
+        return SimpleNamespace(
+            valid=False,
+            evidence_id=None,
+        )
+
+    monkeypatch.setattr(
+        status_module,
+        "audit_phase9_explicit_inputs_at",
+        historical_explicit,
+    )
+    cohort = SimpleNamespace(
+        api_pools_seen=0,
+        stale_api_pools_excluded=0,
+        criteria=SimpleNamespace(min_research_pools=3),
+        required_observations=43,
+        desired_pools=(),
+        research_pools=(),
+        sampling_pools=(),
+        missing_chain_pools=(),
+        research_ready=False,
+        items=(),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "evaluate_phase9_pool_cohort",
+        lambda *args, **kwargs: cohort,
+    )
+    monkeypatch.setattr(
+        status_module,
+        "evaluate_phase9_source_freshness",
+        lambda *args, **kwargs: SimpleNamespace(
+            current=False,
+            families=(),
+        ),
+    )
+    monkeypatch.setattr(
+        status_module,
+        "evaluate_phase9_research_bundle",
+        lambda *args, **kwargs: SimpleNamespace(
+            adaptive_multi_pool=summary(0),
+            mint_risk=summary(0),
+            wallet_flow=summary(0),
+            portfolio_allocation=summary(0),
+            static_hedge=summary(0),
+            contextual_bandit=summary(0),
+            research_ready=False,
+            reasons=(),
+        ),
+    )
+
+    cutoff = "2026-09-24T11:00:00+00:00"
+    report = evaluate_phase9_evidence_status(
+        storage,
+        as_of=cutoff,
+    )
+
+    assert seen["as_of"] == cutoff
+    assert report.explicit_inputs_valid is False
+    assert report.explicit_input_evidence_id is None
+    assert any(
+        "explicit research inputs are not valid" in reason
         for reason in report.reasons
     )
