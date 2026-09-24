@@ -11,6 +11,7 @@ from meteora_learner.phase9_explicit_inputs import (
     PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
     PHASE9_EXPLICIT_INPUTS_SCOPE,
     audit_phase9_explicit_inputs,
+    audit_phase9_explicit_inputs_at,
     build_phase9_explicit_input_template,
     check_phase9_explicit_inputs,
     load_phase9_explicit_inputs,
@@ -779,3 +780,125 @@ def test_explicit_input_persistence_reuses_identical_artifact(tmp_path):
             ).fetchone()[0]
         )
     assert count == 1
+
+
+def test_explicit_input_historical_audit_excludes_future_artifact(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    inputs = parse_phase9_explicit_inputs(filled_payload())
+    payload = inputs.to_record()
+    digest = inputs_module._canonical_sha256(payload)
+    evidence = {
+        "artifact_sha256": digest,
+        "inputs": payload,
+    }
+
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO advanced_edge_evidence(
+                created_at,
+                edge_type,
+                pool_address,
+                as_of,
+                status,
+                qualified,
+                evidence_json
+            ) VALUES (?, ?, ?, NULL, 'INPUTS_VALIDATED', 0, ?)
+            """,
+            (
+                "2026-09-24T12:00:00+00:00",
+                PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+                PHASE9_EXPLICIT_INPUTS_SCOPE,
+                __import__("json").dumps(
+                    evidence,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+
+    earlier = audit_phase9_explicit_inputs_at(
+        storage,
+        as_of="2026-09-24T11:00:00+00:00",
+    )
+    later = audit_phase9_explicit_inputs_at(
+        storage,
+        as_of="2026-09-24T13:00:00+00:00",
+    )
+    current = audit_phase9_explicit_inputs(storage)
+
+    assert earlier.exists is False
+    assert earlier.valid is False
+    assert later.exists is True
+    assert later.valid is True
+    assert later.artifact_sha256 == digest
+    assert current.valid is True
+    assert current.evidence_id == later.evidence_id
+
+
+def test_explicit_input_historical_audit_uses_latest_artifact_by_cutoff(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+
+    def insert(payload, created_at):
+        inputs = parse_phase9_explicit_inputs(payload)
+        record = inputs.to_record()
+        digest = inputs_module._canonical_sha256(record)
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO advanced_edge_evidence(
+                    created_at,
+                    edge_type,
+                    pool_address,
+                    as_of,
+                    status,
+                    qualified,
+                    evidence_json
+                ) VALUES (?, ?, ?, NULL, 'INPUTS_VALIDATED', 0, ?)
+                """,
+                (
+                    created_at,
+                    PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+                    PHASE9_EXPLICIT_INPUTS_SCOPE,
+                    __import__("json").dumps(
+                        {
+                            "artifact_sha256": digest,
+                            "inputs": record,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                ),
+            )
+        return digest
+
+    first_payload = filled_payload()
+    first_digest = insert(
+        first_payload,
+        "2026-09-24T10:00:00+00:00",
+    )
+    second_payload = filled_payload()
+    second_payload["portfolio"]["budget_quote"] = 250.0
+    second_digest = insert(
+        second_payload,
+        "2026-09-24T12:00:00+00:00",
+    )
+
+    earlier = audit_phase9_explicit_inputs_at(
+        storage,
+        as_of="2026-09-24T11:00:00+00:00",
+    )
+    later = audit_phase9_explicit_inputs_at(
+        storage,
+        as_of="2026-09-24T13:00:00+00:00",
+    )
+
+    assert earlier.valid is True
+    assert earlier.artifact_sha256 == first_digest
+    assert later.valid is True
+    assert later.artifact_sha256 == second_digest
+    assert first_digest != second_digest
