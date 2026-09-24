@@ -247,7 +247,7 @@ def evaluate_phase9_policy_authorization(
                 f"Phase 9 currentness: {reason}"
                 for reason in audit.reasons
             )
-        if audit.current:
+        if audit.valid:
             freshness = evaluate_phase9_source_freshness(
                 storage,
                 required_mint_pools=(
