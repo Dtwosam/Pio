@@ -385,10 +385,17 @@ def build_phase9_evidence_plan(
                     f"{user_deficit} remaining"
                     + (
                         "; historical pool-activity backfill is exhausted "
-                        f"after {pool.wallet_backfill_pages_scanned or 0} "
+                        f"after {getattr(pool, 'wallet_backfill_pages_scanned', 0) or 0} "
                         "page(s), so further progress depends on current/"
                         "recent activity or newly discovered owner positions"
-                        if pool.wallet_backfill_exhausted is True
+                        if (
+                            getattr(
+                                pool,
+                                "wallet_backfill_exhausted",
+                                None,
+                            )
+                            is True
+                        )
                         else ""
                     )
                 ),
