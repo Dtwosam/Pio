@@ -433,7 +433,7 @@ def _adaptive_current(
             pool_address=pool,
             as_of=as_of,
         )
-        if used_source is None or current_source is None:
+        if used_source is None:
             return Phase9SourceFreshnessItem(
                 family="adaptive_regime",
                 current=False,
@@ -450,6 +450,12 @@ def _adaptive_current(
                     f"pool {pool} adaptive evidence uses source "
                     f"{used_source[1]} after cutoff {as_of}"
                 ),
+            )
+        if current_source is None:
+            return Phase9SourceFreshnessItem(
+                family="adaptive_regime",
+                current=False,
+                reason=f"pool {pool} source snapshot lineage is unavailable",
             )
         if _source_advanced(
             current_id=current_source[0],
@@ -536,7 +542,7 @@ def _mint_current(
             pool_address=pool,
             as_of=as_of,
         )
-        if used_pool_source is None or latest_pool_source is None:
+        if used_pool_source is None:
             return Phase9SourceFreshnessItem(
                 family="mint_risk",
                 current=False,
@@ -553,6 +559,12 @@ def _mint_current(
                     f"pool {pool} mint-risk evidence uses pool source "
                     f"{used_pool_source[1]} after cutoff {as_of}"
                 ),
+            )
+        if latest_pool_source is None:
+            return Phase9SourceFreshnessItem(
+                family="mint_risk",
+                current=False,
+                reason=f"pool {pool} source snapshot lineage is unavailable",
             )
         if _source_advanced(
             current_id=latest_pool_source[0],
@@ -602,7 +614,7 @@ def _mint_current(
                 mint_address=mint,
                 as_of=as_of,
             )
-            if used_mint_source is None or latest_mint_source is None:
+            if used_mint_source is None:
                 return Phase9SourceFreshnessItem(
                     family="mint_risk",
                     current=False,
@@ -619,6 +631,12 @@ def _mint_current(
                         f"mint {mint} evidence uses source "
                         f"{used_mint_source[1]} after cutoff {as_of}"
                     ),
+                )
+            if latest_mint_source is None:
+                return Phase9SourceFreshnessItem(
+                    family="mint_risk",
+                    current=False,
+                    reason=f"mint {mint} snapshot lineage is unavailable",
                 )
             if _source_advanced(
                 current_id=latest_mint_source[0],
@@ -710,7 +728,7 @@ def _wallet_current(
             pool_address=pool,
             as_of=as_of,
         )
-        if used_source is None or latest_source is None:
+        if used_source is None:
             return Phase9SourceFreshnessItem(
                 family="wallet_flow",
                 current=False,
@@ -727,6 +745,12 @@ def _wallet_current(
                     f"pool {pool} wallet-flow evidence uses source "
                     f"{used_source[1]} after cutoff {as_of}"
                 ),
+            )
+        if latest_source is None:
+            return Phase9SourceFreshnessItem(
+                family="wallet_flow",
+                current=False,
+                reason=f"pool {pool} wallet-flow source lineage is unavailable",
             )
         if _source_advanced(
             current_id=latest_source[0],
