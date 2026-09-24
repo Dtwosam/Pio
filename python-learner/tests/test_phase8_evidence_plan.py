@@ -428,3 +428,26 @@ def test_phase8_plan_surfaces_promotion_persistence_only_after_gate_passes(
         "pio phase8-validate --persist-ready --require-ready"
     )
     assert plan.next_action.operator_required is True
+
+
+def test_phase8_plan_rejects_historical_cutoff(monkeypatch, tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    called = []
+
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase8_evidence_status",
+        lambda *args, **kwargs: called.append("status"),
+    )
+
+    try:
+        build_phase8_evidence_plan(
+            storage,
+            as_of="2026-09-23T12:00:00+00:00",
+        )
+    except ValueError as exc:
+        assert "historical Phase 8 evidence planning is unsupported" in str(exc)
+    else:
+        raise AssertionError("expected historical cutoff rejection")
+
+    assert called == []
