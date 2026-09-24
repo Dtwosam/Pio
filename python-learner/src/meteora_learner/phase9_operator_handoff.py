@@ -235,8 +235,9 @@ def build_phase9_operator_handoff(
         status = "MANUAL_REQUIRED"
         operator_action_required = True
         manual_input_required = False
-        suggested_command = "pio phase8-evidence-run --max-steps 4"
+        suggested_command = "pio phase8-operator-handoff"
         followups = (
+            "pio phase8-evidence-run --max-steps 4",
             "pio phase8-evidence-plan",
             "pio phase9-evidence-run --max-steps 8",
         )
