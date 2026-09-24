@@ -12,6 +12,7 @@ from meteora_learner.phase9_explicit_inputs import (
     PHASE9_EXPLICIT_INPUTS_SCOPE,
     audit_phase9_explicit_inputs,
     build_phase9_explicit_input_template,
+    check_phase9_explicit_inputs,
     load_phase9_explicit_inputs,
     parse_phase9_explicit_inputs,
     persist_phase9_explicit_inputs,
@@ -137,6 +138,42 @@ def test_explicit_input_template_does_not_invent_economic_assumptions(
 
     with pytest.raises(ValueError, match="is required"):
         parse_phase9_explicit_inputs(template)
+
+
+def test_explicit_inputs_check_matches_persisted_sha(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    payload = filled_payload()
+
+    check = check_phase9_explicit_inputs(payload)
+    artifact = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(payload),
+    )
+
+    assert check.valid is True
+    assert check.artifact_sha256 == artifact.artifact_sha256
+    assert check.static_hedge_pools == ("pool-a",)
+    assert check.portfolio_pools == ("pool-a", "pool-b")
+    assert check.reasons == ()
+
+
+def test_explicit_inputs_check_rejects_invalid_without_persistence(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    payload = filled_payload()
+    payload["portfolio"]["budget_quote"] = None
+
+    check = check_phase9_explicit_inputs(payload)
+
+    assert check.valid is False
+    assert check.artifact_sha256 is None
+    assert "budget_quote is required" in check.reasons[0]
+    assert (
+        storage.latest_advanced_edge_evidence(
+            edge_type=PHASE9_EXPLICIT_INPUTS_EVIDENCE_TYPE,
+            pool_address=PHASE9_EXPLICIT_INPUTS_SCOPE,
+        )
+        is None
+    )
 
 
 def test_explicit_inputs_validate_and_round_trip_with_sha(tmp_path):
