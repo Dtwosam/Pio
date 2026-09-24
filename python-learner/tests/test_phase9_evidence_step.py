@@ -182,6 +182,54 @@ def test_evidence_step_runs_only_history_capture_for_history_debt(
     assert calls[0]["min_observation_interval_seconds"] == 3600
 
 
+def test_evidence_step_reports_waiting_interval_without_false_progress(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    action = debt(
+        "CHAIN_HISTORY_DEPTH",
+        "pool-a,pool-b",
+        current=None,
+        remaining=3,
+    )
+    plans = iter((
+        plan(action, history=3),
+        plan(action, history=3),
+    ))
+    monkeypatch.setattr(
+        step_module,
+        "build_phase9_evidence_plan",
+        lambda *args, **kwargs: next(plans),
+    )
+    monkeypatch.setattr(
+        step_module,
+        "run_phase9_history_capture",
+        lambda *args, **kwargs: SimpleNamespace(
+            pools_captured=0,
+            pools_skipped_interval=2,
+            pools_failed=0,
+            to_record=lambda: {
+                "pools_captured": 0,
+                "pools_skipped_interval": 2,
+                "pools_failed": 0,
+            },
+        ),
+    )
+
+    report = run_phase9_evidence_step(
+        storage,
+        settings=Settings(database_path=storage.path),
+        history_interval_seconds=3600,
+    )
+
+    assert report.status == "WAITING_INTERVAL"
+    assert report.progressed is False
+    assert report.error is None
+    assert report.operation["pools_skipped_interval"] == 2
+    assert report.plan_after.history_capture_cycles_remaining == 3
+
+
 def test_evidence_step_runs_research_refresh_directly(
     monkeypatch,
     tmp_path,
