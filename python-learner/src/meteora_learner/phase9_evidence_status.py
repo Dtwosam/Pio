@@ -281,14 +281,22 @@ def evaluate_phase9_evidence_status(
             "checksum-bound explicit research inputs are not valid"
         )
     if not freshness.current:
-        stale = ", ".join(
-            item.family
+        stale_items = tuple(
+            item
             for item in freshness.families
             if not item.current
+        )
+        stale = ", ".join(
+            item.family
+            for item in stale_items
         )
         reasons.append(
             "research source refresh is pending"
             + (f": {stale}" if stale else "")
+        )
+        reasons.extend(
+            f"source freshness {item.family}: {item.reason}"
+            for item in stale_items
         )
     reasons.extend(bundle.reasons)
 
