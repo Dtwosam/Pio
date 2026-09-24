@@ -61,6 +61,8 @@ from .phase8_validation import (
 )
 from .phase8_evidence_status import evaluate_phase8_evidence_status
 from .phase8_evidence_plan import build_phase8_evidence_plan
+from .phase8_evidence_step import run_phase8_evidence_step
+from .phase8_evidence_run import run_phase8_evidence_until_blocked
 from .phase8_retrain_inputs import (
     audit_phase8_retrain_inputs,
     build_phase8_retrain_input_template,
@@ -1447,6 +1449,154 @@ def main() -> None:
         action="store_true",
         help="Exit non-zero unless persisted Phase 8 promotion evidence is current",
     )
+
+    phase8_evidence_step = subparsers.add_parser(
+        "phase8-evidence-step-run",
+        help="Execute exactly one planner-selected safe Phase 8 offline evidence step and stop before PAPER or promotion",
+    )
+    phase8_evidence_step.add_argument(
+        "--min-new-chain-observations",
+        type=int,
+        default=500,
+    )
+    phase8_evidence_step.add_argument(
+        "--min-new-chain-pools",
+        type=int,
+        default=3,
+    )
+    phase8_evidence_step.add_argument(
+        "--min-new-live-labels",
+        type=int,
+        default=5,
+    )
+    phase8_evidence_step.add_argument(
+        "--max-champion-age-days",
+        type=float,
+        default=14.0,
+    )
+    phase8_evidence_step.add_argument(
+        "--min-completed-cycles",
+        type=int,
+        default=1,
+    )
+    phase8_evidence_step.add_argument(
+        "--min-live-labels",
+        type=int,
+        default=10,
+    )
+    phase8_evidence_step.add_argument(
+        "--min-live-pools",
+        type=int,
+        default=2,
+    )
+    phase8_evidence_step.add_argument(
+        "--max-realized-drawdown-bps",
+        type=int,
+        default=2000,
+    )
+    phase8_evidence_step.add_argument(
+        "--max-single-loss-bps",
+        type=int,
+        default=1500,
+    )
+    phase8_evidence_step.add_argument(
+        "--min-win-rate",
+        type=float,
+        default=0.30,
+    )
+    phase8_evidence_step.add_argument(
+        "--min-mean-return-bps",
+        type=float,
+        default=-100.0,
+    )
+    phase8_evidence_step.add_argument(
+        "--max-mean-abs-prediction-error-bps",
+        type=float,
+        default=1500.0,
+    )
+    phase8_evidence_step.add_argument(
+        "--require-progress",
+        action="store_true",
+    )
+    phase8_evidence_step.add_argument(
+        "--require-current",
+        action="store_true",
+    )
+
+    phase8_evidence_run = subparsers.add_parser(
+        "phase8-evidence-run",
+        help="Run bounded safe Phase 8 offline evidence steps until ready, waiting, manual input, non-qualification, failure or no-progress",
+    )
+    phase8_evidence_run.add_argument(
+        "--max-steps",
+        type=int,
+        default=4,
+    )
+    phase8_evidence_run.add_argument(
+        "--min-new-chain-observations",
+        type=int,
+        default=500,
+    )
+    phase8_evidence_run.add_argument(
+        "--min-new-chain-pools",
+        type=int,
+        default=3,
+    )
+    phase8_evidence_run.add_argument(
+        "--min-new-live-labels",
+        type=int,
+        default=5,
+    )
+    phase8_evidence_run.add_argument(
+        "--max-champion-age-days",
+        type=float,
+        default=14.0,
+    )
+    phase8_evidence_run.add_argument(
+        "--min-completed-cycles",
+        type=int,
+        default=1,
+    )
+    phase8_evidence_run.add_argument(
+        "--min-live-labels",
+        type=int,
+        default=10,
+    )
+    phase8_evidence_run.add_argument(
+        "--min-live-pools",
+        type=int,
+        default=2,
+    )
+    phase8_evidence_run.add_argument(
+        "--max-realized-drawdown-bps",
+        type=int,
+        default=2000,
+    )
+    phase8_evidence_run.add_argument(
+        "--max-single-loss-bps",
+        type=int,
+        default=1500,
+    )
+    phase8_evidence_run.add_argument(
+        "--min-win-rate",
+        type=float,
+        default=0.30,
+    )
+    phase8_evidence_run.add_argument(
+        "--min-mean-return-bps",
+        type=float,
+        default=-100.0,
+    )
+    phase8_evidence_run.add_argument(
+        "--max-mean-abs-prediction-error-bps",
+        type=float,
+        default=1500.0,
+    )
+    phase8_evidence_run.add_argument(
+        "--require-current",
+        action="store_true",
+    )
+
 
     phase8_retrain_template = subparsers.add_parser(
         "phase8-retrain-input-template",
@@ -4984,6 +5134,80 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_qualified and not result.offline_qualified:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase8-evidence-step-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = run_phase8_evidence_step(
+            storage,
+            learning_criteria=ContinuousLearningCriteria(
+                min_new_chain_observations=(
+                    args.min_new_chain_observations
+                ),
+                min_new_chain_pools=args.min_new_chain_pools,
+                min_new_live_labels=args.min_new_live_labels,
+                max_champion_age_days=args.max_champion_age_days,
+            ),
+            promotion_criteria=Phase8PromotionCriteria(
+                min_completed_cycles=args.min_completed_cycles,
+                min_live_labels=args.min_live_labels,
+                min_live_pools=args.min_live_pools,
+                max_realized_drawdown_bps=(
+                    args.max_realized_drawdown_bps
+                ),
+                max_single_loss_bps=args.max_single_loss_bps,
+                min_win_rate=args.min_win_rate,
+                min_mean_return_bps=args.min_mean_return_bps,
+                max_mean_abs_prediction_error_bps=(
+                    args.max_mean_abs_prediction_error_bps
+                ),
+            ),
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_progress and not (
+            result.progressed or result.status == "READY"
+        ):
+            raise SystemExit(2)
+        if (
+            args.require_current
+            and not result.plan_after.persisted_phase8_current
+        ):
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase8-evidence-run":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = run_phase8_evidence_until_blocked(
+            storage,
+            learning_criteria=ContinuousLearningCriteria(
+                min_new_chain_observations=(
+                    args.min_new_chain_observations
+                ),
+                min_new_chain_pools=args.min_new_chain_pools,
+                min_new_live_labels=args.min_new_live_labels,
+                max_champion_age_days=args.max_champion_age_days,
+            ),
+            promotion_criteria=Phase8PromotionCriteria(
+                min_completed_cycles=args.min_completed_cycles,
+                min_live_labels=args.min_live_labels,
+                min_live_pools=args.min_live_pools,
+                max_realized_drawdown_bps=(
+                    args.max_realized_drawdown_bps
+                ),
+                max_single_loss_bps=args.max_single_loss_bps,
+                min_win_rate=args.min_win_rate,
+                min_mean_return_bps=args.min_mean_return_bps,
+                max_mean_abs_prediction_error_bps=(
+                    args.max_mean_abs_prediction_error_bps
+                ),
+            ),
+            max_steps=args.max_steps,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if args.require_current and not result.persisted_phase8_current:
             raise SystemExit(2)
         return
 
