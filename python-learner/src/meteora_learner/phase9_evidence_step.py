@@ -204,6 +204,12 @@ def run_phase9_evidence_step(
                 min_observation_interval_seconds=history_interval_seconds,
             )
             operation = result.to_record()
+            if (
+                result.pools_captured == 0
+                and result.pools_skipped_interval > 0
+                and result.pools_failed == 0
+            ):
+                status = "WAITING_INTERVAL"
         elif action.debt_type == "MINT_INPUTS":
             evidence = evaluate_phase9_evidence_status(
                 storage,
