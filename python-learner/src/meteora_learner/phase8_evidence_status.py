@@ -68,11 +68,17 @@ def evaluate_phase8_evidence_status(
     ),
     as_of: str | None = None,
 ) -> Phase8EvidenceStatus:
-    evaluation_time = as_of or utc_now_iso()
+    if as_of is not None:
+        raise ValueError(
+            "historical Phase 8 evidence status is unsupported until "
+            "immutable model and retraining-cycle transition history exists; "
+            "omit as_of for current-state evaluation"
+        )
+    evaluation_time = utc_now_iso()
     learning = build_continuous_learning_plan(
         storage,
         criteria=learning_criteria,
-        as_of=evaluation_time,
+        as_of=None,
     )
     promotion = evaluate_phase8_promotion(
         storage,
