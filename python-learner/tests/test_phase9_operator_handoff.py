@@ -165,8 +165,9 @@ def test_operator_handoff_surfaces_non_actionable_upstream_blocker(
     assert report.operator_action_required is True
     assert report.manual_input_required is False
     assert report.automatic_action_available is False
-    assert report.suggested_command == "pio phase8-evidence-run --max-steps 4"
+    assert report.suggested_command == "pio phase8-operator-handoff"
     assert report.followup_commands == (
+        "pio phase8-evidence-run --max-steps 4",
         "pio phase8-evidence-plan",
         "pio phase9-evidence-run --max-steps 8",
     )
@@ -199,7 +200,7 @@ def test_operator_handoff_cli_prints_manual_handoff(
         automatic_action_available=False,
         operator_action_required=True,
         manual_input_required=False,
-        suggested_command="pio phase8-evidence-run --max-steps 4",
+        suggested_command="pio phase8-operator-handoff",
         explicit_input_template=None,
         required_manual_fields=(),
         followup_commands=(),
@@ -223,6 +224,4 @@ def test_operator_handoff_cli_prints_manual_handoff(
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "MANUAL_REQUIRED"
     assert payload["debt_type"] == "PHASE8_DEPENDENCY"
-    assert payload["suggested_command"] == (
-        "pio phase8-evidence-run --max-steps 4"
-    )
+    assert payload["suggested_command"] == "pio phase8-operator-handoff"
