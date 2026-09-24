@@ -315,6 +315,7 @@ def test_phase8_evidence_run_cli_prints_bounded_report(
 ):
     storage = Storage(tmp_path / "pio.db")
     report = SimpleNamespace(
+        status="MANUAL_REQUIRED",
         persisted_phase8_current=False,
         to_record=lambda: {
             "status": "MANUAL_REQUIRED",
@@ -345,6 +346,9 @@ def test_phase8_evidence_run_cli_prints_bounded_report(
     assert payload["terminal_debt_type"] == (
         "PAPER_CHALLENGER_START_REQUIRED"
     )
+    assert payload["operator_handoff_command"] == (
+        "pio phase8-operator-handoff"
+    )
 
 
 def test_phase8_evidence_run_cli_require_current_fails_closed(
@@ -354,6 +358,7 @@ def test_phase8_evidence_run_cli_require_current_fails_closed(
 ):
     storage = Storage(tmp_path / "pio.db")
     report = SimpleNamespace(
+        status="WAITING",
         persisted_phase8_current=False,
         to_record=lambda: {
             "status": "WAITING",
@@ -380,4 +385,8 @@ def test_phase8_evidence_run_cli_require_current_fails_closed(
         cli.main()
 
     assert exc.value.code == 2
-    assert json.loads(capsys.readouterr().out)["status"] == "WAITING"
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "WAITING"
+    assert payload["operator_handoff_command"] == (
+        "pio phase8-operator-handoff"
+    )
