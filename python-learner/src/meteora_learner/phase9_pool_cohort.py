@@ -172,17 +172,34 @@ def _ranked_api_pools(
     return fresh, len(latest) - len(fresh)
 
 
-def _chain_counts(storage: Storage) -> dict[str, int]:
+def _chain_counts(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> dict[str, int]:
     with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT pool_address, COUNT(*) AS observations
-            FROM chain_pool_snapshots
-            WHERE pool_address IS NOT NULL
-              AND TRIM(pool_address) != ''
-            GROUP BY pool_address
-            """
-        ).fetchall()
+        if as_of is None:
+            rows = conn.execute(
+                """
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                WHERE pool_address IS NOT NULL
+                  AND TRIM(pool_address) != ''
+                GROUP BY pool_address
+                """
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                WHERE pool_address IS NOT NULL
+                  AND TRIM(pool_address) != ''
+                  AND julianday(observed_at) <= julianday(?)
+                GROUP BY pool_address
+                """,
+                (as_of,),
+            ).fetchall()
     return {str(row[0]): int(row[1]) for row in rows}
 
 
@@ -246,7 +263,7 @@ def evaluate_phase9_pool_cohort(
         as_of=as_of,
         max_age_seconds=criteria.max_api_snapshot_age_seconds,
     )
-    chain_counts = _chain_counts(storage)
+    chain_counts = _chain_counts(storage, as_of=as_of)
     required = _required_observations()
 
     if api_pools:
