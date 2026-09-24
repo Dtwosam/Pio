@@ -108,3 +108,35 @@ def test_phase9_systemd_extra_args_are_declared_in_env_example():
     assert "PIO_PHASE9_SOURCE_CAPTURE_EXTRA_ARGS=" in env_example
     assert "PIO_PHASE9_RESEARCH_REFRESH_EXTRA_ARGS=" in env_example
     assert "PIO_PHASE9_EVIDENCE_RUN_EXTRA_ARGS=" in env_example
+
+
+def test_phase9_maintenance_health_service_is_local_and_fail_able():
+    service = (
+        SYSTEMD / "pio-phase9-maintenance-health.service"
+    ).read_text(encoding="utf-8")
+
+    assert "phase9-maintenance-health" in service
+    assert "--max-event-age-seconds 10800" in service
+    assert "--history-limit 100" in service
+    assert "--require-healthy" in service
+    assert "PrivateNetwork=true" in service
+    assert "phase9-validate" not in service
+    assert "phase9-policy" not in service
+    assert "live-submit" not in service
+    assert "sign" not in service.lower()
+    assert "private key" not in service.lower()
+    assert "NoNewPrivileges=true" in service
+    assert "ProtectSystem=strict" in service
+    assert "ProtectHome=true" in service
+    assert "ReadWritePaths=/opt/pio/data" in service
+
+
+def test_phase9_maintenance_health_timer_checks_between_evidence_runs():
+    timer = (
+        SYSTEMD / "pio-phase9-maintenance-health.timer"
+    ).read_text(encoding="utf-8")
+
+    assert "OnBootSec=30min" in timer
+    assert "OnUnitActiveSec=15min" in timer
+    assert "Persistent=true" in timer
+    assert "Unit=pio-phase9-maintenance-health.service" in timer
