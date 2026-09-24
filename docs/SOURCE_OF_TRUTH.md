@@ -553,6 +553,19 @@ calculation, but that does not make the combined Phase 8 promotion view
 historically reconstructible. Later state must never be presented as if it were
 a verified historical Phase 8 snapshot.
 
+Phase 8 now records forward model-registry and retraining-cycle transitions in
+append-only SQLite journals. Journal installation records a migration-start
+watermark and backfills one baseline snapshot for any pre-existing current
+model/cycle row that has no history yet. Subsequent model status changes and
+cycle status/challenger/active-key transitions are captured by database
+triggers, and journal rows cannot be updated or deleted. The
+`phase8-transition-history` audit must verify the watermark, required triggers
+and baseline coverage. This infrastructure does not by itself re-enable
+historical consolidated Phase 8 evaluation: cutoffs before the migration
+watermark are inherently unreconstructible, and cutoffs after it remain
+unsupported until the promotion/status evaluator is explicitly changed and
+tested to consume the transition journals plus time-bounded labels/evidence.
+
 Phase 9 quantitative evidence planning is advisory and deterministic. The
 `phase9-evidence-plan` view may rank evidence debt and emit only existing
 research/read-only commands. It must not execute shell commands itself, fill
