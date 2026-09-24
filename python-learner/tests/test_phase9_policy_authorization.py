@@ -97,7 +97,12 @@ def patch_phase9(monkeypatch, reports):
     monkeypatch.setattr(
         gate_module,
         "evaluate_phase9_shadow",
-        lambda storage, cycle_id, criteria: reports[cycle_id],
+        lambda storage, cycle_id=None, dataset_evidence_id=None, criteria=None: (
+            reports[
+                cycle_id
+                or f"phase9-dataset:{dataset_evidence_id}"
+            ]
+        ),
     )
     monkeypatch.setattr(
         gate_module,
@@ -151,6 +156,46 @@ def test_three_independent_shadow_corpora_can_make_gate_ready(
     assert gate.total_decisions == 180
     assert gate.policy_actionable is False
     assert gate.execution_wired is False
+    assert gate.reasons == ()
+
+
+def test_dataset_backed_shadow_can_qualify_policy_authorization(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = shadow_report(
+        "phase9-dataset:88",
+        dataset_sha="d" * 64,
+        cutoff="2026-09-23T13:00:00+00:00",
+    )
+    report = replace(
+        report,
+        dataset_source_type="PHASE9_BANDIT_DATASET_V1",
+        dataset_evidence_id=88,
+    )
+    reports = {"phase9-dataset:88": report}
+    patch_phase9(monkeypatch, reports)
+    persist_phase9_shadow(storage, report=report)
+
+    gate = evaluate_phase9_policy_authorization(
+        storage,
+        criteria=Phase9PolicyAuthorizationCriteria(
+            min_shadow_runs=1,
+            min_distinct_dataset_hashes=1,
+            min_distinct_cutoffs=1,
+            min_decisions_per_run=50,
+            min_pools_per_run=3,
+            min_selected_arms_per_run=2,
+            min_total_decisions=50,
+        ),
+    )
+
+    assert gate.authorization_ready is True
+    assert gate.qualifying_shadow_runs == 1
+    assert gate.distinct_dataset_hashes == 1
+    assert gate.distinct_cutoffs == 1
+    assert gate.shadow_evidence[0].cycle_id == "phase9-dataset:88"
     assert gate.reasons == ()
 
 
