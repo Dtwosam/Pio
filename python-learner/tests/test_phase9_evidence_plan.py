@@ -58,6 +58,8 @@ def pool(
     wallet_ready=None,
     wallet_events=None,
     wallet_users=None,
+    wallet_backfill_exhausted=None,
+    wallet_backfill_pages_scanned=None,
 ):
     return SimpleNamespace(
         pool_address=address,
@@ -70,6 +72,8 @@ def pool(
         wallet_source_ready=wallet_ready,
         wallet_events=wallet_events,
         wallet_unique_users=wallet_users,
+        wallet_backfill_exhausted=wallet_backfill_exhausted,
+        wallet_backfill_pages_scanned=wallet_backfill_pages_scanned,
     )
 
 
@@ -656,3 +660,65 @@ def test_evidence_plan_reports_earliest_future_history_eligibility(
     assert plan.history_next_eligible_at == (
         "2026-09-24T10:45:00+00:00"
     )
+
+
+def test_evidence_plan_explains_exhausted_wallet_backfill_without_disabling_retry(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = status(
+        wallet_ready_pools=1,
+        research_sources_current=False,
+        research_bundle_ready=False,
+        pools=(
+            pool(
+                "pool-a",
+                1,
+                mint_target=True,
+                mint_ready=True,
+                wallet_target=True,
+                wallet_ready=True,
+                wallet_events=20,
+                wallet_users=5,
+            ),
+            pool(
+                "pool-b",
+                2,
+                mint_target=True,
+                mint_ready=True,
+                wallet_target=True,
+                wallet_ready=False,
+                wallet_events=12,
+                wallet_users=3,
+                wallet_backfill_exhausted=True,
+                wallet_backfill_pages_scanned=7,
+            ),
+            pool("pool-c", 3),
+        ),
+        families=(
+            family("adaptive_regime", True),
+            family("mint_risk", True),
+            family("wallet_flow", False),
+            family("portfolio_allocation", True),
+            family("static_hedge", True),
+            family("contextual_bandit", True),
+        ),
+    )
+    monkeypatch.setattr(
+        plan_module,
+        "evaluate_phase9_evidence_status",
+        lambda *args, **kwargs: report,
+    )
+
+    plan = build_phase9_evidence_plan(storage)
+
+    wallet = next(
+        item
+        for item in plan.items
+        if item.debt_type == "WALLET_FLOW_SOURCE"
+    )
+    assert wallet.scope == "pool-b"
+    assert wallet.actionable is True
+    assert "backfill is exhausted after 7 page(s)" in wallet.reason
+    assert "current/recent activity" in wallet.reason
