@@ -179,6 +179,9 @@ def test_phase9_evidence_status_reports_quantitative_source_gaps(
     assert by_pool["pool-a"].chain_observations_remaining == 0
     assert by_pool["pool-a"].mint_inputs_ready is True
     assert by_pool["pool-a"].wallet_source_ready is True
+    assert by_pool["pool-a"].wallet_backfill_exhausted is None
+    assert by_pool["pool-a"].wallet_backfill_pages_scanned is None
+    assert by_pool["pool-a"].wallet_scan_updated_at is None
     assert by_pool["pool-b"].chain_observations_remaining == 13
     assert by_pool["pool-b"].mint_inputs_ready is False
     assert by_pool["pool-b"].wallet_events == 10
