@@ -68,6 +68,39 @@ def _source_ready(status: Phase9EvidenceStatus) -> bool:
     )
 
 
+def _history_capture_eligible_pools(
+    storage: Storage,
+    *,
+    pool_addresses: tuple[str, ...],
+    evaluation_time: str,
+    history_interval_seconds: int,
+) -> tuple[str, ...]:
+    if history_interval_seconds <= 0:
+        return pool_addresses
+
+    eligible: list[str] = []
+    with storage.connect() as conn:
+        for pool in pool_addresses:
+            row = conn.execute(
+                """
+                SELECT
+                    (julianday(?) - julianday(observed_at)) * 86400.0
+                FROM chain_pool_snapshots
+                WHERE pool_address = ?
+                  AND julianday(observed_at) <= julianday(?)
+                ORDER BY julianday(observed_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (evaluation_time, pool, evaluation_time),
+            ).fetchone()
+            if row is None or row[0] is None:
+                eligible.append(pool)
+                continue
+            if float(row[0]) + 1e-6 >= history_interval_seconds:
+                eligible.append(pool)
+    return tuple(eligible)
+
+
 def build_phase9_evidence_plan(
     storage: Storage,
     *,
@@ -174,30 +207,65 @@ def build_phase9_evidence_plan(
         )
     )
     if history_deficits:
-        scope = ",".join(item.pool_address for item in history_deficits)
+        deficit_pools = tuple(
+            item.pool_address for item in history_deficits
+        )
+        eligible_history_pools = _history_capture_eligible_pools(
+            storage,
+            pool_addresses=deficit_pools,
+            evaluation_time=evaluation_time,
+            history_interval_seconds=history_interval_seconds,
+        )
         details = ", ".join(
             f"{item.pool_address}:{item.chain_observations_remaining}"
             for item in history_deficits
         )
+        history_actionable = bool(eligible_history_pools)
         items.append(
             Phase9EvidenceDebtItem(
                 priority=30,
-                debt_type="CHAIN_HISTORY_DEPTH",
-                scope=scope,
+                debt_type=(
+                    "CHAIN_HISTORY_DEPTH"
+                    if history_actionable
+                    else "CHAIN_HISTORY_CADENCE_WAIT"
+                ),
+                scope=",".join(
+                    eligible_history_pools
+                    if history_actionable
+                    else deficit_pools
+                ),
                 blocking=True,
-                actionable=True,
+                actionable=history_actionable,
                 current=None,
                 required=None,
                 remaining=status.max_history_samples_remaining,
                 shell_command=(
-                    "pio phase9-chain-history-run "
-                    "--min-observation-interval-seconds "
-                    + _q(history_interval_seconds)
+                    (
+                        "pio phase9-chain-history-run "
+                        "--min-observation-interval-seconds "
+                        + _q(history_interval_seconds)
+                    )
+                    if history_actionable
+                    else None
                 ),
                 reason=(
-                    "ranked sampling pools remain below exact history depth; "
-                    "additional observations by pool: "
-                    + details
+                    (
+                        "ranked sampling pools remain below exact history "
+                        "depth; capture is currently eligible for "
+                        + ", ".join(eligible_history_pools)
+                        + "; additional observations by pool: "
+                        + details
+                    )
+                    if history_actionable
+                    else (
+                        "ranked sampling pools remain below exact history "
+                        "depth, but every deficient pool is still inside the "
+                        f"{history_interval_seconds}-second history cadence "
+                        "window; independent source debts may proceed before "
+                        "the next history sample; additional observations by "
+                        "pool: "
+                        + details
+                    )
                 ),
             )
         )
@@ -397,9 +465,33 @@ def build_phase9_evidence_plan(
         )
 
     items.sort(key=lambda item: (item.priority, item.scope))
-    next_action = next(
-        (item for item in items if item.actionable),
-        items[0] if items else None,
+    independent_action = next(
+        (
+            item
+            for item in items
+            if item.actionable and item.priority < 80
+        ),
+        None,
+    )
+    cadence_wait = next(
+        (
+            item
+            for item in items
+            if item.debt_type == "CHAIN_HISTORY_CADENCE_WAIT"
+        ),
+        None,
+    )
+    next_action = (
+        independent_action
+        if independent_action is not None
+        else (
+            cadence_wait
+            if cadence_wait is not None
+            else next(
+                (item for item in items if item.actionable),
+                items[0] if items else None,
+            )
+        )
     )
 
     source_ready = _source_ready(status)
