@@ -1335,3 +1335,50 @@ partial/no-progress results, stale history, missing terminal history and
 expired orphaned leases fail closed. The optional
 `pio-phase9-maintenance-health.timer` runs this check every 15 minutes with
 network access disabled.
+
+
+### Operator handoff after a bounded stop
+
+When `phase9-evidence-run` stops with `MANUAL_REQUIRED`, inspect the
+deterministic operator handoff:
+
+```bash
+pio phase9-operator-handoff
+```
+
+For an upstream dependency such as Phase 8 currentness, the report exposes the
+operator-owned inspection command but does not execute any promotion or state
+transition. For `EXPLICIT_RESEARCH_INPUTS`, it returns the exact ranked pool
+template, every still-null required economic field and the follow-up sequence.
+It distinguishes `operator_action_required` from
+`manual_input_required`, so dependency work is not mislabeled as missing
+economic assumptions.
+
+Use the explicit-input sequence in this order:
+
+```bash
+pio phase9-research-input-template --pools <POOL_A,POOL_B,POOL_C> \
+  > phase9-research-inputs.json
+
+# Fill only the required null economic assumptions yourself.
+
+pio phase9-research-inputs-check \
+  --file phase9-research-inputs.json \
+  --require-valid
+
+pio phase9-research-inputs-ingest \
+  --file phase9-research-inputs.json
+
+pio phase9-research-inputs-audit --require-valid
+pio phase9-explicit-research-run --persist --require-ready
+pio phase9-bandit-research-run --persist --require-qualified
+pio phase9-evidence-run --max-steps 8
+```
+
+The `phase9-research-inputs-check` command performs the same deterministic
+parse/normalization used by persistence and reports the future artifact
+SHA-256 without writing an evidence row. A valid check must therefore produce
+the same checksum that later appears on the persisted identical artifact. This
+preflight exists because Phase 9 evidence history is append-only; malformed or
+inconsistent assumptions should be rejected before persistence rather than
+recorded and repaired afterward.
