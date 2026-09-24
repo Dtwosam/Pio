@@ -887,3 +887,235 @@ def test_source_capture_retargets_mint_and_wallet_after_history(
     assert report.selected_wallet_pools == ("pool-d", "pool-b")
     assert report.pool_cohort == {"stage": "final"}
     assert report.automatic_source_ready is True
+
+
+def test_source_capture_isolates_post_history_cohort_failure(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    settings = Settings(database_path=storage.path)
+    times = iter((
+        "2026-09-24T10:01:00+00:00",
+        "2026-09-24T10:02:00+00:00",
+        "2026-09-24T10:03:00+00:00",
+        "2026-09-24T10:04:00+00:00",
+    ))
+    monkeypatch.setattr(
+        source_module,
+        "utc_now_iso",
+        lambda: next(times),
+    )
+    reports = iter((
+        SimpleNamespace(
+            desired_pools=("pool-a", "pool-b", "pool-c"),
+            sampling_pools=("pool-a", "pool-b", "pool-c"),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "post-api"},
+        ),
+        SimpleNamespace(
+            desired_pools=("pool-a", "pool-b", "pool-c"),
+            sampling_pools=("pool-a", "pool-b", "pool-c"),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "post-chain"},
+        ),
+        RuntimeError("cohort unavailable after history"),
+        SimpleNamespace(
+            desired_pools=("pool-a", "pool-b", "pool-c"),
+            sampling_pools=("pool-a", "pool-b", "pool-c"),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "final"},
+        ),
+    ))
+
+    def cohort(*args, **kwargs):
+        value = next(reports)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(
+        source_module,
+        "evaluate_phase9_pool_cohort",
+        cohort,
+    )
+    monkeypatch.setattr(
+        source_module,
+        "collect_once",
+        lambda settings: SimpleNamespace(run_id="api"),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_chain_capture_batch",
+        lambda *args, **kwargs: DummyRecord(target_met=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_history_capture",
+        lambda *args, **kwargs: DummyRecord(
+            history_ready_after=True
+        ),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "_cohort_source_pools",
+        lambda *args, **kwargs: ("pool-a", "pool-b"),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_mint_capture",
+        lambda *args, **kwargs: DummyRecord(
+            inputs_ready_after=True
+        ),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_wallet_flow_capture",
+        lambda *args, **kwargs: DummyRecord(ok=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_history_plan",
+        lambda *args, **kwargs: SimpleNamespace(plan_ready=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_mint_capture_plan",
+        lambda *args, **kwargs: SimpleNamespace(inputs_ready=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "wallet_flow_source_state",
+        lambda *args, **kwargs: SimpleNamespace(ready=True),
+    )
+
+    report = run_phase9_source_capture(
+        storage,
+        settings=settings,
+    )
+
+    assert report.pool_cohort == {"stage": "final"}
+    assert report.automatic_source_ready is False
+    assert any(
+        "post-history cohort evaluation failed" in value
+        for value in report.errors
+    )
+
+
+def test_source_capture_isolates_final_cohort_failure(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    settings = Settings(database_path=storage.path)
+    times = iter((
+        "2026-09-24T10:01:00+00:00",
+        "2026-09-24T10:02:00+00:00",
+        "2026-09-24T10:03:00+00:00",
+        "2026-09-24T10:04:00+00:00",
+    ))
+    monkeypatch.setattr(
+        source_module,
+        "utc_now_iso",
+        lambda: next(times),
+    )
+    reports = iter((
+        SimpleNamespace(
+            desired_pools=("pool-a", "pool-b", "pool-c"),
+            sampling_pools=("pool-a", "pool-b", "pool-c"),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "post-api"},
+        ),
+        SimpleNamespace(
+            desired_pools=("pool-a", "pool-b", "pool-c"),
+            sampling_pools=("pool-a", "pool-b", "pool-c"),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "post-chain"},
+        ),
+        SimpleNamespace(
+            desired_pools=("pool-d", "pool-b", "pool-c"),
+            sampling_pools=("pool-d", "pool-b", "pool-c"),
+            research_pools=("pool-d", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "post-history"},
+        ),
+        RuntimeError("final cohort unavailable"),
+    ))
+
+    def cohort(*args, **kwargs):
+        value = next(reports)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(
+        source_module,
+        "evaluate_phase9_pool_cohort",
+        cohort,
+    )
+    monkeypatch.setattr(
+        source_module,
+        "collect_once",
+        lambda settings: SimpleNamespace(run_id="api"),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_chain_capture_batch",
+        lambda *args, **kwargs: DummyRecord(target_met=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_history_capture",
+        lambda *args, **kwargs: DummyRecord(
+            history_ready_after=True
+        ),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "_cohort_source_pools",
+        lambda *args, **kwargs: ("pool-d", "pool-b"),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_mint_capture",
+        lambda *args, **kwargs: DummyRecord(
+            inputs_ready_after=True
+        ),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_wallet_flow_capture",
+        lambda *args, **kwargs: DummyRecord(ok=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_history_plan",
+        lambda *args, **kwargs: SimpleNamespace(plan_ready=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_mint_capture_plan",
+        lambda *args, **kwargs: SimpleNamespace(inputs_ready=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "wallet_flow_source_state",
+        lambda *args, **kwargs: SimpleNamespace(ready=True),
+    )
+
+    report = run_phase9_source_capture(
+        storage,
+        settings=settings,
+    )
+
+    assert report.pool_cohort == {"stage": "post-history"}
+    assert report.automatic_source_ready is False
+    assert any(
+        "final cohort evaluation failed" in value
+        for value in report.errors
+    )
