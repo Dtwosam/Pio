@@ -13,6 +13,7 @@ from meteora_learner.phase9_shadow import (
     persist_phase9_shadow,
 )
 from meteora_learner.phase9_validation import Phase9ResearchBundleCriteria
+from types import SimpleNamespace
 from meteora_learner.storage import Storage
 
 
@@ -97,6 +98,20 @@ def patch_phase9(monkeypatch, reports):
         gate_module,
         "evaluate_phase9_shadow",
         lambda storage, cycle_id, criteria: reports[cycle_id],
+    )
+    monkeypatch.setattr(
+        gate_module,
+        "evaluate_phase9_source_freshness",
+        lambda *args, **kwargs: SimpleNamespace(
+            families=(
+                SimpleNamespace(family="adaptive_regime", current=True, reason=""),
+                SimpleNamespace(family="mint_risk", current=True, reason=""),
+                SimpleNamespace(family="wallet_flow", current=True, reason=""),
+                SimpleNamespace(family="portfolio_allocation", current=True, reason=""),
+                SimpleNamespace(family="static_hedge", current=True, reason=""),
+                SimpleNamespace(family="contextual_bandit", current=True, reason=""),
+            )
+        ),
     )
 
 
@@ -360,4 +375,67 @@ def test_authorization_audit_revokes_stale_ready_evidence(
     assert any(
         "no longer passes" in reason
         for reason in audit.reasons
+    )
+
+
+def test_stale_phase9_sources_block_policy_authorization(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    reports = {
+        "cycle-a": shadow_report(
+            "cycle-a",
+            dataset_sha="a" * 64,
+            cutoff="2026-09-23T13:00:00+00:00",
+        ),
+    }
+    patch_phase9(monkeypatch, reports)
+    persist_phase9_shadow(storage, report=reports["cycle-a"])
+
+    monkeypatch.setattr(
+        gate_module,
+        "evaluate_phase9_source_freshness",
+        lambda *args, **kwargs: SimpleNamespace(
+            families=(
+                SimpleNamespace(
+                    family="adaptive_regime",
+                    current=False,
+                    reason="pool-a chain history advanced",
+                ),
+                SimpleNamespace(family="mint_risk", current=True, reason=""),
+                SimpleNamespace(family="wallet_flow", current=True, reason=""),
+                SimpleNamespace(
+                    family="portfolio_allocation",
+                    current=True,
+                    reason="",
+                ),
+                SimpleNamespace(family="static_hedge", current=True, reason=""),
+                SimpleNamespace(
+                    family="contextual_bandit",
+                    current=True,
+                    reason="",
+                ),
+            )
+        ),
+    )
+
+    gate = evaluate_phase9_policy_authorization(
+        storage,
+        criteria=Phase9PolicyAuthorizationCriteria(
+            min_shadow_runs=1,
+            min_distinct_dataset_hashes=1,
+            min_distinct_cutoffs=1,
+            min_decisions_per_run=50,
+            min_pools_per_run=3,
+            min_selected_arms_per_run=2,
+            min_total_decisions=50,
+        ),
+    )
+
+    assert gate.phase9_current is False
+    assert gate.authorization_ready is False
+    assert any(
+        "Phase 9 source currentness: adaptive_regime" in reason
+        for reason in gate.reasons
     )
