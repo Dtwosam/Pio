@@ -231,6 +231,15 @@ def build_phase9_operator_handoff(
             "pio phase9-bandit-research-run --persist --require-qualified",
             "pio phase9-evidence-run --max-steps 8",
         )
+    elif action.debt_type == "PHASE8_DEPENDENCY":
+        status = "MANUAL_REQUIRED"
+        operator_action_required = True
+        manual_input_required = False
+        suggested_command = "pio phase8-evidence-run --max-steps 4"
+        followups = (
+            "pio phase8-evidence-plan",
+            "pio phase9-evidence-run --max-steps 8",
+        )
     elif not action.actionable:
         status = "MANUAL_REQUIRED"
         operator_action_required = True
