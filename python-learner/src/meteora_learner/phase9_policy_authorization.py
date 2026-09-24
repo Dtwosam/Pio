@@ -11,6 +11,9 @@ from .phase9_shadow import (
     evaluate_phase9_shadow,
 )
 from .phase9_validation import audit_persisted_phase9_promotion
+from .phase9_source_freshness import (
+    evaluate_phase9_source_freshness,
+)
 from .storage import Storage
 
 
@@ -241,6 +244,45 @@ def evaluate_phase9_policy_authorization(
                 f"Phase 9 currentness: {reason}"
                 for reason in audit.reasons
             )
+        if audit.current:
+            freshness = evaluate_phase9_source_freshness(
+                storage,
+                required_mint_pools=(
+                    promotion_criteria.min_mint_risk_pools
+                ),
+                required_wallet_pools=(
+                    promotion_criteria.min_wallet_flow_pools
+                ),
+            )
+            required_families = {
+                "adaptive_regime": (
+                    promotion_criteria.require_adaptive_multi_pool
+                ),
+                "mint_risk": True,
+                "wallet_flow": True,
+                "portfolio_allocation": (
+                    promotion_criteria.require_portfolio_allocation
+                ),
+                "static_hedge": True,
+                "contextual_bandit": (
+                    promotion_criteria.require_contextual_bandit
+                ),
+            }
+            stale_required = [
+                item
+                for item in freshness.families
+                if required_families.get(item.family, False)
+                and not item.current
+            ]
+            if stale_required:
+                phase9_current = False
+                reasons.extend(
+                    "Phase 9 source currentness: "
+                    + item.family
+                    + ": "
+                    + item.reason
+                    for item in stale_required
+                )
 
     records_seen, latest = _latest_shadow_rows_by_cycle(storage)
     replay_evidence: list[Phase9ShadowReplayEvidence] = []
