@@ -55,7 +55,11 @@ from .phase9_policy_prewire import evaluate_phase9_policy_prewire_audit
 from .phase9_policy_manifest import (
     audit_persisted_phase9_policy_prewire_manifest,
 )
-from .phase9_shadow import evaluate_phase9_shadow
+from .phase9_shadow import (
+    PHASE9_SHADOW_EVIDENCE_TYPE,
+    PHASE9_SHADOW_SCOPE,
+    evaluate_phase9_shadow,
+)
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
     audit_persisted_phase9_promotion,
@@ -359,7 +363,7 @@ def _shadow_source_already_persisted(
             """,
             (
                 PHASE9_SHADOW_EVIDENCE_TYPE,
-                "__PHASE9_SHADOW__",
+                PHASE9_SHADOW_SCOPE,
             ),
         ).fetchall()
     for (raw_json,) in rows:
