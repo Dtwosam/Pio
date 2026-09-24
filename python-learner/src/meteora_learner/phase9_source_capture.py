@@ -161,7 +161,6 @@ def run_phase9_source_capture(
             "source capture settings database_path must match storage"
         )
 
-    capture_as_of = utc_now_iso()
     errors: list[str] = []
     api_record = None
     chain_record = None
@@ -180,6 +179,8 @@ def run_phase9_source_capture(
                 f"{type(exc).__name__}: {str(exc)[:1000]}"
             )
 
+    ranking_as_of = utc_now_iso()
+
     try:
         cohort_before = evaluate_phase9_pool_cohort(
             storage,
@@ -191,7 +192,7 @@ def run_phase9_source_capture(
                     api_ranking_max_age_seconds
                 ),
             ),
-            as_of=capture_as_of,
+            as_of=ranking_as_of,
         )
         chain = run_phase9_chain_capture_batch(
             storage,
@@ -208,7 +209,7 @@ def run_phase9_source_capture(
             timeout_seconds=timeout_seconds,
             preferred_pool_addresses=cohort_before.desired_pools,
             max_preferred_candidates=cohort_new_pools_per_run,
-            api_ranking_as_of=capture_as_of,
+            api_ranking_as_of=ranking_as_of,
         )
         chain_record = chain.to_record()
     except Exception as exc:
@@ -216,6 +217,8 @@ def run_phase9_source_capture(
             "chain capture failed: "
             f"{type(exc).__name__}: {str(exc)[:1000]}"
         )
+
+    post_chain_as_of = utc_now_iso()
 
     try:
         cohort_after_chain = evaluate_phase9_pool_cohort(
@@ -228,7 +231,7 @@ def run_phase9_source_capture(
                     api_ranking_max_age_seconds
                 ),
             ),
-            as_of=capture_as_of,
+            as_of=post_chain_as_of,
         )
         cohort_record = cohort_after_chain.to_record()
         history = run_phase9_history_capture(
@@ -312,6 +315,7 @@ def run_phase9_source_capture(
                 f"{type(exc).__name__}: {str(exc)[:1000]}"
             )
 
+    final_as_of = utc_now_iso()
     final_cohort = evaluate_phase9_pool_cohort(
         storage,
         criteria=Phase9PoolCohortCriteria(
@@ -322,7 +326,7 @@ def run_phase9_source_capture(
                 api_ranking_max_age_seconds
             ),
         ),
-        as_of=capture_as_of,
+        as_of=final_as_of,
     )
     cohort_record = final_cohort.to_record()
     history_plan = (
