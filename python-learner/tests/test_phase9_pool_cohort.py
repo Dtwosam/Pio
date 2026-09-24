@@ -270,3 +270,64 @@ def test_pool_cohort_historical_cutoff_uses_latest_pre_cutoff_api_row(
     )
     assert pool_a.api_observed_at == "2026-09-23T12:00:00+00:00"
     assert pool_a.tvl == 500.0
+
+
+def test_historical_cohort_ignores_future_chain_depth(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    for index in range(40):
+        storage.save_chain_pool_snapshot(
+            {
+                "pool_address": "pool-a",
+                "active_bin_id": index,
+                "bin_step": 25,
+                "token_x_mint": "x",
+                "token_y_mint": "y",
+                "bin_arrays": [],
+            },
+            observed_at=(
+                "2026-09-24T10:"
+                f"{index // 60:02d}:{index % 60:02d}+00:00"
+            ),
+        )
+    for index in range(5):
+        storage.save_chain_pool_snapshot(
+            {
+                "pool_address": "pool-a",
+                "active_bin_id": 100 + index,
+                "bin_step": 25,
+                "token_x_mint": "x",
+                "token_y_mint": "y",
+                "bin_arrays": [],
+            },
+            observed_at=(
+                "2026-09-24T12:"
+                f"00:{index:02d}+00:00"
+            ),
+        )
+
+    earlier = evaluate_phase9_pool_cohort(
+        storage,
+        criteria=Phase9PoolCohortCriteria(
+            min_research_pools=1,
+            target_pools=1,
+            max_sampling_pools=1,
+        ),
+        as_of="2026-09-24T11:00:00+00:00",
+    )
+    later = evaluate_phase9_pool_cohort(
+        storage,
+        criteria=Phase9PoolCohortCriteria(
+            min_research_pools=1,
+            target_pools=1,
+            max_sampling_pools=1,
+        ),
+        as_of="2026-09-24T13:00:00+00:00",
+    )
+
+    assert earlier.items[0].chain_observations == 40
+    assert earlier.items[0].history_ready is False
+    assert earlier.research_ready is False
+
+    assert later.items[0].chain_observations == 45
+    assert later.items[0].history_ready is True
+    assert later.research_ready is True
