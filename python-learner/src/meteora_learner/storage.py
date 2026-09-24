@@ -1068,6 +1068,18 @@ CREATE TABLE IF NOT EXISTS phase8_transition_history_meta (
 INSERT OR IGNORE INTO phase8_transition_history_meta(singleton, started_at)
 VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
+CREATE TRIGGER IF NOT EXISTS phase8_transition_history_meta_no_update
+BEFORE UPDATE ON phase8_transition_history_meta
+BEGIN
+    SELECT RAISE(ABORT, 'phase8_transition_history_meta is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase8_transition_history_meta_no_delete
+BEFORE DELETE ON phase8_transition_history_meta
+BEGIN
+    SELECT RAISE(ABORT, 'phase8_transition_history_meta is immutable');
+END;
+
 CREATE TABLE IF NOT EXISTS phase8_model_status_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model_id TEXT NOT NULL,
