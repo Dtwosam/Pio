@@ -79,6 +79,30 @@ def _same_debt_progressed(
     )
 
 
+def _wallet_capture_waiting_for_activity(result: Any) -> bool:
+    scan = getattr(result, "historical_scan_state", None)
+    before = getattr(result, "source_before", None)
+    after = getattr(result, "source_after", None)
+    if scan is None or before is None or after is None:
+        return False
+    return bool(
+        getattr(scan, "backfill_exhausted", False)
+        and not getattr(result, "discovery_truncated", False)
+        and getattr(result, "owner_expansion_deferred", 0) == 0
+        and getattr(result, "candidate_positions_deferred", 0) == 0
+        and getattr(result, "owner_expansion_failures", 0) == 0
+        and getattr(result, "historical_scan_failures", 0) == 0
+        and getattr(result, "positions_failed", 0) == 0
+        and getattr(result, "positions_attempted", 0)
+        == getattr(result, "candidate_positions_selected", 0)
+        and not getattr(after, "ready", False)
+        and getattr(after, "events", None)
+        == getattr(before, "events", None)
+        and getattr(after, "unique_users", None)
+        == getattr(before, "unique_users", None)
+    )
+
+
 def run_phase9_evidence_step(
     storage: Storage,
     *,
@@ -274,6 +298,8 @@ def run_phase9_evidence_step(
                 timeout_seconds=timeout_seconds,
             )
             operation = result.to_record()
+            if _wallet_capture_waiting_for_activity(result):
+                status = "WAITING_SOURCE_ACTIVITY"
         elif action.debt_type in {
             "RESEARCH_REFRESH",
             "BUNDLE_REVALIDATION",
