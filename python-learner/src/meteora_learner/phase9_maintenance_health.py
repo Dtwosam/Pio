@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .phase9_maintenance_history import (
@@ -168,7 +168,6 @@ def evaluate_phase9_maintenance_health(
         else None
     )
     if stale_deadline is not None:
-        from datetime import timedelta
         stale_deadline = stale_deadline + timedelta(
             seconds=max_event_age_seconds
         )
