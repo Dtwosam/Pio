@@ -1248,18 +1248,36 @@ def _portfolio_current(
     )
 
 
-def _latest_retraining_dataset_cycle(storage: Storage) -> str | None:
+def _latest_retraining_dataset_cycle(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> str | None:
     with storage.connect() as conn:
-        row = conn.execute(
-            """
-            SELECT evidence_json
-            FROM model_live_evidence
-            WHERE evidence_type = 'CONTINUOUS_RETRAIN_DATASET_V1'
-              AND status = 'BUILT'
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ).fetchone()
+        if as_of is None:
+            row = conn.execute(
+                """
+                SELECT evidence_json
+                FROM model_live_evidence
+                WHERE evidence_type = 'CONTINUOUS_RETRAIN_DATASET_V1'
+                  AND status = 'BUILT'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT evidence_json
+                FROM model_live_evidence
+                WHERE evidence_type = 'CONTINUOUS_RETRAIN_DATASET_V1'
+                  AND status = 'BUILT'
+                  AND julianday(created_at) <= julianday(?)
+                ORDER BY julianday(created_at) DESC, id DESC
+                LIMIT 1
+                """,
+                (as_of,),
+            ).fetchone()
     if row is None:
         return None
     try:
@@ -1274,12 +1292,14 @@ def _common_pool_cutoff(
     storage: Storage,
     *,
     pools: tuple[str, ...],
+    as_of: str | None = None,
 ) -> str | None:
     latest: list[datetime] = []
     for pool in pools:
         value = _latest_pool_observed_at(
             storage,
             pool_address=pool,
+            as_of=as_of,
         )
         if value is None:
             return None
@@ -1376,7 +1396,11 @@ def _bandit_current(
         pools = tuple(
             item.pool_address for item in artifact.inputs.pool_inputs
         )
-        cutoff = _common_pool_cutoff(storage, pools=pools)
+        cutoff = _common_pool_cutoff(
+            storage,
+            pools=pools,
+            as_of=as_of,
+        )
         if cutoff is None:
             return Phase9SourceFreshnessItem(
                 family="contextual_bandit",
@@ -1405,7 +1429,10 @@ def _bandit_current(
             current=False,
             reason="contextual-bandit retraining-cycle lineage is incomplete",
         )
-    latest_cycle = _latest_retraining_dataset_cycle(storage)
+    latest_cycle = _latest_retraining_dataset_cycle(
+        storage,
+        as_of=as_of,
+    )
     if latest_cycle is not None and latest_cycle != cycle_id:
         return Phase9SourceFreshnessItem(
             family="contextual_bandit",
