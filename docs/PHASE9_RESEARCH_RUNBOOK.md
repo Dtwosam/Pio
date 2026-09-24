@@ -1278,3 +1278,42 @@ reports the highest reached checkpoint, including
 `POLICY_AUTHORIZATION_CURRENT`, `CONTROLLED_VALIDATION_CURRENT`,
 `ROLLOUT_SIMULATION_CURRENT`, `ROLLBACK_SIMULATION_CURRENT` and
 `PREWIRE_READY`.
+
+
+### Optional bounded evidence-runner timer
+
+The bounded evidence runner can be deployed as a hardened systemd oneshot when
+an operator wants one maintenance loop to advance the current safe Phase 9
+evidence debt:
+
+```bash
+sudo systemctl enable --now pio-phase9-evidence-run.timer
+journalctl -u pio-phase9-evidence-run.service
+```
+
+The service invokes:
+
+```bash
+pio phase9-evidence-run \
+  --max-steps 8 \
+  --history-interval-seconds 3600 \
+  --lease-seconds 1800
+```
+
+The timer fires every 70 minutes, so automatic history sampling remains above
+the one-hour minimum cadence. The command holds the shared Phase 9 maintenance
+lease for the bounded run and stops as soon as the planner reports READY,
+manual-input debt, a cadence wait, collector failure, no-progress or the
+configured step cap.
+
+Use this timer as an alternative to the paired
+`pio-phase9-source-capture.timer` and
+`pio-phase9-research-refresh.timer` deployment. The shared lease prevents
+overlapping writers if they are accidentally co-enabled, but redundant timers
+add no evidence authority and only create contention.
+
+This deployment does not change the Phase 9 boundary. It may perform only the
+existing planner-selected read-only/public-source acquisition and deterministic
+research-refresh operations. It cannot create explicit economic assumptions,
+persist Phase 9 promotion, create policy authorization, run rollout/rollback
+state changes, sign transactions or submit LIVE execution.
