@@ -83,6 +83,8 @@ class Phase9PolicyControlledValidationReport:
     authorization_audit: dict[str, Any] | None
     shadow_report: dict[str, Any] | None
     reasons: tuple[str, ...]
+    dataset_source_type: str = "CONTINUOUS_RETRAIN_DATASET_V1"
+    dataset_evidence_id: int | None = None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -152,13 +154,17 @@ def _authorization_lineage(
 def evaluate_phase9_policy_controlled_validation(
     storage: Storage,
     *,
-    cycle_id: str,
+    cycle_id: str | None = None,
+    dataset_evidence_id: int | None = None,
     criteria: Phase9PolicyControlledValidationCriteria = (
         Phase9PolicyControlledValidationCriteria()
     ),
 ) -> Phase9PolicyControlledValidationReport:
-    if not cycle_id.strip():
-        raise ValueError("cycle_id is required")
+    cycle = (cycle_id or "").strip()
+    if (bool(cycle) + (dataset_evidence_id is not None)) != 1:
+        raise ValueError(
+            "exactly one of cycle_id or dataset_evidence_id is required"
+        )
     criteria.validate()
 
     reasons: list[str] = []
@@ -196,12 +202,25 @@ def evaluate_phase9_policy_controlled_validation(
             )
 
     shadow = None
+    dataset_source_type = "CONTINUOUS_RETRAIN_DATASET_V1"
+    source_evidence_id: int | None = None
+    source_key = cycle
     try:
-        shadow = evaluate_phase9_shadow(
-            storage,
-            cycle_id=cycle_id,
-            criteria=criteria.shadow_criteria(),
-        )
+        if cycle:
+            shadow = evaluate_phase9_shadow(
+                storage,
+                cycle_id=cycle,
+                criteria=criteria.shadow_criteria(),
+            )
+        else:
+            dataset_source_type = "PHASE9_BANDIT_DATASET_V1"
+            source_evidence_id = int(dataset_evidence_id)
+            source_key = f"phase9-dataset:{source_evidence_id}"
+            shadow = evaluate_phase9_shadow(
+                storage,
+                dataset_evidence_id=source_evidence_id,
+                criteria=criteria.shadow_criteria(),
+            )
     except (ValueError, FileNotFoundError) as exc:
         reasons.append(
             f"controlled holdout replay unavailable: {exc}"
@@ -221,7 +240,7 @@ def evaluate_phase9_policy_controlled_validation(
         dataset_sha256 = shadow.dataset_sha256
         dataset_cutoff = shadow.dataset_cutoff
         shadow_ready = shadow.shadow_ready
-        cycle_independent = cycle_id not in authorized_cycles
+        cycle_independent = source_key not in authorized_cycles
         dataset_independent = (
             bool(dataset_sha256)
             and dataset_sha256 not in authorized_hashes
@@ -284,7 +303,7 @@ def evaluate_phase9_policy_controlled_validation(
         authorization_current=authorization_current,
         authorization_evidence_id=authorization_evidence_id,
         authorization_created_at=authorization_created_at,
-        cycle_id=cycle_id,
+        cycle_id=source_key,
         dataset_version=dataset_version,
         dataset_sha256=dataset_sha256,
         dataset_cutoff=dataset_cutoff,
@@ -302,6 +321,8 @@ def evaluate_phase9_policy_controlled_validation(
             else None
         ),
         reasons=tuple(reasons),
+        dataset_source_type=dataset_source_type,
+        dataset_evidence_id=source_evidence_id,
     )
 
 
@@ -385,9 +406,23 @@ def audit_persisted_phase9_policy_controlled_validation(
 
     criteria = None
     cycle_id = ""
+    dataset_source_type = "CONTINUOUS_RETRAIN_DATASET_V1"
+    dataset_evidence_id = None
     if isinstance(evidence, dict):
         criteria_raw = evidence.get("criteria")
         cycle_id = str(evidence.get("cycle_id", "")).strip()
+        dataset_source_type = str(
+            evidence.get(
+                "dataset_source_type",
+                "CONTINUOUS_RETRAIN_DATASET_V1",
+            )
+        )
+        raw_dataset_id = evidence.get("dataset_evidence_id")
+        if raw_dataset_id is not None:
+            try:
+                dataset_evidence_id = int(raw_dataset_id)
+            except (TypeError, ValueError):
+                dataset_evidence_id = None
         if isinstance(criteria_raw, dict):
             try:
                 criteria = Phase9PolicyControlledValidationCriteria(
@@ -402,15 +437,21 @@ def audit_persisted_phase9_policy_controlled_validation(
             "persisted controlled validation criteria or cycle are invalid"
         )
 
-    current_report = (
-        evaluate_phase9_policy_controlled_validation(
-            storage,
-            cycle_id=cycle_id,
-            criteria=criteria,
-        )
-        if criteria is not None and cycle_id
-        else None
-    )
+    current_report = None
+    if criteria is not None and cycle_id:
+        if dataset_source_type == "PHASE9_BANDIT_DATASET_V1":
+            if dataset_evidence_id is not None:
+                current_report = evaluate_phase9_policy_controlled_validation(
+                    storage,
+                    dataset_evidence_id=dataset_evidence_id,
+                    criteria=criteria,
+                )
+        else:
+            current_report = evaluate_phase9_policy_controlled_validation(
+                storage,
+                cycle_id=cycle_id,
+                criteria=criteria,
+            )
     current_ready = bool(
         current_report is not None
         and current_report.controlled_validation_ready
