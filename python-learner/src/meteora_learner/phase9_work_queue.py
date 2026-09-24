@@ -63,6 +63,7 @@ from .phase9_shadow import (
 from .phase9_validation import (
     Phase9ResearchBundleCriteria,
     audit_persisted_phase9_promotion,
+    audit_persisted_phase9_promotion_baseline,
     evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
 )
@@ -419,6 +420,9 @@ def build_phase9_work_queue(
         criteria=criteria,
         current_report=promotion,
     )
+    promotion_baseline = audit_persisted_phase9_promotion_baseline(
+        storage,
+    )
     source_freshness_as_of = as_of or utc_now_iso()
     source_freshness_report = evaluate_phase9_source_freshness(
         storage,
@@ -521,7 +525,7 @@ def build_phase9_work_queue(
             )
         )
 
-    phase9_current = promotion_audit.current
+    phase9_current = promotion_baseline.valid
     policy_authorization_current = False
     controlled_validation_current = False
     rollout_simulation_current = False
@@ -1470,7 +1474,7 @@ def build_phase9_work_queue(
                 )
             )
 
-    if promotion.promotion_ready and not promotion_audit.current:
+    if promotion.promotion_ready and not promotion_baseline.valid:
         items.append(
             Phase9WorkItem(
                 task_type="PERSIST_PHASE9_PROMOTION",
