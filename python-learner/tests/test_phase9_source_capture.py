@@ -624,3 +624,128 @@ def test_source_capture_forwards_ranked_cohort_to_chain_and_history(
     )
     assert seen["continue"] is True
     assert report.pool_cohort == {"stage": "final"}
+
+
+def test_source_capture_advances_live_evaluation_watermarks(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    settings = Settings(database_path=storage.path)
+    seen = {
+        "cohort_as_of": [],
+        "ranking_as_of": None,
+    }
+    times = iter((
+        "2026-09-24T10:01:00+00:00",
+        "2026-09-24T10:02:00+00:00",
+        "2026-09-24T10:03:00+00:00",
+    ))
+    monkeypatch.setattr(
+        source_module,
+        "utc_now_iso",
+        lambda: next(times),
+    )
+
+    reports = (
+        SimpleNamespace(
+            desired_pools=("pool-a", "pool-b", "pool-c"),
+            sampling_pools=("pool-a", "pool-b", "pool-c"),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=False,
+            to_record=lambda: {"stage": "post-api"},
+        ),
+        SimpleNamespace(
+            desired_pools=("pool-a", "pool-b", "pool-c"),
+            sampling_pools=("pool-a", "pool-b", "pool-c"),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "post-chain"},
+        ),
+        SimpleNamespace(
+            desired_pools=("pool-a", "pool-b", "pool-c"),
+            sampling_pools=("pool-a", "pool-b", "pool-c"),
+            research_pools=("pool-a", "pool-b", "pool-c"),
+            research_ready=True,
+            to_record=lambda: {"stage": "final"},
+        ),
+    )
+    report_iter = iter(reports)
+
+    def cohort(*args, **kwargs):
+        seen["cohort_as_of"].append(kwargs["as_of"])
+        return next(report_iter)
+
+    monkeypatch.setattr(
+        source_module,
+        "evaluate_phase9_pool_cohort",
+        cohort,
+    )
+    monkeypatch.setattr(
+        source_module,
+        "collect_once",
+        lambda settings: SimpleNamespace(run_id="api"),
+    )
+
+    def chain(*args, **kwargs):
+        seen["ranking_as_of"] = kwargs["api_ranking_as_of"]
+        return DummyRecord(target_met=True)
+
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_chain_capture_batch",
+        chain,
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_history_capture",
+        lambda *args, **kwargs: DummyRecord(
+            history_ready_after=True
+        ),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_mint_capture",
+        lambda *args, **kwargs: DummyRecord(
+            inputs_ready_after=True
+        ),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "_cohort_source_pools",
+        lambda *args, **kwargs: ("pool-a", "pool-b"),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "run_phase9_wallet_flow_capture",
+        lambda *args, **kwargs: DummyRecord(ok=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_history_plan",
+        lambda *args, **kwargs: SimpleNamespace(plan_ready=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "build_phase9_mint_capture_plan",
+        lambda *args, **kwargs: SimpleNamespace(inputs_ready=True),
+    )
+    monkeypatch.setattr(
+        source_module,
+        "wallet_flow_source_state",
+        lambda *args, **kwargs: SimpleNamespace(ready=True),
+    )
+
+    report = run_phase9_source_capture(
+        storage,
+        settings=settings,
+    )
+
+    assert seen["cohort_as_of"] == [
+        "2026-09-24T10:01:00+00:00",
+        "2026-09-24T10:02:00+00:00",
+        "2026-09-24T10:03:00+00:00",
+    ]
+    assert seen["ranking_as_of"] == "2026-09-24T10:01:00+00:00"
+    assert report.pool_cohort == {"stage": "final"}
+    assert report.automatic_source_ready is True
