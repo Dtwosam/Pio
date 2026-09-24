@@ -30,7 +30,7 @@ def debt(kind, scope):
     )
 
 
-def plan(action=None, *, ready=False):
+def plan(action=None, *, ready=False, next_history=None):
     return Phase9EvidencePlan(
         research_only=True,
         read_only_commands=True,
@@ -44,6 +44,7 @@ def plan(action=None, *, ready=False):
         next_action=action,
         items=(() if action is None else (action,)),
         reasons=(),
+        history_next_eligible_at=next_history,
     )
 
 
@@ -54,8 +55,13 @@ def step(
     action=None,
     ready=False,
     error=None,
+    next_history=None,
 ):
-    p = plan(action, ready=ready)
+    p = plan(
+        action,
+        ready=ready,
+        next_history=next_history,
+    )
     return Phase9EvidenceStepReport(
         research_only=True,
         read_only_external=True,
@@ -135,6 +141,7 @@ def test_evidence_run_stops_on_interval_wait(monkeypatch, tmp_path):
         lambda *args, **kwargs: step(
             "WAITING_INTERVAL",
             action=action,
+            next_history="2026-09-24T11:00:00+00:00",
         ),
     )
 
@@ -146,6 +153,7 @@ def test_evidence_run_stops_on_interval_wait(monkeypatch, tmp_path):
     assert report.status == "WAITING_INTERVAL"
     assert report.steps_attempted == 1
     assert report.steps_progressed == 0
+    assert report.next_retry_at == "2026-09-24T11:00:00+00:00"
 
 
 def test_evidence_run_stops_on_failure(monkeypatch, tmp_path):
