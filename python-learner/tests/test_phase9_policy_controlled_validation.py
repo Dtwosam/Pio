@@ -147,6 +147,51 @@ def test_fresh_independent_holdout_can_pass_controlled_validation(
     assert result.cutoff_after_authorization is True
 
 
+def test_phase9_dataset_can_pass_independent_controlled_validation(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    save_authorization(storage)
+    cutoff = fresh_cutoff(storage)
+    report = replace(
+        shadow_report(
+            "phase9-dataset:88",
+            dataset_sha="b" * 64,
+            cutoff=cutoff,
+        ),
+        dataset_source_type="PHASE9_BANDIT_DATASET_V1",
+        dataset_evidence_id=88,
+    )
+    patch_authorization(monkeypatch)
+    monkeypatch.setattr(
+        validation_module,
+        "evaluate_phase9_shadow",
+        lambda storage, dataset_evidence_id=None, **kwargs: report,
+    )
+
+    result = evaluate_phase9_policy_controlled_validation(
+        storage,
+        dataset_evidence_id=88,
+    )
+
+    assert result.controlled_validation_ready is True
+    assert result.cycle_id == "phase9-dataset:88"
+    assert result.dataset_source_type == "PHASE9_BANDIT_DATASET_V1"
+    assert result.dataset_evidence_id == 88
+    assert result.cycle_independent is True
+    assert result.dataset_independent is True
+    assert result.cutoff_after_authorization is True
+
+    persist_phase9_policy_controlled_validation(
+        storage,
+        report=result,
+    )
+    audit = audit_persisted_phase9_policy_controlled_validation(storage)
+    assert audit.current is True
+    assert audit.persisted_matches_current is True
+
+
 def test_reused_authorization_dataset_fails_controlled_validation(
     monkeypatch,
     tmp_path,
