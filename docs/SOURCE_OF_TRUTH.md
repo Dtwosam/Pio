@@ -618,4 +618,13 @@ For live/current evaluation, adaptive/regime evidence must reflect the latest ra
 
 Historical planning with `--as-of` is source-time bounded. Adaptive, mint-risk and wallet-flow currentness checks must ignore observations/events that occurred after the requested cutoff, while rejecting evidence whose own persisted source lineage includes an observation/event after that cutoff. Later live state may not retroactively invalidate or repair a historical cutoff.
 
+Historical Phase 9 research-bundle evaluation must use the persisted Phase 8
+promotion audit at the same cutoff, select the latest eligible Phase 9 family
+row per scope only from evidence created no later than the cutoff and whose own
+`as_of` does not cross it, and run lineage verification over that same
+historical selection. Future qualified evidence must not repair an earlier
+bundle and future replacement evidence must not spoil an earlier bundle.
+Historical bundle evaluation is inspection-only: supplying `--as-of` together
+with `--persist` must fail before any evidence write.
+
 The Phase 9 policy-authorization gate consumes both the persisted promotion audit and live research-source currentness. Therefore stale research can never remain operationally authorized merely because its original promotion row still exists. Controlled validation, rollout/rollback simulation and prewire inherit this revocation through their authorization audits. This remains simulation/research control only and does not itself grant transaction-signing or LIVE execution authority.
