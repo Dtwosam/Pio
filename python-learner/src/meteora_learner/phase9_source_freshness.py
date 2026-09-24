@@ -398,6 +398,7 @@ def _adaptive_current(
     rows = _latest_rows(
         storage,
         edge_type=PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
+        as_of=as_of,
     )
     if not rows:
         return Phase9SourceFreshnessItem(
@@ -530,7 +531,11 @@ def _mint_current(
 ) -> Phase9SourceFreshnessItem:
     rows = [
         row
-        for row in _latest_rows(storage, edge_type=MINT_RISK_EVIDENCE_TYPE)
+        for row in _latest_rows(
+            storage,
+            edge_type=MINT_RISK_EVIDENCE_TYPE,
+            as_of=as_of,
+        )
         if row["qualified"]
     ]
     if not rows:
@@ -711,7 +716,11 @@ def _wallet_current(
 ) -> Phase9SourceFreshnessItem:
     rows = [
         row
-        for row in _latest_rows(storage, edge_type=WALLET_FLOW_EVIDENCE_TYPE)
+        for row in _latest_rows(
+            storage,
+            edge_type=WALLET_FLOW_EVIDENCE_TYPE,
+            as_of=as_of,
+        )
         if row["qualified"]
     ]
     if not rows:
@@ -817,10 +826,18 @@ def _wallet_current(
     )
 
 
-def _static_hedge_current(storage: Storage) -> Phase9SourceFreshnessItem:
+def _static_hedge_current(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> Phase9SourceFreshnessItem:
     rows = [
         row
-        for row in _latest_rows(storage, edge_type=STATIC_HEDGE_EVIDENCE_TYPE)
+        for row in _latest_rows(
+            storage,
+            edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+            as_of=as_of,
+        )
         if row["qualified"]
     ]
     if not rows:
@@ -966,10 +983,15 @@ def _static_hedge_current(storage: Storage) -> Phase9SourceFreshnessItem:
     )
 
 
-def _portfolio_current(storage: Storage) -> Phase9SourceFreshnessItem:
+def _portfolio_current(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> Phase9SourceFreshnessItem:
     allocation_rows = _latest_rows(
         storage,
         edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        as_of=as_of,
     )
     if not allocation_rows:
         return Phase9SourceFreshnessItem(
@@ -1226,10 +1248,15 @@ def _common_pool_cutoff(
     return min(latest).isoformat() if latest else None
 
 
-def _bandit_current(storage: Storage) -> Phase9SourceFreshnessItem:
+def _bandit_current(
+    storage: Storage,
+    *,
+    as_of: str | None = None,
+) -> Phase9SourceFreshnessItem:
     rows = _latest_rows(
         storage,
         edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        as_of=as_of,
     )
     if not rows or not rows[0]["qualified"]:
         return Phase9SourceFreshnessItem(
@@ -1366,6 +1393,7 @@ def evaluate_phase9_source_freshness(
             storage,
             cohort=cohort,
             limit=required_mint_pools,
+            as_of=as_of,
         )
         if cohort is not None
         and required_mint_pools is not None
@@ -1376,6 +1404,7 @@ def evaluate_phase9_source_freshness(
             storage,
             cohort=cohort,
             limit=required_wallet_pools,
+            as_of=as_of,
         )
         if cohort is not None
         and required_wallet_pools is not None
@@ -1394,9 +1423,9 @@ def evaluate_phase9_source_freshness(
             target_pools=wallet_targets,
             as_of=as_of,
         ),
-        _portfolio_current(storage),
-        _static_hedge_current(storage),
-        _bandit_current(storage),
+        _portfolio_current(storage, as_of=as_of),
+        _static_hedge_current(storage, as_of=as_of),
+        _bandit_current(storage, as_of=as_of),
     )
     return Phase9SourceFreshnessReport(
         current=all(item.current for item in families),
