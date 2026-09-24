@@ -1891,6 +1891,63 @@ def test_work_queue_advances_to_fresh_controlled_holdout(
     assert "phase9-policy-controlled-validate" in task.shell_command
 
 
+def test_work_queue_uses_phase9_dataset_for_controlled_holdout(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_current_phase9(storage)
+
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_authorization",
+        lambda storage: DummyPolicyAudit(current=True),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "audit_persisted_phase9_policy_controlled_validation",
+        lambda storage: DummyPolicyAudit(
+            current=False,
+            reasons=("controlled evidence is missing",),
+        ),
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "_latest_controlled_validation_cycle",
+        lambda storage: None,
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "_latest_retraining_dataset_cycle",
+        lambda storage: None,
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "_latest_phase9_bandit_dataset_id",
+        lambda storage: 99,
+    )
+    monkeypatch.setattr(
+        work_queue_module,
+        "evaluate_phase9_policy_controlled_validation",
+        lambda storage, dataset_evidence_id=None, **kwargs: (
+            DummyControlledReport(ready=(dataset_evidence_id == 99))
+        ),
+    )
+
+    queue = build_phase9_work_queue(storage)
+
+    task = next(
+        item for item in queue.items
+        if item.task_type == "PERSIST_CONTROLLED_VALIDATION"
+    )
+    assert task.scope == "phase9-dataset:99"
+    assert task.shell_command == (
+        "pio phase9-policy-controlled-validate "
+        "--dataset-evidence-id 99 --persist --require-ready"
+    )
+    assert "checksum-bound holdout" in task.reason
+
+
 def test_work_queue_advances_to_bounded_rollout_after_policy_readiness(
     monkeypatch,
     tmp_path,
