@@ -36,7 +36,13 @@ def action(
     )
 
 
-def plan(next_action, *, ready=False, items=None):
+def plan(
+    next_action,
+    *,
+    ready=False,
+    items=None,
+    inspection_only=False,
+):
     return Phase9EvidencePlan(
         research_only=True,
         read_only_commands=True,
@@ -50,6 +56,7 @@ def plan(next_action, *, ready=False, items=None):
         next_action=next_action,
         items=tuple(items or (() if next_action is None else (next_action,))),
         reasons=("plan reason",),
+        inspection_only=inspection_only,
     )
 
 
@@ -225,3 +232,84 @@ def test_operator_handoff_cli_prints_manual_handoff(
     assert payload["status"] == "MANUAL_REQUIRED"
     assert payload["debt_type"] == "PHASE8_DEPENDENCY"
     assert payload["suggested_command"] == "pio phase8-operator-handoff"
+
+
+def test_historical_operator_handoff_does_not_emit_live_actions(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    next_action = action(
+        "EXPLICIT_RESEARCH_INPUTS",
+        actionable=False,
+        scope="USER_ASSUMPTIONS_REQUIRED",
+        command=None,
+    )
+    seen = {}
+
+    def historical_plan(*args, **kwargs):
+        seen["as_of"] = kwargs["as_of"]
+        return plan(
+            next_action,
+            inspection_only=True,
+        )
+
+    monkeypatch.setattr(
+        handoff_module,
+        "build_phase9_evidence_plan",
+        historical_plan,
+    )
+    monkeypatch.setattr(
+        handoff_module,
+        "evaluate_phase9_evidence_status",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("historical handoff must not build live status")
+        ),
+    )
+    monkeypatch.setattr(
+        handoff_module,
+        "build_phase9_explicit_input_template",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("historical handoff must not build current template")
+        ),
+    )
+
+    cutoff = "2026-09-23T12:00:00+00:00"
+    report = build_phase9_operator_handoff(
+        storage,
+        as_of=cutoff,
+    )
+
+    assert seen["as_of"] == cutoff
+    assert report.status == "INSPECTION_ONLY"
+    assert report.inspection_only is True
+    assert report.automatic_action_available is False
+    assert report.operator_action_required is False
+    assert report.manual_input_required is False
+    assert report.suggested_command is None
+    assert report.explicit_input_template is None
+    assert report.followup_commands == ()
+
+
+def test_live_operator_handoff_preserves_none_cutoff(
+    monkeypatch,
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seen = {}
+
+    def live_plan(*args, **kwargs):
+        seen["as_of"] = kwargs["as_of"]
+        return plan(None, ready=True)
+
+    monkeypatch.setattr(
+        handoff_module,
+        "build_phase9_evidence_plan",
+        live_plan,
+    )
+
+    report = build_phase9_operator_handoff(storage)
+
+    assert seen["as_of"] is None
+    assert report.status == "READY"
+    assert report.inspection_only is False
