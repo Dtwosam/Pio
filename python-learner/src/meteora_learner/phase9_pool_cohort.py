@@ -220,6 +220,7 @@ def select_phase9_cohort_source_pools(
     *,
     cohort: Phase9PoolCohortReport,
     limit: int,
+    as_of: str | None = None,
 ) -> tuple[str, ...]:
     if limit < 1:
         return ()
@@ -233,16 +234,30 @@ def select_phase9_cohort_source_pools(
             return tuple(selected)
 
     with storage.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT pool_address, COUNT(*) AS observations
-            FROM chain_pool_snapshots
-            WHERE pool_address IS NOT NULL
-              AND TRIM(pool_address) != ''
-            GROUP BY pool_address
-            ORDER BY observations DESC, pool_address ASC
-            """
-        ).fetchall()
+        if as_of is None:
+            rows = conn.execute(
+                """
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                WHERE pool_address IS NOT NULL
+                  AND TRIM(pool_address) != ''
+                GROUP BY pool_address
+                ORDER BY observations DESC, pool_address ASC
+                """
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT pool_address, COUNT(*) AS observations
+                FROM chain_pool_snapshots
+                WHERE pool_address IS NOT NULL
+                  AND TRIM(pool_address) != ''
+                  AND julianday(observed_at) <= julianday(?)
+                GROUP BY pool_address
+                ORDER BY observations DESC, pool_address ASC
+                """,
+                (as_of,),
+            ).fetchall()
     for row in rows:
         pool = str(row[0])
         if pool not in selected:
