@@ -1259,6 +1259,7 @@ pio phase9-chain-history-run
 ```
 
 One invocation takes at most one new read-only snapshot per deficient pool.
+When `phase9-evidence-step-run` reaches this debt before the configured sampling interval has elapsed, it returns `WAITING_INTERVAL`; this is a normal retry-later state, not a collector failure and it does not increment evidence depth.
 Repeat it over real elapsed time until `phase9-chain-history-plan
 --require-ready` passes. An explicit `--observed-at` must be timezone-aware
 and strictly newer than the latest persisted snapshot for every captured pool;
