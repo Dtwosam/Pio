@@ -151,7 +151,7 @@ def build_phase9_evidence_plan(
         cohort_criteria=cohort_criteria,
         mint_max_snapshot_age_seconds=mint_max_snapshot_age_seconds,
         wallet_criteria=wallet_criteria,
-        as_of=evaluation_time,
+        as_of=as_of,
     )
 
     items: list[Phase9EvidenceDebtItem] = []
