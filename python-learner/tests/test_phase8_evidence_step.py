@@ -1,3 +1,7 @@
+import json
+import sys
+
+from meteora_learner import cli
 from types import SimpleNamespace
 
 import meteora_learner.phase8_evidence_step as step_module
@@ -280,3 +284,38 @@ def test_phase8_step_isolates_operation_failure(monkeypatch, tmp_path):
     assert report.status == "FAILED"
     assert report.progressed is False
     assert "training failed" in report.error
+
+
+def test_phase8_evidence_step_cli_points_to_operator_handoff(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    report = SimpleNamespace(
+        status="MANUAL_REQUIRED",
+        to_record=lambda: {
+            "status": "MANUAL_REQUIRED",
+            "debt_type": "PAPER_CHALLENGER_START_REQUIRED",
+            "scope": "challenger-1",
+        },
+    )
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "run_phase8_evidence_step",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pio", "phase8-evidence-step-run"],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "MANUAL_REQUIRED"
+    assert payload["operator_handoff_command"] == (
+        "pio phase8-operator-handoff"
+    )
