@@ -350,6 +350,8 @@ def test_wallet_flow_capture_round_robins_owners_before_extra_positions(
     assert report.candidate_positions_total == 6
     assert report.candidate_positions_selected == 4
     assert report.candidate_positions_deferred == 2
+    assert report.owner_expansion_candidates == 2
+    assert report.owner_expansion_deferred == 0
     assert calls[:2] == ["position-a", "position-b"]
     assert set(calls[2:]) == {"closed-a-1", "closed-b-1"}
     assert any(
@@ -596,6 +598,8 @@ def test_wallet_flow_capture_noops_when_source_is_already_ready(tmp_path):
     assert report.candidate_positions_total == 0
     assert report.candidate_positions_selected == 0
     assert report.candidate_positions_deferred == 0
+    assert report.owner_expansion_candidates == 0
+    assert report.owner_expansion_deferred == 0
 
 
 def test_wallet_flow_source_state_uses_same_latest_event_window_as_research(
@@ -711,3 +715,36 @@ def test_wallet_flow_source_state_honors_as_of_inside_lookback_window(
     assert state.events == 5
     assert state.unique_users == 1
     assert state.ready is False
+
+
+def test_wallet_flow_capture_reports_deferred_owner_expansion(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    report = run_phase9_wallet_flow_capture(
+        storage,
+        pool_address="pool-a",
+        criteria=WalletFlowCriteria(
+            min_events=100,
+            min_unique_users=5,
+        ),
+        discover_positions=lambda pool, limit: discovery(
+            pool,
+            (
+                ("position-a", "owner-a"),
+                ("position-b", "owner-b"),
+            ),
+        ),
+        expand_owner_positions=lambda pool, owner: (
+            (f"position-{owner[-1]}", f"closed-{owner[-1]}")
+        ),
+        collect_history=lambda position: 0,
+        owner_expansion_limit=1,
+    )
+
+    assert report.owner_expansion_candidates == 2
+    assert report.owners_expanded == 1
+    assert report.owner_expansion_deferred == 1
+    assert any(
+        "1 wallet-flow owner expansion(s) were deferred" in reason
+        for reason in report.reasons
+    )
