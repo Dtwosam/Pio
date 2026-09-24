@@ -672,6 +672,18 @@ ON live_learning_labels(model_version, strategy, created_at);
 CREATE INDEX IF NOT EXISTS idx_live_learning_labels_pool
 ON live_learning_labels(pool_address, created_at);
 
+CREATE TRIGGER IF NOT EXISTS live_learning_labels_no_update
+BEFORE UPDATE ON live_learning_labels
+BEGIN
+    SELECT RAISE(ABORT, 'live_learning_labels is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS live_learning_labels_no_delete
+BEFORE DELETE ON live_learning_labels
+BEGIN
+    SELECT RAISE(ABORT, 'live_learning_labels is immutable');
+END;
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
