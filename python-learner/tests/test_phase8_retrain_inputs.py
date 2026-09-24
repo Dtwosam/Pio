@@ -6,10 +6,12 @@ import meteora_learner.phase8_retrain_inputs as inputs_module
 from meteora_learner.phase8_retrain_inputs import (
     audit_phase8_retrain_inputs,
     build_phase8_retrain_input_template,
+    check_phase8_retrain_inputs,
     load_phase8_retrain_inputs,
     parse_phase8_retrain_inputs,
     persist_phase8_retrain_inputs,
     run_phase8_retrain_build_from_inputs,
+    PHASE8_RETRAIN_INPUTS_EVIDENCE_TYPE,
 )
 from meteora_learner.storage import Storage
 
@@ -106,6 +108,71 @@ def test_phase8_retrain_template_prefills_pools_but_not_economics(tmp_path):
 
     with pytest.raises(ValueError, match="amount_x is required"):
         parse_phase8_retrain_inputs(template)
+
+
+def test_phase8_retrain_input_check_matches_persisted_sha(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_champion(storage)
+    payload = filled_payload()
+
+    check = check_phase8_retrain_inputs(storage, payload)
+    artifact = persist_phase8_retrain_inputs(
+        storage,
+        inputs=parse_phase8_retrain_inputs(payload),
+    )
+
+    assert check.valid is True
+    assert check.champion_matches_current is True
+    assert check.artifact_sha256 == artifact.artifact_sha256
+    assert check.champion_model_id == "champion-1"
+    assert check.champion_dataset_version == "dataset-v1"
+    assert check.pool_addresses == ("pool-a", "pool-b", "pool-c")
+    assert check.reasons == ()
+
+
+def test_phase8_retrain_input_check_rejects_invalid_without_persistence(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_champion(storage)
+    payload = filled_payload()
+    payload["pools"][0]["amount_x"] = None
+
+    check = check_phase8_retrain_inputs(storage, payload)
+
+    assert check.valid is False
+    assert check.artifact_sha256 is None
+    assert "amount_x is required" in check.reasons[0]
+    assert (
+        storage.latest_model_live_evidence(
+            "champion-1",
+            evidence_type=PHASE8_RETRAIN_INPUTS_EVIDENCE_TYPE,
+        )
+        is None
+    )
+
+
+def test_phase8_retrain_input_check_rejects_stale_champion_lineage(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_champion(storage)
+    payload = filled_payload()
+    payload["champion_dataset_version"] = "stale-dataset"
+
+    check = check_phase8_retrain_inputs(storage, payload)
+
+    assert check.valid is False
+    assert check.artifact_sha256 is not None
+    assert check.champion_matches_current is False
+    assert "current champion lineage" in check.reasons[0]
+    assert (
+        storage.latest_model_live_evidence(
+            "champion-1",
+            evidence_type=PHASE8_RETRAIN_INPUTS_EVIDENCE_TYPE,
+        )
+        is None
+    )
 
 
 def test_phase8_retrain_inputs_round_trip_and_deduplicate(tmp_path):
