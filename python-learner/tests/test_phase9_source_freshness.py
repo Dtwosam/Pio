@@ -7,6 +7,13 @@ from meteora_learner.mint_risk import MINT_RISK_EVIDENCE_TYPE
 from meteora_learner.phase9_research import (
     PHASE9_ADAPTIVE_MULTI_POOL_EVIDENCE_TYPE,
 )
+from meteora_learner.phase9_bandit_dataset import (
+    PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+)
+from meteora_learner.phase9_explicit_inputs import (
+    parse_phase9_explicit_inputs,
+    persist_phase9_explicit_inputs,
+)
 from meteora_learner.phase9_source_freshness import (
     evaluate_phase9_source_freshness,
 )
@@ -17,6 +24,69 @@ from meteora_learner.portfolio_allocation import (
 from meteora_learner.static_hedge import STATIC_HEDGE_EVIDENCE_TYPE
 from meteora_learner.storage import Storage
 from meteora_learner.wallet_flow import WALLET_FLOW_EVIDENCE_TYPE
+
+
+def explicit_payload(*, hedge_cost=10.0, budget=200.0):
+    return {
+        "static_hedges": [
+            {
+                "pool_address": "pool-a",
+                "amount_x": 100,
+                "amount_y": 200,
+                "instrument": {
+                    "instrument_id": "SOL-PERP",
+                    "venue": "TEST",
+                    "available_liquidity_y_atomic": 1_000_000,
+                    "max_liquidity_share_bps": 1000,
+                    "max_leverage": 1.0,
+                    "funding_bps_per_holding_window": 0.0,
+                },
+                "criteria": {
+                    "observation_limit": 96,
+                    "holding_observations": 6,
+                    "hedge_fraction": 1.0,
+                    "hedge_round_trip_cost_bps": hedge_cost,
+                    "min_windows": 20,
+                    "min_mean_abs_return_reduction_bps": 0.0,
+                    "min_worst_loss_improvement_bps": 0.0,
+                    "max_mean_return_drag_bps": 100.0,
+                },
+                "as_of": None,
+            }
+        ],
+        "pool_inputs": [
+            {
+                "pool_address": pool,
+                "amount_x": 100,
+                "amount_y": 200,
+                "requested_quote": 100.0,
+                "network_cost_y_atomic": 1000,
+            }
+            for pool in ("pool-a", "pool-b", "pool-c")
+        ],
+        "portfolio": {
+            "account_equity_quote": 1000.0,
+            "cash_quote": 800.0,
+            "current_deployed_quote": 200.0,
+            "portfolio_drawdown_bps": 100,
+            "observation_limit": 12,
+            "half_widths": [0, 1, 2],
+            "center_offsets": [0],
+            "strategies": ["SPOT", "CURVE", "BID_ASK"],
+            "max_share_bps": 500,
+            "favor_x_in_active_bin": False,
+            "budget_quote": budget,
+            "allocation_criteria": {
+                "max_positions": 3,
+                "min_positions": 2,
+                "max_pool_allocation_bps": 5000,
+                "min_range_survival_ratio": 0.75,
+                "min_excess_vs_hold_bps": 0,
+                "min_position_quote": 10.0,
+                "min_budget_utilization_rate": 0.75,
+            },
+        },
+    }
 
 
 def save_pool(storage, pool, observed_at):
@@ -638,3 +708,201 @@ def test_adaptive_freshness_detects_ranked_research_cohort_change(
     assert item.current is False
     assert "ranked research cohort changed" in item.reason
     assert "pool-d" in item.reason
+
+
+def test_static_hedge_freshness_detects_new_explicit_assumptions(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    first = save_pool(
+        storage,
+        "pool-a",
+        "2026-09-23T10:00:00+00:00",
+    )
+    artifact_a = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(explicit_payload()),
+    )
+    spec = artifact_a.inputs.static_hedges[0]
+    storage.save_advanced_edge_evidence(
+        edge_type=STATIC_HEDGE_EVIDENCE_TYPE,
+        pool_address="pool-a",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "amount_x": spec.amount_x,
+            "amount_y": spec.amount_y,
+            "instrument": {
+                "instrument_id": spec.instrument.instrument_id,
+                "venue": spec.instrument.venue,
+                "available_liquidity_y_atomic": (
+                    spec.instrument.available_liquidity_y_atomic
+                ),
+                "max_liquidity_share_bps": (
+                    spec.instrument.max_liquidity_share_bps
+                ),
+                "max_leverage": spec.instrument.max_leverage,
+                "funding_bps_per_holding_window": (
+                    spec.instrument.funding_bps_per_holding_window
+                ),
+            },
+            "criteria": {
+                "observation_limit": spec.criteria.observation_limit,
+                "holding_observations": spec.criteria.holding_observations,
+                "hedge_fraction": spec.criteria.hedge_fraction,
+                "hedge_round_trip_cost_bps": (
+                    spec.criteria.hedge_round_trip_cost_bps
+                ),
+                "min_windows": spec.criteria.min_windows,
+                "min_mean_abs_return_reduction_bps": (
+                    spec.criteria.min_mean_abs_return_reduction_bps
+                ),
+                "min_worst_loss_improvement_bps": (
+                    spec.criteria.min_worst_loss_improvement_bps
+                ),
+                "max_mean_return_drag_bps": (
+                    spec.criteria.max_mean_return_drag_bps
+                ),
+            },
+            "as_of": spec.as_of,
+            "source_observations": [
+                {
+                    "pool_snapshot_id": first,
+                    "observed_at": "2026-09-23T10:00:00+00:00",
+                }
+            ],
+        },
+    )
+
+    assert freshness(storage, "static_hedge").current is True
+
+    persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(
+            explicit_payload(hedge_cost=25.0)
+        ),
+    )
+    item = freshness(storage, "static_hedge")
+    assert item.current is False
+    assert "assumptions no longer match" in item.reason
+
+
+def test_portfolio_freshness_detects_new_explicit_assumptions(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_pool(
+            storage,
+            pool,
+            "2026-09-23T10:00:00+00:00",
+        )
+    artifact_a = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(explicit_payload()),
+    )
+    candidate_id = storage.save_advanced_edge_evidence(
+        edge_type=PORTFOLIO_CANDIDATE_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO_CANDIDATES__",
+        as_of=None,
+        status="BUILT",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "source_inputs": [
+                {
+                    "pool_address": pool,
+                    "amount_x": 100,
+                    "amount_y": 200,
+                    "requested_quote": 100.0,
+                    "network_cost_y_atomic": 1000,
+                }
+                for pool in ("pool-a", "pool-b", "pool-c")
+            ],
+            "assumptions": {
+                "explicit_input_evidence_id": artifact_a.evidence_id,
+                "explicit_input_artifact_sha256": (
+                    artifact_a.artifact_sha256
+                ),
+            },
+        },
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=PORTFOLIO_ALLOCATION_EVIDENCE_TYPE,
+        pool_address="__PORTFOLIO__",
+        as_of=None,
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "candidate_lineage": {
+                "candidate_evidence_id": candidate_id,
+                "candidate_evidence_sha256": "a" * 64,
+            },
+        },
+    )
+
+    assert freshness(storage, "portfolio_allocation").current is True
+
+    artifact_b = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(
+            explicit_payload(budget=300.0)
+        ),
+    )
+    item = freshness(storage, "portfolio_allocation")
+    assert item.current is False
+    assert str(artifact_a.evidence_id) in item.reason
+    assert str(artifact_b.evidence_id) in item.reason
+
+
+def test_phase9_bandit_freshness_detects_new_explicit_assumptions(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    for pool in ("pool-a", "pool-b", "pool-c"):
+        save_pool(
+            storage,
+            pool,
+            "2026-09-23T10:00:00+00:00",
+        )
+    artifact_a = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(explicit_payload()),
+    )
+    storage.save_advanced_edge_evidence(
+        edge_type=CONTEXTUAL_BANDIT_EVIDENCE_TYPE,
+        pool_address="__CONTEXTUAL_BANDIT__",
+        as_of="2026-09-23T10:00:00+00:00",
+        status="QUALIFIED_RESEARCH",
+        qualified=True,
+        evidence={
+            "research_only": True,
+            "policy_actionable": False,
+            "research_qualified": True,
+            "dataset_lineage": {
+                "source_type": PHASE9_BANDIT_DATASET_EVIDENCE_TYPE,
+                "explicit_input_evidence_id": artifact_a.evidence_id,
+                "explicit_input_artifact_sha256": (
+                    artifact_a.artifact_sha256
+                ),
+                "cutoff": "2026-09-23T10:00:00+00:00",
+            },
+        },
+    )
+
+    assert freshness(storage, "contextual_bandit").current is True
+
+    artifact_b = persist_phase9_explicit_inputs(
+        storage,
+        inputs=parse_phase9_explicit_inputs(
+            explicit_payload(budget=350.0)
+        ),
+    )
+    item = freshness(storage, "contextual_bandit")
+    assert item.current is False
+    assert str(artifact_a.evidence_id) in item.reason
+    assert str(artifact_b.evidence_id) in item.reason
