@@ -89,6 +89,21 @@ class Phase9ExplicitInputsArtifact:
 
 
 @dataclass(frozen=True)
+class Phase9ExplicitInputsCheck:
+    valid: bool
+    research_only: bool
+    policy_actionable: bool
+    execution_wired: bool
+    artifact_sha256: str | None
+    static_hedge_pools: tuple[str, ...]
+    portfolio_pools: tuple[str, ...]
+    reasons: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Phase9ExplicitInputsAudit:
     exists: bool
     valid: bool
@@ -580,6 +595,40 @@ def parse_phase9_explicit_inputs(
         static_hedges=tuple(hedge_inputs),
         pool_inputs=pool_inputs,
         portfolio=portfolio,
+    )
+
+
+def check_phase9_explicit_inputs(
+    payload: Any,
+) -> Phase9ExplicitInputsCheck:
+    try:
+        inputs = parse_phase9_explicit_inputs(payload)
+    except (TypeError, ValueError) as exc:
+        return Phase9ExplicitInputsCheck(
+            valid=False,
+            research_only=True,
+            policy_actionable=False,
+            execution_wired=False,
+            artifact_sha256=None,
+            static_hedge_pools=(),
+            portfolio_pools=(),
+            reasons=(f"{type(exc).__name__}: {exc}",),
+        )
+
+    record = inputs.to_record()
+    return Phase9ExplicitInputsCheck(
+        valid=True,
+        research_only=True,
+        policy_actionable=False,
+        execution_wired=False,
+        artifact_sha256=_canonical_sha256(record),
+        static_hedge_pools=tuple(
+            item.pool_address for item in inputs.static_hedges
+        ),
+        portfolio_pools=tuple(
+            item.pool_address for item in inputs.pool_inputs
+        ),
+        reasons=(),
     )
 
 
