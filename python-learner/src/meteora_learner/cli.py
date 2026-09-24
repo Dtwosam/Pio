@@ -64,6 +64,11 @@ from .phase8_evidence_plan import build_phase8_evidence_plan
 from .phase8_evidence_step import run_phase8_evidence_step
 from .phase8_evidence_run import run_phase8_evidence_until_blocked
 from .phase8_operator_handoff import build_phase8_operator_handoff
+from .phase8_transition_history import (
+    audit_phase8_transition_history,
+    list_phase8_cycle_status_history,
+    list_phase8_model_status_history,
+)
 from .phase8_retrain_inputs import (
     audit_phase8_retrain_inputs,
     check_phase8_retrain_inputs,
@@ -1666,6 +1671,30 @@ def main() -> None:
         "--max-mean-abs-prediction-error-bps",
         type=float,
         default=1500.0,
+    )
+
+    phase8_transition_history = subparsers.add_parser(
+        "phase8-transition-history",
+        help="Audit and inspect append-only Phase 8 model/cycle transition journals",
+    )
+    phase8_transition_history.add_argument(
+        "--model-id",
+        help="Optional model filter for recent model-status transitions",
+    )
+    phase8_transition_history.add_argument(
+        "--cycle-id",
+        help="Optional cycle filter for recent retraining-cycle transitions",
+    )
+    phase8_transition_history.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum recent events per journal, from 1 to 500",
+    )
+    phase8_transition_history.add_argument(
+        "--require-ready",
+        action="store_true",
+        help="Exit non-zero unless journal triggers, baseline coverage and start watermark are intact",
     )
 
 
@@ -5338,6 +5367,33 @@ def main() -> None:
             as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase8-transition-history":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        audit = audit_phase8_transition_history(storage)
+        model_events = list_phase8_model_status_history(
+            storage,
+            model_id=args.model_id,
+            limit=args.limit,
+        )
+        cycle_events = list_phase8_cycle_status_history(
+            storage,
+            cycle_id=args.cycle_id,
+            limit=args.limit,
+        )
+        print(json.dumps({
+            "audit": audit.to_record(),
+            "model_events": [
+                event.to_record() for event in model_events
+            ],
+            "cycle_events": [
+                event.to_record() for event in cycle_events
+            ],
+        }, indent=2))
+        if args.require_ready and not audit.journal_ready:
+            raise SystemExit(2)
         return
 
     if args.command == "phase8-retrain-input-template":
