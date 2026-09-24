@@ -365,6 +365,7 @@ Built:
 - lease-protected bounded evidence runner that chains only successful debt-reducing automatic steps and stops on READY, manual assumptions, cadence wait, collector failure, no-progress or a hard max-step bound
 - optional hardened systemd evidence-runner timer that advances only bounded planner-selected source/research debt under the shared maintenance lease and cannot promote, authorize policy, sign or submit
 - immutable Phase 9 maintenance lifecycle journal covering acquired/busy/recovered leases and finished outcomes for unattended source, refresh and evidence-run operations, with bounded CLI history inspection
+- fail-able Phase 9 maintenance health report plus network-isolated systemd health timer covering stale history, failed/partial/no-progress runs, manual blockers, active runs and expired orphaned leases
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
