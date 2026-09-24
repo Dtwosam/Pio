@@ -37,7 +37,14 @@ def seed_phase6(storage):
     )
 
 
-def seed_closed_position(storage, *, suffix, pool, pnl="1"):
+def seed_closed_position(
+    storage,
+    *,
+    suffix,
+    pool,
+    pnl="1",
+    include_learning_label=True,
+):
     position = f"position-{suffix}"
     enter = f"enter-{suffix}"
     close = f"close-{suffix}"
@@ -183,24 +190,25 @@ def seed_closed_position(storage, *, suffix, pool, pnl="1"):
             """,
             (position, pool, enter, close, pnl, now),
         )
-        conn.execute(
-            """
-            INSERT INTO live_learning_labels(
-                position_address, decision_id, pool_address,
-                model_version, strategy, min_bin_id, max_bin_id,
-                range_width_bins, proposed_capital_quote,
-                expected_net_return_pct, expected_downside_pct,
-                realized_pnl_quote, realized_return_bps,
-                prediction_error_bps, target_positive_return,
-                quote_unit, opened_signature, closed_decision_id,
-                created_at, raw_json
-            ) VALUES (
-                ?, ?, ?, 'baseline', 'SPOT', -1, 1, 3,
-                '10', '1', '1', ?, 100, 0, 1, 'USD', ?, ?, ?, '{}'
+        if include_learning_label:
+            conn.execute(
+                """
+                INSERT INTO live_learning_labels(
+                    position_address, decision_id, pool_address,
+                    model_version, strategy, min_bin_id, max_bin_id,
+                    range_width_bins, proposed_capital_quote,
+                    expected_net_return_pct, expected_downside_pct,
+                    realized_pnl_quote, realized_return_bps,
+                    prediction_error_bps, target_positive_return,
+                    quote_unit, opened_signature, closed_decision_id,
+                    created_at, raw_json
+                ) VALUES (
+                    ?, ?, ?, 'baseline', 'SPOT', -1, 1, 3,
+                    '10', '1', '1', ?, 100, 0, 1, 'USD', ?, ?, ?, '{}'
+                )
+                """,
+                (position, enter, pool, pnl, enter_sig, close, now),
             )
-            """,
-            (position, enter, pool, pnl, enter_sig, close, now),
-        )
 
 
 def criteria():
@@ -259,14 +267,12 @@ def test_phase7_does_not_require_profitable_outcomes(tmp_path):
 def test_phase7_requires_phase6_and_complete_valuation_labeling(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     seed_closed_position(storage, suffix="1", pool="pool-a")
-    seed_closed_position(storage, suffix="2", pool="pool-b")
-    with storage.connect() as conn:
-        conn.execute(
-            """
-            DELETE FROM live_learning_labels
-            WHERE position_address = 'position-2'
-            """
-        )
+    seed_closed_position(
+        storage,
+        suffix="2",
+        pool="pool-b",
+        include_learning_label=False,
+    )
 
     report = evaluate_phase7_promotion(
         storage,
