@@ -43,6 +43,7 @@ from meteora_learner.phase9_validation import (
     PHASE9_RESEARCH_BUNDLE_EVIDENCE_TYPE,
     Phase9ResearchBundleCriteria,
     audit_persisted_phase9_promotion,
+    audit_persisted_phase9_promotion_baseline,
     evaluate_phase9_promotion,
     evaluate_phase9_research_bundle,
     persist_phase9_research_bundle,
@@ -911,6 +912,61 @@ def test_persisted_phase9_promotion_audit_detects_staleness(tmp_path):
         or "stale versus current bundle" in reason
         for reason in audit.reasons
     )
+
+def test_phase9_promotion_baseline_remains_valid_after_new_research(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(storage, report=bundle)
+    report = evaluate_phase9_promotion(storage)
+    assert report.promotion_ready is True
+    persist_phase9_promotion(storage, report=report)
+
+    baseline_before = audit_persisted_phase9_promotion_baseline(storage)
+    assert baseline_before.valid is True
+    promoted_at = baseline_before.promoted_at
+
+    seed_mint_risk_lineage(storage, "pool-c")
+
+    current_audit = audit_persisted_phase9_promotion(storage)
+    baseline_after = audit_persisted_phase9_promotion_baseline(storage)
+
+    assert current_audit.current is False
+    assert baseline_after.valid is True
+    assert baseline_after.promoted_at == promoted_at
+    assert baseline_after.bundle_checksum_valid is True
+    assert baseline_after.promotion_report_valid is True
+    assert baseline_after.reasons == ()
+
+
+def test_phase9_promotion_baseline_rejects_current_row_tampering(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready(storage)
+    bundle = evaluate_phase9_research_bundle(storage)
+    persist_phase9_research_bundle(storage, report=bundle)
+    report = evaluate_phase9_promotion(storage)
+    persist_phase9_promotion(storage, report=report)
+
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE phase_promotion_evidence
+            SET evidence_json = '{}'
+            WHERE phase_name = 'PHASE9'
+            """
+        )
+
+    baseline = audit_persisted_phase9_promotion_baseline(storage)
+
+    assert baseline.valid is False
+    assert baseline.current_row_matches_latest_history is False
+    assert any(
+        "differs from immutable history" in reason
+        for reason in baseline.reasons
+    )
+
 
 def test_phase9_promotion_requires_complete_research_bundle(tmp_path):
     storage = Storage(tmp_path / "pio.db")
