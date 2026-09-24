@@ -145,6 +145,7 @@ pio phase9-source-capture-run --history-min-observation-interval-seconds 3600 --
 pio phase9-maintenance-status  # shared source/research lease state
 pio phase9-maintenance-history --limit 20  # immutable unattended maintenance lifecycle
 pio phase9-maintenance-health --require-healthy  # fail-able unattended maintenance health
+# maintenance health honors persisted WAITING_INTERVAL next_retry_at before declaring a wait stale
 pio phase9-source-freshness  # replay-valid evidence vs latest persisted source observations
 pio phase9-evidence-status  # quantitative ranked-cohort/source/family readiness
 # Historical Phase 9 --as-of views exclude future evidence, chain depth, assumptions, source freshness and Phase 8 promotion state
