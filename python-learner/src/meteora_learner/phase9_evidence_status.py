@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .phase8_historical_promotion import (
+    audit_persisted_phase8_promotion_at,
+)
 from .phase8_validation import audit_persisted_phase8_promotion
 from .phase9_explicit_inputs import audit_phase9_explicit_inputs
 from .phase9_mint_capture import (
@@ -116,7 +119,16 @@ def evaluate_phase9_evidence_status(
 ) -> Phase9EvidenceStatus:
     evaluation_time = as_of or utc_now_iso()
 
-    phase8 = audit_persisted_phase8_promotion(storage)
+    if as_of is None:
+        phase8 = audit_persisted_phase8_promotion(storage)
+        phase8_current = phase8.current
+    else:
+        phase8 = audit_persisted_phase8_promotion_at(
+            storage,
+            as_of=evaluation_time,
+        )
+        phase8_current = phase8.valid_at_cutoff
+
     cohort = evaluate_phase9_pool_cohort(
         storage,
         criteria=cohort_criteria,
@@ -254,8 +266,12 @@ def evaluate_phase9_evidence_status(
     )
 
     reasons: list[str] = []
-    if not phase8.current:
-        reasons.append("Phase 8 promotion is not current")
+    if not phase8_current:
+        reasons.append(
+            "Phase 8 promotion is not current"
+            if as_of is None
+            else "Phase 8 promotion was not valid at the historical cutoff"
+        )
     if cohort.api_pools_seen < cohort.criteria.min_research_pools:
         reasons.append(
             "fresh API-ranked pool coverage is below cohort minimum: "
@@ -305,7 +321,7 @@ def evaluate_phase9_evidence_status(
         policy_actionable=False,
         execution_wired=False,
         as_of=evaluation_time,
-        phase8_current=phase8.current,
+        phase8_current=phase8_current,
         fresh_api_pools=cohort.api_pools_seen,
         stale_api_pools_excluded=cohort.stale_api_pools_excluded,
         desired_pools=cohort.desired_pools,
