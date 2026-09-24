@@ -1060,6 +1060,236 @@ CREATE TABLE IF NOT EXISTS continuous_learning_cycles (
 CREATE INDEX IF NOT EXISTS idx_continuous_learning_cycles_status
 ON continuous_learning_cycles(status, updated_at);
 
+CREATE TABLE IF NOT EXISTS phase8_transition_history_meta (
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    started_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO phase8_transition_history_meta(singleton, started_at)
+VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+CREATE TABLE IF NOT EXISTS phase8_model_status_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id TEXT NOT NULL,
+    changed_at TEXT NOT NULL,
+    old_status TEXT,
+    new_status TEXT NOT NULL,
+    model_family TEXT NOT NULL,
+    feature_version TEXT NOT NULL,
+    dataset_version TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase8_model_status_history_model_id
+ON phase8_model_status_history(model_id, id);
+
+CREATE TRIGGER IF NOT EXISTS phase8_model_status_history_no_update
+BEFORE UPDATE ON phase8_model_status_history
+BEGIN
+    SELECT RAISE(ABORT, 'phase8_model_status_history is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase8_model_status_history_no_delete
+BEFORE DELETE ON phase8_model_status_history
+BEGIN
+    SELECT RAISE(ABORT, 'phase8_model_status_history is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase8_model_status_history_on_insert
+AFTER INSERT ON model_registry
+BEGIN
+    INSERT INTO phase8_model_status_history(
+        model_id,
+        changed_at,
+        old_status,
+        new_status,
+        model_family,
+        feature_version,
+        dataset_version
+    ) VALUES (
+        NEW.model_id,
+        NEW.created_at,
+        NULL,
+        NEW.status,
+        NEW.model_family,
+        NEW.feature_version,
+        NEW.dataset_version
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase8_model_status_history_on_status_update
+AFTER UPDATE OF status ON model_registry
+WHEN OLD.status <> NEW.status
+BEGIN
+    INSERT INTO phase8_model_status_history(
+        model_id,
+        changed_at,
+        old_status,
+        new_status,
+        model_family,
+        feature_version,
+        dataset_version
+    ) VALUES (
+        NEW.model_id,
+        CASE
+            WHEN NEW.updated_at <> OLD.updated_at THEN NEW.updated_at
+            ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        END,
+        OLD.status,
+        NEW.status,
+        NEW.model_family,
+        NEW.feature_version,
+        NEW.dataset_version
+    );
+END;
+
+CREATE TABLE IF NOT EXISTS phase8_cycle_status_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id TEXT NOT NULL,
+    changed_at TEXT NOT NULL,
+    old_status TEXT,
+    new_status TEXT NOT NULL,
+    champion_model_id TEXT NOT NULL,
+    target_dataset_version TEXT NOT NULL,
+    old_challenger_model_id TEXT,
+    new_challenger_model_id TEXT,
+    old_active_key TEXT,
+    new_active_key TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase8_cycle_status_history_cycle_id
+ON phase8_cycle_status_history(cycle_id, id);
+
+CREATE TRIGGER IF NOT EXISTS phase8_cycle_status_history_no_update
+BEFORE UPDATE ON phase8_cycle_status_history
+BEGIN
+    SELECT RAISE(ABORT, 'phase8_cycle_status_history is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase8_cycle_status_history_no_delete
+BEFORE DELETE ON phase8_cycle_status_history
+BEGIN
+    SELECT RAISE(ABORT, 'phase8_cycle_status_history is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase8_cycle_status_history_on_insert
+AFTER INSERT ON continuous_learning_cycles
+BEGIN
+    INSERT INTO phase8_cycle_status_history(
+        cycle_id,
+        changed_at,
+        old_status,
+        new_status,
+        champion_model_id,
+        target_dataset_version,
+        old_challenger_model_id,
+        new_challenger_model_id,
+        old_active_key,
+        new_active_key
+    ) VALUES (
+        NEW.cycle_id,
+        NEW.created_at,
+        NULL,
+        NEW.status,
+        NEW.champion_model_id,
+        NEW.target_dataset_version,
+        NULL,
+        NEW.challenger_model_id,
+        NULL,
+        NEW.active_key
+    );
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase8_cycle_status_history_on_transition
+AFTER UPDATE OF status, challenger_model_id, active_key
+ON continuous_learning_cycles
+WHEN (
+    OLD.status <> NEW.status
+    OR IFNULL(OLD.challenger_model_id, '') <> IFNULL(NEW.challenger_model_id, '')
+    OR IFNULL(OLD.active_key, '') <> IFNULL(NEW.active_key, '')
+)
+BEGIN
+    INSERT INTO phase8_cycle_status_history(
+        cycle_id,
+        changed_at,
+        old_status,
+        new_status,
+        champion_model_id,
+        target_dataset_version,
+        old_challenger_model_id,
+        new_challenger_model_id,
+        old_active_key,
+        new_active_key
+    ) VALUES (
+        NEW.cycle_id,
+        CASE
+            WHEN NEW.updated_at <> OLD.updated_at THEN NEW.updated_at
+            ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        END,
+        OLD.status,
+        NEW.status,
+        NEW.champion_model_id,
+        NEW.target_dataset_version,
+        OLD.challenger_model_id,
+        NEW.challenger_model_id,
+        OLD.active_key,
+        NEW.active_key
+    );
+END;
+
+INSERT INTO phase8_model_status_history(
+    model_id,
+    changed_at,
+    old_status,
+    new_status,
+    model_family,
+    feature_version,
+    dataset_version
+)
+SELECT
+    model_id,
+    (SELECT started_at FROM phase8_transition_history_meta WHERE singleton = 1),
+    NULL,
+    status,
+    model_family,
+    feature_version,
+    dataset_version
+FROM model_registry AS model
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM phase8_model_status_history AS history
+    WHERE history.model_id = model.model_id
+);
+
+INSERT INTO phase8_cycle_status_history(
+    cycle_id,
+    changed_at,
+    old_status,
+    new_status,
+    champion_model_id,
+    target_dataset_version,
+    old_challenger_model_id,
+    new_challenger_model_id,
+    old_active_key,
+    new_active_key
+)
+SELECT
+    cycle_id,
+    (SELECT started_at FROM phase8_transition_history_meta WHERE singleton = 1),
+    NULL,
+    status,
+    champion_model_id,
+    target_dataset_version,
+    NULL,
+    challenger_model_id,
+    NULL,
+    active_key
+FROM continuous_learning_cycles AS cycle
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM phase8_cycle_status_history AS history
+    WHERE history.cycle_id = cycle.cycle_id
+);
+
 CREATE INDEX IF NOT EXISTS idx_model_live_evidence_model_time
 ON model_live_evidence(model_id, created_at, id);
 
