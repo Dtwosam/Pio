@@ -627,6 +627,15 @@ bundle and future replacement evidence must not spoil an earlier bundle.
 Historical bundle evaluation is inspection-only: supplying `--as-of` together
 with `--persist` must fail before any evidence write.
 
+Omitting `--as-of` must preserve live/current semantics all the way through
+the CLI and internal evaluator calls; callers must not synthesize a current
+timestamp and thereby select historical code paths. Phase 8 consolidated
+status/planning remain current-only and explicit historical cutoffs fail closed.
+For Phase 9, an explicit historical cutoff is inspection-only: the plan may
+describe debt that existed at that cutoff, but every collector action and shell
+command must be suppressed, and operator handoff must not generate current
+explicit-input templates or execution follow-ups.
+
 Historical explicit-input validity and source freshness must follow the same
 cutoff. The explicit-input audit selects the latest checksum-valid artifact
 persisted no later than the cutoff; future assumptions cannot satisfy or stale
