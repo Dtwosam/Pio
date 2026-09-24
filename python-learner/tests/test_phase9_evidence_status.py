@@ -76,9 +76,21 @@ def test_phase9_evidence_status_reports_quantitative_source_gaps(
         lambda *args, **kwargs: SimpleNamespace(
             current=False,
             families=(
-                SimpleNamespace(family="adaptive_regime", current=False),
-                SimpleNamespace(family="mint_risk", current=True),
-                SimpleNamespace(family="wallet_flow", current=False),
+                SimpleNamespace(
+                    family="adaptive_regime",
+                    current=False,
+                    reason="pool-a chain history advanced",
+                ),
+                SimpleNamespace(
+                    family="mint_risk",
+                    current=True,
+                    reason="current",
+                ),
+                SimpleNamespace(
+                    family="wallet_flow",
+                    current=False,
+                    reason="pool-b event history advanced",
+                ),
             ),
         ),
     )
@@ -168,6 +180,16 @@ def test_phase9_evidence_status_reports_quantitative_source_gaps(
     assert any("ranked mint inputs ready 1/2" in r for r in report.reasons)
     assert any("ranked wallet sources ready 1/2" in r for r in report.reasons)
     assert any("research source refresh is pending" in r for r in report.reasons)
+    assert any(
+        "source freshness adaptive_regime: pool-a chain history advanced"
+        in r
+        for r in report.reasons
+    )
+    assert any(
+        "source freshness wallet_flow: pool-b event history advanced"
+        in r
+        for r in report.reasons
+    )
 
 
 def test_phase9_evidence_status_reports_ready_counts(
