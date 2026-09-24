@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Pio Phase 9 unattended maintenance health
+
+[Timer]
+OnBootSec=30min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+Unit=pio-phase9-maintenance-health.service
+
+[Install]
+WantedBy=timers.target
