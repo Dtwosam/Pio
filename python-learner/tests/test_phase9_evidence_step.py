@@ -145,7 +145,15 @@ def test_evidence_step_runs_only_history_capture_for_history_debt(
 
     def fake_history(*args, **kwargs):
         calls.append(kwargs)
-        return DummyRecord(pools_captured=2)
+        result = DummyRecord(
+            pools_captured=2,
+            pools_skipped_interval=0,
+            pools_failed=0,
+        )
+        result.pools_captured = 2
+        result.pools_skipped_interval = 0
+        result.pools_failed = 0
+        return result
 
     monkeypatch.setattr(
         step_module,
