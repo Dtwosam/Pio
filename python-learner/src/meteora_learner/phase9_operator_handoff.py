@@ -222,6 +222,8 @@ def build_phase9_operator_handoff(
         template_command += " > phase9-research-inputs.json"
         suggested_command = template_command
         followups = (
+            "pio phase9-research-inputs-check "
+            "--file phase9-research-inputs.json --require-valid",
             "pio phase9-research-inputs-ingest "
             "--file phase9-research-inputs.json",
             "pio phase9-research-inputs-audit --require-valid",
