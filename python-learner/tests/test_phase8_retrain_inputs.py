@@ -1,8 +1,12 @@
+import json
+import sys
+
 from types import SimpleNamespace
 
 import pytest
 
 import meteora_learner.phase8_retrain_inputs as inputs_module
+from meteora_learner import cli
 from meteora_learner.phase8_retrain_inputs import (
     audit_phase8_retrain_inputs,
     build_phase8_retrain_input_template,
@@ -342,3 +346,77 @@ def test_phase8_retrain_build_refuses_when_retraining_is_not_due(
             storage,
             artifact=artifact,
         )
+
+
+def test_phase8_retrain_input_check_cli_returns_checksum(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_champion(storage)
+    payload = filled_payload()
+    input_file = tmp_path / "phase8-retrain-inputs.json"
+    input_file.write_text(json.dumps(payload), encoding="utf-8")
+    expected = check_phase8_retrain_inputs(storage, payload)
+
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase8-retrain-inputs-check",
+            "--file",
+            str(input_file),
+            "--require-valid",
+        ],
+    )
+
+    cli.main()
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["valid"] is True
+    assert result["artifact_sha256"] == expected.artifact_sha256
+    assert result["champion_matches_current"] is True
+
+
+def test_phase8_retrain_input_check_cli_fails_closed_without_persistence(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    storage = Storage(tmp_path / "pio.db")
+    seed_champion(storage)
+    payload = filled_payload()
+    payload["pools"][1]["network_cost_y_atomic"] = None
+    input_file = tmp_path / "phase8-retrain-inputs.json"
+    input_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "pio",
+            "phase8-retrain-inputs-check",
+            "--file",
+            str(input_file),
+            "--require-valid",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["valid"] is False
+    assert "network_cost_y_atomic is required" in result["reasons"][0]
+    assert (
+        storage.latest_model_live_evidence(
+            "champion-1",
+            evidence_type=PHASE8_RETRAIN_INPUTS_EVIDENCE_TYPE,
+        )
+        is None
+    )
