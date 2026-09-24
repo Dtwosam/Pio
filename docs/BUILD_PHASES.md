@@ -366,6 +366,8 @@ Built:
 - optional hardened systemd evidence-runner timer that advances only bounded planner-selected source/research debt under the shared maintenance lease and cannot promote, authorize policy, sign or submit
 - immutable Phase 9 maintenance lifecycle journal covering acquired/busy/recovered leases and finished outcomes for unattended source, refresh and evidence-run operations, with bounded CLI history inspection
 - fail-able Phase 9 maintenance health report plus network-isolated systemd health timer covering stale history, failed/partial/no-progress runs, manual blockers, active runs and expired orphaned leases
+- deterministic Phase 9 operator handoff report that converts manual debt into an exact non-inventing template/check/ingest/audit/research sequence and separates operator actions from economic-input requirements
+- non-persisting explicit-input validation/checksum command so malformed or inconsistent assumptions can be rejected before append-only evidence ingestion
 
 Still needed:
 - real multi-pool evidence satisfying the persisted Phase 9 research-bundle thresholds
