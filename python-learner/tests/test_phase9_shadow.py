@@ -14,11 +14,13 @@ from meteora_learner.storage import Storage
 class DummyAudit:
     def __init__(self, current=True, reasons=()):
         self.current = current
+        self.valid = current
         self.reasons = tuple(reasons)
 
     def to_record(self):
         return {
             "current": self.current,
+            "valid": self.valid,
             "reasons": list(self.reasons),
         }
 
@@ -120,8 +122,8 @@ def patch_context(
     )
     monkeypatch.setattr(
         shadow_module,
-        "audit_persisted_phase9_promotion",
-        lambda storage, criteria: DummyAudit(
+        "audit_persisted_phase9_promotion_baseline",
+        lambda storage: DummyAudit(
             current=phase9_current,
             reasons=(
                 ()
