@@ -1347,12 +1347,15 @@ pio phase9-operator-handoff
 ```
 
 For an upstream dependency such as Phase 8 currentness, the report first
-routes to `pio phase8-evidence-run --max-steps 4`. That bounded runner may
-advance only checksum-bound dataset build, deterministic offline challenger
-training and offline validation. It stops before PAPER, champion promotion,
-rollback or Phase 8 promotion; `phase8-evidence-plan` remains the follow-up
-inspection view when the bounded run reaches an operator or real-evidence
-boundary. For `EXPLICIT_RESEARCH_INPUTS`, the Phase 9 handoff returns the
+routes to `pio phase8-operator-handoff`. That read-only handoff says whether
+Phase 8 has an allowlisted offline action, is waiting on real evidence, needs
+explicit retraining economics, or has reached an operator-owned PAPER,
+promotion or safety boundary. When automatic offline work is available, it
+routes to `pio phase8-evidence-run --max-steps 4`, which may advance only
+checksum-bound dataset build, deterministic offline challenger training and
+offline validation. It stops before PAPER, champion promotion, rollback or
+Phase 8 promotion; `phase8-evidence-plan` remains the lower-level inspection
+view. For `EXPLICIT_RESEARCH_INPUTS`, the Phase 9 handoff returns the
 exact ranked pool template, every still-null required economic field and the
 follow-up sequence.
 It distinguishes `operator_action_required` from
