@@ -5680,7 +5680,7 @@ def main() -> None:
                     args.max_mean_abs_prediction_error_bps
                 ),
             ),
-            as_of=args.as_of or utc_now_iso(),
+            as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_current and not result.persisted_phase8_current:
@@ -5714,7 +5714,7 @@ def main() -> None:
                     args.max_mean_abs_prediction_error_bps
                 ),
             ),
-            as_of=args.as_of or utc_now_iso(),
+            as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_ready and not result.promotion_ready:
@@ -6850,7 +6850,7 @@ def main() -> None:
         storage = Storage(settings.database_path)
         result = evaluate_phase9_source_freshness(
             storage,
-            as_of=args.as_of or utc_now_iso(),
+            as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_current and not result.current:
@@ -6867,7 +6867,7 @@ def main() -> None:
                 min_wallet_flow_pools=args.min_wallet_flow_pools,
                 min_static_hedge_pools=args.min_static_hedge_pools,
             ),
-            as_of=args.as_of or utc_now_iso(),
+            as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_source_ready and not (
@@ -6893,7 +6893,7 @@ def main() -> None:
                 min_static_hedge_pools=args.min_static_hedge_pools,
             ),
             history_interval_seconds=args.history_interval_seconds,
-            as_of=args.as_of or utc_now_iso(),
+            as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
         if args.require_bundle_ready and not result.research_bundle_ready:
