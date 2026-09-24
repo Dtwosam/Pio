@@ -43,6 +43,8 @@ class Phase9MaintenanceHealthReport:
     latest_event_type: str | None
     latest_event_status: str | None
     latest_terminal_status: str | None
+    latest_next_retry_at: str | None
+    seconds_until_next_retry: int | None
     seconds_since_latest_event: int | None
     recent_failure_events: int
     recent_busy_events: int
@@ -119,6 +121,20 @@ def evaluate_phase9_maintenance_health(
         if latest is not None
         else None
     )
+    latest_next_retry_at: str | None = None
+    retry_time: datetime | None = None
+    seconds_until_next_retry: int | None = None
+    if (
+        latest_terminal is not None
+        and latest_terminal.status == "WAITING_INTERVAL"
+    ):
+        raw_retry = latest_terminal.details.get("next_retry_at")
+        if isinstance(raw_retry, str) and raw_retry.strip():
+            latest_next_retry_at = raw_retry
+            retry_time = _parse_time(raw_retry)
+            seconds_until_next_retry = int(
+                (retry_time - now).total_seconds()
+            )
 
     recent_events = tuple(
         event
@@ -146,6 +162,25 @@ def evaluate_phase9_maintenance_health(
     attention_required = True
     status = "NO_HISTORY"
 
+    stale_deadline = (
+        _parse_time(latest.event_time)
+        if latest is not None
+        else None
+    )
+    if stale_deadline is not None:
+        from datetime import timedelta
+        stale_deadline = stale_deadline + timedelta(
+            seconds=max_event_age_seconds
+        )
+        if (
+            latest_terminal is not None
+            and latest_terminal.status == "WAITING_INTERVAL"
+            and retry_time is not None
+            and retry_time > _parse_time(latest.event_time)
+        ):
+            stale_deadline = retry_time + timedelta(
+                seconds=max_event_age_seconds
+            )
     if lease.exists and lease.expired:
         status = "EXPIRED_LEASE"
         reasons.append(
@@ -166,12 +201,25 @@ def evaluate_phase9_maintenance_health(
             attention_required = False
     elif latest is None:
         reasons.append("no Phase 9 maintenance lifecycle events exist")
-    elif latest_age is not None and latest_age > max_event_age_seconds:
+    elif (
+        stale_deadline is not None
+        and now > stale_deadline
+    ):
         status = "STALE"
-        reasons.append(
-            "the latest Phase 9 maintenance lifecycle event is older than "
-            f"{max_event_age_seconds} seconds"
-        )
+        if (
+            latest_terminal is not None
+            and latest_terminal.status == "WAITING_INTERVAL"
+            and retry_time is not None
+        ):
+            reasons.append(
+                "the Phase 9 cadence wait is stale beyond its persisted "
+                f"next_retry_at plus {max_event_age_seconds} seconds"
+            )
+        else:
+            reasons.append(
+                "the latest Phase 9 maintenance lifecycle event is older than "
+                f"{max_event_age_seconds} seconds"
+            )
     elif latest_terminal is None:
         status = "MISSING_TERMINAL"
         reasons.append(
@@ -225,6 +273,8 @@ def evaluate_phase9_maintenance_health(
         latest_terminal_status=(
             latest_terminal.status if latest_terminal else None
         ),
+        latest_next_retry_at=latest_next_retry_at,
+        seconds_until_next_retry=seconds_until_next_retry,
         seconds_since_latest_event=latest_age,
         recent_failure_events=recent_failures,
         recent_busy_events=recent_busy,
