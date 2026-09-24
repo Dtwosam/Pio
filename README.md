@@ -121,6 +121,7 @@ pio phase8-evidence-plan
 pio phase8-operator-handoff  # exact automatic/waiting/manual Phase 8 boundary
 pio phase8-evidence-step-run  # one safe offline planner-selected step
 pio phase8-evidence-run --max-steps 4  # dataset build -> offline train -> offline validate; stops before PAPER/promotion
+# Phase 8 consolidated status/plan/handoff are current-state only; historical --as-of fails closed
 pio phase8-retrain-input-template > phase8-retrain-inputs.json
 pio phase8-retrain-inputs-check --file phase8-retrain-inputs.json --require-valid
 pio phase8-retrain-inputs-ingest --file phase8-retrain-inputs.json
