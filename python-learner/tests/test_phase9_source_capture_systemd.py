@@ -100,3 +100,11 @@ def test_phase9_evidence_run_timer_respects_history_cadence():
     assert "OnUnitActiveSec=70min" in timer
     assert "Persistent=true" in timer
     assert "Unit=pio-phase9-evidence-run.service" in timer
+
+
+def test_phase9_systemd_extra_args_are_declared_in_env_example():
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "PIO_PHASE9_SOURCE_CAPTURE_EXTRA_ARGS=" in env_example
+    assert "PIO_PHASE9_RESEARCH_REFRESH_EXTRA_ARGS=" in env_example
+    assert "PIO_PHASE9_EVIDENCE_RUN_EXTRA_ARGS=" in env_example
