@@ -1,5 +1,9 @@
+import json
+import sys
+
 from types import SimpleNamespace
 
+from meteora_learner import cli
 import meteora_learner.phase9_operator_handoff as handoff_module
 from meteora_learner.phase9_evidence_plan import (
     Phase9EvidenceDebtItem,
@@ -8,7 +12,6 @@ from meteora_learner.phase9_evidence_plan import (
 from meteora_learner.phase9_operator_handoff import (
     build_phase9_operator_handoff,
 )
-from meteora_learner.settings import Settings
 from meteora_learner.storage import Storage
 
 
@@ -158,7 +161,53 @@ def test_operator_handoff_surfaces_non_actionable_upstream_blocker(
     assert report.blockers[0]["debt_type"] == "PHASE8_DEPENDENCY"
 
 
-def test_operator_handoff_uses_matching_storage_settings(tmp_path):
+def test_operator_handoff_cli_prints_manual_handoff(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
     storage = Storage(tmp_path / "pio.db")
-    settings = Settings(database_path=storage.path)
-    assert settings.database_path == storage.path
+    next_action = action(
+        "PHASE8_DEPENDENCY",
+        actionable=False,
+        scope="PHASE8_PROMOTION",
+        command="pio phase8-evidence-plan",
+    )
+    report = handoff_module.Phase9OperatorHandoff(
+        research_only=True,
+        read_only=True,
+        policy_actionable=False,
+        execution_wired=False,
+        as_of="2026-09-24T12:00:00+00:00",
+        status="MANUAL_REQUIRED",
+        research_bundle_ready=False,
+        debt_type=next_action.debt_type,
+        scope=next_action.scope,
+        reason=next_action.reason,
+        automatic_action_available=False,
+        manual_input_required=True,
+        suggested_command=next_action.shell_command,
+        explicit_input_template=None,
+        required_manual_fields=(),
+        followup_commands=(),
+        blockers=(),
+        reasons=("plan reason",),
+    )
+    monkeypatch.setenv("PIO_DATABASE_PATH", str(storage.path))
+    monkeypatch.setattr(
+        cli,
+        "build_phase9_operator_handoff",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["pio", "phase9-operator-handoff"],
+    )
+
+    cli.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "MANUAL_REQUIRED"
+    assert payload["debt_type"] == "PHASE8_DEPENDENCY"
+    assert payload["suggested_command"] == "pio phase8-evidence-plan"
