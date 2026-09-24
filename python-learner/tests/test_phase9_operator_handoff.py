@@ -114,16 +114,23 @@ def test_operator_handoff_builds_non_inventing_explicit_input_handoff(
         "build_phase9_evidence_plan",
         lambda *args, **kwargs: plan(next_action),
     )
+    seen = {}
+
+    def evidence_status(*args, **kwargs):
+        seen["as_of"] = kwargs["as_of"]
+        return SimpleNamespace(
+            sampling_pools=("pool-a", "pool-b", "pool-c")
+        )
+
     monkeypatch.setattr(
         handoff_module,
         "evaluate_phase9_evidence_status",
-        lambda *args, **kwargs: SimpleNamespace(
-            sampling_pools=("pool-a", "pool-b", "pool-c")
-        ),
+        evidence_status,
     )
 
     report = build_phase9_operator_handoff(storage)
 
+    assert seen["as_of"] is None
     assert report.status == "MANUAL_REQUIRED"
     assert report.operator_action_required is True
     assert report.manual_input_required is True
