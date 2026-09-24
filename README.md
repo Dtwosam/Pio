@@ -122,6 +122,7 @@ pio phase8-operator-handoff  # exact automatic/waiting/manual Phase 8 boundary
 pio phase8-transition-history --require-ready  # append-only model/cycle transition journal audit
 pio phase8-transition-snapshot --as-of <TIME> --require-consistent
 pio phase8-historical-promotion --as-of <TIME> --require-ready  # reconstructed readiness only; does not persist promotion
+pio phase8-historical-promotion-audit --as-of <TIME> --require-valid  # persisted promotion validity at cutoff
 pio phase8-transition-snapshot --as-of <TIME> --require-consistent  # journal-backed model/cycle state only
 pio phase8-evidence-step-run  # one safe offline planner-selected step
 pio phase8-evidence-run --max-steps 4  # dataset build -> offline train -> offline validate; stops before PAPER/promotion
