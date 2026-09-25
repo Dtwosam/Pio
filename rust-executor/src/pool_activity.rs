@@ -27,6 +27,8 @@ pub struct HistoricalPoolActivityDiscovery {
     pub read_only_capture: bool,
     pub pool_address: String,
     pub before_signature: Option<String>,
+    pub until_signature: Option<String>,
+    pub newest_signature: Option<String>,
     pub signatures_requested: usize,
     pub signatures_scanned: usize,
     pub failed_transactions: usize,
@@ -88,6 +90,7 @@ pub async fn discover_historical_pool_activity(
     pool_address: &str,
     limit: usize,
     before_signature: Option<&str>,
+    until_signature: Option<&str>,
 ) -> Result<HistoricalPoolActivityDiscovery> {
     if limit == 0 || limit > 1_000 {
         anyhow::bail!("limit must be between 1 and 1000");
@@ -100,6 +103,13 @@ pub async fn discover_historical_pool_activity(
         ),
         _ => None,
     };
+    let until = match until_signature {
+        Some(value) if !value.trim().is_empty() => Some(
+            Signature::from_str(value.trim())
+                .context("invalid until signature")?,
+        ),
+        _ => None,
+    };
 
     let rpc = RpcClient::new(rpc_url.to_string());
     let signatures = rpc
@@ -107,7 +117,7 @@ pub async fn discover_historical_pool_activity(
             &pool,
             GetConfirmedSignaturesForAddress2Config {
                 before,
-                until: None,
+                until,
                 limit: Some(limit),
                 commitment: Some(CommitmentConfig::confirmed()),
             },
@@ -115,6 +125,9 @@ pub async fn discover_historical_pool_activity(
         .await
         .context("failed to fetch pool transaction signatures")?;
 
+    let newest_signature = signatures
+        .first()
+        .map(|item| item.signature.clone());
     let next_before_signature = signatures
         .last()
         .map(|item| item.signature.clone());
@@ -173,6 +186,10 @@ pub async fn discover_historical_pool_activity(
         before_signature: before_signature
             .filter(|value| !value.trim().is_empty())
             .map(str::to_string),
+        until_signature: until_signature
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string),
+        newest_signature,
         signatures_requested: limit,
         signatures_scanned: signatures.len(),
         failed_transactions,
