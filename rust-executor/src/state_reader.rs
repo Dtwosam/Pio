@@ -5,8 +5,9 @@ use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anchor_lang::Discriminator;
 use solana_client::rpc_config::{
-    RpcAccountInfoConfig, RpcProgramAccountsConfig, UiAccountEncoding,
+    RpcAccountInfoConfig, RpcProgramAccountsConfig,
 };
+use solana_client::rpc_response::UiAccountEncoding;
 use solana_client::rpc_filter::{Memcmp, RpcFilterType};
 use anchor_client::solana_sdk::sysvar::clock::{Clock, ID as CLOCK_ID};
 use anyhow::{Context, Result};
