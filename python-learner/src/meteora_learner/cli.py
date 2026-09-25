@@ -3029,6 +3029,10 @@ def main() -> None:
         help="Optional explicit getSignaturesForAddress pagination cursor",
     )
     phase9_pool_activity.add_argument(
+        "--until-signature",
+        help="Optional exclusive recent-activity watermark cursor",
+    )
+    phase9_pool_activity.add_argument(
         "--advance-backfill",
         action="store_true",
         help="Use and advance the persisted per-pool historical backfill cursor",
@@ -6751,14 +6755,18 @@ def main() -> None:
         settings = Settings.from_env()
         storage = Storage(settings.database_path)
         before = args.before_signature
+        until = args.until_signature
         state_before = phase9_pool_activity_scan_state(
             storage,
             pool_address=args.pool,
         )
         if args.advance_backfill:
-            if args.before_signature is not None:
+            if (
+                args.before_signature is not None
+                or args.until_signature is not None
+            ):
                 raise ValueError(
-                    "--before-signature cannot be combined with "
+                    "explicit signature cursors cannot be combined with "
                     "--advance-backfill"
                 )
             if state_before.backfill_exhausted:
@@ -6781,6 +6789,7 @@ def main() -> None:
             args.pool,
             limit=args.limit,
             before_signature=before,
+            until_signature=until,
             rust_manifest_path=args.rust_manifest_path,
             rust_binary_path=args.rust_binary_path,
             timeout_seconds=args.timeout_seconds,
