@@ -804,6 +804,9 @@ CREATE TABLE IF NOT EXISTS phase9_pool_activity_scan_state (
     signatures_scanned INTEGER NOT NULL DEFAULT 0,
     matching_transactions INTEGER NOT NULL DEFAULT 0,
     positions_discovered INTEGER NOT NULL DEFAULT 0,
+    recent_watermark_signature TEXT,
+    recent_before_signature TEXT,
+    recent_head_signature TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -1416,6 +1419,12 @@ VOLUME_BUCKET_EXTRA_COLUMNS = {
     "protocol_fees": "REAL",
 }
 
+PHASE9_POOL_ACTIVITY_SCAN_EXTRA_COLUMNS = {
+    "recent_watermark_signature": "TEXT",
+    "recent_before_signature": "TEXT",
+    "recent_head_signature": "TEXT",
+}
+
 BIN_LIQUIDITY_EXTRA_COLUMNS = {
     "price": "TEXT NOT NULL DEFAULT '0'",
     "bin_array_address": "TEXT",
@@ -1590,6 +1599,11 @@ class Storage:
             _ensure_columns(conn, "chain_position_snapshots", CHAIN_POSITION_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_transaction_events", CHAIN_TX_EVENT_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_add_liquidity_requests", CHAIN_ADD_REQUEST_EXTRA_COLUMNS)
+            _ensure_columns(
+                conn,
+                "phase9_pool_activity_scan_state",
+                PHASE9_POOL_ACTIVITY_SCAN_EXTRA_COLUMNS,
+            )
 
     def save_raw(
         self,
