@@ -15,6 +15,9 @@ class Phase9PoolActivityScanState:
     signatures_scanned: int
     matching_transactions: int
     positions_discovered: int
+    recent_watermark_signature: str | None
+    recent_before_signature: str | None
+    recent_head_signature: str | None
     updated_at: str | None
 
     def to_record(self) -> dict[str, Any]:
@@ -34,6 +37,9 @@ def phase9_pool_activity_scan_state(
             SELECT backfill_before_signature, backfill_exhausted,
                    pages_scanned, signatures_scanned,
                    matching_transactions, positions_discovered,
+                   recent_watermark_signature,
+                   recent_before_signature,
+                   recent_head_signature,
                    updated_at
             FROM phase9_pool_activity_scan_state
             WHERE pool_address = ?
@@ -49,6 +55,9 @@ def phase9_pool_activity_scan_state(
             signatures_scanned=0,
             matching_transactions=0,
             positions_discovered=0,
+            recent_watermark_signature=None,
+            recent_before_signature=None,
+            recent_head_signature=None,
             updated_at=None,
         )
     return Phase9PoolActivityScanState(
@@ -61,7 +70,16 @@ def phase9_pool_activity_scan_state(
         signatures_scanned=int(row[3]),
         matching_transactions=int(row[4]),
         positions_discovered=int(row[5]),
-        updated_at=str(row[6]),
+        recent_watermark_signature=(
+            str(row[6]) if row[6] is not None else None
+        ),
+        recent_before_signature=(
+            str(row[7]) if row[7] is not None else None
+        ),
+        recent_head_signature=(
+            str(row[8]) if row[8] is not None else None
+        ),
+        updated_at=str(row[9]),
     )
 
 
@@ -132,6 +150,123 @@ def record_phase9_pool_activity_page(
                 signatures + signatures_scanned,
                 matches + matching_transactions,
                 positions + positions_discovered,
+                updated_at,
+            ),
+        )
+    return phase9_pool_activity_scan_state(
+        storage,
+        pool_address=pool_address,
+    )
+
+
+def record_phase9_pool_activity_recent_page(
+    storage: Storage,
+    *,
+    pool_address: str,
+    newest_signature: str | None,
+    next_before_signature: str | None,
+    has_more: bool,
+    signatures_scanned: int,
+) -> Phase9PoolActivityScanState:
+    if not pool_address.strip():
+        raise ValueError("pool_address is required")
+    if signatures_scanned < 0:
+        raise ValueError("signatures_scanned cannot be negative")
+    if signatures_scanned == 0:
+        if newest_signature is not None or next_before_signature is not None:
+            raise ValueError(
+                "empty recent page cannot have signature cursors"
+            )
+    else:
+        if not newest_signature:
+            raise ValueError(
+                "non-empty recent page requires newest_signature"
+            )
+        if not next_before_signature:
+            raise ValueError(
+                "non-empty recent page requires next_before_signature"
+            )
+    if has_more and not next_before_signature:
+        raise ValueError("has_more requires next_before_signature")
+
+    updated_at = utc_now_iso()
+    with storage.connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT recent_watermark_signature,
+                   recent_before_signature,
+                   recent_head_signature
+            FROM phase9_pool_activity_scan_state
+            WHERE pool_address = ?
+            """,
+            (pool_address,),
+        ).fetchone()
+        watermark = (
+            str(row[0])
+            if row is not None and row[0] is not None
+            else None
+        )
+        before = (
+            str(row[1])
+            if row is not None and row[1] is not None
+            else None
+        )
+        head = (
+            str(row[2])
+            if row is not None and row[2] is not None
+            else None
+        )
+
+        if watermark is None and before is None:
+            next_watermark = newest_signature or watermark
+            next_before = None
+            next_head = None
+        elif before is None:
+            if signatures_scanned == 0:
+                next_watermark = watermark
+                next_before = None
+                next_head = None
+            elif has_more:
+                next_watermark = watermark
+                next_before = next_before_signature
+                next_head = newest_signature
+            else:
+                next_watermark = newest_signature
+                next_before = None
+                next_head = None
+        else:
+            catchup_head = head or newest_signature
+            if has_more:
+                next_watermark = watermark
+                next_before = next_before_signature
+                next_head = catchup_head
+            else:
+                next_watermark = catchup_head or watermark
+                next_before = None
+                next_head = None
+
+        conn.execute(
+            """
+            INSERT INTO phase9_pool_activity_scan_state(
+                pool_address, recent_watermark_signature,
+                recent_before_signature, recent_head_signature,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(pool_address) DO UPDATE SET
+                recent_watermark_signature =
+                    excluded.recent_watermark_signature,
+                recent_before_signature =
+                    excluded.recent_before_signature,
+                recent_head_signature =
+                    excluded.recent_head_signature,
+                updated_at = excluded.updated_at
+            """,
+            (
+                pool_address,
+                next_watermark,
+                next_before,
+                next_head,
                 updated_at,
             ),
         )
