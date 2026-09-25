@@ -15,6 +15,8 @@ def payload():
         "read_only_capture": True,
         "pool_address": "pool-a",
         "before_signature": None,
+        "until_signature": None,
+        "newest_signature": "sig-newest",
         "signatures_requested": 2,
         "signatures_scanned": 2,
         "failed_transactions": 0,
@@ -82,6 +84,7 @@ def test_historical_pool_activity_wrapper_validates_and_returns_report(
     assert report.positions[0].position_address == "position-a"
     assert report.positions[0].owner == "owner-a"
     assert report.has_more is True
+    assert report.newest_signature == "sig-newest"
     assert report.next_before_signature == "sig-oldest"
 
 
@@ -113,6 +116,46 @@ def test_historical_pool_activity_wrapper_forwards_cursor(
     assert report.before_signature == "sig-before"
 
 
+def test_historical_pool_activity_wrapper_forwards_until_cursor(
+    monkeypatch,
+    tmp_path,
+):
+    binary = fake_binary(tmp_path)
+    monkeypatch.setenv("SOLANA_RPC_URL", "http://rpc")
+    value = payload()
+    value["until_signature"] = "sig-watermark"
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(value),
+            stderr="",
+        )
+
+    monkeypatch.setattr(discovery_module.subprocess, "run", fake_run)
+
+    report = discover_historical_pool_activity_with_rust(
+        "pool-a",
+        limit=2,
+        until_signature="sig-watermark",
+        rust_binary_path=binary,
+    )
+
+    assert calls == [
+        [
+            str(binary),
+            "discover-pool-activity-env",
+            "pool-a",
+            "2",
+            "",
+            "sig-watermark",
+        ]
+    ]
+    assert report.until_signature == "sig-watermark"
+
+
 @pytest.mark.parametrize(
     "mutator, match",
     [
@@ -131,6 +174,10 @@ def test_historical_pool_activity_wrapper_forwards_cursor(
         (
             lambda value: value.__setitem__("next_before_signature", None),
             "next cursor",
+        ),
+        (
+            lambda value: value.__setitem__("newest_signature", None),
+            "newest signature",
         ),
         (
             lambda value: value["positions"].append(

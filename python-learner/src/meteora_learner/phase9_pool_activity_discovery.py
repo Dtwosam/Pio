@@ -31,6 +31,8 @@ class Phase9PoolActivityDiscoveryReport:
     source_scope: str
     pool_address: str
     before_signature: str | None
+    until_signature: str | None
+    newest_signature: str | None
     signatures_requested: int
     signatures_scanned: int
     failed_transactions: int
@@ -50,6 +52,7 @@ def discover_historical_pool_activity_with_rust(
     *,
     limit: int = 100,
     before_signature: str | None = None,
+    until_signature: str | None = None,
     rust_manifest_path: str | Path | None = None,
     rust_binary_path: str | Path | None = None,
     timeout_seconds: int = 300,
@@ -78,6 +81,10 @@ def discover_historical_pool_activity_with_rust(
     ]
     if before_signature:
         args.append(before_signature)
+    elif until_signature:
+        args.append("")
+    if until_signature:
+        args.append(until_signature)
 
     if configured_binary:
         binary = Path(configured_binary)
@@ -145,6 +152,23 @@ def discover_historical_pool_activity_with_rust(
         raise ValueError(
             "historical pool-activity discovery cursor mismatch"
         )
+    raw_until = payload.get("until_signature")
+    returned_until = (
+        str(raw_until).strip()
+        if raw_until is not None
+        else None
+    )
+    expected_until = until_signature.strip() if until_signature else None
+    if returned_until != expected_until:
+        raise ValueError(
+            "historical pool-activity discovery until cursor mismatch"
+        )
+    raw_newest = payload.get("newest_signature")
+    newest_signature = (
+        str(raw_newest).strip()
+        if raw_newest is not None
+        else None
+    )
 
     signatures_requested = int(payload.get("signatures_requested", -1))
     signatures_scanned = int(payload.get("signatures_scanned", -1))
@@ -183,9 +207,15 @@ def discover_historical_pool_activity_with_rust(
         raise ValueError(
             "historical pool-activity page is missing its next cursor"
         )
-    if signatures_scanned == 0 and next_before is not None:
+    if signatures_scanned > 0 and not newest_signature:
         raise ValueError(
-            "empty historical pool-activity page cannot have a cursor"
+            "historical pool-activity page is missing its newest signature"
+        )
+    if signatures_scanned == 0 and (
+        next_before is not None or newest_signature is not None
+    ):
+        raise ValueError(
+            "empty historical pool-activity page cannot have signature cursors"
         )
 
     raw_positions = payload.get("positions")
@@ -245,6 +275,8 @@ def discover_historical_pool_activity_with_rust(
         source_scope="HISTORICAL_POOL_SIGNATURE_ACTIVITY",
         pool_address=pool_address,
         before_signature=returned_before,
+        until_signature=returned_until,
+        newest_signature=newest_signature,
         signatures_requested=signatures_requested,
         signatures_scanned=signatures_scanned,
         failed_transactions=failed_transactions,

@@ -47,6 +47,8 @@ def historical_discovery(
     positions,
     *,
     before=None,
+    until=None,
+    newest="cursor-newest",
     scanned=2,
     has_more=True,
     next_before="cursor-next",
@@ -69,6 +71,8 @@ def historical_discovery(
         source_scope="HISTORICAL_POOL_SIGNATURE_ACTIVITY",
         pool_address=pool,
         before_signature=before,
+        until_signature=until,
+        newest_signature=(newest if scanned > 0 else None),
         signatures_requested=2,
         signatures_scanned=scanned,
         failed_transactions=0,
@@ -403,21 +407,37 @@ def test_wallet_flow_capture_backfills_historical_pool_activity(
     discovery_calls = []
     collected = []
 
-    def historical(pool, limit, before):
-        discovery_calls.append((pool, limit, before))
-        if before is None:
+    def historical(pool, limit, before, until):
+        discovery_calls.append((pool, limit, before, until))
+        if before is None and until is None:
             return historical_discovery(
                 pool,
                 (("historical-a", "owner-a"),),
                 before=None,
+                until=None,
+                newest="head-1",
                 has_more=True,
                 next_before="cursor-1",
             )
+        if before is None and until == "head-1":
+            return historical_discovery(
+                pool,
+                (),
+                before=None,
+                until="head-1",
+                newest=None,
+                scanned=0,
+                has_more=False,
+                next_before=None,
+            )
         assert before == "cursor-1"
+        assert until is None
         return historical_discovery(
             pool,
             (("historical-b", "owner-b"),),
             before="cursor-1",
+            until=None,
+            newest="cursor-1",
             scanned=1,
             has_more=False,
             next_before="cursor-end",
@@ -440,7 +460,7 @@ def test_wallet_flow_capture_backfills_historical_pool_activity(
         historical_signature_limit=2,
     )
 
-    assert discovery_calls == [("pool-a", 2, None)]
+    assert discovery_calls == [("pool-a", 2, None, None)]
     assert first.historical_scan_enabled is True
     assert first.historical_recent_signatures_scanned == 2
     assert first.historical_backfill_signatures_scanned == 0
@@ -448,6 +468,7 @@ def test_wallet_flow_capture_backfills_historical_pool_activity(
     assert first.historical_scan_state is not None
     assert first.historical_scan_state.backfill_before_signature == "cursor-1"
     assert first.historical_scan_state.backfill_exhausted is False
+    assert first.historical_scan_state.recent_watermark_signature == "head-1"
     assert first.source_scope == (
         "CURRENT_AND_HISTORICAL_POOL_ACTIVITY_COHORT"
     )
@@ -469,16 +490,16 @@ def test_wallet_flow_capture_backfills_historical_pool_activity(
     )
 
     assert discovery_calls == [
-        ("pool-a", 2, None),
-        ("pool-a", 2, "cursor-1"),
+        ("pool-a", 2, None, "head-1"),
+        ("pool-a", 2, "cursor-1", None),
     ]
-    assert second.historical_recent_signatures_scanned == 2
+    assert second.historical_recent_signatures_scanned == 0
     assert second.historical_backfill_signatures_scanned == 1
-    assert second.historical_positions_added == 2
+    assert second.historical_positions_added == 1
     assert second.historical_scan_state is not None
     assert second.historical_scan_state.backfill_exhausted is True
     assert second.historical_scan_state.pages_scanned == 2
-    assert {"historical-a", "historical-b"}.issubset(set(collected))
+    assert set(collected) == {"historical-b"}
 
 
 def test_wallet_flow_capture_disables_historical_scan_for_as_of(tmp_path):
@@ -495,8 +516,8 @@ def test_wallet_flow_capture_disables_historical_scan_for_as_of(tmp_path):
         as_of="2026-09-23T12:00:00+00:00",
         discover_positions=lambda pool, limit: discovery(pool, ()),
         discover_historical_activity=(
-            lambda pool, limit, before: calls.append(
-                (pool, limit, before)
+            lambda pool, limit, before, until: calls.append(
+                (pool, limit, before, until)
             )
         ),
         collect_history=lambda position: 0,

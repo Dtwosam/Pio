@@ -16,6 +16,7 @@ from .phase9_pool_activity_scan_state import (
     Phase9PoolActivityScanState,
     phase9_pool_activity_scan_state,
     record_phase9_pool_activity_page,
+    record_phase9_pool_activity_recent_page,
 )
 from .position_history import collect_position_history
 from .settings import Settings
@@ -27,7 +28,7 @@ DiscoverPositions = Callable[[str, int], Phase9PositionDiscoveryReport]
 CollectHistory = Callable[[str], int]
 ExpandOwnerPositions = Callable[[str, str], tuple[str, ...]]
 DiscoverHistoricalActivity = Callable[
-    [str, int, str | None],
+    [str, int, str | None, str | None],
     Phase9PoolActivityDiscoveryReport,
 ]
 
@@ -486,11 +487,13 @@ def run_phase9_wallet_flow_capture(
                     pool: str,
                     limit: int,
                     before: str | None,
+                    until: str | None,
                 ) -> Phase9PoolActivityDiscoveryReport:
                     return discover_historical_pool_activity_with_rust(
                         pool,
                         limit=limit,
                         before_signature=before,
+                        until_signature=until,
                         rust_manifest_path=rust_manifest_path,
                         rust_binary_path=rust_binary_path,
                         timeout_seconds=max(timeout_seconds, 300),
@@ -524,10 +527,22 @@ def run_phase9_wallet_flow_capture(
                     historical_positions_added += 1
 
             try:
+                recent_before = (
+                    historical_state.recent_before_signature
+                )
+                recent_until = (
+                    historical_state.recent_watermark_signature
+                )
+                initialize_backfill = (
+                    historical_state.pages_scanned == 0
+                    and recent_before is None
+                    and recent_until is None
+                )
                 recent = historical_discover(
                     pool_address,
                     historical_signature_limit,
-                    None,
+                    recent_before,
+                    recent_until,
                 )
                 historical_recent_signatures_scanned = (
                     recent.signatures_scanned
@@ -540,7 +555,7 @@ def run_phase9_wallet_flow_capture(
                     source="ONCHAIN_HISTORICAL_RECENT",
                 )
 
-                if historical_state.pages_scanned == 0:
+                if initialize_backfill:
                     historical_state = record_phase9_pool_activity_page(
                         storage,
                         pool_address=pool_address,
@@ -554,14 +569,30 @@ def run_phase9_wallet_flow_capture(
                         ),
                         positions_discovered=recent.positions_found,
                     )
-                elif (
-                    not historical_state.backfill_exhausted
+
+                historical_state = (
+                    record_phase9_pool_activity_recent_page(
+                        storage,
+                        pool_address=pool_address,
+                        newest_signature=recent.newest_signature,
+                        next_before_signature=(
+                            recent.next_before_signature
+                        ),
+                        has_more=recent.has_more,
+                        signatures_scanned=recent.signatures_scanned,
+                    )
+                )
+
+                if (
+                    not initialize_backfill
+                    and not historical_state.backfill_exhausted
                     and historical_state.backfill_before_signature
                 ):
                     backfill = historical_discover(
                         pool_address,
                         historical_signature_limit,
                         historical_state.backfill_before_signature,
+                        None,
                     )
                     historical_backfill_signatures_scanned = (
                         backfill.signatures_scanned
@@ -679,6 +710,15 @@ def run_phase9_wallet_flow_capture(
         reasons.append(
             "historical pool-activity discovery failed: "
             + "; ".join(historical_errors)
+        )
+    if (
+        historical_state is not None
+        and historical_state.recent_before_signature is not None
+    ):
+        reasons.append(
+            "recent pool-activity catch-up remains paginated; the next "
+            "source pass will continue from the persisted recent cursor "
+            "without rescanning completed recent transactions"
         )
     if failed:
         reasons.append(

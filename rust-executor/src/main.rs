@@ -50,8 +50,8 @@ fn usage() {
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
   meteora-executor discover-pool-positions <RPC_URL> <POOL_ADDRESS> [LIMIT]
   meteora-executor discover-pool-positions-env <POOL_ADDRESS> [LIMIT]
-  meteora-executor discover-pool-activity <RPC_URL> <POOL_ADDRESS> [LIMIT] [BEFORE_SIGNATURE]
-  meteora-executor discover-pool-activity-env <POOL_ADDRESS> [LIMIT] [BEFORE_SIGNATURE]
+  meteora-executor discover-pool-activity <RPC_URL> <POOL_ADDRESS> [LIMIT] [BEFORE_SIGNATURE] [UNTIL_SIGNATURE]
+  meteora-executor discover-pool-activity-env <POOL_ADDRESS> [LIMIT] [BEFORE_SIGNATURE] [UNTIL_SIGNATURE]
   meteora-executor inspect-mint <RPC_URL> <MINT_ADDRESS>
   meteora-executor inspect-mint-env <MINT_ADDRESS>
   meteora-executor verify-position-closed <RPC_URL> <POSITION_ADDRESS>
@@ -254,9 +254,10 @@ RPC_URL is accepted as a compatibility fallback",
                 .parse()
                 .context("LIMIT must be a positive integer")?;
             let before_signature = args.next();
+            let until_signature = args.next();
             if args.next().is_some() {
                 anyhow::bail!(
-                    "discover-pool-activity accepts at most four arguments"
+                    "discover-pool-activity accepts at most five arguments"
                 );
             }
             let result = pool_activity::discover_historical_pool_activity(
@@ -264,6 +265,7 @@ RPC_URL is accepted as a compatibility fallback",
                 &pool_address,
                 limit,
                 before_signature.as_deref(),
+                until_signature.as_deref(),
             )
             .await?;
             println!("{}", serde_json::to_string_pretty(&result)?);
@@ -283,9 +285,10 @@ RPC_URL is accepted as a compatibility fallback",
                 .parse()
                 .context("LIMIT must be a positive integer")?;
             let before_signature = args.next();
+            let until_signature = args.next();
             if args.next().is_some() {
                 anyhow::bail!(
-                    "discover-pool-activity-env accepts at most three arguments"
+                    "discover-pool-activity-env accepts at most four arguments"
                 );
             }
             let result = pool_activity::discover_historical_pool_activity(
@@ -293,6 +296,7 @@ RPC_URL is accepted as a compatibility fallback",
                 &pool_address,
                 limit,
                 before_signature.as_deref(),
+                until_signature.as_deref(),
             )
             .await?;
             println!("{}", serde_json::to_string_pretty(&result)?);
