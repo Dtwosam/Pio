@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .ml_dataset import ML_FEATURE_COLUMNS
 from .pool_market_learning import (
     POOL_MARKET_FEATURE_COLUMNS,
     build_pool_market_feature_history,
@@ -17,6 +18,17 @@ MARKET_CONTEXT_FEATURE_COLUMNS = tuple(
     f"market_{column}"
     for column in POOL_MARKET_FEATURE_COLUMNS
 ) + ("market_snapshot_age_seconds",)
+
+ENRICHED_LP_FEATURE_COLUMNS = (
+    *ML_FEATURE_COLUMNS,
+    *MARKET_CONTEXT_FEATURE_COLUMNS,
+)
+
+ENRICHED_LP_CONTINUOUS_TARGET_COLUMNS = (
+    "target_net_return_bps",
+    "target_excess_vs_hold_bps",
+    "target_range_survival_ratio",
+)
 
 
 @dataclass(frozen=True)
@@ -213,6 +225,123 @@ def enrich_lp_examples_with_market_state(
         columns=["_lp_original_order"]
     )
     return enriched, report
+
+
+@dataclass(frozen=True)
+class EnrichedLPTrainingFrameReport:
+    rows_seen: int
+    rows_matched: int
+    rows_ready: int
+    rows_dropped_unmatched: int
+    rows_dropped_incomplete_market: int
+    rows_dropped_incomplete_lp: int
+    feature_columns: tuple[str, ...]
+    target_columns: tuple[str, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def build_market_enriched_lp_training_frame(
+    lp_frame: pd.DataFrame,
+    market_history: pd.DataFrame,
+    *,
+    volatility_window: int = 6,
+    drawdown_window: int = 12,
+    activity_window: int = 6,
+) -> tuple[pd.DataFrame, EnrichedLPTrainingFrameReport]:
+    """
+    Build a continuous-outcome LP training frame with decision-time market state.
+
+    Rows are retained for training only when both the existing LP feature state
+    and the backward-joined market context are complete. No economic value is
+    imputed and no safe/unsafe label is created.
+    """
+    required = {
+        "pool_address",
+        "decision_observed_at",
+        "forward_end_observed_at",
+        *ML_FEATURE_COLUMNS,
+        *ENRICHED_LP_CONTINUOUS_TARGET_COLUMNS,
+    }
+    missing = sorted(required - set(lp_frame.columns))
+    if missing:
+        raise ValueError(
+            f"missing enriched LP source columns: {missing}"
+        )
+
+    enriched, enrichment = enrich_lp_examples_with_market_state(
+        lp_frame,
+        market_history,
+        volatility_window=volatility_window,
+        drawdown_window=drawdown_window,
+        activity_window=activity_window,
+    )
+
+    numeric_columns = [
+        *ENRICHED_LP_FEATURE_COLUMNS,
+        *ENRICHED_LP_CONTINUOUS_TARGET_COLUMNS,
+    ]
+    for column in numeric_columns:
+        enriched[column] = pd.to_numeric(
+            enriched[column],
+            errors="coerce",
+        )
+
+    unmatched = enriched["market_observed_at"].isna()
+    incomplete_market = (
+        ~unmatched
+        & enriched[list(MARKET_CONTEXT_FEATURE_COLUMNS)]
+        .isna()
+        .any(axis=1)
+    )
+    incomplete_lp = (
+        enriched[
+            [
+                *ML_FEATURE_COLUMNS,
+                *ENRICHED_LP_CONTINUOUS_TARGET_COLUMNS,
+            ]
+        ]
+        .isna()
+        .any(axis=1)
+    )
+
+    finite_columns = enriched[numeric_columns].replace(
+        [np.inf, -np.inf],
+        np.nan,
+    )
+    nonfinite = finite_columns.isna().any(axis=1)
+    incomplete_lp = (
+        incomplete_lp
+        | (
+            nonfinite
+            & ~unmatched
+            & ~incomplete_market
+        )
+    )
+
+    ready = ~(
+        unmatched
+        | incomplete_market
+        | incomplete_lp
+    )
+    training = enriched.loc[ready].copy()
+
+    report = EnrichedLPTrainingFrameReport(
+        rows_seen=len(enriched),
+        rows_matched=enrichment.rows_matched,
+        rows_ready=len(training),
+        rows_dropped_unmatched=int(unmatched.sum()),
+        rows_dropped_incomplete_market=int(
+            incomplete_market.sum()
+        ),
+        rows_dropped_incomplete_lp=int(
+            (incomplete_lp & ~unmatched & ~incomplete_market).sum()
+        ),
+        feature_columns=ENRICHED_LP_FEATURE_COLUMNS,
+        target_columns=ENRICHED_LP_CONTINUOUS_TARGET_COLUMNS,
+    )
+    return training, report
 
 
 def enrich_lp_examples_from_store(
