@@ -496,6 +496,58 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def live_learning_evidence_rows(
+        self,
+    ) -> list[dict[str, Any]]:
+        """
+        Load immutable valued LIVE learning labels with their exact quote-backed
+        cost decomposition. This is read-only research evidence.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    l.position_address,
+                    l.decision_id,
+                    l.pool_address,
+                    l.model_version,
+                    l.strategy,
+                    l.min_bin_id,
+                    l.max_bin_id,
+                    l.range_width_bins,
+                    l.proposed_capital_quote,
+                    l.expected_net_return_pct,
+                    l.expected_downside_pct,
+                    l.realized_pnl_quote,
+                    l.realized_return_bps,
+                    l.prediction_error_bps,
+                    l.target_positive_return,
+                    l.quote_unit,
+                    l.opened_signature,
+                    l.closed_decision_id,
+                    l.created_at AS label_created_at,
+                    v.valued_execution_count,
+                    v.principal_cashflow_quote,
+                    v.composition_cost_quote,
+                    v.fee_income_quote,
+                    v.reward_income_quote,
+                    v.network_cost_quote,
+                    v.entry_outflow_quote,
+                    v.realized_return_bps AS valuation_realized_return_bps,
+                    v.max_age_seconds,
+                    v.created_at AS valuation_created_at
+                FROM live_learning_labels l
+                JOIN live_position_valuations v
+                  ON v.position_address = l.position_address
+                ORDER BY julianday(l.created_at) ASC,
+                         l.position_address ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def pool_execution_action_rows(
         self,
         pool_address: str,
