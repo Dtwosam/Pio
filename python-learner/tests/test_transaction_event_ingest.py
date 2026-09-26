@@ -234,3 +234,42 @@ def test_transaction_token_balance_delta_fails_closed_on_bad_arithmetic(
 
     with pytest.raises(ValueError, match="does not match"):
         ingest_transaction_events(storage, payload)
+
+
+
+def test_transaction_token_flow_capture_provenance_distinguishes_legacy_from_empty(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    legacy = snapshot()
+    ingest_transaction_events(storage, legacy)
+
+    store = ResearchStore(str(storage.path))
+    first = store.transaction_snapshot("sig")
+    assert first is not None
+    assert first["token_balance_deltas_captured"] == 0
+    assert storage.data_status()["transaction_token_flow_capture_samples"] == 0
+
+    refreshed = snapshot()
+    refreshed["token_balance_deltas"] = []
+    ingest_transaction_events(storage, refreshed)
+
+    second = store.transaction_snapshot("sig")
+    assert second is not None
+    assert second["token_balance_deltas_captured"] == 1
+    assert store.transaction_token_balance_deltas("sig") == []
+    assert storage.data_status()["transaction_token_flow_capture_samples"] == 1
+
+    ingest_transaction_events(storage, legacy)
+    third = store.transaction_snapshot("sig")
+    assert third is not None
+    assert third["token_balance_deltas_captured"] == 1
+
+
+def test_transaction_token_flow_capture_rejects_non_list_payload(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    payload = snapshot()
+    payload["token_balance_deltas"] = None
+
+    with pytest.raises(ValueError, match="must be a list"):
+        ingest_transaction_events(storage, payload)
