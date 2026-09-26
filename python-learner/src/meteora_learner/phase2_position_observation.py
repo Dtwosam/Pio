@@ -42,6 +42,12 @@ class Phase2ReconciliationProgress:
 
 
 @dataclass(frozen=True)
+class Phase2PositionFailure:
+    position_address: str
+    category: str
+
+
+@dataclass(frozen=True)
 class Phase2PositionObservationResult:
     pool_address: str
     observed_at: str
@@ -53,6 +59,7 @@ class Phase2PositionObservationResult:
     bins_saved: int
     failures: int
     failed_positions: tuple[str, ...]
+    failure_details: tuple[Phase2PositionFailure, ...]
     reconciliation_progress: Phase2ReconciliationProgress | None
 
     def to_record(self) -> dict[str, Any]:
@@ -138,7 +145,11 @@ def collect_phase2_position_observations(
     positions_returned = int(discovery.get("positions_returned", len(positions)))
     truncated = bool(discovery.get("truncated", positions_found > positions_returned))
 
-    latest_by_position: dict[str, float] = {}
+    latest_by_position: dict[str, float] = (
+        storage.latest_phase2_position_observation_attempts(
+            pool_address=pool_address,
+        )
+    )
     with storage.connect() as conn:
         rows = conn.execute(
             """
@@ -150,8 +161,14 @@ def collect_phase2_position_observations(
             (pool_address,),
         ).fetchall()
     for row in rows:
-        if row[1] is not None:
-            latest_by_position[str(row[0])] = float(row[1])
+        if row[1] is None:
+            continue
+        address = str(row[0])
+        snapshot_jd = float(row[1])
+        latest_by_position[address] = max(
+            latest_by_position.get(address, snapshot_jd),
+            snapshot_jd,
+        )
 
     unique_positions: dict[str, dict[str, Any]] = {}
     for item in positions:
@@ -173,7 +190,23 @@ def collect_phase2_position_observations(
 
     snapshots_saved = 0
     bins_saved = 0
-    failed: list[str] = []
+    failure_details: list[Phase2PositionFailure] = []
+
+    def fail(position_address: str, category: str) -> None:
+        storage.save_phase2_position_observation_attempt(
+            pool_address=pool_address,
+            position_address=position_address,
+            attempted_at=timestamp,
+            succeeded=False,
+            failure_category=category,
+        )
+        failure_details.append(
+            Phase2PositionFailure(
+                position_address=position_address,
+                category=category,
+            )
+        )
+
     for item in selected_positions:
         position_address = str(item["position_address"])
 
@@ -184,22 +217,50 @@ def collect_phase2_position_observations(
                 timeout_seconds=timeout_seconds,
                 runner=runner,
             )
-            if not isinstance(snapshot, dict):
-                raise ValueError("position inspection must return a JSON object")
-            if str(snapshot.get("position_address", "")) != position_address:
-                raise ValueError("position inspection returned a different position")
-            if str(snapshot.get("pool_address", "")) != pool_address:
-                raise ValueError("position inspection returned a different pool")
-            _require_single_capture_slot(snapshot)
+        except subprocess.TimeoutExpired:
+            fail(position_address, "EXECUTOR_TIMEOUT")
+            continue
+        except RuntimeError:
+            fail(position_address, "EXECUTOR_FAILED")
+            continue
+        except ValueError:
+            fail(position_address, "INVALID_EXECUTOR_JSON")
+            continue
+
+        if not isinstance(snapshot, dict):
+            fail(position_address, "INVALID_INSPECTION_PAYLOAD")
+            continue
+        if str(snapshot.get("position_address", "")) != position_address:
+            fail(position_address, "POSITION_MISMATCH")
+            continue
+        if str(snapshot.get("pool_address", "")) != pool_address:
+            fail(position_address, "POOL_MISMATCH")
+            continue
+        try:
+            capture_slot = _require_single_capture_slot(snapshot)
+        except (TypeError, ValueError):
+            fail(position_address, "CAPTURE_PROVENANCE")
+            continue
+
+        try:
             result = ingest_position_snapshot(
                 storage,
                 snapshot,
                 observed_at=timestamp,
             )
-            snapshots_saved += 1
-            bins_saved += result.bins
         except Exception:
-            failed.append(position_address)
+            fail(position_address, "INGEST_FAILED")
+            continue
+
+        storage.save_phase2_position_observation_attempt(
+            pool_address=pool_address,
+            position_address=position_address,
+            attempted_at=timestamp,
+            succeeded=True,
+            capture_slot=capture_slot,
+        )
+        snapshots_saved += 1
+        bins_saved += result.bins
 
     reconciliation_progress = None
     try:
@@ -253,8 +314,11 @@ def collect_phase2_position_observations(
         discovery_truncated=truncated,
         snapshots_saved=snapshots_saved,
         bins_saved=bins_saved,
-        failures=len(failed),
-        failed_positions=tuple(failed),
+        failures=len(failure_details),
+        failed_positions=tuple(
+            item.position_address for item in failure_details
+        ),
+        failure_details=tuple(failure_details),
         reconciliation_progress=reconciliation_progress,
     )
 
