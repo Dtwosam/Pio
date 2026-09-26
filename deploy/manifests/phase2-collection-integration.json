@@ -1,0 +1,75 @@
+{
+  "format_version": 1,
+  "purpose": "Phase-2 read-only collection stack integration lineage",
+  "production_deployment_authorized": false,
+  "detector_cursor_movement_authorized": false,
+  "service_restart_authorized": false,
+  "state_reader_target_blob": "30d1435af1329bca07f73d6639539b43503e84e9",
+  "components": [
+    {
+      "pr": 7,
+      "head": "ea235e676b700891839f28b0250e23149cfb77f8",
+      "role": "single-slot pool capture"
+    },
+    {
+      "pr": 8,
+      "head": "6c17db057f92b594ecd0578c0f0eb38da62f9ce3",
+      "role": "neutral position observer"
+    },
+    {
+      "pr": 12,
+      "head": "4ba360715887aefa550d6c040bfb57d824b3e3c7",
+      "role": "single-slot position capture"
+    },
+    {
+      "pr": 17,
+      "head": "b518cb468fb89da1037abc7d23b3f3fc17b27523",
+      "role": "reconciliation capture-slot provenance"
+    },
+    {
+      "pr": 19,
+      "head": "2553e3d1becedf6104f8b8a15f472d7eaef63c9d",
+      "role": "prospective research quotes"
+    },
+    {
+      "pr": 20,
+      "head": "d6dfa035762b7bb1750f28afb7ae38cd15be199f",
+      "role": "env-only Phase-2 RPC commands"
+    },
+    {
+      "pr": 22,
+      "head": "f03e2d92bdf32f195a38d06ad54ad5fd7c20a614",
+      "role": "calibration gap diagnostics"
+    },
+    {
+      "pr": 23,
+      "head": "1d5aaacd1123ad8858d6ad0ba27a1a6708815735",
+      "role": "single-context composition prestate"
+    },
+    {
+      "pr": 25,
+      "head": "66562f305fece9dffaa0486044952da94232b9ff",
+      "role": "observer failure categories"
+    },
+    {
+      "pr": 26,
+      "head": "316d51f73f3ca89242b3ed00f87ce5c9af0ea1d7",
+      "role": "observer fair attempt ledger"
+    },
+    {
+      "pr": 28,
+      "head": "3625b2ba89ac59c13f917905e4736bb9da7ce81f",
+      "role": "bounded transaction reinspection"
+    },
+    {
+      "pr": 29,
+      "head": "4a1836bac8b7a321feea259be0b221250100e459",
+      "role": "bounded strict prestate verification"
+    }
+  ],
+  "integration_notes": [
+    "research_store keeps PR12 position capture-slot columns and PR23 single-context pool-capture filtering",
+    "calibration_queue keeps PR23 future-prestate classification and PR20 env-only RPC commands",
+    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger"
+  ]
+}
