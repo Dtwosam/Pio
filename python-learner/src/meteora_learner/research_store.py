@@ -789,6 +789,55 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def latest_api_pool_snapshot(
+        self,
+        pool_address: str,
+        *,
+        as_of: str | None = None,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            if as_of is None:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, address, name, tvl,
+                           volume_24h, fees_24h, current_price,
+                           bin_step, active_bin_id, apr, apy,
+                           token_x_symbol, token_y_symbol,
+                           token_x_decimals, token_y_decimals,
+                           dynamic_fee_pct, base_fee_pct, max_fee_pct,
+                           protocol_fee_pct, collect_fee_mode,
+                           is_blacklisted, pool_created_at
+                    FROM pool_snapshots
+                    WHERE address = ?
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (pool_address,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, address, name, tvl,
+                           volume_24h, fees_24h, current_price,
+                           bin_step, active_bin_id, apr, apy,
+                           token_x_symbol, token_y_symbol,
+                           token_x_decimals, token_y_decimals,
+                           dynamic_fee_pct, base_fee_pct, max_fee_pct,
+                           protocol_fee_pct, collect_fee_mode,
+                           is_blacklisted, pool_created_at
+                    FROM pool_snapshots
+                    WHERE address = ?
+                      AND julianday(observed_at) <= julianday(?)
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (pool_address, as_of),
+                ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
     def pool_snapshot_history(
         self,
         *,
