@@ -235,3 +235,56 @@ def test_phase9_source_tables_are_append_only(tmp_path):
                     f"DELETE FROM {table} WHERE id = "
                     f"(SELECT MIN(id) FROM {table})"
                 )
+
+
+
+def test_existing_transaction_snapshot_table_is_migrated_with_token_flow_provenance(
+    tmp_path,
+):
+    db = tmp_path / "old-transaction.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE chain_transaction_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            observed_at TEXT NOT NULL,
+            signature TEXT NOT NULL UNIQUE,
+            slot INTEGER NOT NULL,
+            block_time INTEGER,
+            network_fee_lamports INTEGER,
+            compute_units_consumed INTEGER,
+            succeeded INTEGER,
+            raw_json TEXT NOT NULL
+        );
+        INSERT INTO chain_transaction_snapshots(
+            observed_at, signature, slot, raw_json
+        ) VALUES (
+            '2026-09-26T18:00:00+00:00',
+            'legacy-signature',
+            123,
+            '{}'
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    storage = Storage(db)
+
+    with storage.connect() as conn:
+        columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(chain_transaction_snapshots)"
+            ).fetchall()
+        }
+        row = conn.execute(
+            """
+            SELECT token_balance_deltas_captured
+            FROM chain_transaction_snapshots
+            WHERE signature = 'legacy-signature'
+            """
+        ).fetchone()
+
+    assert "token_balance_deltas_captured" in columns
+    assert row == (0,)
