@@ -1,5 +1,7 @@
 from meteora_learner.rotation_fee_semantics import (
+    ROTATION_FEE_SEMANTICS_EVIDENCE_TYPE,
     build_rotation_fee_semantics_report,
+    persist_rotation_fee_semantics_report,
 )
 from meteora_learner.storage import Storage
 
@@ -286,3 +288,34 @@ def test_pool_mint_identity_change_blocks_semantics_attribution(tmp_path):
     assert "mint identity changed" in str(
         report.samples[0].exclusion_reason
     )
+
+
+
+def test_fee_semantics_persistence_remains_non_qualified(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool_identity(storage)
+    save_rebalance(
+        storage,
+        owner_x_delta=25,
+        owner_y_delta=37,
+        should_claim_fee=True,
+    )
+    report = build_rotation_fee_semantics_report(
+        storage,
+        position_address=POSITION,
+    )
+
+    evidence_id = persist_rotation_fee_semantics_report(
+        storage,
+        report=report,
+    )
+
+    assert evidence_id > 0
+    saved = storage.latest_advanced_edge_evidence(
+        edge_type=ROTATION_FEE_SEMANTICS_EVIDENCE_TYPE,
+        pool_address=POOL,
+    )
+    assert saved is not None
+    assert saved["qualified"] is False
+    assert saved["status"] == "UNRESOLVED_OBSERVATIONAL_EVIDENCE"
+    assert saved["evidence"]["semantics_resolved"] is False
