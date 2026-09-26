@@ -178,6 +178,8 @@ CREATE TABLE IF NOT EXISTS chain_position_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
     position_address TEXT NOT NULL,
+    capture_slot_start INTEGER,
+    capture_slot_end INTEGER,
     pool_address TEXT NOT NULL,
     owner TEXT NOT NULL,
     fee_owner TEXT NOT NULL,
@@ -1466,6 +1468,8 @@ CHAIN_TX_EVENT_EXTRA_COLUMNS = {
 }
 
 CHAIN_POSITION_EXTRA_COLUMNS = {
+    "capture_slot_start": "INTEGER",
+    "capture_slot_end": "INTEGER",
     "supports_limit_order": "INTEGER",
     "reward_mint_0": "TEXT",
     "reward_mint_1": "TEXT",
@@ -2165,16 +2169,30 @@ class Storage:
             conn.execute(
                 """
                 INSERT INTO chain_position_snapshots(
-                    observed_at, position_address, pool_address, owner, fee_owner,
+                    observed_at, position_address,
+                    capture_slot_start, capture_slot_end,
+                    pool_address, owner, fee_owner,
                     lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
                     fee_x, fee_y, reward_one, reward_two, last_updated_at,
                     total_claimed_fee_x_amount, total_claimed_fee_y_amount,
                     supports_limit_order, reward_mint_0, reward_mint_1, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
                 """,
                 (
                     observed_at,
                     position_address,
+                    (
+                        int(snapshot["capture_slot_start"])
+                        if snapshot.get("capture_slot_start") is not None
+                        else None
+                    ),
+                    (
+                        int(snapshot["capture_slot_end"])
+                        if snapshot.get("capture_slot_end") is not None
+                        else None
+                    ),
                     str(snapshot["pool_address"]),
                     str(snapshot["owner"]),
                     str(snapshot["fee_owner"]),
