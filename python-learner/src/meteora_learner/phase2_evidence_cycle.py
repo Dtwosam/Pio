@@ -20,6 +20,7 @@ from .phase2_prestate_verification_runner import (
     run_phase2_prestate_verifications,
 )
 from .phase2_research_quotes import collect_phase2_research_quotes
+from .reconciliation_corpus import build_reconciliation_corpus
 from .settings import Settings
 from .storage import Storage, utc_now_iso
 
@@ -41,6 +42,7 @@ class Phase2ReadOnlyEvidenceCycleReport:
     stages_partial: int
     stages_failed: int
     stages: tuple[Phase2EvidenceCycleStage, ...]
+    reconciliation_corpus: dict[str, Any] | None
     calibration_evidence: dict[str, Any] | None
     work_queue: dict[str, Any] | None
     read_only: bool
@@ -220,6 +222,33 @@ def run_phase2_read_only_evidence_cycle(
             )
         )
 
+    reconciliation_record = None
+    try:
+        reconciliation = build_reconciliation_corpus(
+            str(storage.path)
+        )
+    except Exception:
+        stages.append(
+            _stage(
+                name="RECONCILIATION_CORPUS",
+                status="FAILED",
+                failure_category="RECONCILIATION_CORPUS_FAILED",
+            )
+        )
+    else:
+        reconciliation_record = reconciliation.to_record()
+        stages.append(
+            _stage(
+                name="RECONCILIATION_CORPUS",
+                status=(
+                    "SUCCESS"
+                    if reconciliation.strict_math_gate_passed
+                    else "PARTIAL"
+                ),
+                result=reconciliation,
+            )
+        )
+
     calibration_record = None
     try:
         calibration = build_phase2_calibration_evidence(
@@ -286,6 +315,7 @@ def run_phase2_read_only_evidence_cycle(
             item.status == "FAILED" for item in stages
         ),
         stages=tuple(stages),
+        reconciliation_corpus=reconciliation_record,
         calibration_evidence=calibration_record,
         work_queue=queue_record,
         read_only=True,
