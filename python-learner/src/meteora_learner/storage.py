@@ -2193,11 +2193,12 @@ class Storage:
         self,
         *,
         pool_address: str,
-    ) -> dict[str, str]:
+    ) -> dict[str, float]:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT position_address, MAX(attempted_at) AS attempted_at
+                SELECT position_address,
+                       MAX(julianday(attempted_at)) AS attempted_jd
                 FROM phase2_position_observation_attempts
                 WHERE pool_address = ?
                 GROUP BY position_address
@@ -2205,7 +2206,7 @@ class Storage:
                 (pool_address,),
             ).fetchall()
         return {
-            str(row[0]): str(row[1])
+            str(row[0]): float(row[1])
             for row in rows
             if row[1] is not None
         }
