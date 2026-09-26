@@ -40,8 +40,8 @@ def _q(value: object) -> str:
 
 def _inspect_command(signature: str) -> str:
     return (
-        '(cd rust-executor && cargo run -- inspect-transaction-events '
-        f'"$RPC_URL" {_q(signature)}) '
+        '(cd rust-executor && cargo run -- inspect-transaction-events-env '
+        f'{_q(signature)}) '
         "| python-learner/.venv/bin/pio ingest-transaction-events"
     )
 
@@ -57,8 +57,8 @@ def _verify_command(
 ) -> str:
     address_args = " ".join(_q(value) for value in addresses)
     return (
-        '(cd rust-executor && cargo run -- verify-prestate '
-        f'"$RPC_URL" {_q(signature)} {capture_slot_start} {capture_slot_end} '
+        '(cd rust-executor && cargo run -- verify-prestate-env '
+        f'{_q(signature)} {capture_slot_start} {capture_slot_end} '
         f"{address_args}) | python-learner/.venv/bin/pio "
         "ingest-prestate-verification "
         f"--snapshot-observed-at {_q(snapshot_observed_at)} "
