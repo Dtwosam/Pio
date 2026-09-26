@@ -14,6 +14,7 @@ from .pool_api_metadata_context import (
     PoolAPIMetadataContextReport,
     attach_pool_api_metadata_from_store,
 )
+from .pool_lp_learning import ENRICHED_LP_CONTINUOUS_TARGET_COLUMNS
 from .pool_lp_mint_ablation import MINT_ENRICHED_LP_FEATURE_COLUMNS
 from .pool_lp_training import ENRICHED_LP_MODEL_TARGET_COLUMNS
 
@@ -158,7 +159,7 @@ def _prepare_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "decision_observed_at",
         "forward_end_observed_at",
         *API_METADATA_ENRICHED_LP_FEATURE_COLUMNS,
-        *ENRICHED_LP_MODEL_TARGET_COLUMNS,
+        *ENRICHED_LP_CONTINUOUS_TARGET_COLUMNS,
     }
     missing = sorted(required - set(frame.columns))
     if missing:
@@ -191,7 +192,7 @@ def _prepare_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
     numeric = (
         *API_METADATA_ENRICHED_LP_FEATURE_COLUMNS,
-        *ENRICHED_LP_MODEL_TARGET_COLUMNS,
+        *ENRICHED_LP_CONTINUOUS_TARGET_COLUMNS,
     )
     for column in numeric:
         work[column] = pd.to_numeric(
@@ -208,6 +209,11 @@ def _prepare_frame(frame: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(
             "API metadata ablation frame contains non-finite values"
         )
+
+    work["target_downside_bps"] = np.maximum(
+        0.0,
+        -work["target_net_return_bps"].to_numpy(dtype=float),
+    )
 
     return work.sort_values(
         ["decision_observed_at", "pool_address"],
