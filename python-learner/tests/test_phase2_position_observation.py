@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from meteora_learner.phase2_position_observation import (
     collect_phase2_position_observations,
 )
@@ -142,6 +144,7 @@ def test_observer_keeps_successful_samples_visible_when_one_position_fails(tmp_p
     assert result.snapshots_saved == 1
     assert result.failures == 1
     assert result.failed_positions == (POSITIONS[1],)
+    assert result.failure_details[0].category == "EXECUTOR_FAILED"
 
 
 def test_observer_refuses_cross_pool_snapshot(tmp_path):
@@ -168,6 +171,7 @@ def test_observer_refuses_cross_pool_snapshot(tmp_path):
 
     assert result.snapshots_saved == 0
     assert result.failed_positions == (POSITIONS[0],)
+    assert result.failure_details[0].category == "POOL_MISMATCH"
 
 
 def test_observer_rotates_to_least_recently_seen_position(tmp_path):
@@ -329,6 +333,7 @@ def test_observer_rejects_position_snapshot_without_capture_slots(tmp_path):
     assert result.snapshots_saved == 0
     assert result.failures == 1
     assert result.failed_positions == (POSITIONS[0],)
+    assert result.failure_details[0].category == "CAPTURE_PROVENANCE"
 
 
 def test_observer_rejects_mixed_context_position_snapshot(tmp_path):
@@ -360,3 +365,96 @@ def test_observer_rejects_mixed_context_position_snapshot(tmp_path):
     assert result.snapshots_saved == 0
     assert result.failures == 1
     assert result.failed_positions == (POSITIONS[0],)
+    assert result.failure_details[0].category == "CAPTURE_PROVENANCE"
+
+
+
+def test_observer_failure_details_do_not_echo_executor_stderr(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    secret = "https://user:secret@example.invalid/rpc"
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 1,
+                "positions_returned": 1,
+                "truncated": False,
+                "positions": [{"position_address": POSITIONS[0]}],
+            }
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps(payload), ""
+            )
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            f"transport failed for {secret}",
+        )
+
+    result = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        runner=runner,
+    )
+
+    payload = json.dumps(result.to_record())
+    assert result.failure_details[0].category == "EXECUTOR_FAILED"
+    assert secret not in payload
+    assert "transport failed" not in payload
+
+
+def test_observer_classifies_executor_timeout(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 1,
+                "positions_returned": 1,
+                "truncated": False,
+                "positions": [{"position_address": POSITIONS[0]}],
+            }
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps(payload), ""
+            )
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    result = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        runner=runner,
+    )
+
+    assert result.failures == 1
+    assert result.failure_details[0].category == "EXECUTOR_TIMEOUT"
+
+
+
+def test_position_discovery_failure_does_not_echo_executor_stderr(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    secret = "https://user:secret@example.invalid/rpc"
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            f"discovery failed at {secret}",
+        )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        collect_phase2_position_observations(
+            storage,
+            pool_address=POOL,
+            executor_path="/executor",
+            runner=runner,
+        )
+
+    message = str(excinfo.value)
+    assert "executor failed with status 1" in message
+    assert secret not in message
+    assert "discovery failed" not in message
