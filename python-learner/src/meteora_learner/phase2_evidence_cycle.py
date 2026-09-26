@@ -36,6 +36,8 @@ class Phase2EvidenceCycleStage:
 @dataclass(frozen=True)
 class Phase2ReadOnlyEvidenceCycleReport:
     pool_address: str
+    collection_scope: str
+    final_evidence_scope: str
     started_at: str
     finished_at: str
     stages_successful: int
@@ -48,6 +50,7 @@ class Phase2ReadOnlyEvidenceCycleReport:
     read_only: bool
     actionable: bool
     live_authorized: bool
+    promotion_gate_evaluated: bool
     phase_promotion_performed: bool
     detector_cursor_untouched: bool
     service_control_performed: bool
@@ -303,6 +306,8 @@ def run_phase2_read_only_evidence_cycle(
 
     return Phase2ReadOnlyEvidenceCycleReport(
         pool_address=pool_address,
+        collection_scope="POOL",
+        final_evidence_scope="DATABASE_GLOBAL",
         started_at=started_at,
         finished_at=now(),
         stages_successful=sum(
@@ -321,6 +326,7 @@ def run_phase2_read_only_evidence_cycle(
         read_only=True,
         actionable=False,
         live_authorized=False,
+        promotion_gate_evaluated=False,
         phase_promotion_performed=False,
         detector_cursor_untouched=True,
         service_control_performed=False,
