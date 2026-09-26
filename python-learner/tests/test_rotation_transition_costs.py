@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from meteora_learner.quote_registry import save_token_quote
 from meteora_learner.rotation_transition_costs import (
     WRAPPED_SOL_MINT,
@@ -86,7 +88,7 @@ def test_rotation_network_fee_is_quote_normalized_without_counting_protocol_fiel
     assert report.rotation_transactions == 1
     assert report.quote_eligible_transactions == 1
     assert report.total_network_fee_lamports == 7000
-    assert report.total_network_fee_quote == 0.00014
+    assert report.total_network_fee_quote == pytest.approx(0.00014)
     assert report.cost_components_complete is False
     assert report.included_cost_components == ("SOLANA_NETWORK_FEE",)
     sample = report.samples[0]
@@ -95,7 +97,7 @@ def test_rotation_network_fee_is_quote_normalized_without_counting_protocol_fiel
     assert sample.reported_y_fee_amount == 6
     assert sample.reported_reward_one == 8
     assert sample.reported_reward_two == 10
-    assert sample.network_fee_quote == 0.00014
+    assert sample.network_fee_quote == pytest.approx(0.00014)
 
 
 def test_rotation_cost_marks_stale_quote_ineligible(tmp_path):
