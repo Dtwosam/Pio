@@ -221,6 +221,7 @@ def build_composition_fee_reconciliation(
             candidate.pool_address,
             target_slot=candidate.transaction_slot,
             active_bin_id=candidate.active_bin_id,
+            require_single_context=True,
         )
         if capture is None or str(capture["observed_at"]) != candidate.snapshot_observed_at:
             raise ValueError("verified prestate candidate changed during reconciliation")

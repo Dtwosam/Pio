@@ -498,6 +498,7 @@ class ResearchStore:
         *,
         target_slot: int,
         active_bin_id: int,
+        require_single_context: bool = False,
     ) -> dict[str, Any] | None:
         conn = self._connect()
         try:
@@ -526,10 +527,22 @@ class ResearchStore:
                   AND c.capture_slot_end IS NOT NULL
                   AND c.capture_slot_end < ?
                   AND p.active_bin_id = ?
+                  AND (
+                        ? = 0
+                        OR (
+                            c.capture_slot_start IS NOT NULL
+                            AND c.capture_slot_start = c.capture_slot_end
+                        )
+                  )
                 ORDER BY c.capture_slot_end DESC, c.id DESC
                 LIMIT 1
                 """,
-                (pool_address, target_slot, active_bin_id),
+                (
+                    pool_address,
+                    target_slot,
+                    active_bin_id,
+                    int(require_single_context),
+                ),
             ).fetchone()
         finally:
             conn.close()
