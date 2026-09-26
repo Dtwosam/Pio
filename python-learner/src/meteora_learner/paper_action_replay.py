@@ -44,6 +44,8 @@ class PaperHoldVsRebalanceReplayReport:
     reward_value_complete: bool
     transition_cost_complete: bool
     economics_complete: bool
+    complete_economic_components: tuple[str, ...]
+    incomplete_economic_components: tuple[str, ...]
     status: str
     paper_only: bool
     actionable: bool
@@ -204,6 +206,14 @@ def compare_paper_hold_vs_rebalance_gross(
     # effects are intentionally not inferred from incomplete evidence.
     transition_cost_complete = False
     economics_complete = reward_value_complete and transition_cost_complete
+    complete_components = (
+        "HOLD_INVENTORY_AND_FEE_VALUE",
+        "REBALANCE_INVENTORY_AND_FEE_VALUE",
+        "REBALANCE_COMPOSITION_COST",
+    )
+    incomplete_components = ["REBALANCE_TRANSITION_COST"]
+    if not reward_value_complete:
+        incomplete_components.append("REWARD_VALUATION")
 
     return PaperHoldVsRebalanceReplayReport(
         pool_address=prior.pool_address,
@@ -230,6 +240,8 @@ def compare_paper_hold_vs_rebalance_gross(
         reward_value_complete=reward_value_complete,
         transition_cost_complete=transition_cost_complete,
         economics_complete=economics_complete,
+        complete_economic_components=complete_components,
+        incomplete_economic_components=tuple(incomplete_components),
         status="GROSS_COMPARISON_TRANSITION_COST_INCOMPLETE",
         paper_only=True,
         actionable=False,
