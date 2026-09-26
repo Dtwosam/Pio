@@ -12,6 +12,12 @@ from meteora_learner.reconciliation import (
 from meteora_learner.storage import Storage
 
 
+def _capture_slot(observed_at):
+    hour = int(observed_at[11:13])
+    minute = int(observed_at[14:16])
+    return hour * 60 + minute + 1
+
+
 def save_position(
     storage,
     observed_at,
@@ -32,6 +38,8 @@ def save_position(
 ):
     payload = {
             "position_address": "position",
+            "capture_slot_start": _capture_slot(observed_at),
+            "capture_slot_end": _capture_slot(observed_at),
             "pool_address": "pool",
             "owner": "owner",
             "fee_owner": "owner",
@@ -93,6 +101,7 @@ def test_position_amount_reconciliation_matches_dynamic_position_output(tmp_path
 
     result = reconcile_position_amounts(str(db), position_address="position")
 
+    assert result.capture_slot == 1
     assert result.bins_checked == 1
     assert result.mismatched_bins == 0
     assert result.exact_match is True
@@ -125,6 +134,8 @@ def test_fee_reconciliation_matches_checkpoint_growth(tmp_path):
         position_address="position",
     )
 
+    assert result.start_capture_slot == 1
+    assert result.end_capture_slot == 6
     assert result.predicted_fee_x_delta == 20
     assert result.actual_fee_x_delta == 20
     assert result.predicted_fee_y_delta == 30
@@ -265,6 +276,8 @@ def test_reward_reconciliation_matches_dynamic_position_checkpoint_growth(tmp_pa
         position_address="position",
     )
 
+    assert result.start_capture_slot == 1
+    assert result.end_capture_slot == 6
     assert result.predicted_reward_one_delta == 30
     assert result.actual_reward_one_delta == 30
     assert result.bins_with_checkpoint_growth == 1
@@ -362,3 +375,101 @@ def test_reconcile_position_reports_reward_ineligibility_without_hiding_it(tmp_p
     report = reconcile_position(str(db), position_address="position")
     assert report.reward_interval is None
     assert "reward campaign metadata missing" in str(report.reward_interval_error)
+
+
+
+def test_amount_reconciliation_rejects_legacy_unslotted_snapshot(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_position(
+        storage,
+        "2026-09-22T00:00:00+00:00",
+        checkpoint_x=0,
+        checkpoint_y=0,
+        fee_x=0,
+        fee_y=0,
+    )
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE chain_position_snapshots
+            SET capture_slot_start = NULL, capture_slot_end = NULL
+            WHERE position_address = 'position'
+            """
+        )
+
+    with pytest.raises(ValueError, match="capture-slot provenance"):
+        reconcile_position_amounts(
+            str(db),
+            position_address="position",
+        )
+
+
+def test_fee_reconciliation_rejects_mixed_context_snapshot(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_position(
+        storage,
+        "2026-09-22T00:00:00+00:00",
+        checkpoint_x=0,
+        checkpoint_y=0,
+        fee_x=0,
+        fee_y=0,
+    )
+    save_position(
+        storage,
+        "2026-09-22T00:05:00+00:00",
+        checkpoint_x=Q64,
+        checkpoint_y=0,
+        fee_x=10,
+        fee_y=0,
+    )
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE chain_position_snapshots
+            SET capture_slot_end = capture_slot_start + 1
+            WHERE observed_at = '2026-09-22T00:05:00+00:00'
+            """
+        )
+
+    with pytest.raises(ValueError, match="not single-context"):
+        reconcile_latest_position_fee_interval(
+            str(db),
+            position_address="position",
+        )
+
+
+def test_interval_reconciliation_requires_forward_capture_slot(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_position(
+        storage,
+        "2026-09-22T00:00:00+00:00",
+        checkpoint_x=0,
+        checkpoint_y=0,
+        fee_x=0,
+        fee_y=0,
+    )
+    save_position(
+        storage,
+        "2026-09-22T00:05:00+00:00",
+        checkpoint_x=Q64,
+        checkpoint_y=0,
+        fee_x=10,
+        fee_y=0,
+    )
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE chain_position_snapshots
+            SET capture_slot_start = 1, capture_slot_end = 1
+            WHERE observed_at = '2026-09-22T00:05:00+00:00'
+            """
+        )
+
+    with pytest.raises(ValueError, match="capture slot must move forward"):
+        reconcile_latest_position_fee_interval(
+            str(db),
+            position_address="position",
+        )
