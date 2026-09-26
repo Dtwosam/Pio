@@ -7,6 +7,11 @@ from .research_store import ResearchStore
 from .storage import Storage
 
 
+ROTATION_FEE_SEMANTICS_EVIDENCE_TYPE = (
+    "ROTATION_FEE_SEMANTICS_OBSERVATION_V1"
+)
+
+
 @dataclass(frozen=True)
 class RotationFeeSemanticsSample:
     signature: str
@@ -430,4 +435,36 @@ def build_rotation_fee_semantics_report(
         semantics_resolved=False,
         conclusion="UNRESOLVED_OBSERVATIONAL_EVIDENCE",
         samples=tuple(samples),
+    )
+
+
+
+def persist_rotation_fee_semantics_report(
+    storage: Storage,
+    *,
+    report: RotationFeeSemanticsReport,
+) -> int:
+    if report.semantics_resolved:
+        raise ValueError(
+            "observational fee-semantics report cannot self-resolve semantics"
+        )
+    if report.conclusion != "UNRESOLVED_OBSERVATIONAL_EVIDENCE":
+        raise ValueError(
+            "unexpected fee-semantics conclusion for observational evidence"
+        )
+    return storage.save_advanced_edge_evidence(
+        edge_type=ROTATION_FEE_SEMANTICS_EVIDENCE_TYPE,
+        pool_address=(
+            next(
+                (
+                    str(item.pool_address)
+                    for item in report.samples
+                    if item.pool_address
+                ),
+                "UNKNOWN",
+            )
+        ),
+        status=report.conclusion,
+        qualified=False,
+        evidence=report.to_record(),
     )
