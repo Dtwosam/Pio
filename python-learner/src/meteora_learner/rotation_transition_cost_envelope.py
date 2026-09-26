@@ -31,6 +31,7 @@ class RotationTransitionCostEnvelopeSample:
 @dataclass(frozen=True)
 class RotationTransitionCostEnvelopeReport:
     position_address: str
+    pool_address: str
     quote_unit: str
     signatures_seen: int
     eligible_signatures: int
@@ -91,6 +92,17 @@ def build_rotation_transition_cost_envelope(
         raise ValueError(
             "transition-cost envelope expects unresolved fee semantics"
         )
+
+    pool_addresses = {
+        str(item.pool_address)
+        for item in semantics.samples
+        if item.pool_address
+    }
+    if len(pool_addresses) != 1:
+        raise ValueError(
+            "transition-cost envelope requires exactly one pool"
+        )
+    pool_address = next(iter(pool_addresses))
 
     network_by_signature = {
         item.signature: item for item in network.samples
@@ -222,6 +234,7 @@ def build_rotation_transition_cost_envelope(
 
     return RotationTransitionCostEnvelopeReport(
         position_address=position_address,
+        pool_address=pool_address,
         quote_unit=DEFAULT_QUOTE_UNIT,
         signatures_seen=len(samples),
         eligible_signatures=len(eligible),
@@ -263,21 +276,9 @@ def persist_rotation_transition_cost_envelope(
         raise ValueError("unexpected transition-cost envelope conclusion")
     return storage.save_advanced_edge_evidence(
         edge_type=ROTATION_TRANSITION_COST_ENVELOPE_EVIDENCE_TYPE,
-        pool_address=_single_pool_address(report),
+        pool_address=report.pool_address,
         status=report.conclusion,
         qualified=False,
         evidence=report.to_record(),
     )
 
-
-def _single_pool_address(
-    report: RotationTransitionCostEnvelopeReport,
-) -> str:
-    # Position-level envelope persistence needs a stable pool identity. The
-    # source semantics evidence is the authoritative place for that identity,
-    # so require it to be present on every eligible/ineligible sample source
-    # before callers persist. This helper is intentionally replaced by the
-    # builder-backed variant below in normal use.
-    raise ValueError(
-        "pool address must be supplied by builder-backed persistence"
-    )
