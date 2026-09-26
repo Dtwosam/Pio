@@ -102,6 +102,24 @@ def enrich_lp_examples_with_market_state(
         )
         return lp.drop(columns=["_lp_original_order"]), report
 
+    if market_history.empty:
+        enriched = lp.copy()
+        enriched["market_observed_at"] = pd.NaT
+        for column in POOL_MARKET_FEATURE_COLUMNS:
+            enriched[f"market_{column}"] = np.nan
+        enriched["market_snapshot_age_seconds"] = np.nan
+        enriched = enriched.drop(columns=["_lp_original_order"])
+        report = PoolLPMarketEnrichmentReport(
+            lp_rows_seen=len(lp),
+            market_rows_seen=0,
+            rows_matched=0,
+            rows_unmatched=len(lp),
+            rows_with_incomplete_market_features=0,
+            pools_in_lp_rows=int(lp["pool_address"].nunique()),
+            pools_in_market_history=0,
+        )
+        return enriched, report
+
     market = build_pool_market_feature_history(
         market_history,
         volatility_window=volatility_window,
