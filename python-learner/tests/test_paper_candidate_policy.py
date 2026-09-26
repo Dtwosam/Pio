@@ -77,6 +77,7 @@ def test_empirical_policy_uses_same_pool_and_context_only():
             example(strategy="CURVE", excess=1000, move=-1),
         ),
         pool_address="pool",
+        decision_observed_at="2026-09-21T00:00:00+00:00",
         context_key=CONTEXT,
         current_candidates=candidates,
     )
@@ -94,6 +95,7 @@ def test_empirical_policy_explores_unseen_arm_in_paper_only():
     result = select_empirical_paper_candidate(
         historical_examples=(example(strategy="SPOT"),),
         pool_address="pool",
+        decision_observed_at="2026-09-21T00:00:00+00:00",
         context_key=CONTEXT,
         current_candidates=(
             PaperCandidateArm("SPOT", 1, 0),
@@ -111,6 +113,7 @@ def test_empirical_policy_makes_no_selection_without_matching_context():
     result = select_empirical_paper_candidate(
         historical_examples=(example(move=-1),),
         pool_address="pool",
+        decision_observed_at="2026-09-21T00:00:00+00:00",
         context_key=CONTEXT,
         current_candidates=(PaperCandidateArm("SPOT", 1, 0),),
     )
@@ -118,3 +121,34 @@ def test_empirical_policy_makes_no_selection_without_matching_context():
     assert result.status == "INSUFFICIENT_CONTEXT_EVIDENCE"
     assert result.selected_arm is None
     assert result.live_authorized is False
+
+
+def test_empirical_policy_does_not_look_ahead_to_unfinished_label():
+    past = example(strategy="SPOT", excess=5)
+    future = MLTrainingExample(
+        **{
+            **past.__dict__,
+            "strategy": "CURVE",
+            "baseline_selected": 0,
+            "strategy_spot": 0,
+            "strategy_curve": 1,
+            "target_excess_vs_hold_bps": 1000,
+            "forward_end_observed_at": "2026-09-22T00:10:00+00:00",
+        }
+    )
+
+    result = select_empirical_paper_candidate(
+        historical_examples=(past, future),
+        pool_address="pool",
+        decision_observed_at="2026-09-21T00:00:00+00:00",
+        context_key=CONTEXT,
+        current_candidates=(
+            PaperCandidateArm("SPOT", 1, 0),
+            PaperCandidateArm("CURVE", 1, 0),
+        ),
+    )
+
+    assert result.status == "PAPER_EXPLORATION"
+    assert result.selected_arm == PaperCandidateArm("CURVE", 1, 0)
+    by_arm = {item.arm.key: item for item in result.evidence}
+    assert by_arm["CURVE|w=1|o=0"].observations == 0
