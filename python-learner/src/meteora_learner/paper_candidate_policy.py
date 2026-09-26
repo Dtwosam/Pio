@@ -216,6 +216,7 @@ def select_empirical_paper_candidate(
     )[0]
     return EmpiricalPaperCandidateSelection(
         pool_address=pool_address,
+        decision_observed_at=decision_observed_at,
         context_key=context_key,
         status="PAPER_EMPIRICAL_SELECTION",
         selection_mode="MEAN_OBSERVED_EXCESS_VS_HOLD",
