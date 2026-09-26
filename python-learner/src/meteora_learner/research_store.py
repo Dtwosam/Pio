@@ -468,6 +468,38 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def transaction_token_balance_deltas(
+        self,
+        signature: str,
+        *,
+        owner_address: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = [signature]
+        owner_clause = ""
+        if owner_address is not None:
+            owner_clause = (
+                "AND (pre_owner = ? OR post_owner = ?)"
+            )
+            params.extend((owner_address, owner_address))
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT observed_at, signature, account_index,
+                       account_address, mint, pre_owner, post_owner,
+                       pre_amount, post_amount, delta_amount, decimals
+                FROM chain_transaction_token_balance_deltas
+                WHERE signature = ?
+                {owner_clause}
+                ORDER BY account_index ASC, mint ASC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def add_liquidity_request(
         self,
         signature: str,
