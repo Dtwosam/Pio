@@ -86,10 +86,12 @@ def test_observer_uses_env_only_executor_commands_and_saves_all_positions(tmp_pa
         runner=runner,
     )
 
+    assert result.positions_selected == 2
     assert result.snapshots_saved == 2
     assert result.bins_saved == 2
     assert result.failures == 0
     assert commands[0][1] == "discover-pool-positions-env"
+    assert commands[0][3] == "5000"
     assert [item[1] for item in commands[1:]] == [
         "inspect-position-env",
         "inspect-position-env",
@@ -159,3 +161,80 @@ def test_observer_refuses_cross_pool_snapshot(tmp_path):
 
     assert result.snapshots_saved == 0
     assert result.failed_positions == (POSITIONS[0],)
+
+
+def test_observer_rotates_to_least_recently_seen_position(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    inspected = []
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 2,
+                "positions_returned": 2,
+                "truncated": False,
+                "positions": [
+                    {"position_address": POSITIONS[0]},
+                    {"position_address": POSITIONS[1]},
+                ],
+            }
+        else:
+            inspected.append(command[2])
+            payload = _snapshot(command[2])
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    first = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:00:00+00:00",
+        runner=runner,
+    )
+    second = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:15:00+00:00",
+        runner=runner,
+    )
+
+    assert first.positions_selected == 1
+    assert second.positions_selected == 1
+    assert inspected == [POSITIONS[0], POSITIONS[1]]
+
+
+def test_observer_surfaces_discovery_truncation(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 5001,
+                "positions_returned": 1,
+                "truncated": True,
+                "positions": [{"position_address": POSITIONS[0]}],
+            }
+        else:
+            payload = _snapshot(command[2])
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    result = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        runner=runner,
+    )
+
+    assert result.discovery_truncated is True
+    assert result.positions_found == 5001
+    assert result.positions_returned == 1
+    assert result.positions_selected == 1
