@@ -27,6 +27,17 @@ class RotationFeeSemanticsClassCount:
 
 
 @dataclass(frozen=True)
+class RotationFeeSemanticsClaimCohort:
+    should_claim_fee: str
+    eligible_samples: int
+    quote_eligible_samples: int
+    quote_coverage_rate: float
+    evidence_class_counts: tuple[RotationFeeSemanticsClassCount, ...]
+    quoted_base_residual_net: float
+    quoted_fee_separate_residual_net: float
+
+
+@dataclass(frozen=True)
 class RotationFeeSemanticsCorpusReport:
     pool_address: str
     quote_unit: str
@@ -40,6 +51,7 @@ class RotationFeeSemanticsCorpusReport:
     claim_fee_true_samples: int
     claim_fee_false_samples: int
     claim_fee_unknown_samples: int
+    claim_fee_cohorts: tuple[RotationFeeSemanticsClaimCohort, ...]
     evidence_class_counts: tuple[RotationFeeSemanticsClassCount, ...]
     quoted_base_residual_net: float
     quoted_fee_separate_residual_net: float
@@ -167,6 +179,72 @@ def build_rotation_fee_semantics_corpus(
         if sample.eligible and sample.should_claim_fee is None
     )
 
+    cohort_samples: dict[str, list[Any]] = {
+        "TRUE": [],
+        "FALSE": [],
+        "UNKNOWN": [],
+    }
+    for report in reports:
+        for sample in report.samples:
+            if not sample.eligible:
+                continue
+            if sample.should_claim_fee is True:
+                cohort = "TRUE"
+            elif sample.should_claim_fee is False:
+                cohort = "FALSE"
+            else:
+                cohort = "UNKNOWN"
+            cohort_samples[cohort].append(sample)
+
+    cohort_reports: list[RotationFeeSemanticsClaimCohort] = []
+    for cohort in ("TRUE", "FALSE", "UNKNOWN"):
+        samples = cohort_samples[cohort]
+        cohort_class_counts: dict[str, int] = {}
+        quote_eligible = 0
+        base_net = 0.0
+        fee_net = 0.0
+        for sample in samples:
+            cohort_class_counts[sample.evidence_class] = (
+                cohort_class_counts.get(sample.evidence_class, 0) + 1
+            )
+            if getattr(sample, "quote_eligible", False):
+                quote_eligible += 1
+                base_value = getattr(sample, "base_residual_quote", None)
+                fee_value = getattr(
+                    sample,
+                    "fee_separate_residual_quote",
+                    None,
+                )
+                if base_value is not None:
+                    base_net += float(base_value)
+                if fee_value is not None:
+                    fee_net += float(fee_value)
+
+        cohort_reports.append(
+            RotationFeeSemanticsClaimCohort(
+                should_claim_fee=cohort,
+                eligible_samples=len(samples),
+                quote_eligible_samples=quote_eligible,
+                quote_coverage_rate=(
+                    quote_eligible / len(samples)
+                    if samples
+                    else 0.0
+                ),
+                evidence_class_counts=tuple(
+                    RotationFeeSemanticsClassCount(
+                        evidence_class=name,
+                        count=count,
+                    )
+                    for name, count in sorted(
+                        cohort_class_counts.items(),
+                        key=lambda item: (-item[1], item[0]),
+                    )
+                ),
+                quoted_base_residual_net=base_net,
+                quoted_fee_separate_residual_net=fee_net,
+            )
+        )
+
     return RotationFeeSemanticsCorpusReport(
         pool_address=pool_address,
         quote_unit=DEFAULT_QUOTE_UNIT,
@@ -184,6 +262,7 @@ def build_rotation_fee_semantics_corpus(
         claim_fee_true_samples=claim_true,
         claim_fee_false_samples=claim_false,
         claim_fee_unknown_samples=claim_unknown,
+        claim_fee_cohorts=tuple(cohort_reports),
         evidence_class_counts=tuple(
             RotationFeeSemanticsClassCount(
                 evidence_class=name,
