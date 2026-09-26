@@ -41,6 +41,9 @@ def sample(
     evidence_class="FEE_SEPARATE_ONLY_EXACT",
     claim=True,
     eligible=True,
+    quote_eligible=True,
+    base_residual_quote=0.0,
+    fee_residual_quote=0.0,
 ):
     return SimpleNamespace(
         signature=signature,
@@ -48,6 +51,9 @@ def sample(
         evidence_class=evidence_class,
         should_claim_fee=claim,
         eligible=eligible,
+        quote_eligible=quote_eligible,
+        base_residual_quote=base_residual_quote,
+        fee_separate_residual_quote=fee_residual_quote,
     )
 
 
@@ -94,11 +100,17 @@ def test_corpus_aggregates_quote_normalized_hypotheses_without_resolving(
         "position-a": report(
             "position-a",
             (
-                sample("sig-a", claim=True),
+                sample(
+                    "sig-a",
+                    claim=True,
+                    base_residual_quote=31.0,
+                    fee_residual_quote=0.0,
+                ),
                 sample(
                     "sig-b",
                     evidence_class="BASE_FLOW_ONLY_EXACT",
                     claim=False,
+                    quote_eligible=False,
                 ),
             ),
             quote_eligible=1,
@@ -114,6 +126,8 @@ def test_corpus_aggregates_quote_normalized_hypotheses_without_resolving(
                     "sig-c",
                     evidence_class="FEE_SEPARATE_ONLY_EXACT",
                     claim=None,
+                    base_residual_quote=9.0,
+                    fee_residual_quote=0.0,
                 ),
             ),
             quote_eligible=1,
@@ -145,6 +159,20 @@ def test_corpus_aggregates_quote_normalized_hypotheses_without_resolving(
     assert corpus.claim_fee_true_samples == 1
     assert corpus.claim_fee_false_samples == 1
     assert corpus.claim_fee_unknown_samples == 1
+    cohorts = {
+        item.should_claim_fee: item
+        for item in corpus.claim_fee_cohorts
+    }
+    assert cohorts["TRUE"].eligible_samples == 1
+    assert cohorts["TRUE"].quote_eligible_samples == 1
+    assert cohorts["TRUE"].quote_coverage_rate == 1.0
+    assert cohorts["TRUE"].quoted_base_residual_net == 31.0
+    assert cohorts["FALSE"].eligible_samples == 1
+    assert cohorts["FALSE"].quote_eligible_samples == 0
+    assert cohorts["FALSE"].quote_coverage_rate == 0.0
+    assert cohorts["UNKNOWN"].eligible_samples == 1
+    assert cohorts["UNKNOWN"].quote_eligible_samples == 1
+    assert cohorts["UNKNOWN"].quoted_base_residual_net == 9.0
     assert {
         item.evidence_class: item.count
         for item in corpus.evidence_class_counts
@@ -378,3 +406,83 @@ def test_corpus_rejects_resolved_position_report_invariant(
     assert corpus.positions_failed == 1
     assert corpus.failures[0].category == "POSITION_REPORT_INVARIANT"
     assert corpus.quoted_base_residual_net == 1.0
+
+
+
+def test_corpus_claim_cohort_preserves_evidence_classes(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    install_store(monkeypatch)
+    reports = {
+        "position-a": report(
+            "position-a",
+            (
+                sample(
+                    "sig-a",
+                    claim=True,
+                    evidence_class="FEE_SEPARATE_ONLY_EXACT",
+                    base_residual_quote=5.0,
+                ),
+                sample(
+                    "sig-b",
+                    claim=True,
+                    evidence_class="BASE_FLOW_ONLY_EXACT",
+                    base_residual_quote=0.0,
+                    fee_residual_quote=-2.0,
+                ),
+            ),
+            quote_eligible=2,
+            claim_true=2,
+            claim_false=0,
+            base_residual=5.0,
+            fee_residual=-2.0,
+        ),
+        "position-b": report(
+            "position-b",
+            (
+                sample(
+                    "sig-c",
+                    claim=False,
+                    evidence_class="NEITHER_HYPOTHESIS_EXACT",
+                    quote_eligible=False,
+                ),
+            ),
+            quote_eligible=0,
+            claim_true=0,
+            claim_false=1,
+            base_residual=0.0,
+            fee_residual=0.0,
+        ),
+    }
+    monkeypatch.setattr(
+        "meteora_learner.rotation_fee_semantics_corpus.build_rotation_fee_semantics_report",
+        lambda storage, *, position_address, max_quote_age_seconds: reports[
+            position_address
+        ],
+    )
+
+    corpus = build_rotation_fee_semantics_corpus(
+        storage,
+        pool_address=POOL,
+    )
+
+    cohorts = {
+        item.should_claim_fee: item
+        for item in corpus.claim_fee_cohorts
+    }
+    assert {
+        item.evidence_class: item.count
+        for item in cohorts["TRUE"].evidence_class_counts
+    } == {
+        "BASE_FLOW_ONLY_EXACT": 1,
+        "FEE_SEPARATE_ONLY_EXACT": 1,
+    }
+    assert cohorts["TRUE"].quoted_base_residual_net == 5.0
+    assert cohorts["TRUE"].quoted_fee_separate_residual_net == -2.0
+    assert {
+        item.evidence_class: item.count
+        for item in cohorts["FALSE"].evidence_class_counts
+    } == {"NEITHER_HYPOTHESIS_EXACT": 1}
+    assert cohorts["FALSE"].quote_coverage_rate == 0.0
