@@ -81,7 +81,36 @@ def _save_chain_and_mints(
             "protocol_share_bps": 0,
             "collect_fee_mode": 0,
             "supports_limit_order": True,
-            "bin_arrays": [],
+            "bin_arrays": [
+                {
+                    "index": 0,
+                    "address": f"{pool}-BIN-ARRAY",
+                    "bins": [
+                        {
+                            "bin_id": -1,
+                            "price": "0.99",
+                            "amount_x": "0",
+                            "amount_y": "0",
+                            "liquidity_supply": "1000",
+                            "fee_amount_x_per_token_stored": "10",
+                            "fee_amount_y_per_token_stored": "20",
+                            "reward_per_token_stored_0": "0",
+                            "reward_per_token_stored_1": "0",
+                        },
+                        {
+                            "bin_id": 0,
+                            "price": "1.0",
+                            "amount_x": "0",
+                            "amount_y": "0",
+                            "liquidity_supply": "2000",
+                            "fee_amount_x_per_token_stored": "15",
+                            "fee_amount_y_per_token_stored": "25",
+                            "reward_per_token_stored_0": "0",
+                            "reward_per_token_stored_1": "0",
+                        },
+                    ],
+                }
+            ],
         },
         observed_at="2026-01-01T00:00:00+00:00",
     )
@@ -300,6 +329,10 @@ def test_canonical_dataset_mint_research_runs_end_to_end(
     assert report.rotation_evidence is not None
     assert report.rotation_evidence.transition_opportunities > 0
     assert report.rotation_evidence_reason is None
+    assert report.chain_context_enrichment is not None
+    assert report.chain_context_enrichment.rows_ready == 210
+    assert report.chain_context_ablation is not None
+    assert report.chain_context_reason is None
     assert report.research_only is True
     assert report.policy_actionable is False
     assert report.execution_wired is False
