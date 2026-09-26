@@ -37,7 +37,35 @@ class PoolMarketResearchCycleReport:
     walk_forward: PoolMarketWalkForwardReport | None
 
     def to_record(self) -> dict[str, Any]:
-        return asdict(self)
+        dataset_summary = None
+        if self.dataset is not None:
+            dataset_summary = {
+                "rows_seen": self.dataset.rows_seen,
+                "pools_seen": self.dataset.pools_seen,
+                "examples_built": self.dataset.examples_built,
+                "rows_dropped": self.dataset.rows_dropped,
+                "drop_reasons": list(self.dataset.drop_reasons),
+            }
+
+        return {
+            "research_only": self.research_only,
+            "policy_actionable": self.policy_actionable,
+            "execution_wired": self.execution_wired,
+            "status": self.status,
+            "reason": self.reason,
+            "discovery": (
+                self.discovery.to_record()
+                if self.discovery is not None
+                else None
+            ),
+            "coverage": self.coverage.to_record(),
+            "dataset": dataset_summary,
+            "walk_forward": (
+                self.walk_forward.to_record()
+                if self.walk_forward is not None
+                else None
+            ),
+        }
 
 
 def run_pool_market_research_cycle(
