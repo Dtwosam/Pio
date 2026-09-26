@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .normalization import normalize_timestamp
 from .research_store import ResearchStore
 
 
@@ -128,17 +129,16 @@ def attach_pool_api_metadata_from_store(
 
         pool_age = np.nan
         if snapshot.get("pool_created_at") is not None:
-            created_at = pd.to_datetime(
-                snapshot["pool_created_at"],
-                utc=True,
-                errors="coerce",
+            normalized_created = normalize_timestamp(
+                snapshot["pool_created_at"]
             )
-            if not pd.isna(created_at):
+            if normalized_created is not None:
+                created_at = _parse_time(
+                    normalized_created,
+                    field="pool_created_at",
+                )
                 pool_age = float(
-                    (
-                        decision_time
-                        - pd.Timestamp(created_at)
-                    ).total_seconds()
+                    (decision_time - created_at).total_seconds()
                 )
                 if pool_age < 0:
                     pool_age = np.nan
