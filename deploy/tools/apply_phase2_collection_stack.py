@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 from typing import Any
@@ -90,15 +91,27 @@ def _load_manifest(path: Path) -> dict[str, Any]:
     for item in normalized:
         target = target_blobs[item]
         base = base_blobs[item]
-        if not isinstance(target, str) or len(target) != 40:
+        if (
+            not isinstance(target, str)
+            or re.fullmatch(r"[0-9a-f]{40}", target) is None
+        ):
             raise ValueError(f"invalid target blob for {item}")
         if base is not None and (
-            not isinstance(base, str) or len(base) != 40
+            not isinstance(base, str)
+            or re.fullmatch(r"[0-9a-f]{40}", base) is None
         ):
             raise ValueError(f"invalid base blob for {item}")
 
     payload["deployment_files"] = normalized
     return payload
+
+
+def _resolves_within(root: Path, path: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def preflight_collection_stack(
@@ -128,23 +141,34 @@ def preflight_collection_stack(
         source_path = source / relative
         target_blob = str(target_blobs[relative])
         base_blob = base_blobs[relative]
-        source_blob = git_blob_sha(source_path)
-        current_blob = git_blob_sha(target_path)
+        source_blob = None
+        current_blob = None
 
-        if source_blob != target_blob:
-            status = "SOURCE_MISMATCH"
-        elif current_blob == target_blob:
-            status = "ALREADY_TARGET"
-        elif current_blob is None and base_blob is None:
-            status = "READY_CREATE"
-        elif current_blob == base_blob:
-            status = "READY_UPDATE"
-        elif current_blob is None:
-            status = "CONFLICT_MISSING"
-        elif base_blob is None:
-            status = "CONFLICT_UNEXPECTED_EXISTING"
+        if not _resolves_within(source, source_path):
+            status = "SOURCE_OUTSIDE_TREE"
+        elif source_path.is_symlink():
+            status = "SOURCE_SYMLINK"
+        elif not _resolves_within(repo, target_path):
+            status = "TARGET_OUTSIDE_REPOSITORY"
+        elif target_path.is_symlink():
+            status = "CONFLICT_SYMLINK"
         else:
-            status = "CONFLICT_MODIFIED"
+            source_blob = git_blob_sha(source_path)
+            current_blob = git_blob_sha(target_path)
+            if source_blob != target_blob:
+                status = "SOURCE_MISMATCH"
+            elif current_blob == target_blob:
+                status = "ALREADY_TARGET"
+            elif current_blob is None and base_blob is None:
+                status = "READY_CREATE"
+            elif current_blob == base_blob:
+                status = "READY_UPDATE"
+            elif current_blob is None:
+                status = "CONFLICT_MISSING"
+            elif base_blob is None:
+                status = "CONFLICT_UNEXPECTED_EXISTING"
+            else:
+                status = "CONFLICT_MODIFIED"
 
         files.append(
             CollectionDeployFile(
