@@ -3,6 +3,12 @@ from meteora_learner.reconciliation_corpus import build_reconciliation_corpus
 from meteora_learner.storage import Storage
 
 
+def _capture_slot(observed_at):
+    hour = int(observed_at[11:13])
+    minute = int(observed_at[14:16])
+    return hour * 60 + minute + 1
+
+
 def save_position(
     storage,
     address,
@@ -21,6 +27,8 @@ def save_position(
     storage.save_chain_position_snapshot(
         {
             "position_address": address,
+            "capture_slot_start": _capture_slot(observed_at),
+            "capture_slot_end": _capture_slot(observed_at),
             "pool_address": "pool",
             "owner": "owner",
             "fee_owner": "owner",
