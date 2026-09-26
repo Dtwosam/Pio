@@ -105,9 +105,12 @@ def test_evidence_cycle_runs_read_only_stages_in_order(tmp_path, monkeypatch):
         "SUCCESS",
         "SUCCESS",
     ]
+    assert report.collection_scope == "POOL"
+    assert report.final_evidence_scope == "DATABASE_GLOBAL"
     assert report.read_only is True
     assert report.actionable is False
     assert report.live_authorized is False
+    assert report.promotion_gate_evaluated is False
     assert report.phase_promotion_performed is False
     assert report.detector_cursor_untouched is True
     assert report.service_control_performed is False
