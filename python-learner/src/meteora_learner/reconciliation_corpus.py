@@ -30,6 +30,7 @@ class ReconciliationCorpusReport:
     positions_seen: int
     amount_positions_eligible: int
     amount_positions_exact: int
+    amount_positions_provenance_ineligible: int
     amount_bins_checked: int
     amount_mismatched_bins: int
     amount_total_abs_error_x: int
@@ -38,6 +39,7 @@ class ReconciliationCorpusReport:
     fee_intervals_seen: int
     fee_intervals_eligible: int
     fee_intervals_exact: int
+    fee_intervals_provenance_ineligible: int
     fee_bins_checked: int
     fee_mismatched_bins: int
     fee_total_abs_error_x: int
@@ -45,6 +47,7 @@ class ReconciliationCorpusReport:
     reward_intervals_seen: int
     reward_intervals_eligible: int
     reward_intervals_exact: int
+    reward_intervals_provenance_ineligible: int
     reward_bins_checked: int
     reward_bins_with_checkpoint_growth: int
     reward_mismatched_bins: int
@@ -58,6 +61,14 @@ class ReconciliationCorpusReport:
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _is_capture_provenance_error(message: str) -> bool:
+    return (
+        "capture-slot provenance" in message
+        or "not single-context" in message
+        or "capture slot must move forward" in message
+    )
 
 
 def build_reconciliation_corpus(
@@ -85,6 +96,7 @@ def build_reconciliation_corpus(
 
     amount_positions_eligible = 0
     amount_positions_exact = 0
+    amount_positions_provenance_ineligible = 0
     amount_bins_checked = 0
     amount_mismatched_bins = 0
     amount_total_abs_error_x = 0
@@ -94,6 +106,7 @@ def build_reconciliation_corpus(
     fee_intervals_seen = 0
     fee_intervals_eligible = 0
     fee_intervals_exact = 0
+    fee_intervals_provenance_ineligible = 0
     fee_bins_checked = 0
     fee_mismatched_bins = 0
     fee_total_abs_error_x = 0
@@ -102,6 +115,7 @@ def build_reconciliation_corpus(
     reward_intervals_seen = 0
     reward_intervals_eligible = 0
     reward_intervals_exact = 0
+    reward_intervals_provenance_ineligible = 0
     reward_bins_checked = 0
     reward_bins_with_checkpoint_growth = 0
     reward_mismatched_bins = 0
@@ -118,6 +132,8 @@ def build_reconciliation_corpus(
             )
         except ValueError as exc:
             amount_error = str(exc)
+            if _is_capture_provenance_error(amount_error):
+                amount_positions_provenance_ineligible += 1
         else:
             amount_positions_eligible += 1
             amount_positions_exact += int(amount_state.exact_match)
@@ -150,7 +166,12 @@ def build_reconciliation_corpus(
                         end_observed_at=end_time,
                     )
                 except ValueError as exc:
-                    fee_errors.append(f"{start_time} -> {end_time}: {exc}")
+                    message = str(exc)
+                    fee_errors.append(
+                        f"{start_time} -> {end_time}: {message}"
+                    )
+                    if _is_capture_provenance_error(message):
+                        fee_intervals_provenance_ineligible += 1
                 else:
                     latest_fee_interval = fee_interval
                     fee_intervals_eligible += 1
@@ -169,7 +190,12 @@ def build_reconciliation_corpus(
                         end_observed_at=end_time,
                     )
                 except ValueError as exc:
-                    reward_errors.append(f"{start_time} -> {end_time}: {exc}")
+                    message = str(exc)
+                    reward_errors.append(
+                        f"{start_time} -> {end_time}: {message}"
+                    )
+                    if _is_capture_provenance_error(message):
+                        reward_intervals_provenance_ineligible += 1
                 else:
                     latest_reward_interval = reward_interval
                     reward_intervals_eligible += 1
@@ -235,6 +261,9 @@ def build_reconciliation_corpus(
         positions_seen=len(addresses),
         amount_positions_eligible=amount_positions_eligible,
         amount_positions_exact=amount_positions_exact,
+        amount_positions_provenance_ineligible=(
+            amount_positions_provenance_ineligible
+        ),
         amount_bins_checked=amount_bins_checked,
         amount_mismatched_bins=amount_mismatched_bins,
         amount_total_abs_error_x=amount_total_abs_error_x,
@@ -243,6 +272,9 @@ def build_reconciliation_corpus(
         fee_intervals_seen=fee_intervals_seen,
         fee_intervals_eligible=fee_intervals_eligible,
         fee_intervals_exact=fee_intervals_exact,
+        fee_intervals_provenance_ineligible=(
+            fee_intervals_provenance_ineligible
+        ),
         fee_bins_checked=fee_bins_checked,
         fee_mismatched_bins=fee_mismatched_bins,
         fee_total_abs_error_x=fee_total_abs_error_x,
@@ -250,6 +282,9 @@ def build_reconciliation_corpus(
         reward_intervals_seen=reward_intervals_seen,
         reward_intervals_eligible=reward_intervals_eligible,
         reward_intervals_exact=reward_intervals_exact,
+        reward_intervals_provenance_ineligible=(
+            reward_intervals_provenance_ineligible
+        ),
         reward_bins_checked=reward_bins_checked,
         reward_bins_with_checkpoint_growth=reward_bins_with_checkpoint_growth,
         reward_mismatched_bins=reward_mismatched_bins,
