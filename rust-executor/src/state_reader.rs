@@ -210,6 +210,21 @@ fn effective_reward_per_token_stored(
     rewards
 }
 
+fn active_bin_array_index(active_bin_id: i32) -> Result<i32> {
+    BinArray::bin_id_to_bin_array_index(active_bin_id)
+        .context("active bin index")
+}
+
+fn bin_array_indexes_for_active_bin(
+    active_bin_id: i32,
+    array_radius: i32,
+) -> Result<Vec<i32>> {
+    let active_array_index = active_bin_array_index(active_bin_id)?;
+    Ok(((active_array_index - array_radius)
+        ..=(active_array_index + array_radius))
+        .collect())
+}
+
 pub async fn inspect_pool(
     rpc_url: &str,
     pool_address: &str,
@@ -221,18 +236,95 @@ pub async fn inspect_pool(
 
     let pool = Pubkey::from_str(pool_address).context("invalid pool address")?;
     let rpc = RpcClient::new(rpc_url.to_string());
-    let capture_slot_start = rpc
-        .get_slot()
-        .await
-        .context("failed to get snapshot start slot")?;
-    let account = rpc
-        .get_account(&pool)
-        .await
-        .with_context(|| format!("failed to fetch pool account {pool}"))?;
-    if account.owner != commons::dlmm::ID {
-        anyhow::bail!("pool account is not owned by Meteora DLMM");
+
+    // The first pool read is only a probe so we can derive the active bin-array
+    // addresses. The authoritative snapshot is fetched afterward in a single
+    // getMultipleAccounts response containing the pool, clock and all required
+    // bin arrays. Its response context slot is therefore the snapshot slot.
+    let mut final_response = None;
+    let mut final_indexes = Vec::new();
+    let mut final_pubkeys = Vec::new();
+
+    for _attempt in 0..3 {
+        let probe_response = rpc
+            .get_account_with_commitment(&pool, rpc.commitment())
+            .await
+            .with_context(|| format!("failed to probe pool account {pool}"))?;
+        let probe_account = probe_response
+            .value
+            .context("pool account missing during snapshot probe")?;
+        if probe_account.owner != commons::dlmm::ID {
+            anyhow::bail!("pool account is not owned by Meteora DLMM");
+        }
+        let probe_pair =
+            decode_lb_pair(&probe_account.data).context("failed to decode probe LbPair")?;
+        let probe_active_array_index =
+            active_bin_array_index(probe_pair.active_id)
+                .context("probe active bin index")?;
+
+        let indexes =
+            bin_array_indexes_for_active_bin(probe_pair.active_id, array_radius)
+                .context("probe bin-array window")?;
+        let pubkeys: Vec<Pubkey> = indexes
+            .iter()
+            .map(|index| derive_bin_array_pda(pool, i64::from(*index)).0)
+            .collect();
+
+        let accounts_to_fetch: Vec<Pubkey> = [
+            vec![pool, CLOCK_ID],
+            pubkeys.clone(),
+        ]
+        .concat();
+        let response = rpc
+            .get_multiple_accounts_with_commitment(
+                &accounts_to_fetch,
+                rpc.commitment(),
+            )
+            .await
+            .context(
+                "failed to fetch single-slot pool/clock/bin-array snapshot",
+            )?;
+
+        let snapshot_pool_account = response
+            .value
+            .first()
+            .and_then(|account| account.as_ref())
+            .context("pool account missing from final snapshot")?;
+        if snapshot_pool_account.owner != commons::dlmm::ID {
+            anyhow::bail!("pool account is not owned by Meteora DLMM");
+        }
+        let snapshot_pair = decode_lb_pair(&snapshot_pool_account.data)
+            .context("failed to decode final LbPair")?;
+        let snapshot_active_array_index =
+            active_bin_array_index(snapshot_pair.active_id)
+                .context("final active bin index")?;
+
+        if snapshot_active_array_index != probe_active_array_index {
+            // The active bin crossed a bin-array boundary between the probe and
+            // final read, so the derived array addresses may be stale. Retry
+            // rather than emitting an internally inconsistent snapshot.
+            continue;
+        }
+
+        final_indexes = indexes;
+        final_pubkeys = pubkeys;
+        final_response = Some(response);
+        break;
     }
-    let mut lb_pair = decode_lb_pair(&account.data).context("failed to decode LbPair")?;
+
+    let response = final_response.context(
+        "pool active bin array changed during all snapshot attempts",
+    )?;
+    let capture_slot = response.context.slot;
+    let accounts = response.value;
+
+    let account = accounts
+        .first()
+        .and_then(|account| account.as_ref())
+        .context("pool account missing from single-slot snapshot")?;
+    let mut lb_pair =
+        decode_lb_pair(&account.data).context("failed to decode LbPair")?;
+
     let raw_fee_state = FeeStateSnapshot {
         base_factor: lb_pair.parameters.base_factor,
         filter_period: lb_pair.parameters.filter_period,
@@ -257,10 +349,10 @@ pub async fn inspect_pool(
         .get_total_fee()
         .context("failed to compute total fee")?;
 
-    let clock_account = rpc
-        .get_account(&CLOCK_ID)
-        .await
-        .context("failed to fetch Solana clock")?;
+    let clock_account = accounts
+        .get(1)
+        .and_then(|account| account.as_ref())
+        .context("Solana clock missing from single-slot snapshot")?;
     let clock: Clock =
         bincode::deserialize(&clock_account.data).context("failed to decode Solana clock")?;
     lb_pair
@@ -273,24 +365,13 @@ pub async fn inspect_pool(
         .get_total_fee()
         .context("failed to compute deposit-time total fee")?;
 
-    let active_array_index =
-        BinArray::bin_id_to_bin_array_index(lb_pair.active_id).context("active bin index")?;
-
-    let indexes: Vec<i32> = ((active_array_index - array_radius)
-        ..=(active_array_index + array_radius))
-        .collect();
-    let pubkeys: Vec<Pubkey> = indexes
-        .iter()
-        .map(|index| derive_bin_array_pda(pool, i64::from(*index)).0)
-        .collect();
-
-    let accounts = rpc
-        .get_multiple_accounts(&pubkeys)
-        .await
-        .context("failed to fetch bin array accounts")?;
-
     let mut bin_arrays = Vec::new();
-    for ((index, pubkey), account) in indexes.into_iter().zip(pubkeys).zip(accounts) {
+    for (((index, pubkey), account_index), account) in final_indexes
+        .into_iter()
+        .zip(final_pubkeys)
+        .zip(2usize..)
+        .zip(accounts.into_iter().skip(2))
+    {
         let Some(account) = account else {
             continue;
         };
@@ -298,6 +379,8 @@ pub async fn inspect_pool(
             .with_context(|| format!("failed to decode bin array {pubkey}"))?;
         let (lower_bin_id, upper_bin_id) =
             BinArray::get_bin_array_lower_upper_bin_id(index).context("bin array coverage")?;
+
+        debug_assert!(account_index >= 2);
 
         let bins = bin_array
             .bins
@@ -349,15 +432,10 @@ pub async fn inspect_pool(
         });
     }
 
-    let capture_slot_end = rpc
-        .get_slot()
-        .await
-        .context("failed to get snapshot end slot")?;
-
     Ok(PoolChainSnapshot {
         pool_address: pool.to_string(),
-        capture_slot_start,
-        capture_slot_end,
+        capture_slot_start: capture_slot,
+        capture_slot_end: capture_slot,
         clock_unix_timestamp: clock.unix_timestamp,
         active_bin_id: lb_pair.active_id,
         bin_step: lb_pair.bin_step,
@@ -737,6 +815,41 @@ pub async fn inspect_position(
 #[cfg(test)]
 mod discovery_layout_tests {
     use super::*;
+
+    #[test]
+    fn snapshot_bin_array_window_is_centered_on_active_array() {
+        let active_id = 0;
+        let center = active_bin_array_index(active_id).expect("active array");
+        let indexes =
+            bin_array_indexes_for_active_bin(active_id, 2).expect("window");
+        assert_eq!(
+            indexes,
+            vec![center - 2, center - 1, center, center + 1, center + 2]
+        );
+    }
+
+    #[test]
+    fn active_bin_boundary_change_changes_snapshot_array_window() {
+        let center = active_bin_array_index(0).expect("active array");
+        let (lower, upper) =
+            BinArray::get_bin_array_lower_upper_bin_id(center)
+                .expect("array bounds");
+
+        assert_eq!(
+            active_bin_array_index(lower).expect("lower index"),
+            center
+        );
+        assert_eq!(
+            active_bin_array_index(upper).expect("upper index"),
+            center
+        );
+
+        let next = upper.checked_add(1).expect("next bin");
+        assert_ne!(
+            active_bin_array_index(next).expect("next index"),
+            center
+        );
+    }
 
     #[test]
     fn position_bin_array_indexes_cover_full_position_range() {
