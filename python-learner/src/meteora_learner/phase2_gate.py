@@ -107,6 +107,37 @@ def evaluate_phase2_promotion_gate(
 
     reasons: list[str] = []
 
+    amount_provenance_rejected = getattr(
+        corpus,
+        "amount_positions_provenance_ineligible",
+        0,
+    )
+    fee_provenance_rejected = getattr(
+        corpus,
+        "fee_intervals_provenance_ineligible",
+        0,
+    )
+    reward_provenance_rejected = getattr(
+        corpus,
+        "reward_intervals_provenance_ineligible",
+        0,
+    )
+    if amount_provenance_rejected:
+        reasons.append(
+            f"{amount_provenance_rejected} amount-state snapshots rejected "
+            "for capture-slot provenance"
+        )
+    if fee_provenance_rejected:
+        reasons.append(
+            f"{fee_provenance_rejected} fee intervals rejected "
+            "for capture-slot provenance"
+        )
+    if reward_provenance_rejected:
+        reasons.append(
+            f"{reward_provenance_rejected} reward intervals rejected "
+            "for capture-slot provenance"
+        )
+
     exact_math_passed = corpus.strict_math_gate_passed
     if not exact_math_passed:
         if corpus.amount_positions_eligible == 0:
