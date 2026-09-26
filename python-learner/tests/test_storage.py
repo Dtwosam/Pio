@@ -235,3 +235,69 @@ def test_phase9_source_tables_are_append_only(tmp_path):
                     f"DELETE FROM {table} WHERE id = "
                     f"(SELECT MIN(id) FROM {table})"
                 )
+
+
+
+def test_phase2_collection_task_attempt_ledger_is_append_only(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    attempt_id = storage.save_phase2_collection_task_attempt(
+        stage="TRANSACTION_REINSPECTION",
+        task_key="sig",
+        attempted_at="2026-09-26T18:00:00+00:00",
+        succeeded=False,
+        outcome_category="EXECUTOR_FAILED",
+    )
+    assert attempt_id > 0
+
+    latest = storage.latest_phase2_collection_task_attempts(
+        stage="TRANSACTION_REINSPECTION",
+    )
+    assert set(latest) == {"sig"}
+
+    status = storage.data_status()
+    assert status["phase2_collection_task_attempts"] == 1
+    assert status["phase2_collection_task_successes"] == 0
+    assert status["phase2_collection_task_failures"] == 1
+    assert status["latest_phase2_collection_task_attempt"] == (
+        "2026-09-26T18:00:00+00:00"
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                UPDATE phase2_collection_task_attempts
+                SET outcome_category = 'OTHER'
+                WHERE id = ?
+                """,
+                (attempt_id,),
+            )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with storage.connect() as conn:
+            conn.execute(
+                "DELETE FROM phase2_collection_task_attempts WHERE id = ?",
+                (attempt_id,),
+            )
+
+
+def test_phase2_collection_task_attempt_validation(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    with pytest.raises(ValueError, match="stage is required"):
+        storage.save_phase2_collection_task_attempt(
+            stage="",
+            task_key="sig",
+            attempted_at="2026-09-26T18:00:00+00:00",
+            succeeded=False,
+            outcome_category="EXECUTOR_FAILED",
+        )
+
+    with pytest.raises(ValueError, match="task_key is required"):
+        storage.save_phase2_collection_task_attempt(
+            stage="TRANSACTION_REINSPECTION",
+            task_key="",
+            attempted_at="2026-09-26T18:00:00+00:00",
+            succeeded=False,
+            outcome_category="EXECUTOR_FAILED",
+        )
