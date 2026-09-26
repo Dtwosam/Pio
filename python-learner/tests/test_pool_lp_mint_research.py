@@ -297,6 +297,9 @@ def test_canonical_dataset_mint_research_runs_end_to_end(
     assert report.cross_sectional_ranking is not None
     assert report.cross_sectional_ranking.ranking_points > 0
     assert report.cross_sectional_ranking_reason is None
+    assert report.rotation_evidence is not None
+    assert report.rotation_evidence.transition_opportunities > 0
+    assert report.rotation_evidence_reason is None
     assert report.research_only is True
     assert report.policy_actionable is False
     assert report.execution_wired is False
@@ -377,6 +380,8 @@ def test_canonical_dataset_reports_missing_mint_context(
     assert report.execution_cost_reason is None
     assert report.cross_sectional_ranking is None
     assert report.cross_sectional_ranking_reason is None
+    assert report.rotation_evidence is None
+    assert report.rotation_evidence_reason is None
     assert (
         report.mint_enrichment.rows_dropped_missing_mint_context
         == 210
