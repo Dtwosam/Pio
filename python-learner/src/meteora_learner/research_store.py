@@ -73,6 +73,35 @@ class ResearchStore:
 
         return [dict(row) for row in rows]
 
+    def stable_pool_token_mints(
+        self,
+        address: str,
+    ) -> tuple[str, str] | None:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT token_x_mint, token_y_mint
+                FROM chain_pool_snapshots
+                WHERE pool_address = ?
+                ORDER BY token_x_mint, token_y_mint
+                """,
+                (address,),
+            ).fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            return None
+        identities = {
+            (str(row["token_x_mint"]), str(row["token_y_mint"]))
+            for row in rows
+        }
+        if len(identities) != 1:
+            raise ValueError(
+                f"pool token mint identity changed across snapshots: {address}"
+            )
+        return next(iter(identities))
+
     def latest_chain_pool_snapshot(
         self,
         address: str,
