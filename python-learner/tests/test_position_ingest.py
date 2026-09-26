@@ -9,6 +9,8 @@ from meteora_learner.storage import Storage
 def position_snapshot():
     return {
         "position_address": "position",
+        "capture_slot_start": 450600000,
+        "capture_slot_end": 450600000,
         "pool_address": "pool",
         "owner": "owner",
         "fee_owner": "owner",
@@ -57,7 +59,11 @@ def test_position_snapshot_is_persisted(tmp_path):
     conn = sqlite3.connect(storage.path)
     try:
         position = conn.execute(
-            "SELECT position_address, pool_address, fee_x, fee_y FROM chain_position_snapshots"
+            """
+            SELECT position_address, capture_slot_start, capture_slot_end,
+                   pool_address, fee_x, fee_y
+            FROM chain_position_snapshots
+            """
         ).fetchone()
         bin_row = conn.execute(
             """
@@ -70,7 +76,9 @@ def test_position_snapshot_is_persisted(tmp_path):
     finally:
         conn.close()
 
-    assert position == ("position", "pool", "3", "4")
+    assert position == (
+        "position", 450600000, 450600000, "pool", "3", "4"
+    )
     assert bin_row == (100, "3000", "31", "41", "300", "3", "4")
     assert storage.data_status()["position_bin_snapshots"] == 1
 
@@ -80,3 +88,37 @@ def test_position_snapshot_rejects_inverted_range(tmp_path):
     payload["lower_bin_id"] = 102
     with pytest.raises(ValueError):
         ingest_position_snapshot(Storage(tmp_path / "pio.db"), payload)
+
+
+
+def test_position_snapshot_rejects_partial_capture_slot_lineage(tmp_path):
+    payload = position_snapshot()
+    payload.pop("capture_slot_end")
+    with pytest.raises(ValueError, match="supplied together"):
+        ingest_position_snapshot(Storage(tmp_path / "pio.db"), payload)
+
+
+def test_position_snapshot_rejects_inverted_capture_slot_range(tmp_path):
+    payload = position_snapshot()
+    payload["capture_slot_start"] = 20
+    payload["capture_slot_end"] = 19
+    with pytest.raises(ValueError, match="cannot exceed"):
+        ingest_position_snapshot(Storage(tmp_path / "pio.db"), payload)
+
+
+def test_legacy_position_snapshot_without_capture_slots_still_ingests(tmp_path):
+    payload = position_snapshot()
+    payload.pop("capture_slot_start")
+    payload.pop("capture_slot_end")
+    storage = Storage(tmp_path / "pio.db")
+
+    ingest_position_snapshot(storage, payload)
+
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT capture_slot_start, capture_slot_end
+            FROM chain_position_snapshots
+            """
+        ).fetchone()
+    assert row == (None, None)
