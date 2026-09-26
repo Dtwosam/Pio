@@ -287,3 +287,33 @@ rather than treating initial snapshots as permanent:
 
 These additions remain research-only and do not create economic cutoffs,
 allocation rules, transaction construction, signing or submission.
+
+
+## Current pool candidate evidence
+
+The research branch now has an operator-facing bridge from market-wide discovery
+to consolidated current candidate evidence:
+
+- `pool_market_current_forecast.py`
+  - trains only on fully realized historical market examples;
+  - requires purged walk-forward evaluation to be constructible;
+  - emits continuous future market forecasts for every latest pool with
+    complete features;
+  - reports market snapshot lag explicitly;
+  - emits no rank, selected pool, allocation or action.
+
+- `pool_current_candidate_evidence.py`
+  - joins each current forecast to the latest as-of API metadata, mint history,
+    chain/liquidity history and execution-cost history;
+  - reports which context groups are available or missing per pool;
+  - keeps missing context as missing rather than synthesizing values;
+  - orders output stably by pool address rather than opportunity score.
+
+- Console commands:
+  - `pio-current-pool-forecast`
+  - `pio-current-pool-candidates`
+
+This is the current research comparison surface. It is deliberately descriptive
+and non-actionable; a later learned policy layer must earn the right to combine
+these forecasts/evidence into capital decisions through out-of-sample and
+controlled-live validation.
