@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from meteora_learner.phase2_position_observation import (
     collect_phase2_position_observations,
 )
@@ -541,3 +543,30 @@ def test_attempt_ledger_uses_prior_snapshot_history_for_initial_rotation(tmp_pat
 
     assert result.snapshots_saved == 1
     assert inspected == [POSITIONS[1]]
+
+
+
+def test_position_discovery_failure_does_not_echo_executor_stderr(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    secret = "https://user:secret@example.invalid/rpc"
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            f"discovery failed at {secret}",
+        )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        collect_phase2_position_observations(
+            storage,
+            pool_address=POOL,
+            executor_path="/executor",
+            runner=runner,
+        )
+
+    message = str(excinfo.value)
+    assert "executor failed with status 1" in message
+    assert secret not in message
+    assert "discovery failed" not in message
