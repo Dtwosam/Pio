@@ -10,6 +10,7 @@ from .chain_replay import (
     continue_small_lp_replay,
     replay_small_lp_history,
 )
+from .quote_registry import DEFAULT_QUOTE_UNIT, token_quote_status
 from .research_store import ResearchStore
 from .storage import Storage
 from .strategy import StrategyType
@@ -37,6 +38,18 @@ class PaperHoldVsRebalanceReplayReport:
     rebalance_value_after_composition_y_atomic: int
     gross_advantage_before_transition_cost_y_atomic: int
     gross_advantage_before_transition_cost_bps: int | None
+    quote_unit: str
+    token_y_mint: str | None
+    end_y_quote_per_atomic: float | None
+    end_y_quote_source: str | None
+    end_y_quote_observed_at: str | None
+    end_y_quote_age_seconds: int | None
+    quote_normalization_complete: bool
+    quote_exclusion_reason: str | None
+    hold_inventory_fee_value_quote: float | None
+    rebalance_inventory_fee_value_quote: float | None
+    rebalance_composition_cost_quote: float | None
+    gross_advantage_before_transition_cost_quote: float | None
     hold_reward_one: int
     hold_reward_two: int
     rebalance_reward_one: int
@@ -89,6 +102,7 @@ def compare_paper_hold_vs_rebalance_gross(
     strategy: StrategyType | str,
     max_share_bps: int | None = None,
     favor_x_in_active_bin: bool = False,
+    max_quote_age_seconds: int = 300,
 ) -> PaperHoldVsRebalanceReplayReport:
     """
     Compare HOLD with a fresh redeposit over the same observed forward window.
@@ -102,6 +116,8 @@ def compare_paper_hold_vs_rebalance_gross(
     """
     if min_bin_id > max_bin_id:
         raise ValueError("min_bin_id cannot exceed max_bin_id")
+    if max_quote_age_seconds < 0:
+        raise ValueError("max_quote_age_seconds cannot be negative")
     times = [str(value) for value in observation_times]
     if len(times) < 2:
         raise ValueError("observation_times must contain at least two observations")
@@ -194,6 +210,63 @@ def compare_paper_hold_vs_rebalance_gross(
         else None
     )
 
+    token_y_mint = None
+    end_y_quote_per_atomic = None
+    end_y_quote_source = None
+    end_y_quote_observed_at = None
+    end_y_quote_age_seconds = None
+    quote_reason = None
+    hold_value_quote = None
+    rebalance_value_quote = None
+    composition_cost_quote = None
+    advantage_quote = None
+
+    decision_pool = store.chain_pool_snapshot_at(
+        prior.pool_address,
+        times[0],
+    )
+    end_pool = store.chain_pool_snapshot_at(
+        prior.pool_address,
+        times[-1],
+    )
+    if decision_pool is None or end_pool is None:
+        quote_reason = "pool token identity missing at comparison boundary"
+    else:
+        decision_y = str(decision_pool.get("token_y_mint") or "")
+        end_y = str(end_pool.get("token_y_mint") or "")
+        if not decision_y or not end_y:
+            quote_reason = "token Y mint missing at comparison boundary"
+        elif decision_y != end_y:
+            quote_reason = "token Y mint changed across comparison window"
+        else:
+            token_y_mint = end_y
+            quote = token_quote_status(
+                Storage(Path(database_path)),
+                token_mint=token_y_mint,
+                max_age_seconds=max_quote_age_seconds,
+                as_of=times[-1],
+                quote_unit=DEFAULT_QUOTE_UNIT,
+            )
+            end_y_quote_per_atomic = quote.quote_per_atomic
+            end_y_quote_source = quote.source
+            end_y_quote_observed_at = quote.observed_at
+            end_y_quote_age_seconds = quote.age_seconds
+            if not quote.available:
+                quote_reason = "token Y quote missing at comparison end"
+            elif not quote.fresh or quote.quote_per_atomic is None:
+                quote_reason = "token Y quote stale at comparison end"
+            else:
+                hold_value_quote = hold_value * quote.quote_per_atomic
+                rebalance_value_quote = (
+                    rebalance_value * quote.quote_per_atomic
+                )
+                composition_cost_quote = (
+                    composition_cost * quote.quote_per_atomic
+                )
+                advantage_quote = advantage * quote.quote_per_atomic
+
+    quote_normalization_complete = quote_reason is None
+
     reward_value_complete = not any(
         (
             hold.reward_one,
@@ -233,6 +306,18 @@ def compare_paper_hold_vs_rebalance_gross(
         ),
         gross_advantage_before_transition_cost_y_atomic=advantage,
         gross_advantage_before_transition_cost_bps=advantage_bps,
+        quote_unit=DEFAULT_QUOTE_UNIT,
+        token_y_mint=token_y_mint,
+        end_y_quote_per_atomic=end_y_quote_per_atomic,
+        end_y_quote_source=end_y_quote_source,
+        end_y_quote_observed_at=end_y_quote_observed_at,
+        end_y_quote_age_seconds=end_y_quote_age_seconds,
+        quote_normalization_complete=quote_normalization_complete,
+        quote_exclusion_reason=quote_reason,
+        hold_inventory_fee_value_quote=hold_value_quote,
+        rebalance_inventory_fee_value_quote=rebalance_value_quote,
+        rebalance_composition_cost_quote=composition_cost_quote,
+        gross_advantage_before_transition_cost_quote=advantage_quote,
         hold_reward_one=hold.reward_one,
         hold_reward_two=hold.reward_two,
         rebalance_reward_one=rebalance.reward_one,
