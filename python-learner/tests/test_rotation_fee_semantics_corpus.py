@@ -27,7 +27,11 @@ class FakeStore:
 
 class FakeReport(SimpleNamespace):
     def to_record(self):
-        return dict(self.__dict__)
+        record = dict(self.__dict__)
+        record["samples"] = [
+            dict(item.__dict__) for item in self.samples
+        ]
+        return record
 
 
 def sample(
