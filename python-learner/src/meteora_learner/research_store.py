@@ -457,7 +457,8 @@ class ResearchStore:
             row = conn.execute(
                 """
                 SELECT observed_at, signature, slot, block_time,
-                       network_fee_lamports, compute_units_consumed, succeeded
+                       network_fee_lamports, compute_units_consumed, succeeded,
+                       token_balance_deltas_captured
                 FROM chain_transaction_snapshots
                 WHERE signature = ?
                 LIMIT 1
