@@ -17,6 +17,10 @@ from .pool_lp_context_ablation import (
     ContextFeatureAblationReport,
     evaluate_context_feature_ablation,
 )
+from .pool_lp_cross_sectional_ranking import (
+    CrossSectionRankingReport,
+    evaluate_cross_sectional_ranking,
+)
 from .pool_execution_cost_context import (
     ExecutionCostAblationReport,
     ExecutionCostTrainingFrameReport,
@@ -81,6 +85,8 @@ class MintFeatureResearchReport:
     execution_cost_enrichment: ExecutionCostTrainingFrameReport | None = None
     execution_cost_ablation: ExecutionCostAblationReport | None = None
     execution_cost_reason: str | None = None
+    cross_sectional_ranking: CrossSectionRankingReport | None = None
+    cross_sectional_ranking_reason: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -161,6 +167,14 @@ class MintFeatureResearchReport:
                 else None
             ),
             "execution_cost_reason": self.execution_cost_reason,
+            "cross_sectional_ranking": (
+                self.cross_sectional_ranking.to_record()
+                if self.cross_sectional_ranking is not None
+                else None
+            ),
+            "cross_sectional_ranking_reason": (
+                self.cross_sectional_ranking_reason
+            ),
         }
 
 
@@ -438,6 +452,19 @@ def run_mint_feature_research_from_dataset_file(
     except ValueError as exc:
         execution_cost_reason = str(exc)
 
+    cross_sectional_ranking = None
+    cross_sectional_ranking_reason = None
+    try:
+        cross_sectional_ranking = evaluate_cross_sectional_ranking(
+            mint_frame,
+            min_train_decision_times=min_train_decision_times,
+            validation_decision_times=validation_decision_times,
+            step_decision_times=step_decision_times,
+            min_train_rows=min_train_rows,
+        )
+    except ValueError as exc:
+        cross_sectional_ranking_reason = str(exc)
+
     return MintFeatureResearchReport(
         research_only=True,
         policy_actionable=False,
@@ -464,4 +491,6 @@ def run_mint_feature_research_from_dataset_file(
         execution_cost_enrichment=execution_cost_enrichment,
         execution_cost_ablation=execution_cost_ablation,
         execution_cost_reason=execution_cost_reason,
+        cross_sectional_ranking=cross_sectional_ranking,
+        cross_sectional_ranking_reason=cross_sectional_ranking_reason,
     )
