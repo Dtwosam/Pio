@@ -768,12 +768,16 @@ class ResearchStore:
         self,
         *,
         event_type: str | None = None,
+        pool_address: str | None = None,
     ) -> list[str]:
         params: list[Any] = []
         clause = "WHERE position_address IS NOT NULL"
         if event_type is not None:
             clause += " AND event_type = ?"
             params.append(event_type)
+        if pool_address is not None:
+            clause += " AND lb_pair = ?"
+            params.append(pool_address)
         conn = self._connect()
         try:
             rows = conn.execute(
