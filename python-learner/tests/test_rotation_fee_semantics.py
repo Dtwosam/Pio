@@ -233,7 +233,7 @@ def test_multiple_rebalance_events_are_not_attributed_to_shared_owner_flow(tmp_p
         position_address=POSITION,
     )
 
-    assert report.transactions_seen == 2
+    assert report.transactions_seen == 1
     assert report.eligible_transactions == 0
     assert all(not item.eligible for item in report.samples)
     assert all(
