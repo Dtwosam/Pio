@@ -1,3 +1,8 @@
+from datetime import datetime, timezone
+
+import pytest
+
+from meteora_learner.quote_registry import save_token_quote
 from meteora_learner.rotation_fee_semantics import (
     ROTATION_FEE_SEMANTICS_EVIDENCE_TYPE,
     build_rotation_fee_semantics_report,
@@ -319,3 +324,142 @@ def test_fee_semantics_persistence_remains_non_qualified(tmp_path):
     assert saved["qualified"] is False
     assert saved["status"] == "UNRESOLVED_OBSERVATIONAL_EVIDENCE"
     assert saved["evidence"]["semantics_resolved"] is False
+
+
+
+def save_test_quotes(storage, *, age_seconds=0):
+    observed = datetime.fromtimestamp(
+        1_700_000_000 - age_seconds,
+        tz=timezone.utc,
+    ).isoformat()
+    save_token_quote(
+        storage,
+        token_mint=X_MINT,
+        quote_per_atomic=2.0,
+        source="TEST",
+        observed_at=observed,
+    )
+    save_token_quote(
+        storage,
+        token_mint=Y_MINT,
+        quote_per_atomic=3.0,
+        source="TEST",
+        observed_at=observed,
+    )
+
+
+def test_quote_normalizes_both_residual_hypotheses(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool_identity(storage)
+    save_rebalance(
+        storage,
+        owner_x_delta=25,
+        owner_y_delta=37,
+        should_claim_fee=True,
+    )
+    save_test_quotes(storage)
+
+    report = build_rotation_fee_semantics_report(
+        storage,
+        position_address=POSITION,
+    )
+
+    assert report.quote_unit == "ACCOUNT_QUOTE"
+    assert report.quote_eligible_transactions == 1
+    assert report.quote_coverage_rate == 1.0
+    sample = report.samples[0]
+    assert sample.quote_eligible is True
+    assert sample.x_quote_source == "TEST"
+    assert sample.y_quote_source == "TEST"
+    assert sample.base_residual_quote == pytest.approx(31.0)
+    assert sample.fee_separate_residual_quote == pytest.approx(0.0)
+    assert report.quoted_base_residual_net == pytest.approx(31.0)
+    assert report.quoted_fee_separate_residual_net == pytest.approx(0.0)
+    assert report.semantics_resolved is False
+
+
+def test_quote_normalized_residuals_do_not_change_semantic_classification(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool_identity(storage)
+    save_rebalance(
+        storage,
+        owner_x_delta=20,
+        owner_y_delta=30,
+        should_claim_fee=False,
+    )
+    save_test_quotes(storage)
+
+    report = build_rotation_fee_semantics_report(
+        storage,
+        position_address=POSITION,
+    )
+
+    sample = report.samples[0]
+    assert sample.evidence_class == "BASE_FLOW_ONLY_EXACT"
+    assert sample.base_residual_quote == pytest.approx(0.0)
+    assert sample.fee_separate_residual_quote == pytest.approx(-31.0)
+    assert report.conclusion == "UNRESOLVED_OBSERVATIONAL_EVIDENCE"
+    assert report.semantics_resolved is False
+
+
+def test_stale_quotes_leave_residual_economics_unpriced(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool_identity(storage)
+    save_rebalance(
+        storage,
+        owner_x_delta=25,
+        owner_y_delta=37,
+        should_claim_fee=True,
+    )
+    save_test_quotes(storage, age_seconds=301)
+
+    report = build_rotation_fee_semantics_report(
+        storage,
+        position_address=POSITION,
+        max_quote_age_seconds=300,
+    )
+
+    assert report.eligible_transactions == 1
+    assert report.quote_eligible_transactions == 0
+    assert report.quote_coverage_rate == 0.0
+    sample = report.samples[0]
+    assert sample.quote_eligible is False
+    assert "stale" in str(sample.quote_exclusion_reason)
+    assert sample.base_residual_quote is None
+    assert sample.fee_separate_residual_quote is None
+
+
+def test_missing_one_token_quote_fails_quote_eligibility_only(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool_identity(storage)
+    save_rebalance(
+        storage,
+        owner_x_delta=25,
+        owner_y_delta=37,
+        should_claim_fee=True,
+    )
+    observed = datetime.fromtimestamp(
+        1_700_000_000,
+        tz=timezone.utc,
+    ).isoformat()
+    save_token_quote(
+        storage,
+        token_mint=X_MINT,
+        quote_per_atomic=2.0,
+        source="TEST",
+        observed_at=observed,
+    )
+
+    report = build_rotation_fee_semantics_report(
+        storage,
+        position_address=POSITION,
+    )
+
+    assert report.eligible_transactions == 1
+    assert report.quote_eligible_transactions == 0
+    assert report.samples[0].evidence_class == "FEE_SEPARATE_ONLY_EXACT"
+    assert report.samples[0].quote_exclusion_reason == (
+        "token Y quote missing at transaction time"
+    )
