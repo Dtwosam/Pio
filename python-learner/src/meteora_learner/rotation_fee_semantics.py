@@ -230,6 +230,17 @@ def build_rotation_fee_semantics_report(
                 )
             )
             continue
+        if int(receipt.get("token_balance_deltas_captured") or 0) != 1:
+            samples.append(
+                _ineligible_sample(
+                    event=event,
+                    succeeded=succeeded,
+                    rebalance_events_in_transaction=event_count,
+                    should_claim_fee=should_claim_fee,
+                    reason="transaction token-balance capture missing",
+                )
+            )
+            continue
         if event_count != 1:
             samples.append(
                 _ineligible_sample(
