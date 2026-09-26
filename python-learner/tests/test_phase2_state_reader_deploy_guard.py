@@ -1,3 +1,4 @@
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
@@ -8,6 +9,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "deploy" / "tools" / "apply_phase2_state_reader_patch.py"
 TARGET = Path("rust-executor/src/state_reader.rs")
+
+SPEC = importlib.util.spec_from_file_location(
+    "apply_phase2_state_reader_patch",
+    TOOL,
+)
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
 
 
 def _git(repo, *args):
@@ -46,35 +56,28 @@ def test_guarded_patch_dry_run_and_apply_touch_only_state_reader(tmp_path):
     _make_patch(repo, TARGET, "after\n", patch)
     (repo / "keep.txt").write_text("local-only\n", encoding="utf-8")
 
-    dry = subprocess.run(
-        [sys.executable, str(TOOL), "--repo", str(repo), "--patch", str(patch)],
-        check=True,
-        capture_output=True,
-        text=True,
+    dry = MODULE.apply_guarded_patch(
+        repository=repo,
+        patch=patch,
+        reference_patch=patch,
     )
-    assert '"ready": true' in dry.stdout
-    assert '"applied": false' in dry.stdout
+    assert dry.ready is True
+    assert dry.applied is False
+    assert dry.pr7_head == MODULE.PR7_HEAD
+    assert len(dry.patch_sha256) == 64
     assert (repo / TARGET).read_text(encoding="utf-8") == "before\n"
     assert (repo / "keep.txt").read_text(encoding="utf-8") == "local-only\n"
 
     backup_dir = tmp_path / "backups"
-    applied = subprocess.run(
-        [
-            sys.executable,
-            str(TOOL),
-            "--repo",
-            str(repo),
-            "--patch",
-            str(patch),
-            "--apply",
-            "--backup-dir",
-            str(backup_dir),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+    applied = MODULE.apply_guarded_patch(
+        repository=repo,
+        patch=patch,
+        reference_patch=patch,
+        apply=True,
+        backup_dir=backup_dir,
     )
-    assert '"applied": true' in applied.stdout
+    assert applied.applied is True
+    assert applied.patch_sha256 == dry.patch_sha256
     assert (repo / TARGET).read_text(encoding="utf-8") == "after\n"
     assert (repo / "keep.txt").read_text(encoding="utf-8") == "local-only\n"
     backups = list(backup_dir.glob("*/rust-executor/src/state_reader.rs"))
@@ -90,13 +93,12 @@ def test_guarded_patch_rejects_multi_file_patch(tmp_path):
     patch.write_text(_git(repo, "diff").stdout, encoding="utf-8")
     _git(repo, "checkout", "--", ".")
 
-    completed = subprocess.run(
-        [sys.executable, str(TOOL), "--repo", str(repo), "--patch", str(patch)],
-        capture_output=True,
-        text=True,
-    )
-    assert completed.returncode != 0
-    assert "patch must modify only" in completed.stderr
+    with pytest.raises(ValueError, match="patch must modify only"):
+        MODULE.apply_guarded_patch(
+            repository=repo,
+            patch=patch,
+            reference_patch=patch,
+        )
     assert (repo / TARGET).read_text(encoding="utf-8") == "before\n"
 
 
@@ -106,10 +108,39 @@ def test_guarded_patch_fails_closed_on_target_conflict(tmp_path):
     _make_patch(repo, TARGET, "after\n", patch)
     (repo / TARGET).write_text("production-local-fix\n", encoding="utf-8")
 
-    completed = subprocess.run(
-        [sys.executable, str(TOOL), "--repo", str(repo), "--patch", str(patch)],
-        capture_output=True,
-        text=True,
+    with pytest.raises(subprocess.CalledProcessError):
+        MODULE.apply_guarded_patch(
+            repository=repo,
+            patch=patch,
+            reference_patch=patch,
+        )
+    assert (
+        repo / TARGET
+    ).read_text(encoding="utf-8") == "production-local-fix\n"
+
+
+def test_guarded_patch_rejects_unreviewed_patch_bytes(tmp_path):
+    repo = _repo(tmp_path)
+    approved = tmp_path / "approved.patch"
+    _make_patch(repo, TARGET, "reviewed\n", approved)
+    unreviewed = tmp_path / "unreviewed.patch"
+    _make_patch(repo, TARGET, "different\n", unreviewed)
+
+    with pytest.raises(ValueError, match="reviewed PR #7 reference patch"):
+        MODULE.apply_guarded_patch(
+            repository=repo,
+            patch=unreviewed,
+            reference_patch=approved,
+        )
+    assert (repo / TARGET).read_text(encoding="utf-8") == "before\n"
+
+
+def test_bundled_reference_patch_is_single_file_and_pinned_to_pr7():
+    reference = MODULE.REFERENCE_PATCH
+    assert reference.is_file()
+    assert MODULE.changed_paths(
+        reference.read_text(encoding="utf-8")
+    ) == (str(TARGET),)
+    assert MODULE.PR7_HEAD == (
+        "ea235e676b700891839f28b0250e23149cfb77f8"
     )
-    assert completed.returncode != 0
-    assert (repo / TARGET).read_text(encoding="utf-8") == "production-local-fix\n"
