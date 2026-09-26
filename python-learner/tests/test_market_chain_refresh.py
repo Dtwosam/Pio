@@ -113,14 +113,15 @@ def test_refresh_captures_existing_pool_again(tmp_path) -> None:
     assert report.pools_failed == 0
     assert report.items[0].status == "REFRESHED"
 
-    times = storage.connect().__enter__().execute(
-        """
-        SELECT observed_at
-        FROM chain_pool_snapshots
-        WHERE pool_address = 'POOL'
-        ORDER BY julianday(observed_at)
-        """
-    ).fetchall()
+    with storage.connect() as conn:
+        times = conn.execute(
+            """
+            SELECT observed_at
+            FROM chain_pool_snapshots
+            WHERE pool_address = 'POOL'
+            ORDER BY julianday(observed_at)
+            """
+        ).fetchall()
     # Avoid relying on any update path: refresh creates a second immutable row.
     assert [str(row[0]) for row in times] == [
         "2026-01-01T00:05:00+00:00",
