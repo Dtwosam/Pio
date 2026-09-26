@@ -22,6 +22,7 @@ class Phase2PositionObservationResult:
     observed_at: str
     positions_found: int
     positions_returned: int
+    positions_selected: int
     discovery_truncated: bool
     snapshots_saved: int
     bins_saved: int
@@ -66,20 +67,20 @@ def collect_phase2_position_observations(
     *,
     pool_address: str,
     executor_path: str | Path,
-    limit: int = 250,
+    max_positions_per_run: int = 50,
     timeout_seconds: int = 120,
     observed_at: str | None = None,
     runner: ExecutorRunner = subprocess.run,
 ) -> Phase2PositionObservationResult:
     if not pool_address.strip():
         raise ValueError("pool_address is required")
-    if limit <= 0 or limit > 5_000:
-        raise ValueError("limit must be between 1 and 5000")
+    if max_positions_per_run <= 0 or max_positions_per_run > 5_000:
+        raise ValueError("max_positions_per_run must be between 1 and 5000")
 
     timestamp = observed_at or utc_now_iso()
     discovery = _run_executor_json(
         executor_path,
-        ("discover-pool-positions-env", pool_address, str(limit)),
+        ("discover-pool-positions-env", pool_address, "5000"),
         timeout_seconds=timeout_seconds,
         runner=runner,
     )
@@ -93,20 +94,44 @@ def collect_phase2_position_observations(
     positions_returned = int(discovery.get("positions_returned", len(positions)))
     truncated = bool(discovery.get("truncated", positions_found > positions_returned))
 
-    snapshots_saved = 0
-    bins_saved = 0
-    failed: list[str] = []
-    seen: set[str] = set()
+    latest_by_position: dict[str, float] = {}
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT position_address, MAX(julianday(observed_at)) AS latest_jd
+            FROM chain_position_snapshots
+            WHERE pool_address = ?
+            GROUP BY position_address
+            """,
+            (pool_address,),
+        ).fetchall()
+    for row in rows:
+        if row[1] is not None:
+            latest_by_position[str(row[0])] = float(row[1])
 
+    unique_positions: dict[str, dict[str, Any]] = {}
     for item in positions:
         if not isinstance(item, dict):
             raise ValueError("position discovery contains a non-object entry")
         position_address = str(item.get("position_address", "")).strip()
         if not position_address:
             raise ValueError("position discovery entry is missing position_address")
-        if position_address in seen:
-            continue
-        seen.add(position_address)
+        unique_positions.setdefault(position_address, item)
+
+    selected_positions = sorted(
+        unique_positions.values(),
+        key=lambda item: (
+            str(item["position_address"]) in latest_by_position,
+            latest_by_position.get(str(item["position_address"]), 0.0),
+            str(item["position_address"]),
+        ),
+    )[:max_positions_per_run]
+
+    snapshots_saved = 0
+    bins_saved = 0
+    failed: list[str] = []
+    for item in selected_positions:
+        position_address = str(item["position_address"])
 
         try:
             snapshot = _run_executor_json(
@@ -136,6 +161,7 @@ def collect_phase2_position_observations(
         observed_at=timestamp,
         positions_found=positions_found,
         positions_returned=positions_returned,
+        positions_selected=len(selected_positions),
         discovery_truncated=truncated,
         snapshots_saved=snapshots_saved,
         bins_saved=bins_saved,
@@ -157,7 +183,11 @@ def main() -> None:
         "--executor",
         default="/opt/pio/rust-executor/target/release/meteora-executor",
     )
-    parser.add_argument("--limit", type=int, default=250)
+    parser.add_argument(
+        "--max-positions-per-run",
+        type=int,
+        default=int(os.getenv("PIO_PHASE2_POSITION_MAX_PER_RUN", "50")),
+    )
     parser.add_argument("--timeout-seconds", type=int, default=120)
     parser.add_argument("--database")
     args = parser.parse_args()
@@ -171,11 +201,11 @@ def main() -> None:
         storage,
         pool_address=args.pool,
         executor_path=args.executor,
-        limit=args.limit,
+        max_positions_per_run=args.max_positions_per_run,
         timeout_seconds=args.timeout_seconds,
     )
     print(json.dumps(result.to_record(), indent=2))
-    if result.failures:
+    if result.failures or result.discovery_truncated:
         raise SystemExit(2)
 
 
