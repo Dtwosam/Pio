@@ -11,6 +11,7 @@ dependencies = [
 
 [project.scripts]
 pio = "meteora_learner.cli:main"
+pio-market-research = "meteora_learner.pool_market_research_cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
