@@ -9,6 +9,7 @@ from meteora_learner.paper_action_replay import (
     compare_paper_hold_vs_rebalance_gross,
     persist_paper_hold_vs_rebalance_gross,
 )
+from meteora_learner.quote_registry import save_token_quote
 from meteora_learner.storage import Storage
 
 
@@ -74,6 +75,14 @@ class FakeStore:
         assert bin_id in {100, 101}
         return {"price": str(Q64)}
 
+    def chain_pool_snapshot_at(self, pool_address, observed_at):
+        assert pool_address == "pool"
+        assert observed_at in {DECISION, END}
+        return {
+            "token_x_mint": "x",
+            "token_y_mint": "y",
+        }
+
 
 def install_fakes(monkeypatch, *, hold=None, rebalance=None):
     hold = hold or hold_result()
@@ -132,6 +141,13 @@ def test_gross_comparison_uses_same_inventory_and_forward_window(
     assert report.rebalance_value_after_composition_y_atomic == 42
     assert report.gross_advantage_before_transition_cost_y_atomic == 2
     assert report.gross_advantage_before_transition_cost_bps == 500
+    assert report.quote_unit == "ACCOUNT_QUOTE"
+    assert report.token_y_mint == "y"
+    assert report.quote_normalization_complete is False
+    assert report.quote_exclusion_reason == (
+        "token Y quote missing at comparison end"
+    )
+    assert report.gross_advantage_before_transition_cost_quote is None
 
     assert report.reward_value_complete is True
     assert report.transition_cost_complete is False
@@ -248,4 +264,99 @@ def test_research_persistence_rejects_actionability_leak(
         persist_paper_hold_vs_rebalance_gross(
             storage,
             report=replace(report, actionable=True),
+        )
+
+
+
+def test_gross_comparison_quote_normalizes_end_values_with_non_future_y_quote(
+    tmp_path,
+    monkeypatch,
+):
+    install_fakes(monkeypatch)
+    storage = Storage(tmp_path / "pio.db")
+    save_token_quote(
+        storage,
+        token_mint="y",
+        quote_per_atomic=2.0,
+        source="TEST",
+        observed_at=END,
+    )
+
+    report = compare_paper_hold_vs_rebalance_gross(
+        storage.path,
+        prior=prior(),
+        observation_times=[DECISION, END],
+        min_bin_id=99,
+        max_bin_id=103,
+        strategy="SPOT",
+    )
+
+    assert report.quote_unit == "ACCOUNT_QUOTE"
+    assert report.token_y_mint == "y"
+    assert report.end_y_quote_per_atomic == pytest.approx(2.0)
+    assert report.end_y_quote_source == "TEST"
+    assert report.end_y_quote_observed_at == END
+    assert report.end_y_quote_age_seconds == 0
+    assert report.quote_normalization_complete is True
+    assert report.quote_exclusion_reason is None
+    assert report.hold_inventory_fee_value_quote == pytest.approx(80.0)
+    assert report.rebalance_inventory_fee_value_quote == pytest.approx(88.0)
+    assert report.rebalance_composition_cost_quote == pytest.approx(4.0)
+    assert report.gross_advantage_before_transition_cost_quote == pytest.approx(
+        4.0
+    )
+
+    # Quote normalization does not resolve transition economics.
+    assert report.transition_cost_complete is False
+    assert report.economics_complete is False
+    assert report.actionable is False
+
+
+def test_gross_comparison_rejects_stale_y_quote_for_normalization(
+    tmp_path,
+    monkeypatch,
+):
+    install_fakes(monkeypatch)
+    storage = Storage(tmp_path / "pio.db")
+    save_token_quote(
+        storage,
+        token_mint="y",
+        quote_per_atomic=2.0,
+        source="TEST",
+        observed_at="2026-09-26T09:59:59+00:00",
+    )
+
+    report = compare_paper_hold_vs_rebalance_gross(
+        storage.path,
+        prior=prior(),
+        observation_times=[DECISION, END],
+        min_bin_id=99,
+        max_bin_id=103,
+        strategy="SPOT",
+        max_quote_age_seconds=300,
+    )
+
+    assert report.quote_normalization_complete is False
+    assert report.quote_exclusion_reason == (
+        "token Y quote stale at comparison end"
+    )
+    assert report.gross_advantage_before_transition_cost_quote is None
+    assert report.economics_complete is False
+
+
+def test_gross_comparison_rejects_negative_quote_age_limit(
+    tmp_path,
+    monkeypatch,
+):
+    install_fakes(monkeypatch)
+
+    with pytest.raises(ValueError, match="max_quote_age_seconds"):
+        compare_paper_hold_vs_rebalance_gross(
+            tmp_path / "pio.db",
+            prior=prior(),
+            observation_times=[DECISION, END],
+            min_bin_id=99,
+            max_bin_id=103,
+            strategy="SPOT",
+            max_quote_age_seconds=-1,
         )
