@@ -166,3 +166,25 @@ def test_decision_before_first_snapshot_cannot_use_future() -> None:
 
     assert pd.isna(enriched.iloc[0]["market_observed_at"])
     assert report.rows_unmatched == 1
+
+
+def test_empty_market_history_is_reported_as_unmatched() -> None:
+    lp = pd.DataFrame(
+        [
+            {
+                "pool_address": "A",
+                "decision_observed_at": "2026-01-01T05:30:00Z",
+            }
+        ]
+    )
+    empty_market = _market().iloc[0:0].copy()
+
+    enriched, report = enrich_lp_examples_with_market_state(
+        lp,
+        empty_market,
+    )
+
+    assert len(enriched) == 1
+    assert pd.isna(enriched.iloc[0]["market_observed_at"])
+    assert report.rows_unmatched == 1
+    assert report.pools_in_market_history == 0
