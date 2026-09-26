@@ -109,6 +109,67 @@ def _save_chain_and_mints(
         )
 
 
+def _save_execution_history(
+    storage: Storage,
+    *,
+    pool: str,
+    network_fee: int,
+) -> None:
+    block_time = int(
+        pd.Timestamp("2026-01-01T09:00:00Z").timestamp()
+    )
+    storage.save_chain_transaction_events(
+        {
+            "signature": f"{pool}-ADD",
+            "slot": block_time,
+            "block_time": block_time,
+            "network_fee_lamports": network_fee,
+            "compute_units_consumed": 100_000 + network_fee,
+            "succeeded": True,
+            "add_requests": [
+                {
+                    "instruction_index": 2,
+                    "instruction_type": "AddLiquidityByStrategy2",
+                    "requested_amount_x": "1000",
+                    "requested_amount_y": "2000",
+                }
+            ],
+            "rebalance_requests": [],
+            "events": [
+                {
+                    "event_index": 0,
+                    "parent_ix_index": 2,
+                    "event": {
+                        "event_type": "AddLiquidity",
+                        "event": {
+                            "lb_pair": pool,
+                            "position": f"{pool}-POSITION",
+                            "active_bin_id": 0,
+                            "amount_x": "900",
+                            "amount_y": "1800",
+                        },
+                    },
+                },
+                {
+                    "event_index": 1,
+                    "parent_ix_index": 2,
+                    "event": {
+                        "event_type": "CompositionFee",
+                        "event": {
+                            "bin_id": 0,
+                            "token_x_fee_amount": "9",
+                            "token_y_fee_amount": "18",
+                            "protocol_token_x_fee_amount": "0",
+                            "protocol_token_y_fee_amount": "0",
+                        },
+                    },
+                },
+            ],
+        },
+        observed_at="2026-01-01T09:00:00+00:00",
+    )
+
+
 def _write_canonical_dataset(path: Path) -> None:
     pools = (
         ("A", True),
@@ -163,6 +224,21 @@ def _seed_complete_store(storage: Storage) -> None:
         pool="C",
         x_authority="AUTH-C",
     )
+    _save_execution_history(
+        storage,
+        pool="A",
+        network_fee=5_000,
+    )
+    _save_execution_history(
+        storage,
+        pool="B",
+        network_fee=50_000,
+    )
+    _save_execution_history(
+        storage,
+        pool="C",
+        network_fee=7_000,
+    )
 
 
 def test_canonical_dataset_mint_research_runs_end_to_end(
@@ -214,6 +290,10 @@ def test_canonical_dataset_mint_research_runs_end_to_end(
     assert report.api_metadata_enrichment.rows_ready == 210
     assert report.api_metadata_ablation is not None
     assert report.api_metadata_reason is None
+    assert report.execution_cost_enrichment is not None
+    assert report.execution_cost_enrichment.rows_ready == 210
+    assert report.execution_cost_ablation is not None
+    assert report.execution_cost_reason is None
     assert report.research_only is True
     assert report.policy_actionable is False
     assert report.execution_wired is False
@@ -289,6 +369,9 @@ def test_canonical_dataset_reports_missing_mint_context(
     assert report.api_metadata_enrichment is None
     assert report.api_metadata_ablation is None
     assert report.api_metadata_reason is None
+    assert report.execution_cost_enrichment is None
+    assert report.execution_cost_ablation is None
+    assert report.execution_cost_reason is None
     assert (
         report.mint_enrichment.rows_dropped_missing_mint_context
         == 210
