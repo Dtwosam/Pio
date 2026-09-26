@@ -87,7 +87,9 @@ fn usage() {
   meteora-executor simulate-transaction <TRANSACTION_BASE64_FILE_OR_->
   meteora-executor guard-transaction <PROPOSAL_JSON_OR_-> <TRANSACTION_BASE64_FILE_OR_-> <TRANSACTION_GUARD_CONFIG_JSON>
   meteora-executor inspect-transaction-events <RPC_URL> <SIGNATURE>
-  meteora-executor verify-prestate <RPC_URL> <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]"
+  meteora-executor inspect-transaction-events-env <SIGNATURE>
+  meteora-executor verify-prestate <RPC_URL> <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]
+  meteora-executor verify-prestate-env <SIGNATURE> <CAPTURE_START_SLOT> <CAPTURE_END_SLOT> <ACCOUNT> [ACCOUNT ...]"
     );
 }
 
@@ -1776,8 +1778,54 @@ RPC_URL is accepted as a compatibility fallback",
                 transaction_events::inspect_transaction_events(&rpc_url, &signature).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
         }
+        "inspect-transaction-events-env" => {
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let signature = args.next().context("SIGNATURE is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "inspect-transaction-events-env accepts exactly one argument"
+                );
+            }
+            let snapshot =
+                transaction_events::inspect_transaction_events(&rpc_url, &signature).await?;
+            println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
         "verify-prestate" => {
             let rpc_url = args.next().context("RPC_URL is required")?;
+            let signature = args.next().context("SIGNATURE is required")?;
+            let capture_slot_start: u64 = args
+                .next()
+                .context("CAPTURE_START_SLOT is required")?
+                .parse()
+                .context("CAPTURE_START_SLOT must be an integer")?;
+            let capture_slot_end: u64 = args
+                .next()
+                .context("CAPTURE_END_SLOT is required")?
+                .parse()
+                .context("CAPTURE_END_SLOT must be an integer")?;
+            let addresses: Vec<String> = args.collect();
+            let result = prestate_verifier::verify_prestate_gap(
+                &rpc_url,
+                &signature,
+                capture_slot_start,
+                capture_slot_end,
+                &addresses,
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        "verify-prestate-env" => {
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                )?;
             let signature = args.next().context("SIGNATURE is required")?;
             let capture_slot_start: u64 = args
                 .next()
