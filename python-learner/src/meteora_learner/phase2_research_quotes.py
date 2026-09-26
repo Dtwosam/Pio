@@ -178,7 +178,7 @@ def collect_phase2_research_quotes(
                         observed_at=observed_at or now(),
                         quote_per_atomic=None,
                         source=None,
-                        error=str(exc)[:2000],
+                        error=failure_category(exc),
                     )
                 )
 
