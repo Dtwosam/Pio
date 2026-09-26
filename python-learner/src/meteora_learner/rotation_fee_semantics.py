@@ -452,18 +452,18 @@ def persist_rotation_fee_semantics_report(
         raise ValueError(
             "unexpected fee-semantics conclusion for observational evidence"
         )
+    pool_addresses = {
+        str(item.pool_address)
+        for item in report.samples
+        if item.pool_address
+    }
+    if len(pool_addresses) != 1:
+        raise ValueError(
+            "fee-semantics evidence must resolve to exactly one pool"
+        )
     return storage.save_advanced_edge_evidence(
         edge_type=ROTATION_FEE_SEMANTICS_EVIDENCE_TYPE,
-        pool_address=(
-            next(
-                (
-                    str(item.pool_address)
-                    for item in report.samples
-                    if item.pool_address
-                ),
-                "UNKNOWN",
-            )
-        ),
+        pool_address=next(iter(pool_addresses)),
         status=report.conclusion,
         qualified=False,
         evidence=report.to_record(),
