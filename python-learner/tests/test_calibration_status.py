@@ -64,7 +64,7 @@ def test_calibration_evidence_counts_real_receipt_without_calling_it_complete(tm
     assert report.composition_ineligible_samples == 1
     assert report.composition_ineligibility_reasons
     assert report.composition_ineligibility_reasons[0].reason == (
-        "add-liquidity request decode missing"
+        "AddLiquidity event decode missing"
     )
     assert report.composition_ineligibility_reasons[0].count == 1
     assert report.add_execution_unmatched_samples == 1
