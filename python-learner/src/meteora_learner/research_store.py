@@ -496,6 +496,43 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def live_valued_action_rows(
+        self,
+    ) -> list[dict[str, Any]]:
+        """
+        Load valued LIVE position actions with the persisted quote-evidence blob.
+
+        The quote evidence was produced by the immutable position valuation and
+        is not recomputed here.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    v.position_address,
+                    v.pool_address,
+                    v.quote_unit,
+                    v.entry_outflow_quote,
+                    v.max_age_seconds,
+                    v.quote_evidence_json,
+                    e.decision_id,
+                    e.signature,
+                    e.event_time,
+                    e.action,
+                    e.prior_status,
+                    e.next_status
+                FROM live_position_valuations v
+                JOIN live_position_events e
+                  ON e.position_address = v.position_address
+                ORDER BY julianday(e.event_time) ASC,
+                         e.decision_id ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def live_learning_evidence_rows(
         self,
     ) -> list[dict[str, Any]]:
