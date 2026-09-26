@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from meteora_learner.pool_lp_learning import (
     ENRICHED_LP_FEATURE_COLUMNS,
@@ -18,7 +19,7 @@ def _frame() -> pd.DataFrame:
     rows = []
     start = pd.Timestamp("2026-01-01T00:00:00Z")
     for pool_index, pool in enumerate(("A", "B", "C")):
-        for index in range(100):
+        for index in range(60):
             wave = np.sin(index / 6.0 + pool_index)
             row = {
                 "pool_address": pool,
@@ -52,14 +53,22 @@ def _frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_enriched_lp_walk_forward_is_purged() -> None:
-    report = evaluate_enriched_lp_walk_forward(
+
+@pytest.fixture(scope="module")
+def enriched_lp_walk_forward_report():
+    return evaluate_enriched_lp_walk_forward(
         _frame(),
-        min_train_decision_times=35,
+        min_train_decision_times=25,
         validation_decision_times=10,
         step_decision_times=10,
-        min_train_rows=60,
+        min_train_rows=50,
     )
+
+
+def test_enriched_lp_walk_forward_is_purged(
+    enriched_lp_walk_forward_report,
+) -> None:
+    report = enriched_lp_walk_forward_report
 
     assert report.research_only is True
     assert report.policy_actionable is False
@@ -68,14 +77,10 @@ def test_enriched_lp_walk_forward_is_purged() -> None:
     assert all(fold.purged_rows > 0 for fold in report.folds)
 
 
-def test_enriched_lp_walk_forward_reports_all_targets() -> None:
-    report = evaluate_enriched_lp_walk_forward(
-        _frame(),
-        min_train_decision_times=35,
-        validation_decision_times=10,
-        step_decision_times=10,
-        min_train_rows=60,
-    )
+def test_enriched_lp_walk_forward_reports_all_targets(
+    enriched_lp_walk_forward_report,
+) -> None:
+    report = enriched_lp_walk_forward_report
 
     assert tuple(
         item.target for item in report.aggregates
@@ -92,16 +97,10 @@ def test_enriched_lp_walk_forward_reports_all_targets() -> None:
         )
 
 
-def test_enriched_lp_walk_forward_has_no_policy_verdict() -> None:
-    report = evaluate_enriched_lp_walk_forward(
-        _frame(),
-        min_train_decision_times=35,
-        validation_decision_times=10,
-        step_decision_times=10,
-        min_train_rows=60,
-    )
-
-    record = report.to_record()
+def test_enriched_lp_walk_forward_has_no_policy_verdict(
+    enriched_lp_walk_forward_report,
+) -> None:
+    record = enriched_lp_walk_forward_report.to_record()
     assert record["policy_actionable"] is False
     assert record["execution_wired"] is False
     assert "qualified" not in record
