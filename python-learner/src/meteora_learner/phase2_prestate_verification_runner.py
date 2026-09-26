@@ -13,10 +13,12 @@ from .composition_prestate import (
     ingest_prestate_verification,
 )
 from .settings import Settings
-from .storage import Storage
+from .storage import Storage, utc_now_iso
 
 
 ExecutorRunner = Callable[..., subprocess.CompletedProcess[str]]
+
+PRESTATE_VERIFICATION_STAGE = "PRESTATE_VERIFICATION"
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,7 @@ def run_phase2_prestate_verifications(
     executor_path: str | Path,
     max_tasks: int = 10,
     timeout_seconds: int = 180,
+    observed_at: str | None = None,
     runner: ExecutorRunner = subprocess.run,
 ) -> Phase2PrestateVerificationRunReport:
     """
@@ -88,6 +91,7 @@ def run_phase2_prestate_verifications(
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
 
+    timestamp = observed_at or utc_now_iso()
     queue = build_calibration_work_queue(str(storage.path))
     verify_items = [
         item
@@ -97,11 +101,36 @@ def run_phase2_prestate_verifications(
         and item.instruction_index is not None
     ]
 
+    def task_key(item: Any) -> str:
+        return f"{item.signature}:{int(item.instruction_index)}"
+
+    unique_items: dict[str, Any] = {}
+    for item in verify_items:
+        unique_items.setdefault(task_key(item), item)
+    latest_attempts = storage.latest_phase2_collection_task_attempts(
+        stage=PRESTATE_VERIFICATION_STAGE,
+    )
+    ordered_items = sorted(
+        unique_items.values(),
+        key=lambda item: (
+            task_key(item) in latest_attempts,
+            latest_attempts.get(task_key(item), 0.0),
+            task_key(item),
+        ),
+    )[:max_tasks]
+
     selected: list[tuple[Any, Any]] = []
-    selected_keys: set[tuple[str, str]] = set()
+    selected_candidate_keys: set[tuple[str, str]] = set()
     failures: list[Phase2PrestateVerificationFailure] = []
 
     def fail(item: Any, category: str) -> None:
+        storage.save_phase2_collection_task_attempt(
+            stage=PRESTATE_VERIFICATION_STAGE,
+            task_key=task_key(item),
+            attempted_at=timestamp,
+            succeeded=False,
+            outcome_category=category,
+        )
         failures.append(
             Phase2PrestateVerificationFailure(
                 position_address=str(item.position_address),
@@ -112,7 +141,7 @@ def run_phase2_prestate_verifications(
         )
 
     reports_by_position: dict[str, Any] = {}
-    for item in verify_items:
+    for item in ordered_items:
         position = str(item.position_address)
         if position not in reports_by_position:
             try:
@@ -164,12 +193,11 @@ def run_phase2_prestate_verifications(
             candidate.signature,
             candidate.snapshot_observed_at,
         )
-        if key in selected_keys:
+        if key in selected_candidate_keys:
+            fail(item, "DUPLICATE_CANDIDATE")
             continue
-        selected_keys.add(key)
+        selected_candidate_keys.add(key)
         selected.append((item, candidate))
-        if len(selected) >= max_tasks:
-            break
 
     ingested = 0
     eligible_verdicts = 0
@@ -235,6 +263,17 @@ def run_phase2_prestate_verifications(
             fail(item, "INGEST_FAILED")
             continue
 
+        storage.save_phase2_collection_task_attempt(
+            stage=PRESTATE_VERIFICATION_STAGE,
+            task_key=task_key(item),
+            attempted_at=timestamp,
+            succeeded=True,
+            outcome_category=(
+                "VERDICT_ELIGIBLE"
+                if result.eligible
+                else "VERDICT_INELIGIBLE"
+            ),
+        )
         ingested += 1
         if result.eligible:
             eligible_verdicts += 1
