@@ -152,3 +152,30 @@ def test_empirical_policy_does_not_look_ahead_to_unfinished_label():
     assert result.selected_arm == PaperCandidateArm("CURVE", 1, 0)
     by_arm = {item.arm.key: item for item in result.evidence}
     assert by_arm["CURVE|w=1|o=0"].observations == 0
+
+
+
+def test_candidate_context_uses_direction_without_arbitrary_skew_deadband():
+    assert candidate_context_key(
+        active_bin_move_1=0,
+        below_active_liquidity_ratio=0.5000,
+        above_active_liquidity_ratio=0.5001,
+        fee_growth_bins_x=0,
+        fee_growth_bins_y=0,
+    ) == "FLAT|ABOVE|QUIET"
+
+    assert candidate_context_key(
+        active_bin_move_1=0,
+        below_active_liquidity_ratio=0.5001,
+        above_active_liquidity_ratio=0.5000,
+        fee_growth_bins_x=0,
+        fee_growth_bins_y=0,
+    ) == "FLAT|BELOW|QUIET"
+
+    assert candidate_context_key(
+        active_bin_move_1=0,
+        below_active_liquidity_ratio=0.5,
+        above_active_liquidity_ratio=0.5,
+        fee_growth_bins_x=0,
+        fee_growth_bins_y=0,
+    ) == "FLAT|BALANCED|QUIET"
