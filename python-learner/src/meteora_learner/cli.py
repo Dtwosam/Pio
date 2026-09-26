@@ -359,6 +359,10 @@ from .live_champion_monitor import (
     rollback_live_champion,
 )
 from .transaction_costs import build_transaction_cost_report
+from .rotation_fee_semantics_corpus import (
+    build_rotation_fee_semantics_corpus,
+    persist_rotation_fee_semantics_corpus,
+)
 from .wallet_flow import (
     WalletFlowCriteria,
     persist_wallet_flow_research,
@@ -4474,6 +4478,24 @@ def main() -> None:
         help="Meteora position address",
     )
 
+    rotation_semantics = subparsers.add_parser(
+        "rotation-fee-semantics-corpus",
+        help=(
+            "Aggregate unresolved rebalance owner-flow hypotheses for one pool"
+        ),
+    )
+    rotation_semantics.add_argument("--pool", required=True)
+    rotation_semantics.add_argument(
+        "--max-quote-age-seconds",
+        type=int,
+        default=300,
+    )
+    rotation_semantics.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist non-qualified observational corpus evidence",
+    )
+
     composition_prestate = subparsers.add_parser(
         "composition-prestate",
         help="Find slot-bounded pre-add snapshots eligible for exact verification",
@@ -4958,6 +4980,22 @@ def main() -> None:
             str(settings.database_path),
             position_address=args.position,
         )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "rotation-fee-semantics-corpus":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_rotation_fee_semantics_corpus(
+            storage,
+            pool_address=args.pool,
+            max_quote_age_seconds=args.max_quote_age_seconds,
+        )
+        if args.persist:
+            persist_rotation_fee_semantics_corpus(
+                storage,
+                report=result,
+            )
         print(json.dumps(result.to_record(), indent=2))
         return
 
