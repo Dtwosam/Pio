@@ -17,6 +17,10 @@ from .market_mint_context import (
     MarketMintContextCaptureReport,
     run_market_mint_context_capture,
 )
+from .market_mint_refresh import (
+    MarketMintRefreshReport,
+    run_market_mint_refresh,
+)
 from .market_pool_universe import (
     PageFetcher,
     PoolUniverseDiscoveryReport,
@@ -37,6 +41,7 @@ class MarketContextCollectionCycleReport:
     chain_context: MarketChainContextCaptureReport | None
     chain_refresh: MarketChainRefreshReport | None
     mint_context: MarketMintContextCaptureReport | None
+    mint_refresh: MarketMintRefreshReport | None
     pools_discovered: int
     chain_pools_captured: int
     chain_pools_failed: int
@@ -44,6 +49,8 @@ class MarketContextCollectionCycleReport:
     chain_refresh_failed: int
     mints_captured: int
     mints_failed: int
+    mints_refreshed: int
+    mint_refresh_failed: int
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -56,6 +63,7 @@ def run_market_context_collection_cycle(
     capture_chain_context: bool = True,
     refresh_chain_context: bool = False,
     capture_mint_context: bool = True,
+    refresh_mint_context: bool = False,
     observed_at: str | None = None,
     settings: Settings | None = None,
     fetch_page: PageFetcher | None = None,
@@ -66,6 +74,7 @@ def run_market_context_collection_cycle(
     chain_batch_limit: int = 10,
     chain_refresh_batch_limit: int = 10,
     mint_batch_limit: int = 20,
+    mint_refresh_batch_limit: int = 20,
     bin_array_radius: int = 0,
     rust_manifest_path: str | None = None,
     rust_binary_path: str | None = None,
@@ -78,7 +87,8 @@ def run_market_context_collection_cycle(
       1. discover/refresh the broad pool universe;
       2. optionally refresh already-observed pools oldest-chain-first;
       3. capture a neutral batch of missing chain pool state;
-      4. capture mints newly exposed by chain pool state.
+      4. optionally refresh already-observed mints oldest-snapshot-first;
+      5. capture mints newly exposed by chain pool state.
 
     The cycle collects evidence only. It performs no pool ranking, allocation,
     transaction construction, signing or submission.
@@ -88,6 +98,7 @@ def run_market_context_collection_cycle(
         or capture_chain_context
         or refresh_chain_context
         or capture_mint_context
+        or refresh_mint_context
     ):
         raise ValueError(
             "at least one context collection stage must be enabled"
@@ -99,6 +110,7 @@ def run_market_context_collection_cycle(
     chain_context: MarketChainContextCaptureReport | None = None
     chain_refresh: MarketChainRefreshReport | None = None
     mint_context: MarketMintContextCaptureReport | None = None
+    mint_refresh: MarketMintRefreshReport | None = None
 
     if capture_universe:
         discovery = discover_pool_universe(
@@ -132,6 +144,17 @@ def run_market_context_collection_cycle(
             rust_binary_path=rust_binary_path,
             timeout_seconds=timeout_seconds,
             ingest_observed_at=observed_at,
+        )
+
+    if refresh_mint_context:
+        mint_refresh = run_market_mint_refresh(
+            storage,
+            batch_limit=mint_refresh_batch_limit,
+            inspector=mint_inspector,
+            rust_manifest_path=rust_manifest_path,
+            rust_binary_path=rust_binary_path,
+            timeout_seconds=timeout_seconds,
+            observed_at=observed_at,
         )
 
     if capture_mint_context:
@@ -186,10 +209,30 @@ def run_market_context_collection_cycle(
         if mint_context is not None
         else 0
     )
+    mints_refreshed = (
+        mint_refresh.mints_refreshed
+        if mint_refresh is not None
+        else 0
+    )
+    mint_refresh_failed = (
+        mint_refresh.mints_failed
+        if mint_refresh is not None
+        else 0
+    )
 
-    if chain_failed or chain_refresh_failed or mints_failed:
+    if (
+        chain_failed
+        or chain_refresh_failed
+        or mints_failed
+        or mint_refresh_failed
+    ):
         status = "PARTIAL"
-    elif chain_captured or chain_refreshed or mints_captured:
+    elif (
+        chain_captured
+        or chain_refreshed
+        or mints_captured
+        or mints_refreshed
+    ):
         status = "CAPTURED"
     elif discovery is not None and discovery.snapshots_saved:
         status = "DISCOVERED"
@@ -206,6 +249,7 @@ def run_market_context_collection_cycle(
         chain_context=chain_context,
         chain_refresh=chain_refresh,
         mint_context=mint_context,
+        mint_refresh=mint_refresh,
         pools_discovered=pools_discovered,
         chain_pools_captured=chain_captured,
         chain_pools_failed=chain_failed,
@@ -213,4 +257,6 @@ def run_market_context_collection_cycle(
         chain_refresh_failed=chain_refresh_failed,
         mints_captured=mints_captured,
         mints_failed=mints_failed,
+        mints_refreshed=mints_refreshed,
+        mint_refresh_failed=mint_refresh_failed,
     )
