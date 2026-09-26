@@ -143,10 +143,12 @@ def test_evidence_cycle_marks_collector_failures_partial(
         now=lambda: "2026-09-26T19:00:00+00:00",
     )
 
-    assert report.stages_partial == 4
+    assert report.stages_partial == 6
     assert report.stages_failed == 0
-    assert report.stages_successful == 2
-    assert [item.status for item in report.stages[:4]] == [
+    assert report.stages_successful == 0
+    assert [item.status for item in report.stages] == [
+        "PARTIAL",
+        "PARTIAL",
         "PARTIAL",
         "PARTIAL",
         "PARTIAL",
@@ -249,3 +251,42 @@ def test_evidence_cycle_requires_pool(tmp_path):
             pool_address="",
             executor_path="/executor",
         )
+
+
+
+def test_evidence_cycle_stays_partial_when_only_final_work_remains(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_phase2_calibration_evidence",
+        lambda *args, **kwargs: Result(
+            evidence_gaps=("no exact composition-fee reconciliation samples",)
+        ),
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_calibration_work_queue",
+        lambda *args, **kwargs: Result(items=("future-sample",)),
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+
+    assert [item.status for item in report.stages[:4]] == [
+        "SUCCESS",
+        "SUCCESS",
+        "SUCCESS",
+        "SUCCESS",
+    ]
+    assert report.stages[-2].status == "PARTIAL"
+    assert report.stages[-1].status == "PARTIAL"
+    assert report.stages_partial == 2
+    assert report.stages_failed == 0
+    assert report.actionable is False
