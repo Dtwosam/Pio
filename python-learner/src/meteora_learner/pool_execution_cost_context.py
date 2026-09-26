@@ -386,7 +386,7 @@ def evaluate_execution_cost_ablation(
 
     work = frame.copy()
     for column in ("decision_observed_at", "forward_end_observed_at"):
-        work[column] = pd.to_datetime(column=work[column], utc=True, errors="coerce")
+        work[column] = pd.to_datetime(work[column], utc=True, errors="coerce")
     if work[["decision_observed_at", "forward_end_observed_at"]].isna().any(axis=None):
         raise ValueError("execution-cost ablation has invalid timestamps")
     if (work["forward_end_observed_at"] <= work["decision_observed_at"]).any():
