@@ -46,6 +46,15 @@ def _inspect_command(signature: str) -> str:
     )
 
 
+def _needs_future_prestate(reason: str | None) -> bool:
+    if not reason:
+        return False
+    return (
+        "no slot-bounded pre-add pool capture" in reason
+        or "no single-context strict-prior pre-add pool capture" in reason
+    )
+
+
 def _verify_command(
     *,
     signature: str,
@@ -158,11 +167,8 @@ def build_calibration_work_queue(database_path: str) -> CalibrationWorkQueue:
 
         for candidate in candidates.candidates:
             if not candidate.eligible_for_verification:
-                if candidate.ineligibility_reason and (
-                    "no slot-bounded pre-add pool capture"
-                    in candidate.ineligibility_reason
-                    or "no single-context strict-prior pre-add pool capture"
-                    in candidate.ineligibility_reason
+                if _needs_future_prestate(
+                    candidate.ineligibility_reason
                 ):
                     add_item(
                         CalibrationWorkItem(
