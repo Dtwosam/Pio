@@ -64,6 +64,9 @@ def report(
     eligible = sum(item.eligible for item in samples)
     return FakeReport(
         position_address=position,
+        quote_unit="ACCOUNT_QUOTE",
+        semantics_resolved=False,
+        conclusion="UNRESOLVED_OBSERVATIONAL_EVIDENCE",
         eligible_transactions=eligible,
         quote_eligible_transactions=quote_eligible,
         claim_fee_true_samples=claim_true,
@@ -331,3 +334,47 @@ def test_transaction_event_position_addresses_can_filter_pool(tmp_path):
         event_type="Rebalancing",
         pool_address="pool-a",
     ) == ["position-a"]
+
+
+
+def test_corpus_rejects_resolved_position_report_invariant(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    install_store(monkeypatch)
+    good = report(
+        "position-b",
+        (sample("sig-b"),),
+        quote_eligible=1,
+        claim_true=1,
+        claim_false=0,
+        base_residual=1.0,
+        fee_residual=0.0,
+    )
+    resolved = report(
+        "position-a",
+        (sample("sig-a"),),
+        quote_eligible=1,
+        claim_true=1,
+        claim_false=0,
+        base_residual=10.0,
+        fee_residual=0.0,
+    )
+    resolved.semantics_resolved = True
+    monkeypatch.setattr(
+        "meteora_learner.rotation_fee_semantics_corpus.build_rotation_fee_semantics_report",
+        lambda storage, *, position_address, max_quote_age_seconds: (
+            resolved if position_address == "position-a" else good
+        ),
+    )
+
+    corpus = build_rotation_fee_semantics_corpus(
+        storage,
+        pool_address=POOL,
+    )
+
+    assert corpus.positions_reported == 1
+    assert corpus.positions_failed == 1
+    assert corpus.failures[0].category == "POSITION_REPORT_INVARIANT"
+    assert corpus.quoted_base_residual_net == 1.0
