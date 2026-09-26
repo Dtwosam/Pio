@@ -7,6 +7,10 @@ from typing import Any
 
 import pandas as pd
 
+from .live_action_cost_evidence import (
+    LiveActionCostEvidenceReport,
+    build_live_action_cost_evidence,
+)
 from .research_store import ResearchStore
 
 
@@ -93,6 +97,7 @@ class LiveOutcomeEvidenceReport:
     mean_reward_income_bps: float | None
     model_calibration: tuple[LiveModelCalibration, ...]
     samples: tuple[LiveOutcomeEvidenceSample, ...]
+    action_cost_evidence: LiveActionCostEvidenceReport | None = None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -243,6 +248,9 @@ def build_live_outcome_evidence(
             mean_reward_income_bps=None,
             model_calibration=(),
             samples=(),
+            action_cost_evidence=build_live_action_cost_evidence(
+                database_path
+            ),
         )
 
     realized = [item.realized_return_bps for item in samples]
@@ -294,4 +302,7 @@ def build_live_outcome_evidence(
         ),
         model_calibration=_model_calibration(samples),
         samples=samples,
+        action_cost_evidence=build_live_action_cost_evidence(
+            database_path
+        ),
     )
