@@ -611,14 +611,6 @@ pub async fn inspect_position(
     }
     let lb_pair_state =
         decode_lb_pair(&lb_pair_account.data).context("failed to decode LbPair")?;
-    if position_state.lb_pair != Pubkey::from_str(&lb_pair_state.to_string())
-        .unwrap_or(position_state.lb_pair)
-    {
-        // This branch is intentionally unreachable for a valid LbPair account,
-        // but keep the dependency relationship fail-closed if serialization
-        // semantics ever change.
-        anyhow::bail!("position pool does not match fetched pool account");
-    }
 
     let clock_account = accounts
         .get(2)
