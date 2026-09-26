@@ -52,8 +52,8 @@
       "role": "observer failure categories and secret-safe discovery"
     },
     {
-      "pr": 26,
-      "head": "8304110deaba657ae028f0301f0c808ce33fc721",
+      "pr": 43,
+      "head": "563a0a996e7830d2abf32ecb4dac53febab9b9fa",
       "role": "observer fair attempt ledger"
     },
     {
@@ -77,15 +77,15 @@
       "role": "fair bounded runner attempt ledger"
     },
     {
-      "pr": 34,
-      "head": "315ab40c6ef54bac5c0a84ef220bd69fc847a26d",
+      "pr": 44,
+      "head": "75b15607757ce5b713f390f2480dda0a24cc3e77",
       "role": "mixed exploration and interval revisit cadence"
     }
   ],
   "integration_notes": [
     "research_store keeps PR12 position capture-slot columns and PR23 single-context pool-capture filtering",
     "calibration_queue keeps PR23 future-prestate classification and PR20 env-only RPC commands",
-    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger and PR31 bounded-task attempt ledger",
+    "storage keeps PR12 position capture slots plus PR43 append-only observer attempt ledger and PR31 bounded-task attempt ledger",
     "quote and position observer failures are categorical and do not expose raw transport/RPC error text",
     "neutral position collection reserves revisit capacity when budget permits so fee/reward intervals can accumulate without starving exploration"
   ]
