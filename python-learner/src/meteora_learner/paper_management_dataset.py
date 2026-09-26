@@ -27,6 +27,9 @@ class PaperManagementObservation:
     min_bin_id: int
     max_bin_id: int
     range_width_bins: int
+    decision_active_bin_id: int | None
+    rebalance_lower_offset_bins: int | None
+    rebalance_upper_offset_bins: int | None
     start_x: int
     start_y: int
     start_value_y_atomic: int
@@ -52,6 +55,9 @@ class PaperManagementTrainingExample:
     min_bin_id: int
     max_bin_id: int
     range_width_bins: int
+    decision_active_bin_id: int
+    rebalance_lower_offset_bins: int
+    rebalance_upper_offset_bins: int
     start_x: int
     start_y: int
     start_value_y_atomic: int
@@ -158,7 +164,47 @@ def build_paper_management_dataset(
             exclusion = "TRANSITION_COST_INCOMPLETE"
         elif not economics_complete:
             exclusion = "ECONOMICS_INCOMPLETE"
-        elif final_net is None:
+
+        decision_active_bin_raw = getattr(
+            report,
+            "decision_active_bin_id",
+            None,
+        )
+        lower_offset_raw = getattr(
+            report,
+            "rebalance_lower_offset_bins",
+            None,
+        )
+        upper_offset_raw = getattr(
+            report,
+            "rebalance_upper_offset_bins",
+            None,
+        )
+        decision_active_bin = (
+            int(decision_active_bin_raw)
+            if decision_active_bin_raw is not None
+            else None
+        )
+        lower_offset = (
+            int(lower_offset_raw)
+            if lower_offset_raw is not None
+            else None
+        )
+        upper_offset = (
+            int(upper_offset_raw)
+            if upper_offset_raw is not None
+            else None
+        )
+        if (
+            exclusion is None
+            and (
+                decision_active_bin is None
+                or lower_offset is None
+                or upper_offset is None
+            )
+        ):
+            exclusion = "DECISION_CONTEXT_INCOMPLETE"
+        elif exclusion is None and final_net is None:
             exclusion = "FINAL_NET_ADVANTAGE_MISSING"
         elif final_net == 0.0:
             exclusion = "REALIZED_ACTION_TIE"
@@ -177,6 +223,9 @@ def build_paper_management_dataset(
             range_width_bins=(
                 report.max_bin_id - report.min_bin_id + 1
             ),
+            decision_active_bin_id=decision_active_bin,
+            rebalance_lower_offset_bins=lower_offset,
+            rebalance_upper_offset_bins=upper_offset,
             start_x=report.start_x,
             start_y=report.start_y,
             start_value_y_atomic=report.start_value_y_atomic,
@@ -224,6 +273,9 @@ def build_paper_management_dataset(
                 range_width_bins=(
                     report.max_bin_id - report.min_bin_id + 1
                 ),
+                decision_active_bin_id=decision_active_bin,
+                rebalance_lower_offset_bins=lower_offset,
+                rebalance_upper_offset_bins=upper_offset,
                 start_x=report.start_x,
                 start_y=report.start_y,
                 start_value_y_atomic=report.start_value_y_atomic,
