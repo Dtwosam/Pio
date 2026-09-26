@@ -451,6 +451,48 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def rebalance_token_flow_capture_rows(
+        self,
+        *,
+        pool_address: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        pool_clause = ""
+        if pool_address is not None:
+            pool_clause = "AND e.lb_pair = ?"
+            params.append(pool_address)
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT e.signature, e.slot, e.block_time,
+                       e.lb_pair AS pool_address,
+                       e.position_address,
+                       CASE WHEN s.signature IS NULL THEN 0 ELSE 1 END
+                           AS receipt_present,
+                       COALESCE(
+                           s.token_balance_deltas_captured,
+                           0
+                       ) AS token_balance_deltas_captured,
+                       (
+                           SELECT COUNT(*)
+                           FROM chain_transaction_token_balance_deltas d
+                           WHERE d.signature = e.signature
+                       ) AS token_delta_rows
+                FROM chain_transaction_events e
+                LEFT JOIN chain_transaction_snapshots s
+                  ON s.signature = e.signature
+                WHERE e.event_type = 'Rebalancing'
+                {pool_clause}
+                ORDER BY e.slot ASC, e.signature ASC, e.event_index ASC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def transaction_snapshot(self, signature: str) -> dict[str, Any] | None:
         conn = self._connect()
         try:
