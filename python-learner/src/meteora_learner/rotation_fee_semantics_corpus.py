@@ -109,6 +109,19 @@ def build_rotation_fee_semantics_corpus(
             )
             continue
 
+        if (
+            report.quote_unit != DEFAULT_QUOTE_UNIT
+            or report.semantics_resolved
+            or report.conclusion != "UNRESOLVED_OBSERVATIONAL_EVIDENCE"
+        ):
+            failures.append(
+                RotationFeeSemanticsCorpusFailure(
+                    position_address=position_address,
+                    category="POSITION_REPORT_INVARIANT",
+                )
+            )
+            continue
+
         sample_pools = {
             str(sample.pool_address)
             for sample in report.samples
