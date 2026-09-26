@@ -1,5 +1,8 @@
 import sqlite3
 
+import pytest
+
+from meteora_learner.research_store import ResearchStore
 from meteora_learner.storage import Storage
 from meteora_learner.transaction_event_ingest import ingest_transaction_events
 
@@ -158,3 +161,76 @@ def test_rebalance_lifecycle_event_fields_are_persisted(tmp_path):
         "10", "8", 1, 14, "3",
     )
     assert receipt == (9000, 250000, 1)
+
+
+
+def test_transaction_token_balance_deltas_are_persisted_and_queryable(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    payload = snapshot()
+    payload["token_balance_deltas"] = [
+        {
+            "account_index": 2,
+            "account_address": "token-account",
+            "mint": "mint-x",
+            "pre_owner": "owner",
+            "post_owner": "owner",
+            "pre_amount": "100",
+            "post_amount": "135",
+            "delta_amount": "35",
+            "decimals": 6,
+        },
+        {
+            "account_index": 3,
+            "account_address": "other-account",
+            "mint": "mint-y",
+            "pre_owner": "other-owner",
+            "post_owner": "other-owner",
+            "pre_amount": "50",
+            "post_amount": "40",
+            "delta_amount": "-10",
+            "decimals": 6,
+        },
+    ]
+
+    ingest_transaction_events(storage, payload)
+    ingest_transaction_events(storage, payload)
+
+    store = ResearchStore(str(storage.path))
+    all_rows = store.transaction_token_balance_deltas("sig")
+    owner_rows = store.transaction_token_balance_deltas(
+        "sig",
+        owner_address="owner",
+    )
+
+    assert len(all_rows) == 2
+    assert len(owner_rows) == 1
+    assert owner_rows[0]["account_address"] == "token-account"
+    assert owner_rows[0]["mint"] == "mint-x"
+    assert owner_rows[0]["delta_amount"] == "35"
+    assert owner_rows[0]["decimals"] == 6
+    assert storage.data_status()[
+        "chain_transaction_token_balance_deltas"
+    ] == 2
+
+
+def test_transaction_token_balance_delta_fails_closed_on_bad_arithmetic(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    payload = snapshot()
+    payload["token_balance_deltas"] = [
+        {
+            "account_index": 2,
+            "account_address": "token-account",
+            "mint": "mint-x",
+            "pre_owner": "owner",
+            "post_owner": "owner",
+            "pre_amount": "100",
+            "post_amount": "135",
+            "delta_amount": "34",
+            "decimals": 6,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="does not match"):
+        ingest_transaction_events(storage, payload)
