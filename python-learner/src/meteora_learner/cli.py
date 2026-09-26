@@ -43,6 +43,7 @@ from .phase2_evidence_cycle import (
 from .phase2_prestate_verification_runner import (
     run_phase2_prestate_verifications,
 )
+from .phase2_progress_history import build_phase2_progress_history
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .phase_promotion import (
     PHASE2,
@@ -4539,6 +4540,16 @@ def main() -> None:
             "after the collection step"
         ),
     )
+    phase2_history = subparsers.add_parser(
+        "phase2-progress-history",
+        help=(
+            "Show recent non-qualified Phase-2 collection progress "
+            "and signed metric deltas"
+        ),
+    )
+    phase2_history.add_argument("--pool", required=True)
+    phase2_history.add_argument("--limit", type=int, default=10)
+
 
     transaction_costs = subparsers.add_parser(
         "transaction-costs",
@@ -5079,6 +5090,16 @@ def main() -> None:
         print(json.dumps(output, indent=2))
         if result.stages_partial or result.stages_failed:
             raise SystemExit(2)
+        return
+
+    if args.command == "phase2-progress-history":
+        settings = Settings.from_env()
+        result = build_phase2_progress_history(
+            Storage(settings.database_path),
+            pool_address=args.pool,
+            limit=args.limit,
+        )
+        print(json.dumps(result.to_record(), indent=2))
         return
 
     if args.command == "transaction-costs":
