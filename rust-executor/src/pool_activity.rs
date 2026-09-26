@@ -221,6 +221,7 @@ mod tests {
             network_fee_lamports: None,
             compute_units_consumed: None,
             succeeded: Some(true),
+            token_balance_deltas: Vec::new(),
             add_requests: Vec::new(),
             rebalance_requests: Vec::new(),
             events: events
