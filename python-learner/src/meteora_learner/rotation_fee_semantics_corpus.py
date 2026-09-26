@@ -27,12 +27,19 @@ class RotationFeeSemanticsClassCount:
 
 
 @dataclass(frozen=True)
+class RotationFeeSemanticsReasonCount:
+    reason: str
+    count: int
+
+
+@dataclass(frozen=True)
 class RotationFeeSemanticsClaimCohort:
     should_claim_fee: str
     eligible_samples: int
     quote_eligible_samples: int
     quote_coverage_rate: float
     evidence_class_counts: tuple[RotationFeeSemanticsClassCount, ...]
+    ineligible_reason_counts: tuple[RotationFeeSemanticsReasonCount, ...]
     quoted_base_residual_net: float
     quoted_fee_separate_residual_net: float
 
@@ -95,6 +102,7 @@ def build_rotation_fee_semantics_corpus(
     failures: list[RotationFeeSemanticsCorpusFailure] = []
     reports: list[Any] = []
     class_counts: dict[str, int] = {}
+    ineligible_reasons: dict[str, int] = {}
     transaction_signatures: set[str] = set()
 
     for position_address in positions:
@@ -154,6 +162,14 @@ def build_rotation_fee_semantics_corpus(
             if sample.eligible:
                 class_counts[sample.evidence_class] = (
                     class_counts.get(sample.evidence_class, 0) + 1
+                )
+            else:
+                reason = (
+                    getattr(sample, "exclusion_reason", None)
+                    or "UNSPECIFIED_INELIGIBLE"
+                )
+                ineligible_reasons[str(reason)] = (
+                    ineligible_reasons.get(str(reason), 0) + 1
                 )
 
     eligible_transactions = sum(
@@ -270,6 +286,16 @@ def build_rotation_fee_semantics_corpus(
             )
             for name, count in sorted(
                 class_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ),
+        ineligible_reason_counts=tuple(
+            RotationFeeSemanticsReasonCount(
+                reason=reason,
+                count=count,
+            )
+            for reason, count in sorted(
+                ineligible_reasons.items(),
                 key=lambda item: (-item[1], item[0]),
             )
         ),
