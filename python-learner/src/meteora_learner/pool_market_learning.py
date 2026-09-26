@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .research_store import ResearchStore
+
 
 REQUIRED_POOL_MARKET_COLUMNS = {
     "pool_address",
@@ -185,6 +187,74 @@ def _prepare_history(
     return pd.concat(pieces, ignore_index=True).replace(
         [np.inf, -np.inf],
         np.nan,
+    )
+
+
+def load_pool_market_history(
+    database_path: str,
+    *,
+    pool_addresses: tuple[str, ...] | None = None,
+    start_observed_at: str | None = None,
+    end_observed_at: str | None = None,
+) -> pd.DataFrame:
+    """
+    Load chronological normalized pool snapshots into the market-learning schema.
+
+    This is an observation adapter only. It does not rank, filter, label, or
+    authorize pools economically.
+    """
+    rows = ResearchStore(database_path).pool_snapshot_history(
+        pool_addresses=pool_addresses,
+        start_observed_at=start_observed_at,
+        end_observed_at=end_observed_at,
+    )
+    if not rows:
+        return pd.DataFrame(columns=sorted(REQUIRED_POOL_MARKET_COLUMNS))
+
+    frame = pd.DataFrame(rows).rename(
+        columns={
+            "address": "pool_address",
+            "current_price": "price",
+            "tvl": "tvl_usd",
+            "volume_24h": "volume_24h_usd",
+            "fees_24h": "fees_24h_usd",
+        }
+    )
+    return frame[
+        [
+            "pool_address",
+            "observed_at",
+            "price",
+            "tvl_usd",
+            "volume_24h_usd",
+            "fees_24h_usd",
+        ]
+    ].copy()
+
+
+def build_pool_market_learning_dataset_from_store(
+    database_path: str,
+    *,
+    pool_addresses: tuple[str, ...] | None = None,
+    start_observed_at: str | None = None,
+    end_observed_at: str | None = None,
+    horizon_rows: int = 6,
+    volatility_window: int = 6,
+    drawdown_window: int = 12,
+    activity_window: int = 6,
+) -> PoolMarketLearningDataset:
+    history = load_pool_market_history(
+        database_path,
+        pool_addresses=pool_addresses,
+        start_observed_at=start_observed_at,
+        end_observed_at=end_observed_at,
+    )
+    return build_pool_market_learning_dataset(
+        history,
+        horizon_rows=horizon_rows,
+        volatility_window=volatility_window,
+        drawdown_window=drawdown_window,
+        activity_window=activity_window,
     )
 
 
