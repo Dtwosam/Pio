@@ -47,6 +47,10 @@ from .pool_lp_outcome_coverage import (
     build_outcome_coverage_report,
     compare_outcome_coverage,
 )
+from .pool_lp_rotation_evidence import (
+    RotationEvidenceReport,
+    evaluate_rotation_transition_evidence,
+)
 from .pool_lp_tail_risk import (
     TailRiskCalibrationReport,
     evaluate_tail_risk_calibration,
@@ -87,6 +91,8 @@ class MintFeatureResearchReport:
     execution_cost_reason: str | None = None
     cross_sectional_ranking: CrossSectionRankingReport | None = None
     cross_sectional_ranking_reason: str | None = None
+    rotation_evidence: RotationEvidenceReport | None = None
+    rotation_evidence_reason: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -175,6 +181,12 @@ class MintFeatureResearchReport:
             "cross_sectional_ranking_reason": (
                 self.cross_sectional_ranking_reason
             ),
+            "rotation_evidence": (
+                self.rotation_evidence.to_record()
+                if self.rotation_evidence is not None
+                else None
+            ),
+            "rotation_evidence_reason": self.rotation_evidence_reason,
         }
 
 
@@ -465,6 +477,19 @@ def run_mint_feature_research_from_dataset_file(
     except ValueError as exc:
         cross_sectional_ranking_reason = str(exc)
 
+    rotation_evidence = None
+    rotation_evidence_reason = None
+    try:
+        rotation_evidence = evaluate_rotation_transition_evidence(
+            mint_frame,
+            min_train_decision_times=min_train_decision_times,
+            validation_decision_times=validation_decision_times,
+            step_decision_times=step_decision_times,
+            min_train_rows=min_train_rows,
+        )
+    except ValueError as exc:
+        rotation_evidence_reason = str(exc)
+
     return MintFeatureResearchReport(
         research_only=True,
         policy_actionable=False,
@@ -493,4 +518,6 @@ def run_mint_feature_research_from_dataset_file(
         execution_cost_reason=execution_cost_reason,
         cross_sectional_ranking=cross_sectional_ranking,
         cross_sectional_ranking_reason=cross_sectional_ranking_reason,
+        rotation_evidence=rotation_evidence,
+        rotation_evidence_reason=rotation_evidence_reason,
     )
