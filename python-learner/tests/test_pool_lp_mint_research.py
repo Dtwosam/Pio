@@ -37,12 +37,18 @@ def _save_market_history(
                     "apr": 12.0,
                     "apy": 13.0,
                     "dynamic_fee_pct": 0.2,
-                    "base_fee_pct": 0.1,
-                    "max_fee_pct": 1.0,
-                    "protocol_fee_pct": 0.05,
-                    "collect_fee_mode": 0,
+                    "pool_config": {
+                        "base_fee_pct": 0.1,
+                        "max_fee_pct": 1.0,
+                        "protocol_fee_pct": 0.05,
+                        "collect_fee_mode": 0,
+                    },
                     "is_blacklisted": False,
-                    "pool_created_at": "2025-12-01T00:00:00+00:00",
+                    "created_at": int(
+                        pd.Timestamp(
+                            "2025-12-01T00:00:00Z"
+                        ).timestamp()
+                    ),
                     "token_x": {"symbol": "X", "decimals": 6},
                     "token_y": {"symbol": "Y", "decimals": 6},
                 },
