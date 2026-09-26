@@ -227,6 +227,7 @@ def run_mint_feature_research_from_dataset_file(
             market_enrichment=None,
             mint_enrichment=None,
             ablation=None,
+            source_outcome_coverage=source_outcome_coverage,
         )
 
     if market_frame.empty:
@@ -244,6 +245,7 @@ def run_mint_feature_research_from_dataset_file(
             market_enrichment=market_report,
             mint_enrichment=None,
             ablation=None,
+            source_outcome_coverage=source_outcome_coverage,
         )
 
     mint_frame, mint_report = build_mint_enriched_lp_training_frame(
@@ -301,6 +303,8 @@ def run_mint_feature_research_from_dataset_file(
             mint_enrichment=mint_report,
             ablation=None,
             context_ablation=None,
+            source_outcome_coverage=source_outcome_coverage,
+            model_ready_outcome_coverage=model_ready_outcome_coverage,
         )
 
     unseen_pool_validation = None
