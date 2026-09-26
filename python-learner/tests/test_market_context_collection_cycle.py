@@ -99,6 +99,8 @@ def test_collection_cycle_discovers_then_captures_chain_then_mints(
     assert report.pools_discovered == 1
     assert report.chain_pools_captured == 1
     assert report.chain_pools_failed == 0
+    assert report.chain_pools_refreshed == 0
+    assert report.chain_refresh_failed == 0
     assert report.mints_captured == 2
     assert report.mints_failed == 0
     assert report.research_only is True
@@ -138,6 +140,7 @@ def test_collection_cycle_is_no_change_when_context_complete(
 
     assert report.status == "NO_CHANGE"
     assert report.chain_pools_captured == 0
+    assert report.chain_pools_refreshed == 0
     assert report.mints_captured == 0
 
 
@@ -180,4 +183,48 @@ def test_collection_cycle_can_run_discovery_only(tmp_path) -> None:
     assert report.status == "DISCOVERED"
     assert report.discovery is not None
     assert report.chain_context is None
+    assert report.chain_refresh is None
+    assert report.mint_context is None
+
+
+
+def test_collection_cycle_can_refresh_existing_chain_context(
+    tmp_path,
+) -> None:
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_pool_snapshot(
+        _api_pool("POOL"),
+        observed_at="2026-09-25T00:00:00+00:00",
+    )
+    storage.save_chain_pool_snapshot(
+        _pool_payload("POOL"),
+        observed_at="2026-09-25T00:05:00+00:00",
+    )
+
+    calls: list[tuple[str, int]] = []
+
+    def pool_inspector(pool: str, radius: int):
+        calls.append((pool, radius))
+        payload = _pool_payload(pool)
+        payload["active_bin_id"] = 1
+        return payload
+
+    report = run_market_context_collection_cycle(
+        storage,
+        capture_universe=False,
+        capture_chain_context=False,
+        refresh_chain_context=True,
+        capture_mint_context=False,
+        observed_at="2026-09-26T00:00:00+00:00",
+        pool_inspector=pool_inspector,
+        chain_refresh_batch_limit=1,
+        bin_array_radius=2,
+    )
+
+    assert calls == [("POOL", 2)]
+    assert report.status == "CAPTURED"
+    assert report.chain_context is None
+    assert report.chain_refresh is not None
+    assert report.chain_pools_refreshed == 1
+    assert report.chain_refresh_failed == 0
     assert report.mint_context is None
