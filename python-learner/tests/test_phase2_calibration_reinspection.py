@@ -214,3 +214,57 @@ def test_reinspection_requires_positive_task_budget(tmp_path):
             executor_path="/executor",
             max_tasks=0,
         )
+
+
+
+def test_reinspection_failed_signature_does_not_starve_unseen_work(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    install_queue(
+        monkeypatch,
+        (
+            item("INSPECT_TRANSACTION", "sig-a"),
+            item("INSPECT_TRANSACTION", "sig-b"),
+        ),
+    )
+    attempted = []
+
+    def runner(command, **kwargs):
+        attempted.append(command[2])
+        if command[2] == "sig-a":
+            return subprocess.CompletedProcess(command, 1, "", "failed")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps(
+                {
+                    "signature": command[2],
+                    "slot": 1,
+                    "events": [],
+                }
+            ),
+            "",
+        )
+
+    first = run_phase2_calibration_reinspection(
+        storage,
+        executor_path="/executor",
+        max_tasks=1,
+        observed_at="2026-09-26T18:00:00+00:00",
+        runner=runner,
+    )
+    second = run_phase2_calibration_reinspection(
+        storage,
+        executor_path="/executor",
+        max_tasks=1,
+        observed_at="2026-09-26T18:05:00+00:00",
+        runner=runner,
+    )
+
+    assert first.selected_signatures == ("sig-a",)
+    assert first.failure_details[0].category == "EXECUTOR_FAILED"
+    assert second.selected_signatures == ("sig-b",)
+    assert second.signatures_succeeded == 1
+    assert attempted == ["sig-a", "sig-b"]
