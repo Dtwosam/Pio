@@ -33,6 +33,9 @@ from .collector import collect_once
 from .meteora_api import MeteoraDataAPI
 from .position_ingest import ingest_position_snapshot
 from .position_history import collect_position_history
+from .phase2_calibration_reinspection import (
+    run_phase2_calibration_reinspection,
+)
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .phase_promotion import (
     PHASE2,
@@ -4464,6 +4467,20 @@ def main() -> None:
         help="List actionable missing calibration work from the local database",
     )
 
+    phase2_reinspect = subparsers.add_parser(
+        "phase2-reinspect",
+        help=(
+            "Run bounded read-only transaction decoder tasks from the "
+            "Phase-2 calibration queue"
+        ),
+    )
+    phase2_reinspect.add_argument(
+        "--executor",
+        default="/opt/pio/rust-executor/target/release/meteora-executor",
+    )
+    phase2_reinspect.add_argument("--max-tasks", type=int, default=25)
+    phase2_reinspect.add_argument("--timeout-seconds", type=int, default=120)
+
     transaction_costs = subparsers.add_parser(
         "transaction-costs",
         help="Summarize real Solana fees and compute usage for one position",
@@ -4950,6 +4967,19 @@ def main() -> None:
             str(settings.database_path),
         )
         print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "phase2-reinspect":
+        settings = Settings.from_env()
+        result = run_phase2_calibration_reinspection(
+            Storage(settings.database_path),
+            executor_path=args.executor,
+            max_tasks=args.max_tasks,
+            timeout_seconds=args.timeout_seconds,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if result.signatures_failed:
+            raise SystemExit(2)
         return
 
     if args.command == "transaction-costs":
