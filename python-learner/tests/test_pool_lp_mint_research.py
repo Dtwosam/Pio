@@ -34,6 +34,15 @@ def _save_market_history(
                     "current_price": 10.0 + 0.02 * index,
                     "bin_step": 25,
                     "active_bin_id": 0,
+                    "apr": 12.0,
+                    "apy": 13.0,
+                    "dynamic_fee_pct": 0.2,
+                    "base_fee_pct": 0.1,
+                    "max_fee_pct": 1.0,
+                    "protocol_fee_pct": 0.05,
+                    "collect_fee_mode": 0,
+                    "is_blacklisted": False,
+                    "pool_created_at": "2025-12-01T00:00:00+00:00",
                     "token_x": {"symbol": "X", "decimals": 6},
                     "token_y": {"symbol": "Y", "decimals": 6},
                 },
@@ -195,6 +204,10 @@ def test_canonical_dataset_mint_research_runs_end_to_end(
     assert report.model_ready_outcome_coverage is not None
     assert report.model_ready_outcome_coverage.rows_retained == 210
     assert report.model_ready_outcome_coverage.rows_dropped == 0
+    assert report.api_metadata_enrichment is not None
+    assert report.api_metadata_enrichment.rows_ready == 210
+    assert report.api_metadata_ablation is not None
+    assert report.api_metadata_reason is None
     assert report.research_only is True
     assert report.policy_actionable is False
     assert report.execution_wired is False
@@ -267,6 +280,9 @@ def test_canonical_dataset_reports_missing_mint_context(
     assert report.model_ready_outcome_coverage is not None
     assert report.model_ready_outcome_coverage.rows_retained == 0
     assert report.model_ready_outcome_coverage.rows_dropped == 210
+    assert report.api_metadata_enrichment is None
+    assert report.api_metadata_ablation is None
+    assert report.api_metadata_reason is None
     assert (
         report.mint_enrichment.rows_dropped_missing_mint_context
         == 210
