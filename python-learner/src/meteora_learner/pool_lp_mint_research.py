@@ -7,6 +7,12 @@ from typing import Any
 
 import pandas as pd
 
+from .pool_chain_context_ablation import (
+    ChainContextAblationReport,
+    ChainContextTrainingFrameReport,
+    build_chain_context_enriched_lp_frame,
+    evaluate_chain_context_ablation,
+)
 from .pool_api_metadata_ablation import (
     APIMetadataAblationReport,
     APIMetadataTrainingFrameReport,
@@ -93,6 +99,9 @@ class MintFeatureResearchReport:
     cross_sectional_ranking_reason: str | None = None
     rotation_evidence: RotationEvidenceReport | None = None
     rotation_evidence_reason: str | None = None
+    chain_context_enrichment: ChainContextTrainingFrameReport | None = None
+    chain_context_ablation: ChainContextAblationReport | None = None
+    chain_context_reason: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -187,6 +196,17 @@ class MintFeatureResearchReport:
                 else None
             ),
             "rotation_evidence_reason": self.rotation_evidence_reason,
+            "chain_context_enrichment": (
+                self.chain_context_enrichment.to_record()
+                if self.chain_context_enrichment is not None
+                else None
+            ),
+            "chain_context_ablation": (
+                self.chain_context_ablation.to_record()
+                if self.chain_context_ablation is not None
+                else None
+            ),
+            "chain_context_reason": self.chain_context_reason,
         }
 
 
@@ -464,6 +484,32 @@ def run_mint_feature_research_from_dataset_file(
     except ValueError as exc:
         execution_cost_reason = str(exc)
 
+    chain_context_enrichment = None
+    chain_context_ablation = None
+    chain_context_reason = None
+    try:
+        chain_frame, chain_context_enrichment = (
+            build_chain_context_enriched_lp_frame(
+                database_path,
+                mint_frame,
+            )
+        )
+        if chain_frame.empty:
+            chain_context_reason = (
+                "no mint-enriched LP rows have complete decision-time "
+                "chain liquidity context"
+            )
+        else:
+            chain_context_ablation = evaluate_chain_context_ablation(
+                chain_frame,
+                min_train_decision_times=min_train_decision_times,
+                validation_decision_times=validation_decision_times,
+                step_decision_times=step_decision_times,
+                min_train_rows=min_train_rows,
+            )
+    except ValueError as exc:
+        chain_context_reason = str(exc)
+
     cross_sectional_ranking = None
     cross_sectional_ranking_reason = None
     try:
@@ -520,4 +566,7 @@ def run_mint_feature_research_from_dataset_file(
         cross_sectional_ranking_reason=cross_sectional_ranking_reason,
         rotation_evidence=rotation_evidence,
         rotation_evidence_reason=rotation_evidence_reason,
+        chain_context_enrichment=chain_context_enrichment,
+        chain_context_ablation=chain_context_ablation,
+        chain_context_reason=chain_context_reason,
     )
