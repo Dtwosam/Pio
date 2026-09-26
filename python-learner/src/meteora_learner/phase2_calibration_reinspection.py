@@ -15,6 +15,8 @@ from .transaction_event_ingest import ingest_transaction_events
 
 ExecutorRunner = Callable[..., subprocess.CompletedProcess[str]]
 
+REINSPECTION_STAGE = "TRANSACTION_REINSPECTION"
+
 REINSPECTION_TASK_TYPES = frozenset(
     {
         "INSPECT_TRANSACTION",
@@ -105,22 +107,33 @@ def run_phase2_calibration_reinspection(
         and item.signature is not None
     ]
 
-    selected: list[str] = []
-    seen: set[str] = set()
-    for item in eligible_items:
-        signature = str(item.signature)
-        if signature in seen:
-            continue
-        seen.add(signature)
-        selected.append(signature)
-        if len(selected) >= max_tasks:
-            break
+    unique_signatures = sorted({
+        str(item.signature) for item in eligible_items
+    })
+    latest_attempts = storage.latest_phase2_collection_task_attempts(
+        stage=REINSPECTION_STAGE,
+    )
+    selected = sorted(
+        unique_signatures,
+        key=lambda signature: (
+            signature in latest_attempts,
+            latest_attempts.get(signature, 0.0),
+            signature,
+        ),
+    )[:max_tasks]
 
     failures: list[Phase2CalibrationReinspectionFailure] = []
     succeeded = 0
     events_ingested = 0
 
     def fail(signature: str, category: str) -> None:
+        storage.save_phase2_collection_task_attempt(
+            stage=REINSPECTION_STAGE,
+            task_key=signature,
+            attempted_at=timestamp,
+            succeeded=False,
+            outcome_category=category,
+        )
         failures.append(
             Phase2CalibrationReinspectionFailure(
                 signature=signature,
@@ -163,6 +176,13 @@ def run_phase2_calibration_reinspection(
             fail(signature, "INGEST_FAILED")
             continue
 
+        storage.save_phase2_collection_task_attempt(
+            stage=REINSPECTION_STAGE,
+            task_key=signature,
+            attempted_at=timestamp,
+            succeeded=True,
+            outcome_category="INGESTED",
+        )
         succeeded += 1
         events_ingested += result.events
 
