@@ -208,6 +208,21 @@ fn effective_reward_per_token_stored(
     rewards
 }
 
+fn active_bin_array_index(active_bin_id: i32) -> Result<i32> {
+    BinArray::bin_id_to_bin_array_index(active_bin_id)
+        .context("active bin index")
+}
+
+fn bin_array_indexes_for_active_bin(
+    active_bin_id: i32,
+    array_radius: i32,
+) -> Result<Vec<i32>> {
+    let active_array_index = active_bin_array_index(active_bin_id)?;
+    Ok(((active_array_index - array_radius)
+        ..=(active_array_index + array_radius))
+        .collect())
+}
+
 pub async fn inspect_pool(
     rpc_url: &str,
     pool_address: &str,
@@ -242,12 +257,12 @@ pub async fn inspect_pool(
         let probe_pair =
             decode_lb_pair(&probe_account.data).context("failed to decode probe LbPair")?;
         let probe_active_array_index =
-            BinArray::bin_id_to_bin_array_index(probe_pair.active_id)
+            active_bin_array_index(probe_pair.active_id)
                 .context("probe active bin index")?;
 
-        let indexes: Vec<i32> = ((probe_active_array_index - array_radius)
-            ..=(probe_active_array_index + array_radius))
-            .collect();
+        let indexes =
+            bin_array_indexes_for_active_bin(probe_pair.active_id, array_radius)
+                .context("probe bin-array window")?;
         let pubkeys: Vec<Pubkey> = indexes
             .iter()
             .map(|index| derive_bin_array_pda(pool, i64::from(*index)).0)
@@ -279,7 +294,7 @@ pub async fn inspect_pool(
         let snapshot_pair = decode_lb_pair(&snapshot_pool_account.data)
             .context("failed to decode final LbPair")?;
         let snapshot_active_array_index =
-            BinArray::bin_id_to_bin_array_index(snapshot_pair.active_id)
+            active_bin_array_index(snapshot_pair.active_id)
                 .context("final active bin index")?;
 
         if snapshot_active_array_index != probe_active_array_index {
@@ -684,6 +699,41 @@ pub async fn inspect_position(
 #[cfg(test)]
 mod discovery_layout_tests {
     use super::*;
+
+    #[test]
+    fn snapshot_bin_array_window_is_centered_on_active_array() {
+        let active_id = 0;
+        let center = active_bin_array_index(active_id).expect("active array");
+        let indexes =
+            bin_array_indexes_for_active_bin(active_id, 2).expect("window");
+        assert_eq!(
+            indexes,
+            vec![center - 2, center - 1, center, center + 1, center + 2]
+        );
+    }
+
+    #[test]
+    fn active_bin_boundary_change_changes_snapshot_array_window() {
+        let center = active_bin_array_index(0).expect("active array");
+        let (lower, upper) =
+            BinArray::get_bin_array_lower_upper_bin_id(center)
+                .expect("array bounds");
+
+        assert_eq!(
+            active_bin_array_index(lower).expect("lower index"),
+            center
+        );
+        assert_eq!(
+            active_bin_array_index(upper).expect("upper index"),
+            center
+        );
+
+        let next = upper.checked_add(1).expect("next bin");
+        assert_ne!(
+            active_bin_array_index(next).expect("next index"),
+            center
+        );
+    }
 
     #[test]
     fn position_v2_pool_filter_offset_fits_position_layout() {
