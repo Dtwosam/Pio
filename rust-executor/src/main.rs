@@ -48,6 +48,7 @@ fn usage() {
   meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
+  meteora-executor inspect-position-env <POSITION_ADDRESS>
   meteora-executor discover-pool-positions <RPC_URL> <POOL_ADDRESS> [LIMIT]
   meteora-executor discover-pool-positions-env <POOL_ADDRESS> [LIMIT]
   meteora-executor discover-pool-activity <RPC_URL> <POOL_ADDRESS> [LIMIT] [BEFORE_SIGNATURE] [UNTIL_SIGNATURE]
@@ -193,6 +194,24 @@ RPC_URL is accepted as a compatibility fallback",
         "inspect-position" => {
             let rpc_url = args.next().context("RPC_URL is required")?;
             let position_address = args.next().context("POSITION_ADDRESS is required")?;
+            let snapshot =
+                state_reader::inspect_position(&rpc_url, &position_address).await?;
+            println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "inspect-position-env" => {
+            let rpc_url = std::env::var("SOLANA_RPC_URL")
+                .or_else(|_| std::env::var("RPC_URL"))
+                .context(
+                    "SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                )?;
+            let position_address =
+                args.next().context("POSITION_ADDRESS is required")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "inspect-position-env accepts exactly one argument"
+                );
+            }
             let snapshot =
                 state_reader::inspect_position(&rpc_url, &position_address).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
