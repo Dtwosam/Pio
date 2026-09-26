@@ -85,6 +85,24 @@ def _run_executor_json(
         raise ValueError("executor returned invalid JSON") from exc
 
 
+def _require_single_capture_slot(snapshot: dict[str, Any]) -> int:
+    start_raw = snapshot.get("capture_slot_start")
+    end_raw = snapshot.get("capture_slot_end")
+    if start_raw is None or end_raw is None:
+        raise ValueError(
+            "position inspection is missing capture-slot provenance"
+        )
+    start = int(start_raw)
+    end = int(end_raw)
+    if start < 0 or end < 0:
+        raise ValueError("position capture slots cannot be negative")
+    if start != end:
+        raise ValueError(
+            f"position inspection is not single-context: {start}..{end}"
+        )
+    return start
+
+
 def collect_phase2_position_observations(
     storage: Storage,
     *,
@@ -169,6 +187,7 @@ def collect_phase2_position_observations(
                 raise ValueError("position inspection returned a different position")
             if str(snapshot.get("pool_address", "")) != pool_address:
                 raise ValueError("position inspection returned a different pool")
+            _require_single_capture_slot(snapshot)
             result = ingest_position_snapshot(
                 storage,
                 snapshot,
