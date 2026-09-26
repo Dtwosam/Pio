@@ -281,3 +281,60 @@ def test_runner_ignores_non_verification_work_items(tmp_path, monkeypatch):
     assert report.candidates_selected == 0
     assert report.verdicts_ingested == 0
     assert report.failures == 0
+
+
+
+def test_prestate_failed_candidate_does_not_starve_unseen_work(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    items = (
+        work_item(signature="sig-a", ix=1),
+        work_item(signature="sig-b", ix=2),
+    )
+    candidates = (
+        candidate(signature="sig-a", ix=1),
+        candidate(signature="sig-b", ix=2),
+    )
+    candidates[0].capture_slot_end = 101
+    install_inputs(
+        monkeypatch,
+        items=items,
+        candidates=candidates,
+    )
+    called = []
+
+    def runner(command, **kwargs):
+        called.append(command[2])
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps(
+                verifier_payload(command[2], eligible=True)
+            ),
+            "",
+        )
+
+    first = run_phase2_prestate_verifications(
+        storage,
+        executor_path="/executor",
+        max_tasks=1,
+        observed_at="2026-09-26T18:00:00+00:00",
+        runner=runner,
+    )
+    second = run_phase2_prestate_verifications(
+        storage,
+        executor_path="/executor",
+        max_tasks=1,
+        observed_at="2026-09-26T18:05:00+00:00",
+        runner=runner,
+    )
+
+    assert first.candidates_selected == 0
+    assert first.failure_details[0].category == (
+        "CANDIDATE_NOT_SINGLE_CONTEXT"
+    )
+    assert second.candidates_selected == 1
+    assert second.verdicts_ingested == 1
+    assert called == ["sig-b"]
