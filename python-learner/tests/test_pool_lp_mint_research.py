@@ -180,6 +180,7 @@ def test_canonical_dataset_mint_research_runs_end_to_end(
     assert report.mint_enrichment is not None
     assert report.mint_enrichment.rows_ready == 210
     assert report.ablation is not None
+    assert report.context_ablation is not None
     assert report.research_only is True
     assert report.policy_actionable is False
     assert report.execution_wired is False
@@ -190,6 +191,13 @@ def test_canonical_dataset_mint_research_runs_end_to_end(
     )
     assert net.mean_mint_mae_improvement > 0
     assert net.mint_better_folds > 0
+
+    staged_net = next(
+        item for item in report.context_ablation.aggregates
+        if item.target == "target_net_return_bps"
+    )
+    assert staged_net.mean_mint_mae_improvement > 0
+    assert staged_net.mint_better_folds > 0
 
 
 def test_canonical_dataset_reports_missing_mint_context(
@@ -231,6 +239,7 @@ def test_canonical_dataset_reports_missing_mint_context(
 
     assert report.status == "COLLECTING_CONTEXT"
     assert report.ablation is None
+    assert report.context_ablation is None
     assert report.mint_enrichment is not None
     assert report.mint_enrichment.rows_ready == 0
     assert (
