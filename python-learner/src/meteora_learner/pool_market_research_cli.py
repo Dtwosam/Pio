@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Sequence
+from uuid import uuid4
 
+from .pool_market_report_artifact import (
+    save_pool_market_research_report,
+)
 from .pool_market_research_cycle import (
     run_pool_market_research_cycle,
 )
@@ -55,6 +60,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=10,
     )
     parser.add_argument("--min-train-rows", type=int, default=50)
+    parser.add_argument(
+        "--output-dir",
+        help=(
+            "Optionally save a checksum-verified research report "
+            "artifact in this directory."
+        ),
+    )
+    parser.add_argument(
+        "--report-id",
+        help=(
+            "Artifact identifier used with --output-dir. "
+            "If omitted, a UTC timestamp plus random suffix is used."
+        ),
+    )
     return parser
 
 
@@ -85,9 +104,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         min_train_rows=args.min_train_rows,
     )
 
+    output = report.to_record()
+
+    if args.report_id and not args.output_dir:
+        raise ValueError("--report-id requires --output-dir")
+
+    if args.output_dir:
+        report_id = args.report_id
+        if report_id is None:
+            timestamp = datetime.now(timezone.utc).strftime(
+                "%Y%m%dT%H%M%SZ"
+            )
+            report_id = (
+                f"pool-market-{timestamp}-{uuid4().hex[:8]}"
+            )
+        artifact = save_pool_market_research_report(
+            report,
+            directory=args.output_dir,
+            report_id=report_id,
+        )
+        output["artifact"] = artifact.to_record()
+
     print(
         json.dumps(
-            report.to_record(),
+            output,
             indent=2,
             sort_keys=True,
         )
