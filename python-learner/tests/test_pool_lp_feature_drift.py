@@ -37,8 +37,8 @@ def _frame(*, shift_late: bool) -> pd.DataFrame:
                 value = (
                     1.0
                     + 0.01 * feature_index
-                    + 0.001 * index
                     + 0.005 * pool_index
+                    + 0.01 * np.sin(index / 2.0)
                 )
                 if (
                     shift_late
