@@ -161,6 +161,8 @@ def build_calibration_work_queue(database_path: str) -> CalibrationWorkQueue:
                 if candidate.ineligibility_reason and (
                     "no slot-bounded pre-add pool capture"
                     in candidate.ineligibility_reason
+                    or "no single-context strict-prior pre-add pool capture"
+                    in candidate.ineligibility_reason
                 ):
                     add_item(
                         CalibrationWorkItem(
