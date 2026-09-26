@@ -62,10 +62,9 @@ def candidate_context_key(
     else:
         move = "FLAT"
 
-    skew = above_active_liquidity_ratio - below_active_liquidity_ratio
-    if skew > 0.10:
+    if above_active_liquidity_ratio > below_active_liquidity_ratio:
         liquidity = "ABOVE"
-    elif skew < -0.10:
+    elif above_active_liquidity_ratio < below_active_liquidity_ratio:
         liquidity = "BELOW"
     else:
         liquidity = "BALANCED"
