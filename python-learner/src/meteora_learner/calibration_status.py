@@ -24,13 +24,9 @@ class Phase2CalibrationEvidence:
     composition_eligible_samples: int
     composition_exact_samples: int
     composition_mismatched_samples: int
-    composition_ineligible_samples: int
-    composition_ineligibility_reasons: tuple[CalibrationGapCount, ...]
     add_execution_events: int
     add_execution_request_decodes: int
     add_execution_matched_events: int
-    add_execution_unmatched_samples: int
-    add_execution_gap_reasons: tuple[CalibrationGapCount, ...]
     add_active_guard_samples: int
     add_active_guard_violations: int
     rebalance_positions: int
@@ -42,6 +38,10 @@ class Phase2CalibrationEvidence:
     transaction_fee_samples: int
     missing_transaction_receipts: int
     evidence_gaps: tuple[str, ...]
+    composition_ineligible_samples: int = 0
+    composition_ineligibility_reasons: tuple[CalibrationGapCount, ...] = ()
+    add_execution_unmatched_samples: int = 0
+    add_execution_gap_reasons: tuple[CalibrationGapCount, ...] = ()
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
