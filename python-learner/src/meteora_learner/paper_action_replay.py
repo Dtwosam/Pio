@@ -29,6 +29,9 @@ class PaperHoldVsRebalanceReplayReport:
     strategy: str
     min_bin_id: int
     max_bin_id: int
+    decision_active_bin_id: int
+    rebalance_lower_offset_bins: int
+    rebalance_upper_offset_bins: int
     start_x: int
     start_y: int
     start_value_y_atomic: int
@@ -295,6 +298,13 @@ def compare_paper_hold_vs_rebalance_gross(
         strategy=StrategyType(strategy).value,
         min_bin_id=min_bin_id,
         max_bin_id=max_bin_id,
+        decision_active_bin_id=hold.start_active_bin_id,
+        rebalance_lower_offset_bins=(
+            min_bin_id - hold.start_active_bin_id
+        ),
+        rebalance_upper_offset_bins=(
+            max_bin_id - hold.start_active_bin_id
+        ),
         start_x=start_x,
         start_y=start_y,
         start_value_y_atomic=start_value,
