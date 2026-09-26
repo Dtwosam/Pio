@@ -235,3 +235,56 @@ def test_phase9_source_tables_are_append_only(tmp_path):
                     f"DELETE FROM {table} WHERE id = "
                     f"(SELECT MIN(id) FROM {table})"
                 )
+
+
+
+def test_existing_position_table_is_migrated_with_capture_slots(tmp_path):
+    db = tmp_path / "old-position.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE chain_position_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            observed_at TEXT NOT NULL,
+            position_address TEXT NOT NULL,
+            pool_address TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            fee_owner TEXT NOT NULL,
+            lower_bin_id INTEGER NOT NULL,
+            upper_bin_id INTEGER NOT NULL,
+            total_x_amount TEXT NOT NULL,
+            total_y_amount TEXT NOT NULL,
+            fee_x TEXT NOT NULL,
+            fee_y TEXT NOT NULL,
+            reward_one TEXT NOT NULL,
+            reward_two TEXT NOT NULL,
+            last_updated_at INTEGER NOT NULL,
+            total_claimed_fee_x_amount TEXT NOT NULL,
+            total_claimed_fee_y_amount TEXT NOT NULL,
+            raw_json TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    Storage(db)
+
+    conn = sqlite3.connect(db)
+    try:
+        columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(chain_position_snapshots)"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert {
+        "capture_slot_start",
+        "capture_slot_end",
+        "supports_limit_order",
+        "reward_mint_0",
+        "reward_mint_1",
+    } <= columns

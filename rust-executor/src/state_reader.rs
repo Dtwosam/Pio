@@ -120,6 +120,8 @@ pub struct PositionBinSnapshot {
 #[derive(Debug, Serialize)]
 pub struct PositionChainSnapshot {
     pub position_address: String,
+    pub capture_slot_start: u64,
+    pub capture_slot_end: u64,
     pub pool_address: String,
     pub owner: String,
     pub fee_owner: String,
@@ -470,62 +472,168 @@ pub async fn discover_pool_positions(
     })
 }
 
+fn position_bin_array_indexes(
+    lower_bin_id: i32,
+    upper_bin_id: i32,
+) -> Result<Vec<i32>> {
+    if lower_bin_id > upper_bin_id {
+        anyhow::bail!("position lower bin cannot exceed upper bin");
+    }
+    let lower_index =
+        BinArray::bin_id_to_bin_array_index(lower_bin_id).context("lower bin")?;
+    let upper_index =
+        BinArray::bin_id_to_bin_array_index(upper_bin_id).context("upper bin")?;
+    Ok((lower_index..=upper_index).collect())
+}
+
+fn position_dependencies_match(
+    probe_pool: Pubkey,
+    probe_lower_bin_id: i32,
+    probe_upper_bin_id: i32,
+    snapshot_pool: Pubkey,
+    snapshot_lower_bin_id: i32,
+    snapshot_upper_bin_id: i32,
+) -> bool {
+    probe_pool == snapshot_pool
+        && probe_lower_bin_id == snapshot_lower_bin_id
+        && probe_upper_bin_id == snapshot_upper_bin_id
+}
+
 pub async fn inspect_position(
     rpc_url: &str,
     position_address: &str,
 ) -> Result<PositionChainSnapshot> {
-    let position_key = Pubkey::from_str(position_address).context("invalid position address")?;
+    let position_key =
+        Pubkey::from_str(position_address).context("invalid position address")?;
     let rpc = RpcClient::new(rpc_url.to_string());
 
-    let position_account = rpc
-        .get_account(&position_key)
-        .await
-        .with_context(|| format!("failed to fetch position account {position_key}"))?;
-    if position_account.owner != commons::dlmm::ID {
-        anyhow::bail!("position account is not owned by Meteora DLMM");
+    // The first position read is only a probe so we can derive the pool and bin
+    // array addresses. The authoritative position, pool, clock and arrays are
+    // refetched together in one getMultipleAccounts response. If a mutation
+    // changes the position's pool/range between probe and batch, retry instead
+    // of emitting a mixed-context reconciliation snapshot.
+    let mut final_response = None;
+    let mut final_indexes = Vec::new();
+    let mut final_pubkeys = Vec::new();
+
+    for _attempt in 0..3 {
+        let probe_account = rpc
+            .get_account(&position_key)
+            .await
+            .with_context(|| {
+                format!("failed to probe position account {position_key}")
+            })?;
+        if probe_account.owner != commons::dlmm::ID {
+            anyhow::bail!("position account is not owned by Meteora DLMM");
+        }
+        let probe_state: PositionV2 =
+            pod_read_unaligned_skip_disc(&probe_account.data)
+                .context("failed to decode probe PositionV2")?;
+        let indexes = position_bin_array_indexes(
+            probe_state.lower_bin_id,
+            probe_state.upper_bin_id,
+        )?;
+        let pubkeys: Vec<Pubkey> = indexes
+            .iter()
+            .map(|index| {
+                derive_bin_array_pda(
+                    probe_state.lb_pair,
+                    i64::from(*index),
+                )
+                .0
+            })
+            .collect();
+
+        let accounts_to_fetch: Vec<Pubkey> = [
+            vec![position_key, probe_state.lb_pair, CLOCK_ID],
+            pubkeys.clone(),
+        ]
+        .concat();
+        let response = rpc
+            .get_multiple_accounts_with_commitment(
+                &accounts_to_fetch,
+                rpc.commitment(),
+            )
+            .await
+            .context(
+                "failed to fetch single-slot position/pool/clock/bin-array snapshot",
+            )?;
+
+        let snapshot_position_account = response
+            .value
+            .first()
+            .and_then(|account| account.as_ref())
+            .context("position account missing from final snapshot")?;
+        if snapshot_position_account.owner != commons::dlmm::ID {
+            anyhow::bail!("position account is not owned by Meteora DLMM");
+        }
+        let snapshot_state: PositionV2 =
+            pod_read_unaligned_skip_disc(&snapshot_position_account.data)
+                .context("failed to decode final PositionV2")?;
+
+        if !position_dependencies_match(
+            probe_state.lb_pair,
+            probe_state.lower_bin_id,
+            probe_state.upper_bin_id,
+            snapshot_state.lb_pair,
+            snapshot_state.lower_bin_id,
+            snapshot_state.upper_bin_id,
+        ) {
+            continue;
+        }
+
+        final_indexes = indexes;
+        final_pubkeys = pubkeys;
+        final_response = Some(response);
+        break;
     }
-    let position_state: PositionV2 = pod_read_unaligned_skip_disc(&position_account.data)
-        .context("failed to decode PositionV2")?;
 
-    let lower_index =
-        BinArray::bin_id_to_bin_array_index(position_state.lower_bin_id).context("lower bin")?;
-    let upper_index =
-        BinArray::bin_id_to_bin_array_index(position_state.upper_bin_id).context("upper bin")?;
+    let response = final_response.context(
+        "position dependencies changed during all snapshot attempts",
+    )?;
+    let capture_slot = response.context.slot;
+    let accounts = response.value;
 
-    let bin_array_pubkeys: Vec<Pubkey> = (lower_index..=upper_index)
-        .map(|index| derive_bin_array_pda(position_state.lb_pair, i64::from(index)).0)
-        .collect();
-
-    let accounts_to_fetch: Vec<Pubkey> = [
-        vec![position_state.lb_pair, CLOCK_ID],
-        bin_array_pubkeys.clone(),
-    ]
-    .concat();
-    let fetched = rpc
-        .get_multiple_accounts(&accounts_to_fetch)
-        .await
-        .context("failed to fetch position dependencies")?;
-
-    let lb_pair_account = fetched
+    let position_account = accounts
         .first()
         .and_then(|account| account.as_ref())
-        .context("pool account missing")?;
-    let lb_pair_state = decode_lb_pair(&lb_pair_account.data).context("failed to decode LbPair")?;
+        .context("position account missing from single-slot snapshot")?;
+    let position_state: PositionV2 =
+        pod_read_unaligned_skip_disc(&position_account.data)
+            .context("failed to decode final PositionV2")?;
 
-    let clock_account = fetched
+    let lb_pair_account = accounts
         .get(1)
         .and_then(|account| account.as_ref())
-        .context("clock account missing")?;
-    let clock: Clock =
-        bincode::deserialize(&clock_account.data).context("failed to decode Solana clock")?;
+        .context("pool account missing from single-slot snapshot")?;
+    if lb_pair_account.owner != commons::dlmm::ID {
+        anyhow::bail!("pool account is not owned by Meteora DLMM");
+    }
+    let lb_pair_state =
+        decode_lb_pair(&lb_pair_account.data).context("failed to decode LbPair")?;
+
+    let clock_account = accounts
+        .get(2)
+        .and_then(|account| account.as_ref())
+        .context("clock account missing from single-slot snapshot")?;
+    let clock: Clock = bincode::deserialize(&clock_account.data)
+        .context("failed to decode Solana clock")?;
 
     let mut bin_array_map: HashMap<i32, BinArray> = HashMap::new();
-    for (offset, index) in (lower_index..=upper_index).enumerate() {
-        if let Some(account) = fetched.get(2 + offset).and_then(|account| account.as_ref()) {
-            let bin_array = decode_bin_array(&account.data)
-                .with_context(|| format!("failed to decode bin array index {index}"))?;
-            bin_array_map.insert(index, bin_array);
+    for ((index, pubkey), account) in final_indexes
+        .into_iter()
+        .zip(final_pubkeys)
+        .zip(accounts.iter().skip(3))
+    {
+        let Some(account) = account.as_ref() else {
+            continue;
+        };
+        if account.owner != commons::dlmm::ID {
+            anyhow::bail!("bin array account {pubkey} is not owned by Meteora DLMM");
         }
+        let bin_array = decode_bin_array(&account.data)
+            .with_context(|| format!("failed to decode bin array {pubkey}"))?;
+        bin_array_map.insert(index, bin_array);
     }
 
     let parsed = DynamicPosition::parse(
@@ -568,32 +676,38 @@ pub async fn inspect_position(
                 .unwrap_or((0, 0, [0u128; NUM_REWARDS]));
 
             PositionBinSnapshot {
-            bin_id: bin.bin_id,
-            price: bin.price.to_string(),
-            bin_x_amount: bin.bin_x_amount.to_string(),
-            bin_y_amount: bin.bin_y_amount.to_string(),
-            bin_liquidity: bin.bin_liquidity.to_string(),
-            bin_fee_x_per_token_stored: bin_fee_x_per_token_stored.to_string(),
-            bin_fee_y_per_token_stored: bin_fee_y_per_token_stored.to_string(),
-            bin_reward_per_token_stored: [
-                bin_reward_per_token_stored[0].to_string(),
-                bin_reward_per_token_stored[1].to_string(),
-            ],
-            position_liquidity: bin.position_liquidity.to_string(),
-            position_x_amount: bin.position_x_amount.to_string(),
-            position_y_amount: bin.position_y_amount.to_string(),
-            position_fee_x_amount: bin.position_fee_x_amount.to_string(),
-            position_fee_y_amount: bin.position_fee_y_amount.to_string(),
-            position_reward_amounts: [
-                bin.position_reward_amounts[0].to_string(),
-                bin.position_reward_amounts[1].to_string(),
-            ],
-        }
+                bin_id: bin.bin_id,
+                price: bin.price.to_string(),
+                bin_x_amount: bin.bin_x_amount.to_string(),
+                bin_y_amount: bin.bin_y_amount.to_string(),
+                bin_liquidity: bin.bin_liquidity.to_string(),
+                bin_fee_x_per_token_stored:
+                    bin_fee_x_per_token_stored.to_string(),
+                bin_fee_y_per_token_stored:
+                    bin_fee_y_per_token_stored.to_string(),
+                bin_reward_per_token_stored: [
+                    bin_reward_per_token_stored[0].to_string(),
+                    bin_reward_per_token_stored[1].to_string(),
+                ],
+                position_liquidity: bin.position_liquidity.to_string(),
+                position_x_amount: bin.position_x_amount.to_string(),
+                position_y_amount: bin.position_y_amount.to_string(),
+                position_fee_x_amount:
+                    bin.position_fee_x_amount.to_string(),
+                position_fee_y_amount:
+                    bin.position_fee_y_amount.to_string(),
+                position_reward_amounts: [
+                    bin.position_reward_amounts[0].to_string(),
+                    bin.position_reward_amounts[1].to_string(),
+                ],
+            }
         })
         .collect();
 
     Ok(PositionChainSnapshot {
         position_address: position_key.to_string(),
+        capture_slot_start: capture_slot,
+        capture_slot_end: capture_slot,
         pool_address: parsed.lb_pair.to_string(),
         owner: parsed.owner.to_string(),
         fee_owner: parsed.fee_owner.to_string(),
@@ -606,8 +720,10 @@ pub async fn inspect_position(
         reward_one: parsed.reward_one.to_string(),
         reward_two: parsed.reward_two.to_string(),
         last_updated_at: parsed.last_updated_at,
-        total_claimed_fee_x_amount: parsed.total_claimed_fee_x_amount.to_string(),
-        total_claimed_fee_y_amount: parsed.total_claimed_fee_y_amount.to_string(),
+        total_claimed_fee_x_amount:
+            parsed.total_claimed_fee_x_amount.to_string(),
+        total_claimed_fee_y_amount:
+            parsed.total_claimed_fee_y_amount.to_string(),
         supports_limit_order: lb_pair_state.is_support_limit_order(),
         reward_mints: [
             lb_pair_state.reward_infos[0].mint.to_string(),
@@ -621,6 +737,49 @@ pub async fn inspect_position(
 #[cfg(test)]
 mod discovery_layout_tests {
     use super::*;
+
+    #[test]
+    fn position_bin_array_indexes_cover_full_position_range() {
+        let lower = -71;
+        let upper = 71;
+        let lower_index =
+            BinArray::bin_id_to_bin_array_index(lower).expect("lower");
+        let upper_index =
+            BinArray::bin_id_to_bin_array_index(upper).expect("upper");
+        let indexes =
+            position_bin_array_indexes(lower, upper).expect("indexes");
+
+        assert_eq!(indexes.first().copied(), Some(lower_index));
+        assert_eq!(indexes.last().copied(), Some(upper_index));
+        assert_eq!(
+            indexes,
+            (lower_index..=upper_index).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn position_dependency_change_requires_retry() {
+        let pool = Pubkey::new_unique();
+        let other_pool = Pubkey::new_unique();
+
+        assert!(position_dependencies_match(
+            pool, -10, 10, pool, -10, 10
+        ));
+        assert!(!position_dependencies_match(
+            pool, -10, 10, other_pool, -10, 10
+        ));
+        assert!(!position_dependencies_match(
+            pool, -10, 10, pool, -11, 10
+        ));
+        assert!(!position_dependencies_match(
+            pool, -10, 10, pool, -10, 11
+        ));
+    }
+
+    #[test]
+    fn invalid_position_range_fails_closed() {
+        assert!(position_bin_array_indexes(5, 4).is_err());
+    }
 
     #[test]
     fn position_v2_pool_filter_offset_fits_position_layout() {

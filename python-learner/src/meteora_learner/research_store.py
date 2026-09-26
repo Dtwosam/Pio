@@ -194,7 +194,9 @@ class ResearchStore:
         try:
             row = conn.execute(
                 """
-                SELECT observed_at, position_address, pool_address, owner, fee_owner,
+                SELECT observed_at, position_address,
+                       capture_slot_start, capture_slot_end,
+                       pool_address, owner, fee_owner,
                        lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
                        fee_x, fee_y, reward_one, reward_two, last_updated_at,
                        total_claimed_fee_x_amount, total_claimed_fee_y_amount,
@@ -316,7 +318,9 @@ class ResearchStore:
         try:
             row = conn.execute(
                 """
-                SELECT observed_at, position_address, pool_address, owner, fee_owner,
+                SELECT observed_at, position_address,
+                       capture_slot_start, capture_slot_end,
+                       pool_address, owner, fee_owner,
                        lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
                        fee_x, fee_y, reward_one, reward_two, last_updated_at,
                        total_claimed_fee_x_amount, total_claimed_fee_y_amount,
