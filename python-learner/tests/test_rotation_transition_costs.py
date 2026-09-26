@@ -86,6 +86,7 @@ def test_rotation_network_fee_is_quote_normalized_without_counting_protocol_fiel
     )
 
     assert report.rotation_transactions == 1
+    assert report.quote_unit == "ACCOUNT_QUOTE"
     assert report.quote_eligible_transactions == 1
     assert report.total_network_fee_lamports == 7000
     assert report.total_network_fee_quote == pytest.approx(0.00014)
@@ -93,6 +94,7 @@ def test_rotation_network_fee_is_quote_normalized_without_counting_protocol_fiel
     assert report.included_cost_components == ("SOLANA_NETWORK_FEE",)
     sample = report.samples[0]
     assert sample.events_in_transaction == 2
+    assert sample.sol_quote_source == "TEST"
     assert sample.reported_x_fee_amount == 9
     assert sample.reported_y_fee_amount == 6
     assert sample.reported_reward_one == 8
