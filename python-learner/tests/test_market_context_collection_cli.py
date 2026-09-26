@@ -66,3 +66,27 @@ def test_context_collection_cli_allows_refresh_only(
     assert payload["chain_pools_refreshed"] == 0
     assert payload["policy_actionable"] is False
     assert payload["execution_wired"] is False
+
+
+def test_context_collection_cli_allows_mint_refresh_only(
+    tmp_path,
+    capsys,
+) -> None:
+    code = main(
+        [
+            "--database",
+            str(tmp_path / "pio.db"),
+            "--no-discovery",
+            "--no-chain",
+            "--no-mints",
+            "--refresh-mints",
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "NO_CHANGE"
+    assert payload["mint_refresh"] is not None
+    assert payload["mints_refreshed"] == 0
+    assert payload["policy_actionable"] is False
+    assert payload["execution_wired"] is False
