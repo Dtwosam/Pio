@@ -85,6 +85,8 @@ def test_evidence_cycle_runs_read_only_stages_in_order(tmp_path, monkeypatch):
     )
 
     assert calls == [
+        "reconciliation",
+        "evidence",
         "quotes",
         "positions",
         "reinspect",
@@ -208,6 +210,8 @@ def test_evidence_cycle_isolates_stage_exception_and_hides_error_text(
     assert failed.failure_category == "QUOTE_STAGE_FAILED"
     assert failed.result is None
     assert calls == [
+        "reconciliation",
+        "evidence",
         "quotes-failed",
         "positions",
         "reinspect",
@@ -347,3 +351,149 @@ def test_evidence_cycle_surfaces_reconciliation_failure_without_leaking_text(
     encoded = str(report.to_record())
     assert secret not in encoded
     assert "internal failure" not in encoded
+
+
+
+def test_evidence_cycle_reports_technical_before_after_deltas(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.collect_phase2_research_quotes",
+        lambda *args, **kwargs: Result(quotes_failed=0),
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.collect_phase2_position_observations",
+        lambda *args, **kwargs: Result(
+            failures=0,
+            discovery_truncated=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.run_phase2_calibration_reinspection",
+        lambda *args, **kwargs: Result(signatures_failed=0),
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.run_phase2_prestate_verifications",
+        lambda *args, **kwargs: Result(failures=0),
+    )
+
+    reconciliation_calls = iter(
+        (
+            Result(
+                strict_math_gate_passed=False,
+                positions_seen=1,
+                amount_bins_checked=49,
+                fee_intervals_eligible=0,
+                fee_bins_checked=0,
+                reward_intervals_eligible=0,
+                reward_bins_with_checkpoint_growth=0,
+            ),
+            Result(
+                strict_math_gate_passed=False,
+                positions_seen=2,
+                amount_bins_checked=72,
+                fee_intervals_eligible=1,
+                fee_bins_checked=12,
+                reward_intervals_eligible=1,
+                reward_bins_with_checkpoint_growth=3,
+            ),
+        )
+    )
+    calibration_calls = iter(
+        (
+            Result(
+                evidence_gaps=("gap",),
+                composition_eligible_samples=0,
+                composition_exact_samples=0,
+                add_execution_matched_events=17,
+                rebalance_guard_samples=12,
+                transaction_fee_samples=42,
+            ),
+            Result(
+                evidence_gaps=("gap",),
+                composition_eligible_samples=1,
+                composition_exact_samples=1,
+                add_execution_matched_events=19,
+                rebalance_guard_samples=13,
+                transaction_fee_samples=44,
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_reconciliation_corpus",
+        lambda *args, **kwargs: next(reconciliation_calls),
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_phase2_calibration_evidence",
+        lambda *args, **kwargs: next(calibration_calls),
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_calibration_work_queue",
+        lambda *args, **kwargs: Result(items=("future-work",)),
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+
+    assert report.evidence_before.positions_seen == 1
+    assert report.evidence_after.positions_seen == 2
+    assert report.evidence_delta.positions_seen == 1
+    assert report.evidence_delta.amount_bins_checked == 23
+    assert report.evidence_delta.fee_intervals_eligible == 1
+    assert report.evidence_delta.fee_bins_checked == 12
+    assert report.evidence_delta.reward_intervals_eligible == 1
+    assert report.evidence_delta.reward_growth_bins == 3
+    assert report.evidence_delta.composition_eligible_samples == 1
+    assert report.evidence_delta.composition_exact_samples == 1
+    assert report.evidence_delta.add_execution_matched_events == 2
+    assert report.evidence_delta.rebalance_guard_samples == 1
+    assert report.evidence_delta.transaction_fee_samples == 2
+    assert report.promotion_gate_evaluated is False
+
+
+def test_evidence_delta_keeps_unavailable_baseline_unknown(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+
+    reconciliation_results = iter(
+        (
+            ValueError("no baseline"),
+            Result(
+                strict_math_gate_passed=True,
+                positions_seen=2,
+                amount_bins_checked=20,
+            ),
+        )
+    )
+
+    def reconciliation(*args, **kwargs):
+        value = next(reconciliation_results)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_reconciliation_corpus",
+        reconciliation,
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+
+    assert report.evidence_before.positions_seen is None
+    assert report.evidence_after.positions_seen == 2
+    assert report.evidence_delta.positions_seen is None
