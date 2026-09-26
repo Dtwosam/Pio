@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any
 
+from .quote_registry import DEFAULT_QUOTE_UNIT, token_quote_status
 from .research_store import ResearchStore
 from .storage import Storage
 
@@ -19,6 +21,7 @@ class RotationFeeSemanticsSample:
     pool_address: str | None
     owner_address: str | None
     parent_ix_index: int
+    block_time: int | None
     succeeded: bool | None
     rebalance_events_in_transaction: int
     should_claim_fee: bool | None
@@ -38,6 +41,18 @@ class RotationFeeSemanticsSample:
     base_residual_y: int | None
     fee_separate_residual_x: int | None
     fee_separate_residual_y: int | None
+    x_quote_per_atomic: float | None
+    x_quote_source: str | None
+    x_quote_observed_at: str | None
+    x_quote_age_seconds: int | None
+    y_quote_per_atomic: float | None
+    y_quote_source: str | None
+    y_quote_observed_at: str | None
+    y_quote_age_seconds: int | None
+    base_residual_quote: float | None
+    fee_separate_residual_quote: float | None
+    quote_eligible: bool
+    quote_exclusion_reason: str | None
     base_flow_exact: bool | None
     fee_separate_exact: bool | None
     evidence_class: str
@@ -48,20 +63,49 @@ class RotationFeeSemanticsSample:
 @dataclass(frozen=True)
 class RotationFeeSemanticsReport:
     position_address: str
+    quote_unit: str
     transactions_seen: int
     eligible_transactions: int
+    quote_eligible_transactions: int
+    quote_coverage_rate: float
     claim_fee_true_samples: int
     claim_fee_false_samples: int
     base_flow_only_matches: int
     fee_separate_only_matches: int
     both_hypotheses_match: int
     neither_hypothesis_matches: int
+    quoted_base_residual_net: float
+    quoted_fee_separate_residual_net: float
     semantics_resolved: bool
     conclusion: str
     samples: tuple[RotationFeeSemanticsSample, ...]
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _block_time_iso(block_time: int) -> str:
+    return datetime.fromtimestamp(
+        block_time,
+        tz=timezone.utc,
+    ).isoformat()
+
+
+def _quote_status_for_mint(
+    storage: Storage,
+    *,
+    mint: str,
+    block_time: int | None,
+    max_quote_age_seconds: int,
+):
+    if block_time is None:
+        return None
+    return token_quote_status(
+        storage,
+        token_mint=mint,
+        max_age_seconds=max_quote_age_seconds,
+        as_of=_block_time_iso(block_time),
+    )
 
 
 def _owner_delta_by_mint(
@@ -127,6 +171,11 @@ def _ineligible_sample(
             else None
         ),
         parent_ix_index=int(event["parent_ix_index"]),
+        block_time=(
+            int(event["block_time"])
+            if event.get("block_time") is not None
+            else None
+        ),
         succeeded=succeeded,
         rebalance_events_in_transaction=rebalance_events_in_transaction,
         should_claim_fee=should_claim_fee,
@@ -146,6 +195,18 @@ def _ineligible_sample(
         base_residual_y=None,
         fee_separate_residual_x=None,
         fee_separate_residual_y=None,
+        x_quote_per_atomic=None,
+        x_quote_source=None,
+        x_quote_observed_at=None,
+        x_quote_age_seconds=None,
+        y_quote_per_atomic=None,
+        y_quote_source=None,
+        y_quote_observed_at=None,
+        y_quote_age_seconds=None,
+        base_residual_quote=None,
+        fee_separate_residual_quote=None,
+        quote_eligible=False,
+        quote_exclusion_reason=reason,
         base_flow_exact=None,
         fee_separate_exact=None,
         evidence_class="INELIGIBLE",
@@ -158,6 +219,7 @@ def build_rotation_fee_semantics_report(
     storage: Storage,
     *,
     position_address: str,
+    max_quote_age_seconds: int = 300,
 ) -> RotationFeeSemanticsReport:
     """
     Compare two observable-flow hypotheses without assigning economic meaning.
@@ -173,6 +235,8 @@ def build_rotation_fee_semantics_report(
     """
     if not position_address.strip():
         raise ValueError("position_address is required")
+    if max_quote_age_seconds < 0:
+        raise ValueError("max_quote_age_seconds cannot be negative")
 
     store = ResearchStore(str(storage.path))
     events = store.load_position_transaction_events(
@@ -360,6 +424,52 @@ def build_rotation_fee_semantics_report(
         base_exact = base_residual_x == 0 and base_residual_y == 0
         fee_exact = fee_residual_x == 0 and fee_residual_y == 0
 
+        block_time = (
+            int(event["block_time"])
+            if event.get("block_time") is not None
+            else None
+        )
+        x_quote = _quote_status_for_mint(
+            storage,
+            mint=x_mint,
+            block_time=block_time,
+            max_quote_age_seconds=max_quote_age_seconds,
+        )
+        y_quote = _quote_status_for_mint(
+            storage,
+            mint=y_mint,
+            block_time=block_time,
+            max_quote_age_seconds=max_quote_age_seconds,
+        )
+        quote_reason = None
+        if block_time is None:
+            quote_reason = "transaction block time missing"
+        elif x_quote is None or not x_quote.available:
+            quote_reason = "token X quote missing at transaction time"
+        elif not x_quote.fresh or x_quote.quote_per_atomic is None:
+            quote_reason = "token X quote stale at transaction time"
+        elif y_quote is None or not y_quote.available:
+            quote_reason = "token Y quote missing at transaction time"
+        elif not y_quote.fresh or y_quote.quote_per_atomic is None:
+            quote_reason = "token Y quote stale at transaction time"
+
+        quote_eligible = quote_reason is None
+        base_residual_quote = None
+        fee_residual_quote = None
+        if quote_eligible:
+            assert x_quote is not None
+            assert y_quote is not None
+            assert x_quote.quote_per_atomic is not None
+            assert y_quote.quote_per_atomic is not None
+            base_residual_quote = (
+                base_residual_x * x_quote.quote_per_atomic
+                + base_residual_y * y_quote.quote_per_atomic
+            )
+            fee_residual_quote = (
+                fee_residual_x * x_quote.quote_per_atomic
+                + fee_residual_y * y_quote.quote_per_atomic
+            )
+
         if base_exact and fee_exact:
             evidence_class = "BOTH_HYPOTHESES_EXACT"
         elif base_exact:
@@ -376,6 +486,7 @@ def build_rotation_fee_semantics_report(
                 pool_address=pool_address,
                 owner_address=owner_address,
                 parent_ix_index=int(event["parent_ix_index"]),
+                block_time=block_time,
                 succeeded=succeeded,
                 rebalance_events_in_transaction=event_count,
                 should_claim_fee=should_claim_fee,
@@ -395,6 +506,34 @@ def build_rotation_fee_semantics_report(
                 base_residual_y=base_residual_y,
                 fee_separate_residual_x=fee_residual_x,
                 fee_separate_residual_y=fee_residual_y,
+                x_quote_per_atomic=(
+                    x_quote.quote_per_atomic if x_quote is not None else None
+                ),
+                x_quote_source=(
+                    x_quote.source if x_quote is not None else None
+                ),
+                x_quote_observed_at=(
+                    x_quote.observed_at if x_quote is not None else None
+                ),
+                x_quote_age_seconds=(
+                    x_quote.age_seconds if x_quote is not None else None
+                ),
+                y_quote_per_atomic=(
+                    y_quote.quote_per_atomic if y_quote is not None else None
+                ),
+                y_quote_source=(
+                    y_quote.source if y_quote is not None else None
+                ),
+                y_quote_observed_at=(
+                    y_quote.observed_at if y_quote is not None else None
+                ),
+                y_quote_age_seconds=(
+                    y_quote.age_seconds if y_quote is not None else None
+                ),
+                base_residual_quote=base_residual_quote,
+                fee_separate_residual_quote=fee_residual_quote,
+                quote_eligible=quote_eligible,
+                quote_exclusion_reason=quote_reason,
                 base_flow_exact=base_exact,
                 fee_separate_exact=fee_exact,
                 evidence_class=evidence_class,
@@ -404,12 +543,22 @@ def build_rotation_fee_semantics_report(
         )
 
     eligible = [item for item in samples if item.eligible]
+    quote_eligible = [
+        item for item in eligible if item.quote_eligible
+    ]
     return RotationFeeSemanticsReport(
         position_address=position_address,
+        quote_unit=DEFAULT_QUOTE_UNIT,
         transactions_seen=len({
             item.signature for item in samples
         }),
         eligible_transactions=len(eligible),
+        quote_eligible_transactions=len(quote_eligible),
+        quote_coverage_rate=(
+            len(quote_eligible) / len(eligible)
+            if eligible
+            else 0.0
+        ),
         claim_fee_true_samples=sum(
             item.should_claim_fee is True for item in eligible
         ),
@@ -432,6 +581,16 @@ def build_rotation_fee_semantics_report(
             item.evidence_class == "NEITHER_HYPOTHESIS_EXACT"
             for item in eligible
         ),
+        quoted_base_residual_net=float(sum(
+            item.base_residual_quote
+            for item in quote_eligible
+            if item.base_residual_quote is not None
+        )),
+        quoted_fee_separate_residual_net=float(sum(
+            item.fee_separate_residual_quote
+            for item in quote_eligible
+            if item.fee_separate_residual_quote is not None
+        )),
         semantics_resolved=False,
         conclusion="UNRESOLVED_OBSERVATIONAL_EVIDENCE",
         samples=tuple(samples),
