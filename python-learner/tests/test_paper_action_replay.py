@@ -126,6 +126,9 @@ def test_gross_comparison_uses_same_inventory_and_forward_window(
     )
 
     # Q64 price == 1 Y per X in this fixture.
+    assert report.decision_active_bin_id == 100
+    assert report.rebalance_lower_offset_bins == -1
+    assert report.rebalance_upper_offset_bins == 3
     assert report.start_x == 11
     assert report.start_y == 22
     assert report.start_value_y_atomic == 33
