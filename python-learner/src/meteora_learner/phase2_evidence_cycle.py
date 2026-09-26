@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from dataclasses import asdict, dataclass
 import json
 import os
@@ -23,6 +24,41 @@ from .phase2_research_quotes import collect_phase2_research_quotes
 from .reconciliation_corpus import build_reconciliation_corpus
 from .settings import Settings
 from .storage import Storage, utc_now_iso
+
+
+PHASE2_EVIDENCE_CYCLE_PROGRESS_TYPE = (
+    "PHASE2_EVIDENCE_CYCLE_PROGRESS_V1"
+)
+
+
+@dataclass(frozen=True)
+class Phase2EvidenceCycleTaskCount:
+    task_type: str
+    count: int
+
+
+@dataclass(frozen=True)
+class Phase2EvidenceCycleProgress:
+    pool_address: str
+    finished_at: str
+    overall_status: str
+    stages_successful: int
+    stages_partial: int
+    stages_failed: int
+    stage_statuses: tuple[tuple[str, str], ...]
+    reconciliation: dict[str, Any] | None
+    calibration: dict[str, Any] | None
+    work_queue_items: int
+    work_queue_task_counts: tuple[Phase2EvidenceCycleTaskCount, ...]
+    read_only: bool
+    actionable: bool
+    live_authorized: bool
+    promotion_gate_evaluated: bool
+    phase_promotion_performed: bool
+    qualified: bool
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -333,6 +369,163 @@ def run_phase2_read_only_evidence_cycle(
     )
 
 
+def _compact_reconciliation(
+    record: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if record is None:
+        return None
+    keys = (
+        "positions_seen",
+        "amount_positions_eligible",
+        "amount_positions_exact",
+        "amount_positions_provenance_ineligible",
+        "amount_bins_checked",
+        "amount_mismatched_bins",
+        "fee_intervals_seen",
+        "fee_intervals_eligible",
+        "fee_intervals_exact",
+        "fee_intervals_provenance_ineligible",
+        "fee_bins_checked",
+        "fee_mismatched_bins",
+        "reward_intervals_seen",
+        "reward_intervals_eligible",
+        "reward_intervals_exact",
+        "reward_intervals_provenance_ineligible",
+        "reward_bins_checked",
+        "reward_bins_with_checkpoint_growth",
+        "reward_mismatched_bins",
+        "strict_math_gate_passed",
+    )
+    return {
+        key: record[key]
+        for key in keys
+        if key in record
+    }
+
+
+def _compact_calibration(
+    record: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if record is None:
+        return None
+    keys = (
+        "add_positions",
+        "composition_add_events",
+        "composition_eligible_samples",
+        "composition_exact_samples",
+        "composition_mismatched_samples",
+        "composition_ineligible_samples",
+        "add_execution_events",
+        "add_execution_request_decodes",
+        "add_execution_matched_events",
+        "add_execution_unmatched_samples",
+        "add_active_guard_samples",
+        "rebalance_execution_events",
+        "rebalance_execution_request_decodes",
+        "rebalance_execution_matched_events",
+        "rebalance_active_guard_samples",
+        "transaction_fee_samples",
+    )
+    compact = {
+        key: record[key]
+        for key in keys
+        if key in record
+    }
+    gaps = record.get("evidence_gaps")
+    compact["evidence_gap_count"] = (
+        len(gaps) if isinstance(gaps, (list, tuple)) else 0
+    )
+    return compact
+
+
+def build_phase2_evidence_cycle_progress(
+    report: Phase2ReadOnlyEvidenceCycleReport,
+) -> Phase2EvidenceCycleProgress:
+    if (
+        not report.read_only
+        or report.actionable
+        or report.live_authorized
+        or report.promotion_gate_evaluated
+        or report.phase_promotion_performed
+        or not report.detector_cursor_untouched
+        or report.service_control_performed
+    ):
+        raise ValueError(
+            "Phase-2 evidence-cycle progress crossed the read-only boundary"
+        )
+
+    if report.stages_failed:
+        overall_status = "FAILED"
+    elif report.stages_partial:
+        overall_status = "PARTIAL"
+    else:
+        overall_status = "SUCCESS"
+
+    queue_items: list[dict[str, Any]] = []
+    if isinstance(report.work_queue, dict):
+        raw_items = report.work_queue.get("items")
+        if isinstance(raw_items, list):
+            queue_items = [
+                item for item in raw_items if isinstance(item, dict)
+            ]
+    task_counts = Counter(
+        str(item.get("task_type", "UNKNOWN"))
+        for item in queue_items
+    )
+
+    return Phase2EvidenceCycleProgress(
+        pool_address=report.pool_address,
+        finished_at=report.finished_at,
+        overall_status=overall_status,
+        stages_successful=report.stages_successful,
+        stages_partial=report.stages_partial,
+        stages_failed=report.stages_failed,
+        stage_statuses=tuple(
+            (stage.name, stage.status)
+            for stage in report.stages
+        ),
+        reconciliation=_compact_reconciliation(
+            report.reconciliation_corpus
+        ),
+        calibration=_compact_calibration(
+            report.calibration_evidence
+        ),
+        work_queue_items=len(queue_items),
+        work_queue_task_counts=tuple(
+            Phase2EvidenceCycleTaskCount(
+                task_type=task_type,
+                count=count,
+            )
+            for task_type, count in sorted(
+                task_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ),
+        read_only=True,
+        actionable=False,
+        live_authorized=False,
+        promotion_gate_evaluated=False,
+        phase_promotion_performed=False,
+        qualified=False,
+    )
+
+
+def persist_phase2_evidence_cycle_progress(
+    storage: Storage,
+    *,
+    report: Phase2ReadOnlyEvidenceCycleReport,
+) -> int:
+    progress = build_phase2_evidence_cycle_progress(report)
+    return storage.save_advanced_edge_evidence(
+        edge_type=PHASE2_EVIDENCE_CYCLE_PROGRESS_TYPE,
+        pool_address=progress.pool_address,
+        as_of=progress.finished_at,
+        status=f"COLLECTION_{progress.overall_status}",
+        qualified=False,
+        evidence=progress.to_record(),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -363,6 +556,14 @@ def main() -> None:
         default=180,
     )
     parser.add_argument("--database")
+    parser.add_argument(
+        "--persist-progress",
+        action="store_true",
+        help=(
+            "Persist a compact non-qualified technical progress record "
+            "after the collection step"
+        ),
+    )
     args = parser.parse_args()
 
     if not args.pool:
@@ -385,7 +586,15 @@ def main() -> None:
         reinspection_timeout_seconds=args.reinspection_timeout_seconds,
         prestate_timeout_seconds=args.prestate_timeout_seconds,
     )
-    print(json.dumps(report.to_record(), indent=2))
+    output = report.to_record()
+    if args.persist_progress:
+        output["progress_evidence_id"] = (
+            persist_phase2_evidence_cycle_progress(
+                storage,
+                report=report,
+            )
+        )
+    print(json.dumps(output, indent=2))
     if report.stages_partial or report.stages_failed:
         raise SystemExit(2)
 
