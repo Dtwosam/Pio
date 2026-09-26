@@ -238,7 +238,11 @@ def run_phase2_read_only_evidence_cycle(
         stages.append(
             _stage(
                 name="CALIBRATION_EVIDENCE",
-                status="SUCCESS",
+                status=(
+                    "PARTIAL"
+                    if calibration.evidence_gaps
+                    else "SUCCESS"
+                ),
                 result=calibration,
             )
         )
@@ -259,7 +263,11 @@ def run_phase2_read_only_evidence_cycle(
         stages.append(
             _stage(
                 name="CALIBRATION_WORK_QUEUE",
-                status="SUCCESS",
+                status=(
+                    "PARTIAL"
+                    if queue.items
+                    else "SUCCESS"
+                ),
                 result=queue,
             )
         )
