@@ -49,11 +49,11 @@
     {
       "pr": 25,
       "head": "b9353d40ce693887a3d808ae9cd06641e8a00b6f",
-      "role": "observer failure categories"
+      "role": "observer failure categories and secret-safe discovery"
     },
     {
       "pr": 26,
-      "head": "316d51f73f3ca89242b3ed00f87ce5c9af0ea1d7",
+      "head": "8304110deaba657ae028f0301f0c808ce33fc721",
       "role": "observer fair attempt ledger"
     },
     {
@@ -65,12 +65,28 @@
       "pr": 29,
       "head": "4a1836bac8b7a321feea259be0b221250100e459",
       "role": "bounded strict prestate verification"
+    },
+    {
+      "pr": 30,
+      "head": "337d3d86ba99f2de2c02dd6b601ecf4847cb5d1f",
+      "role": "secret-safe prospective quote failures"
+    },
+    {
+      "pr": 31,
+      "head": "395a888bc7b4c6ba1945b5ed8bf08ad049111e3a",
+      "role": "fair bounded runner attempt ledger"
+    },
+    {
+      "pr": 34,
+      "head": "315ab40c6ef54bac5c0a84ef220bd69fc847a26d",
+      "role": "mixed exploration and interval revisit cadence"
     }
   ],
   "integration_notes": [
     "research_store keeps PR12 position capture-slot columns and PR23 single-context pool-capture filtering",
     "calibration_queue keeps PR23 future-prestate classification and PR20 env-only RPC commands",
-    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger",
-    "position discovery failures are secret-safe and do not include raw executor stderr"
+    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger and PR31 bounded-task attempt ledger",
+    "quote and position observer failures are categorical and do not expose raw transport/RPC error text",
+    "neutral position collection reserves revisit capacity when budget permits so fee/reward intervals can accumulate without starving exploration"
   ]
 }
