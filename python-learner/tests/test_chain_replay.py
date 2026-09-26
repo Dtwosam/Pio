@@ -1,5 +1,7 @@
 from meteora_learner.chain_replay import (
     STANDARD_SPL_TOKEN_PROGRAM,
+    continue_small_lp_replay,
+    replay_existing_lp_history,
     replay_latest_small_lp_interval,
     replay_small_lp_history,
 )
@@ -577,3 +579,268 @@ def test_chain_replay_marks_rewards_not_applicable_for_limit_order_pool(tmp_path
     assert result.reward_one == 0
     assert result.reward_two == 0
     assert result.reward_fidelity == "NOT_APPLICABLE_LIMIT_ORDER_POOL"
+
+
+
+def test_existing_lp_continuation_matches_full_replay_incremental_fees(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+
+    def save(minute, supply, y_amount, fee_checkpoint):
+        storage.save_chain_pool_snapshot(
+            {
+                "pool_address": "pool",
+                "active_bin_id": 0,
+                "bin_step": 25,
+                "token_x_mint": "x",
+                "token_y_mint": "y",
+                "token_x_program": STANDARD_SPL_TOKEN_PROGRAM,
+                "token_y_program": STANDARD_SPL_TOKEN_PROGRAM,
+                "base_fee_rate": "0",
+                "variable_fee_rate": "0",
+                "total_fee_rate": "0",
+                "deposit_total_fee_rate": "0",
+                "protocol_share_bps": 0,
+                "collect_fee_mode": 0,
+                "bin_arrays": [
+                    {
+                        "address": "array",
+                        "index": 0,
+                        "lower_bin_id": 0,
+                        "upper_bin_id": 0,
+                        "bins": [
+                            {
+                                "bin_id": 0,
+                                "price": str(Q64),
+                                "amount_x": "0",
+                                "amount_y": str(y_amount),
+                                "liquidity_supply": str(supply * Q64),
+                                "fee_amount_x_per_token_stored": "0",
+                                "fee_amount_y_per_token_stored": str(
+                                    fee_checkpoint * Q64
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            },
+            observed_at=f"2026-09-22T00:{minute:02d}:00+00:00",
+        )
+
+    save(0, 100, 100, 0)
+    save(5, 200, 200, 1000)
+    save(10, 200, 200, 2000)
+
+    first = replay_small_lp_history(
+        str(db),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=1,
+        min_bin_id=0,
+        max_bin_id=0,
+        strategy=StrategyType.SPOT,
+        observation_times=(
+            "2026-09-22T00:00:00+00:00",
+            "2026-09-22T00:05:00+00:00",
+        ),
+        max_share_bps=200,
+    )
+    continuation = continue_small_lp_replay(
+        str(db),
+        prior=first,
+        observation_times=(
+            "2026-09-22T00:05:00+00:00",
+            "2026-09-22T00:10:00+00:00",
+        ),
+    )
+    full = replay_small_lp_history(
+        str(db),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=1,
+        min_bin_id=0,
+        max_bin_id=0,
+        strategy=StrategyType.SPOT,
+        observation_times=(
+            "2026-09-22T00:00:00+00:00",
+            "2026-09-22T00:05:00+00:00",
+            "2026-09-22T00:10:00+00:00",
+        ),
+        max_share_bps=200,
+    )
+
+    assert continuation.replay_fidelity == (
+        "EXISTING_SMALL_LP_CONTINUATION_V1"
+    )
+    assert continuation.composition_fee_applied is False
+    assert continuation.fee_y == full.fee_y - first.fee_y
+    assert first.fee_y + continuation.fee_y == full.fee_y
+    assert continuation.ending_x == full.ending_x
+    assert continuation.ending_y == full.ending_y
+    assert continuation.bins[0].liquidity_share == (
+        first.bins[0].liquidity_share
+    )
+
+
+def test_existing_lp_continuation_requires_exact_prior_boundary(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_snapshot(
+        storage,
+        "2026-09-22T00:00:00+00:00",
+        y_amount=100,
+        fee_y_per_token=0,
+    )
+    save_snapshot(
+        storage,
+        "2026-09-22T00:05:00+00:00",
+        y_amount=100,
+        fee_y_per_token=0,
+    )
+    save_snapshot(
+        storage,
+        "2026-09-22T00:10:00+00:00",
+        y_amount=100,
+        fee_y_per_token=0,
+    )
+    prior = replay_small_lp_history(
+        str(db),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=1,
+        min_bin_id=0,
+        max_bin_id=0,
+        strategy=StrategyType.SPOT,
+        observation_times=(
+            "2026-09-22T00:00:00+00:00",
+            "2026-09-22T00:05:00+00:00",
+        ),
+        max_share_bps=200,
+    )
+
+    try:
+        continue_small_lp_replay(
+            str(db),
+            prior=prior,
+            observation_times=(
+                "2026-09-22T00:00:00+00:00",
+                "2026-09-22T00:10:00+00:00",
+            ),
+        )
+    except ValueError as exc:
+        assert "prior replay end" in str(exc)
+    else:
+        raise AssertionError("expected continuation boundary mismatch to fail")
+
+
+def test_existing_lp_continuation_rejects_share_that_becomes_too_large(
+    tmp_path,
+):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+
+    def save(minute, supply):
+        storage.save_chain_pool_snapshot(
+            {
+                "pool_address": "pool",
+                "active_bin_id": 0,
+                "bin_step": 25,
+                "token_x_mint": "x",
+                "token_y_mint": "y",
+                "token_x_program": STANDARD_SPL_TOKEN_PROGRAM,
+                "token_y_program": STANDARD_SPL_TOKEN_PROGRAM,
+                "base_fee_rate": "0",
+                "variable_fee_rate": "0",
+                "total_fee_rate": "0",
+                "deposit_total_fee_rate": "0",
+                "protocol_share_bps": 0,
+                "collect_fee_mode": 0,
+                "bin_arrays": [
+                    {
+                        "address": "array",
+                        "index": 0,
+                        "lower_bin_id": 0,
+                        "upper_bin_id": 0,
+                        "bins": [
+                            {
+                                "bin_id": 0,
+                                "price": str(Q64),
+                                "amount_x": "0",
+                                "amount_y": str(supply),
+                                "liquidity_supply": str(supply * Q64),
+                                "fee_amount_x_per_token_stored": "0",
+                                "fee_amount_y_per_token_stored": "0",
+                            }
+                        ],
+                    }
+                ],
+            },
+            observed_at=f"2026-09-22T00:{minute:02d}:00+00:00",
+        )
+
+    save(0, 100)
+    save(5, 100)
+    save(10, 25)
+    prior = replay_small_lp_history(
+        str(db),
+        pool_address="pool",
+        amount_x=0,
+        amount_y=1,
+        min_bin_id=0,
+        max_bin_id=0,
+        strategy=StrategyType.SPOT,
+        observation_times=(
+            "2026-09-22T00:00:00+00:00",
+            "2026-09-22T00:05:00+00:00",
+        ),
+        max_share_bps=200,
+    )
+
+    try:
+        continue_small_lp_replay(
+            str(db),
+            prior=prior,
+            observation_times=(
+                "2026-09-22T00:05:00+00:00",
+                "2026-09-22T00:10:00+00:00",
+            ),
+        )
+    except ValueError as exc:
+        assert "too large" in str(exc)
+    else:
+        raise AssertionError(
+            "expected continuation small-LP guard to reject share"
+        )
+
+
+def test_existing_lp_history_accepts_explicit_existing_shares(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_snapshot(
+        storage,
+        "2026-09-22T00:00:00+00:00",
+        y_amount=100,
+        fee_y_per_token=0,
+    )
+    save_snapshot(
+        storage,
+        "2026-09-22T00:05:00+00:00",
+        y_amount=110,
+        fee_y_per_token=100 * Q64,
+    )
+
+    result = replay_existing_lp_history(
+        str(db),
+        pool_address="pool",
+        liquidity_shares={0: Q64},
+        observation_times=(
+            "2026-09-22T00:00:00+00:00",
+            "2026-09-22T00:05:00+00:00",
+        ),
+        max_share_bps=200,
+    )
+
+    assert result.start_position_y == 1
+    assert result.ending_y == 1
+    assert result.fee_y == 99
+    assert result.composition_fee_applied is False
