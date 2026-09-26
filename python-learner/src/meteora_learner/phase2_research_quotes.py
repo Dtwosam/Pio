@@ -26,6 +26,7 @@ WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112"
 class Phase2ResearchQuoteItem:
     token_mint: str
     status: str
+    observed_at: str
     quote_per_atomic: float | None
     source: str | None
     error: str | None
@@ -83,6 +84,7 @@ def collect_phase2_research_quotes(
     pool_address: str,
     observed_at: str | None = None,
     fetch_quote: Callable[[str], JupiterTokenUSDQuote] | None = None,
+    now: Callable[[], str] = utc_now_iso,
 ) -> Phase2ResearchQuoteReport:
     """
     Capture prospective quote evidence for Phase-2/rotation research.
@@ -90,7 +92,7 @@ def collect_phase2_research_quotes(
     This collector is read-only with respect to external systems. It persists
     only observed token quotes and performs no policy/action selection.
     """
-    timestamp = observed_at or utc_now_iso()
+    run_started_at = observed_at or now()
     mints = required_pool_research_quote_mints(
         storage,
         pool_address=pool_address,
@@ -99,7 +101,12 @@ def collect_phase2_research_quotes(
     refreshed = 0
     failed = 0
 
-    def record(mint: str, quote: JupiterTokenUSDQuote) -> None:
+    def record(
+        mint: str,
+        quote: JupiterTokenUSDQuote,
+        *,
+        quote_observed_at: str,
+    ) -> None:
         nonlocal refreshed
         if quote.token_mint != mint:
             raise ValueError("quote mint does not match requested mint")
@@ -108,7 +115,7 @@ def collect_phase2_research_quotes(
             token_mint=mint,
             quote_per_atomic=quote.usd_per_atomic,
             source=JUPITER_SOURCE,
-            observed_at=timestamp,
+            observed_at=quote_observed_at,
             quote_unit=DEFAULT_QUOTE_UNIT,
             raw=asdict(quote),
         )
@@ -117,6 +124,7 @@ def collect_phase2_research_quotes(
             Phase2ResearchQuoteItem(
                 token_mint=mint,
                 status="REFRESHED",
+                observed_at=quote_observed_at,
                 quote_per_atomic=saved.quote_per_atomic,
                 source=saved.source,
                 error=None,
@@ -127,13 +135,19 @@ def collect_phase2_research_quotes(
         with JupiterTokenClient() as client:
             for mint in mints:
                 try:
-                    record(mint, client.token_usd_quote(mint))
+                    quote = client.token_usd_quote(mint)
+                    record(
+                        mint,
+                        quote,
+                        quote_observed_at=observed_at or now(),
+                    )
                 except Exception as exc:
                     failed += 1
                     items.append(
                         Phase2ResearchQuoteItem(
                             token_mint=mint,
                             status="FAILED",
+                            observed_at=observed_at or now(),
                             quote_per_atomic=None,
                             source=None,
                             error=str(exc)[:2000],
@@ -142,7 +156,12 @@ def collect_phase2_research_quotes(
     else:
         for mint in mints:
             try:
-                record(mint, fetch_quote(mint))
+                quote = fetch_quote(mint)
+                record(
+                    mint,
+                    quote,
+                    quote_observed_at=observed_at or now(),
+                )
             except Exception as exc:
                 failed += 1
                 items.append(
@@ -157,7 +176,7 @@ def collect_phase2_research_quotes(
 
     return Phase2ResearchQuoteReport(
         pool_address=pool_address,
-        observed_at=timestamp,
+        observed_at=run_started_at,
         mints_requested=len(mints),
         quotes_refreshed=refreshed,
         quotes_failed=failed,
