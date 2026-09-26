@@ -211,6 +211,28 @@ def build_market_chain_refresh_queue(
     )
 
 
+def _latest_chain_observed_at(
+    storage: Storage,
+    pool_address: str,
+) -> str:
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT observed_at
+            FROM chain_pool_snapshots
+            WHERE pool_address = ?
+            ORDER BY julianday(observed_at) DESC, id DESC
+            LIMIT 1
+            """,
+            (pool_address,),
+        ).fetchone()
+    if row is None:
+        raise ValueError(
+            "refreshed pool snapshot was not persisted"
+        )
+    return str(row[0])
+
+
 def run_market_chain_refresh(
     storage: Storage,
     *,
@@ -279,7 +301,10 @@ def run_market_chain_refresh(
                         candidate.last_chain_observed_at
                     ),
                     status="REFRESHED",
-                    new_observed_at=result.observed_at,
+                    new_observed_at=_latest_chain_observed_at(
+                        storage,
+                        candidate.pool_address,
+                    ),
                     bin_arrays=result.bin_arrays,
                     bins=result.bins,
                     error=None,
