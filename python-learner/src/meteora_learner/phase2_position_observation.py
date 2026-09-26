@@ -145,7 +145,11 @@ def collect_phase2_position_observations(
     positions_returned = int(discovery.get("positions_returned", len(positions)))
     truncated = bool(discovery.get("truncated", positions_found > positions_returned))
 
-    latest_by_position: dict[str, float] = {}
+    latest_by_position: dict[str, float] = (
+        storage.latest_phase2_position_observation_attempts(
+            pool_address=pool_address,
+        )
+    )
     with storage.connect() as conn:
         rows = conn.execute(
             """
@@ -157,8 +161,14 @@ def collect_phase2_position_observations(
             (pool_address,),
         ).fetchall()
     for row in rows:
-        if row[1] is not None:
-            latest_by_position[str(row[0])] = float(row[1])
+        if row[1] is None:
+            continue
+        address = str(row[0])
+        snapshot_jd = float(row[1])
+        latest_by_position[address] = max(
+            latest_by_position.get(address, snapshot_jd),
+            snapshot_jd,
+        )
 
     unique_positions: dict[str, dict[str, Any]] = {}
     for item in positions:
@@ -183,6 +193,13 @@ def collect_phase2_position_observations(
     failure_details: list[Phase2PositionFailure] = []
 
     def fail(position_address: str, category: str) -> None:
+        storage.save_phase2_position_observation_attempt(
+            pool_address=pool_address,
+            position_address=position_address,
+            attempted_at=timestamp,
+            succeeded=False,
+            failure_category=category,
+        )
         failure_details.append(
             Phase2PositionFailure(
                 position_address=position_address,
@@ -220,7 +237,7 @@ def collect_phase2_position_observations(
             fail(position_address, "POOL_MISMATCH")
             continue
         try:
-            _require_single_capture_slot(snapshot)
+            capture_slot = _require_single_capture_slot(snapshot)
         except (TypeError, ValueError):
             fail(position_address, "CAPTURE_PROVENANCE")
             continue
@@ -235,6 +252,13 @@ def collect_phase2_position_observations(
             fail(position_address, "INGEST_FAILED")
             continue
 
+        storage.save_phase2_position_observation_attempt(
+            pool_address=pool_address,
+            position_address=position_address,
+            attempted_at=timestamp,
+            succeeded=True,
+            capture_slot=capture_slot,
+        )
         snapshots_saved += 1
         bins_saved += result.bins
 
