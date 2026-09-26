@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -218,12 +218,7 @@ def apply_guarded_collection_stack(
         if item.status in {"READY_CREATE", "READY_UPDATE"}
     ]
     if not changes:
-        return CollectionDeployReport(
-            **{
-                **report.to_record(),
-                "applied": True,
-            }
-        )
+        return replace(report, applied=True)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup_root = Path(backup_dir).resolve() / stamp
@@ -259,12 +254,10 @@ def apply_guarded_collection_stack(
                 target.unlink()
         raise
 
-    return CollectionDeployReport(
-        **{
-            **report.to_record(),
-            "applied": True,
-            "backup_root": str(backup_root),
-        }
+    return replace(
+        report,
+        applied=True,
+        backup_root=str(backup_root),
     )
 
 
