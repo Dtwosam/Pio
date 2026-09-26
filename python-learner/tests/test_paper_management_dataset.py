@@ -34,6 +34,9 @@ def report(
         "strategy": "SPOT",
         "min_bin_id": 99,
         "max_bin_id": 103,
+        "decision_active_bin_id": 100,
+        "rebalance_lower_offset_bins": -1,
+        "rebalance_upper_offset_bins": 3,
         "start_x": 11,
         "start_y": 22,
         "start_value_y_atomic": 33,
@@ -104,6 +107,9 @@ def test_complete_positive_and_negative_net_outcomes_create_labels():
     assert [
         item.target_rebalance_wins for item in dataset.training_examples
     ] == [1, 0]
+    assert dataset.training_examples[0].decision_active_bin_id == 100
+    assert dataset.training_examples[0].rebalance_lower_offset_bins == -1
+    assert dataset.training_examples[0].rebalance_upper_offset_bins == 3
     assert dataset.training_examples[0].target_net_advantage_after_all_costs_quote == pytest.approx(
         2.5
     )
@@ -280,3 +286,21 @@ def test_persisted_dataset_requires_existing_gross_evidence(tmp_path):
             storage,
             pool_address="pool",
         )
+
+
+
+def test_complete_economics_without_decision_relative_context_stays_unlabeled():
+    row = report(
+        transition_complete=True,
+        economics_complete=True,
+        final_net=3.0,
+    )
+    del row.decision_active_bin_id
+    del row.rebalance_lower_offset_bins
+    del row.rebalance_upper_offset_bins
+
+    dataset = build_paper_management_dataset((row,))
+
+    assert dataset.training_examples_built == 0
+    assert dataset.drop_reasons == (("DECISION_CONTEXT_INCOMPLETE", 1),)
+    assert dataset.observations[0].training_eligible is False
