@@ -667,3 +667,30 @@ def test_observer_revisit_budget_cannot_be_negative(tmp_path):
             executor_path="/executor",
             min_revisit_per_run=-1,
         )
+
+
+
+def test_position_discovery_failure_does_not_echo_executor_stderr(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    secret = "https://user:secret@example.invalid/rpc"
+
+    def runner(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            f"discovery failed at {secret}",
+        )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        collect_phase2_position_observations(
+            storage,
+            pool_address=POOL,
+            executor_path="/executor",
+            runner=runner,
+        )
+
+    message = str(excinfo.value)
+    assert "executor failed with status 1" in message
+    assert secret not in message
+    assert "discovery failed" not in message
