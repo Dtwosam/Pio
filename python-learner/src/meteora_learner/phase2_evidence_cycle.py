@@ -34,6 +34,21 @@ class Phase2EvidenceCycleStage:
 
 
 @dataclass(frozen=True)
+class Phase2EvidenceProgressCounts:
+    positions_seen: int | None
+    amount_bins_checked: int | None
+    fee_intervals_eligible: int | None
+    fee_bins_checked: int | None
+    reward_intervals_eligible: int | None
+    reward_growth_bins: int | None
+    composition_eligible_samples: int | None
+    composition_exact_samples: int | None
+    add_execution_matched_events: int | None
+    rebalance_guard_samples: int | None
+    transaction_fee_samples: int | None
+
+
+@dataclass(frozen=True)
 class Phase2ReadOnlyEvidenceCycleReport:
     pool_address: str
     collection_scope: str
@@ -44,6 +59,9 @@ class Phase2ReadOnlyEvidenceCycleReport:
     stages_partial: int
     stages_failed: int
     stages: tuple[Phase2EvidenceCycleStage, ...]
+    evidence_before: Phase2EvidenceProgressCounts
+    evidence_after: Phase2EvidenceProgressCounts
+    evidence_delta: Phase2EvidenceProgressCounts
     reconciliation_corpus: dict[str, Any] | None
     calibration_evidence: dict[str, Any] | None
     work_queue: dict[str, Any] | None
@@ -81,6 +99,115 @@ def _stage(
     )
 
 
+def _progress_counts(
+    *,
+    reconciliation: Any | None,
+    calibration: Any | None,
+) -> Phase2EvidenceProgressCounts:
+    return Phase2EvidenceProgressCounts(
+        positions_seen=(
+            int(reconciliation.positions_seen)
+            if reconciliation is not None
+            else None
+        ),
+        amount_bins_checked=(
+            int(reconciliation.amount_bins_checked)
+            if reconciliation is not None
+            else None
+        ),
+        fee_intervals_eligible=(
+            int(reconciliation.fee_intervals_eligible)
+            if reconciliation is not None
+            else None
+        ),
+        fee_bins_checked=(
+            int(reconciliation.fee_bins_checked)
+            if reconciliation is not None
+            else None
+        ),
+        reward_intervals_eligible=(
+            int(reconciliation.reward_intervals_eligible)
+            if reconciliation is not None
+            else None
+        ),
+        reward_growth_bins=(
+            int(reconciliation.reward_bins_with_checkpoint_growth)
+            if reconciliation is not None
+            else None
+        ),
+        composition_eligible_samples=(
+            int(calibration.composition_eligible_samples)
+            if calibration is not None
+            else None
+        ),
+        composition_exact_samples=(
+            int(calibration.composition_exact_samples)
+            if calibration is not None
+            else None
+        ),
+        add_execution_matched_events=(
+            int(calibration.add_execution_matched_events)
+            if calibration is not None
+            else None
+        ),
+        rebalance_guard_samples=(
+            int(calibration.rebalance_guard_samples)
+            if calibration is not None
+            else None
+        ),
+        transaction_fee_samples=(
+            int(calibration.transaction_fee_samples)
+            if calibration is not None
+            else None
+        ),
+    )
+
+
+def _progress_delta(
+    before: Phase2EvidenceProgressCounts,
+    after: Phase2EvidenceProgressCounts,
+) -> Phase2EvidenceProgressCounts:
+    values: dict[str, int | None] = {}
+    for name in before.__dataclass_fields__:
+        start = getattr(before, name)
+        end = getattr(after, name)
+        values[name] = (
+            end - start
+            if start is not None and end is not None
+            else None
+        )
+    return Phase2EvidenceProgressCounts(**values)
+
+
+def _snapshot_progress(
+    storage: Storage,
+) -> tuple[
+    Phase2EvidenceProgressCounts,
+    Any | None,
+    Any | None,
+]:
+    try:
+        reconciliation = build_reconciliation_corpus(
+            str(storage.path)
+        )
+    except Exception:
+        reconciliation = None
+    try:
+        calibration = build_phase2_calibration_evidence(
+            str(storage.path)
+        )
+    except Exception:
+        calibration = None
+    return (
+        _progress_counts(
+            reconciliation=reconciliation,
+            calibration=calibration,
+        ),
+        reconciliation,
+        calibration,
+    )
+
+
 def run_phase2_read_only_evidence_cycle(
     storage: Storage,
     *,
@@ -108,6 +235,7 @@ def run_phase2_read_only_evidence_cycle(
         raise ValueError("pool_address is required")
 
     started_at = now()
+    evidence_before, _, _ = _snapshot_progress(storage)
     stages: list[Phase2EvidenceCycleStage] = []
 
     try:
@@ -304,6 +432,25 @@ def run_phase2_read_only_evidence_cycle(
             )
         )
 
+    evidence_after = _progress_counts(
+        reconciliation=(
+            reconciliation
+            if "reconciliation" in locals()
+            and reconciliation_record is not None
+            else None
+        ),
+        calibration=(
+            calibration
+            if "calibration" in locals()
+            and calibration_record is not None
+            else None
+        ),
+    )
+    evidence_delta = _progress_delta(
+        evidence_before,
+        evidence_after,
+    )
+
     return Phase2ReadOnlyEvidenceCycleReport(
         pool_address=pool_address,
         collection_scope="POOL",
@@ -320,6 +467,9 @@ def run_phase2_read_only_evidence_cycle(
             item.status == "FAILED" for item in stages
         ),
         stages=tuple(stages),
+        evidence_before=evidence_before,
+        evidence_after=evidence_after,
+        evidence_delta=evidence_delta,
         reconciliation_corpus=reconciliation_record,
         calibration_evidence=calibration_record,
         work_queue=queue_record,
