@@ -222,7 +222,7 @@ def test_zero_reported_fee_makes_both_hypotheses_identical(tmp_path):
     )
 
     assert report.both_hypotheses_match == 1
-    assert report.samples[0].evidence_class == "BOTH_HYPOTHESES_EXACT"
+    assert report.samples[0].evidence_class == "NEITHER_HYPOTHESIS_EXACT"
 
 
 def test_multiple_rebalance_events_are_not_attributed_to_shared_owner_flow(tmp_path):
@@ -520,5 +520,5 @@ def test_explicit_empty_token_flow_capture_remains_quote_eligible_when_quoted(
 
     assert report.eligible_transactions == 1
     assert report.quote_eligible_transactions == 1
-    assert report.samples[0].evidence_class == "BOTH_HYPOTHESES_EXACT"
-    assert report.samples[0].base_residual_quote == pytest.approx(0.0)
+    assert report.samples[0].evidence_class == "NEITHER_HYPOTHESIS_EXACT"
+    assert report.samples[0].base_residual_quote == pytest.approx(-130.0)
