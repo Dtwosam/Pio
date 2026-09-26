@@ -9,11 +9,25 @@ import subprocess
 from typing import Any, Callable, Sequence
 
 from .position_ingest import ingest_position_snapshot
+from .reconciliation_corpus import build_reconciliation_corpus
 from .settings import Settings
 from .storage import Storage, utc_now_iso
 
 
 ExecutorRunner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+@dataclass(frozen=True)
+class Phase2ReconciliationProgress:
+    positions_seen: int
+    amount_positions_eligible: int
+    amount_bins_checked: int
+    fee_intervals_eligible: int
+    fee_bins_checked: int
+    reward_intervals_eligible: int
+    reward_bins_checked: int
+    reward_bins_with_checkpoint_growth: int
+    strict_math_gate_passed: bool
 
 
 @dataclass(frozen=True)
@@ -28,6 +42,7 @@ class Phase2PositionObservationResult:
     bins_saved: int
     failures: int
     failed_positions: tuple[str, ...]
+    reconciliation_progress: Phase2ReconciliationProgress | None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -156,6 +171,26 @@ def collect_phase2_position_observations(
         except Exception:
             failed.append(position_address)
 
+    reconciliation_progress = None
+    try:
+        corpus = build_reconciliation_corpus(str(storage.path))
+    except ValueError:
+        corpus = None
+    if corpus is not None:
+        reconciliation_progress = Phase2ReconciliationProgress(
+            positions_seen=corpus.positions_seen,
+            amount_positions_eligible=corpus.amount_positions_eligible,
+            amount_bins_checked=corpus.amount_bins_checked,
+            fee_intervals_eligible=corpus.fee_intervals_eligible,
+            fee_bins_checked=corpus.fee_bins_checked,
+            reward_intervals_eligible=corpus.reward_intervals_eligible,
+            reward_bins_checked=corpus.reward_bins_checked,
+            reward_bins_with_checkpoint_growth=(
+                corpus.reward_bins_with_checkpoint_growth
+            ),
+            strict_math_gate_passed=corpus.strict_math_gate_passed,
+        )
+
     return Phase2PositionObservationResult(
         pool_address=pool_address,
         observed_at=timestamp,
@@ -167,6 +202,7 @@ def collect_phase2_position_observations(
         bins_saved=bins_saved,
         failures=len(failed),
         failed_positions=tuple(failed),
+        reconciliation_progress=reconciliation_progress,
     )
 
 
