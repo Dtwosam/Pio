@@ -54,6 +54,8 @@ class Phase2PositionObservationResult:
     positions_found: int
     positions_returned: int
     positions_selected: int
+    exploration_positions_selected: int
+    revisit_positions_selected: int
     discovery_truncated: bool
     snapshots_saved: int
     bins_saved: int
@@ -118,6 +120,7 @@ def collect_phase2_position_observations(
     pool_address: str,
     executor_path: str | Path,
     max_positions_per_run: int = 50,
+    min_revisit_per_run: int = 1,
     timeout_seconds: int = 120,
     observed_at: str | None = None,
     runner: ExecutorRunner = subprocess.run,
@@ -126,6 +129,8 @@ def collect_phase2_position_observations(
         raise ValueError("pool_address is required")
     if max_positions_per_run <= 0 or max_positions_per_run > 5_000:
         raise ValueError("max_positions_per_run must be between 1 and 5000")
+    if min_revisit_per_run < 0:
+        raise ValueError("min_revisit_per_run cannot be negative")
 
     timestamp = observed_at or utc_now_iso()
     discovery = _run_executor_json(
@@ -149,6 +154,7 @@ def collect_phase2_position_observations(
             pool_address=pool_address,
         )
     )
+    latest_snapshot_by_position: dict[str, float] = {}
     with storage.connect() as conn:
         rows = conn.execute(
             """
@@ -164,6 +170,7 @@ def collect_phase2_position_observations(
             continue
         address = str(row[0])
         snapshot_jd = float(row[1])
+        latest_snapshot_by_position[address] = snapshot_jd
         latest_by_position[address] = max(
             latest_by_position.get(address, snapshot_jd),
             snapshot_jd,
@@ -178,14 +185,76 @@ def collect_phase2_position_observations(
             raise ValueError("position discovery entry is missing position_address")
         unique_positions.setdefault(position_address, item)
 
-    selected_positions = sorted(
-        unique_positions.values(),
+    exploration_positions = sorted(
+        (
+            item
+            for item in unique_positions.values()
+            if str(item["position_address"])
+            not in latest_snapshot_by_position
+        ),
         key=lambda item: (
             str(item["position_address"]) in latest_by_position,
             latest_by_position.get(str(item["position_address"]), 0.0),
             str(item["position_address"]),
         ),
-    )[:max_positions_per_run]
+    )
+    revisit_positions = sorted(
+        (
+            item
+            for item in unique_positions.values()
+            if str(item["position_address"])
+            in latest_snapshot_by_position
+        ),
+        key=lambda item: (
+            latest_by_position.get(
+                str(item["position_address"]),
+                latest_snapshot_by_position[str(item["position_address"])],
+            ),
+            str(item["position_address"]),
+        ),
+    )
+
+    if exploration_positions and revisit_positions:
+        revisit_budget = min(
+            min_revisit_per_run,
+            len(revisit_positions),
+            max(0, max_positions_per_run - 1),
+        )
+    elif revisit_positions:
+        revisit_budget = min(
+            max_positions_per_run,
+            len(revisit_positions),
+        )
+    else:
+        revisit_budget = 0
+
+    exploration_budget = max_positions_per_run - revisit_budget
+    selected_exploration = exploration_positions[:exploration_budget]
+    selected_revisits = revisit_positions[:revisit_budget]
+
+    remaining = max_positions_per_run - (
+        len(selected_exploration) + len(selected_revisits)
+    )
+    if remaining:
+        selected_exploration.extend(
+            exploration_positions[len(selected_exploration):][
+                :remaining
+            ]
+        )
+        remaining = max_positions_per_run - (
+            len(selected_exploration) + len(selected_revisits)
+        )
+    if remaining:
+        selected_revisits.extend(
+            revisit_positions[len(selected_revisits):][
+                :remaining
+            ]
+        )
+
+    selected_positions = [
+        *selected_exploration,
+        *selected_revisits,
+    ]
 
     snapshots_saved = 0
     bins_saved = 0
@@ -310,6 +379,8 @@ def collect_phase2_position_observations(
         positions_found=positions_found,
         positions_returned=positions_returned,
         positions_selected=len(selected_positions),
+        exploration_positions_selected=len(selected_exploration),
+        revisit_positions_selected=len(selected_revisits),
         discovery_truncated=truncated,
         snapshots_saved=snapshots_saved,
         bins_saved=bins_saved,
@@ -340,6 +411,13 @@ def main() -> None:
         type=int,
         default=int(os.getenv("PIO_PHASE2_POSITION_MAX_PER_RUN", "50")),
     )
+    parser.add_argument(
+        "--min-revisit-per-run",
+        type=int,
+        default=int(
+            os.getenv("PIO_PHASE2_POSITION_MIN_REVISITS_PER_RUN", "1")
+        ),
+    )
     parser.add_argument("--timeout-seconds", type=int, default=120)
     parser.add_argument("--database")
     args = parser.parse_args()
@@ -354,6 +432,7 @@ def main() -> None:
         pool_address=args.pool,
         executor_path=args.executor,
         max_positions_per_run=args.max_positions_per_run,
+        min_revisit_per_run=args.min_revisit_per_run,
         timeout_seconds=args.timeout_seconds,
     )
     print(json.dumps(result.to_record(), indent=2))
