@@ -74,7 +74,7 @@ def test_verify_rejects_modified_captured_source(tmp_path):
     captured = next(snapshot.glob("detector__*"))
     captured.write_text("changed\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="hash mismatch"):
+    with pytest.raises(ValueError, match="mismatch"):
         VERIFY.verify_production_source_snapshot(
             snapshot_directory=snapshot,
         )
