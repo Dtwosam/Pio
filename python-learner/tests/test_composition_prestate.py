@@ -14,7 +14,7 @@ def seed_ready_add(storage):
         {
             "pool_address": "pool",
             "capture_slot_start": 100,
-            "capture_slot_end": 101,
+            "capture_slot_end": 100,
             "clock_unix_timestamp": 1700000000,
             "active_bin_id": 5,
             "bin_step": 25,
@@ -150,7 +150,7 @@ def test_prestate_candidate_requires_slot_bounded_matching_capture(tmp_path):
     candidate = report.candidates[0]
     assert candidate.snapshot_observed_at == "2026-09-23T00:00:00+00:00"
     assert candidate.capture_slot_start == 100
-    assert candidate.capture_slot_end == 101
+    assert candidate.capture_slot_end == 100
     assert candidate.verification_addresses == ("pool", "array")
     assert candidate.eligible_for_verification is True
 
@@ -164,7 +164,7 @@ def test_prestate_verification_ingest_is_persisted(tmp_path):
             "signature": "sig",
             "transaction_slot": 120,
             "capture_slot_start": 100,
-            "capture_slot_end": 101,
+            "capture_slot_end": 100,
             "eligible": True,
             "reasons": [],
             "account_checks": [],
@@ -173,3 +173,30 @@ def test_prestate_verification_ingest_is_persisted(tmp_path):
         pool_address="pool",
     )
     assert result.eligible is True
+
+
+
+def test_legacy_multi_slot_capture_is_not_exact_prestate_evidence(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready_add(storage)
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE chain_pool_capture_state
+            SET capture_slot_end = 101
+            WHERE pool_address = 'pool'
+            """
+        )
+
+    report = build_composition_prestate_candidates(
+        str(storage.path),
+        position_address="position",
+    )
+
+    assert report.verification_ready == 0
+    candidate = report.candidates[0]
+    assert candidate.eligible_for_verification is False
+    assert candidate.ineligibility_reason == (
+        "no single-context strict-prior pre-add pool capture "
+        "with matching active bin"
+    )
