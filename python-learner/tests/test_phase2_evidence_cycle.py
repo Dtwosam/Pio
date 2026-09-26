@@ -30,6 +30,10 @@ def install_successes(monkeypatch, calls):
         calls.append("prestates")
         return Result(failures=0)
 
+    def reconciliation(*args, **kwargs):
+        calls.append("reconciliation")
+        return Result(strict_math_gate_passed=True)
+
     def evidence(*args, **kwargs):
         calls.append("evidence")
         return Result(evidence_gaps=())
@@ -53,6 +57,10 @@ def install_successes(monkeypatch, calls):
     monkeypatch.setattr(
         "meteora_learner.phase2_evidence_cycle.run_phase2_prestate_verifications",
         prestates,
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_reconciliation_corpus",
+        reconciliation,
     )
     monkeypatch.setattr(
         "meteora_learner.phase2_evidence_cycle.build_phase2_calibration_evidence",
@@ -81,13 +89,15 @@ def test_evidence_cycle_runs_read_only_stages_in_order(tmp_path, monkeypatch):
         "positions",
         "reinspect",
         "prestates",
+        "reconciliation",
         "evidence",
         "queue",
     ]
-    assert report.stages_successful == 6
+    assert report.stages_successful == 7
     assert report.stages_partial == 0
     assert report.stages_failed == 0
     assert [item.status for item in report.stages] == [
+        "SUCCESS",
         "SUCCESS",
         "SUCCESS",
         "SUCCESS",
@@ -128,6 +138,10 @@ def test_evidence_cycle_marks_collector_failures_partial(
         lambda *args, **kwargs: Result(failures=1),
     )
     monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_reconciliation_corpus",
+        lambda *args, **kwargs: Result(strict_math_gate_passed=False),
+    )
+    monkeypatch.setattr(
         "meteora_learner.phase2_evidence_cycle.build_phase2_calibration_evidence",
         lambda *args, **kwargs: Result(evidence_gaps=("gap",)),
     )
@@ -143,10 +157,11 @@ def test_evidence_cycle_marks_collector_failures_partial(
         now=lambda: "2026-09-26T19:00:00+00:00",
     )
 
-    assert report.stages_partial == 6
+    assert report.stages_partial == 7
     assert report.stages_failed == 0
     assert report.stages_successful == 0
     assert [item.status for item in report.stages] == [
+        "PARTIAL",
         "PARTIAL",
         "PARTIAL",
         "PARTIAL",
@@ -279,7 +294,8 @@ def test_evidence_cycle_stays_partial_when_only_final_work_remains(
         now=lambda: "2026-09-26T19:00:00+00:00",
     )
 
-    assert [item.status for item in report.stages[:4]] == [
+    assert [item.status for item in report.stages[:5]] == [
+        "SUCCESS",
         "SUCCESS",
         "SUCCESS",
         "SUCCESS",
@@ -290,3 +306,40 @@ def test_evidence_cycle_stays_partial_when_only_final_work_remains(
     assert report.stages_partial == 2
     assert report.stages_failed == 0
     assert report.actionable is False
+
+
+
+def test_evidence_cycle_surfaces_reconciliation_failure_without_leaking_text(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+    secret = "https://user:secret@example.invalid/rpc"
+
+    def broken_reconciliation(*args, **kwargs):
+        raise RuntimeError(f"internal failure at {secret}")
+
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_reconciliation_corpus",
+        broken_reconciliation,
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+
+    stage = next(
+        item for item in report.stages
+        if item.name == "RECONCILIATION_CORPUS"
+    )
+    assert stage.status == "FAILED"
+    assert stage.failure_category == "RECONCILIATION_CORPUS_FAILED"
+    assert report.reconciliation_corpus is None
+    encoded = str(report.to_record())
+    assert secret not in encoded
+    assert "internal failure" not in encoded
