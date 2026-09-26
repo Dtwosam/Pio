@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from statistics import mean
 from typing import Any, Sequence
 
@@ -33,6 +34,7 @@ class PaperCandidateEvidence:
 @dataclass(frozen=True)
 class EmpiricalPaperCandidateSelection:
     pool_address: str
+    decision_observed_at: str
     context_key: str
     status: str
     selection_mode: str
@@ -94,10 +96,18 @@ def _example_arm(example: MLTrainingExample) -> PaperCandidateArm:
     )
 
 
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("candidate policy timestamps require timezone")
+    return parsed.astimezone(timezone.utc)
+
+
 def select_empirical_paper_candidate(
     *,
     historical_examples: Sequence[MLTrainingExample],
     pool_address: str,
+    decision_observed_at: str,
     context_key: str,
     current_candidates: Sequence[PaperCandidateArm],
 ) -> EmpiricalPaperCandidateSelection:
@@ -114,6 +124,7 @@ def select_empirical_paper_candidate(
         raise ValueError("pool_address is required")
     if not context_key.strip():
         raise ValueError("context_key is required")
+    decision_time = _parse_time(decision_observed_at)
     if not current_candidates:
         raise ValueError("at least one current candidate is required")
 
@@ -133,6 +144,7 @@ def select_empirical_paper_candidate(
         if item.pool_address == pool_address
         and _example_context(item) == context_key
         and _example_arm(item).key in by_key
+        and _parse_time(item.forward_end_observed_at) <= decision_time
     ]
 
     grouped: dict[str, list[MLTrainingExample]] = {
@@ -169,6 +181,7 @@ def select_empirical_paper_candidate(
     if not matching:
         return EmpiricalPaperCandidateSelection(
             pool_address=pool_address,
+            decision_observed_at=decision_observed_at,
             context_key=context_key,
             status="INSUFFICIENT_CONTEXT_EVIDENCE",
             selection_mode="NO_SELECTION",
@@ -183,6 +196,7 @@ def select_empirical_paper_candidate(
         chosen = sorted(unseen, key=lambda item: item.arm.key)[0]
         return EmpiricalPaperCandidateSelection(
             pool_address=pool_address,
+            decision_observed_at=decision_observed_at,
             context_key=context_key,
             status="PAPER_EXPLORATION",
             selection_mode="UNSEEN_ARM",
