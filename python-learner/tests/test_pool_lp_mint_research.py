@@ -187,6 +187,9 @@ def test_canonical_dataset_mint_research_runs_end_to_end(
     assert report.tail_risk_calibration is not None
     assert len(report.tail_risk_calibration.folds) > 0
     assert report.tail_risk_reason is None
+    assert report.feature_drift is not None
+    assert len(report.feature_drift.folds) > 0
+    assert report.feature_drift_reason is None
     assert report.research_only is True
     assert report.policy_actionable is False
     assert report.execution_wired is False
@@ -250,6 +253,8 @@ def test_canonical_dataset_reports_missing_mint_context(
     assert report.unseen_pool_reason is None
     assert report.tail_risk_calibration is None
     assert report.tail_risk_reason is None
+    assert report.feature_drift is None
+    assert report.feature_drift_reason is None
     assert report.mint_enrichment is not None
     assert report.mint_enrichment.rows_ready == 0
     assert (
