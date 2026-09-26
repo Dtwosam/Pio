@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from meteora_learner.phase2_position_observation import (
     collect_phase2_position_observations,
 )
