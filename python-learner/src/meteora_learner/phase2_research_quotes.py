@@ -109,7 +109,7 @@ def collect_phase2_research_quotes(
     ) -> None:
         nonlocal refreshed
         if quote.token_mint != mint:
-            raise ValueError("quote mint does not match requested mint")
+            raise ValueError("QUOTE_MINT_MISMATCH")
         saved = save_token_quote(
             storage,
             token_mint=mint,
@@ -131,6 +131,13 @@ def collect_phase2_research_quotes(
             )
         )
 
+    def failure_category(exc: Exception) -> str:
+        if isinstance(exc, ValueError):
+            if str(exc) == "QUOTE_MINT_MISMATCH":
+                return "QUOTE_MINT_MISMATCH"
+            return "QUOTE_VALIDATION_FAILED"
+        return "QUOTE_FETCH_FAILED"
+
     if fetch_quote is None:
         with JupiterTokenClient() as client:
             for mint in mints:
@@ -150,7 +157,7 @@ def collect_phase2_research_quotes(
                             observed_at=observed_at or now(),
                             quote_per_atomic=None,
                             source=None,
-                            error=str(exc)[:2000],
+                            error=failure_category(exc),
                         )
                     )
     else:
