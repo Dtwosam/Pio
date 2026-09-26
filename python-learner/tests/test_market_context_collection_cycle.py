@@ -228,3 +228,45 @@ def test_collection_cycle_can_refresh_existing_chain_context(
     assert report.chain_pools_refreshed == 1
     assert report.chain_refresh_failed == 0
     assert report.mint_context is None
+
+
+def test_collection_cycle_can_refresh_existing_mint_context(
+    tmp_path,
+) -> None:
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_chain_pool_snapshot(
+        _pool_payload("POOL"),
+        observed_at="2026-09-25T00:00:00+00:00",
+    )
+    for mint in ("POOL-X", "POOL-Y"):
+        storage.save_token_mint_snapshot(
+            _mint_payload(mint),
+            observed_at="2026-09-25T00:05:00+00:00",
+        )
+
+    calls: list[str] = []
+
+    def mint_inspector(mint: str):
+        calls.append(mint)
+        payload = _mint_payload(mint)
+        payload["supply"] = "2000000000"
+        return payload
+
+    report = run_market_context_collection_cycle(
+        storage,
+        capture_universe=False,
+        capture_chain_context=False,
+        refresh_chain_context=False,
+        capture_mint_context=False,
+        refresh_mint_context=True,
+        observed_at="2026-09-26T00:00:00+00:00",
+        mint_inspector=mint_inspector,
+        mint_refresh_batch_limit=2,
+    )
+
+    assert calls == ["POOL-X", "POOL-Y"]
+    assert report.status == "CAPTURED"
+    assert report.mint_context is None
+    assert report.mint_refresh is not None
+    assert report.mints_refreshed == 2
+    assert report.mint_refresh_failed == 0
