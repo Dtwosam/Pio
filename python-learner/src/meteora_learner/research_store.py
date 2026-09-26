@@ -73,6 +73,35 @@ class ResearchStore:
 
         return [dict(row) for row in rows]
 
+    def stable_pool_token_mints(
+        self,
+        address: str,
+    ) -> tuple[str, str] | None:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT token_x_mint, token_y_mint
+                FROM chain_pool_snapshots
+                WHERE pool_address = ?
+                ORDER BY token_x_mint, token_y_mint
+                """,
+                (address,),
+            ).fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            return None
+        identities = {
+            (str(row["token_x_mint"]), str(row["token_y_mint"]))
+            for row in rows
+        }
+        if len(identities) != 1:
+            raise ValueError(
+                f"pool token mint identity changed across snapshots: {address}"
+            )
+        return next(iter(identities))
+
     def latest_chain_pool_snapshot(
         self,
         address: str,
@@ -468,6 +497,38 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def transaction_token_balance_deltas(
+        self,
+        signature: str,
+        *,
+        owner_address: str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = [signature]
+        owner_clause = ""
+        if owner_address is not None:
+            owner_clause = (
+                "AND (pre_owner = ? OR post_owner = ?)"
+            )
+            params.extend((owner_address, owner_address))
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT observed_at, signature, account_index,
+                       account_address, mint, pre_owner, post_owner,
+                       pre_amount, post_amount, delta_amount, decimals
+                FROM chain_transaction_token_balance_deltas
+                WHERE signature = ?
+                {owner_clause}
+                ORDER BY account_index ASC, mint ASC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def add_liquidity_request(
         self,
         signature: str,
@@ -584,6 +645,36 @@ class ResearchStore:
         finally:
             conn.close()
         return dict(row) if row is not None else None
+
+    def transaction_event_count(
+        self,
+        signature: str,
+        *,
+        event_type: str | None = None,
+    ) -> int:
+        conn = self._connect()
+        try:
+            if event_type is None:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM chain_transaction_events
+                    WHERE signature = ?
+                    """,
+                    (signature,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM chain_transaction_events
+                    WHERE signature = ? AND event_type = ?
+                    """,
+                    (signature, event_type),
+                ).fetchone()
+        finally:
+            conn.close()
+        return int(row[0]) if row is not None else 0
 
     def rebalance_request(
         self,
