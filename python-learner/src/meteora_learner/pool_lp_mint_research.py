@@ -21,6 +21,10 @@ from .pool_lp_mint_ablation import (
     build_mint_enriched_lp_training_frame,
     evaluate_mint_feature_ablation,
 )
+from .pool_lp_tail_risk import (
+    TailRiskCalibrationReport,
+    evaluate_tail_risk_calibration,
+)
 from .pool_lp_unseen_pool import (
     UnseenPoolValidationReport,
     evaluate_unseen_pool_walk_forward,
@@ -43,6 +47,8 @@ class MintFeatureResearchReport:
     context_ablation: ContextFeatureAblationReport | None = None
     unseen_pool_validation: UnseenPoolValidationReport | None = None
     unseen_pool_reason: str | None = None
+    tail_risk_calibration: TailRiskCalibrationReport | None = None
+    tail_risk_reason: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -79,6 +85,12 @@ class MintFeatureResearchReport:
                 else None
             ),
             "unseen_pool_reason": self.unseen_pool_reason,
+            "tail_risk_calibration": (
+                self.tail_risk_calibration.to_record()
+                if self.tail_risk_calibration is not None
+                else None
+            ),
+            "tail_risk_reason": self.tail_risk_reason,
         }
 
 
@@ -264,6 +276,19 @@ def run_mint_feature_research_from_dataset_file(
     except ValueError as exc:
         unseen_pool_reason = str(exc)
 
+    tail_risk_calibration = None
+    tail_risk_reason = None
+    try:
+        tail_risk_calibration = evaluate_tail_risk_calibration(
+            mint_frame,
+            min_train_decision_times=min_train_decision_times,
+            validation_decision_times=validation_decision_times,
+            step_decision_times=step_decision_times,
+            min_train_rows=min_train_rows,
+        )
+    except ValueError as exc:
+        tail_risk_reason = str(exc)
+
     return MintFeatureResearchReport(
         research_only=True,
         policy_actionable=False,
@@ -278,4 +303,6 @@ def run_mint_feature_research_from_dataset_file(
         context_ablation=context_ablation,
         unseen_pool_validation=unseen_pool_validation,
         unseen_pool_reason=unseen_pool_reason,
+        tail_risk_calibration=tail_risk_calibration,
+        tail_risk_reason=tail_risk_reason,
     )
