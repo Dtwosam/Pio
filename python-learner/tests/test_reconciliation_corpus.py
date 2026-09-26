@@ -213,3 +213,40 @@ def test_corpus_reward_mismatch_blocks_strict_gate(tmp_path):
     assert report.reward_intervals_exact == 0
     assert report.reward_mismatched_bins == 1
     assert report.strict_math_gate_passed is False
+
+
+
+def test_corpus_counts_capture_provenance_rejections(tmp_path):
+    db = tmp_path / "pio.db"
+    storage = Storage(db)
+    save_position(storage, "a", "2026-09-22T00:00:00+00:00")
+    save_position(
+        storage,
+        "a",
+        "2026-09-22T00:05:00+00:00",
+        checkpoint_x=Q64,
+        position_fee_x=10,
+    )
+
+    with storage.connect() as conn:
+        conn.execute(
+            """
+            UPDATE chain_position_snapshots
+            SET capture_slot_start = NULL,
+                capture_slot_end = NULL
+            WHERE position_address = 'a'
+              AND observed_at = '2026-09-22T00:05:00+00:00'
+            """
+        )
+
+    report = build_reconciliation_corpus(str(db))
+
+    assert report.amount_positions_eligible == 0
+    assert report.amount_positions_provenance_ineligible == 1
+    assert report.fee_intervals_seen == 1
+    assert report.fee_intervals_eligible == 0
+    assert report.fee_intervals_provenance_ineligible == 1
+    assert report.reward_intervals_seen == 1
+    assert report.reward_intervals_eligible == 0
+    assert report.reward_intervals_provenance_ineligible == 1
+    assert report.strict_math_gate_passed is False
