@@ -194,7 +194,6 @@ def run_phase2_prestate_verifications(
             candidate.snapshot_observed_at,
         )
         if key in selected_candidate_keys:
-            fail(item, "DUPLICATE_CANDIDATE")
             continue
         selected_candidate_keys.add(key)
         selected.append((item, candidate))
