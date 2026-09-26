@@ -273,18 +273,6 @@ ON position_event_history(position_address, block_time, ix_index);
 CREATE INDEX IF NOT EXISTS idx_position_event_history_signature
 ON position_event_history(signature, ix_index);
 
-CREATE TABLE IF NOT EXISTS phase2_collection_task_attempts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    attempted_at TEXT NOT NULL,
-    stage TEXT NOT NULL,
-    task_key TEXT NOT NULL,
-    succeeded INTEGER NOT NULL,
-    outcome_category TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_phase2_collection_task_attempts
-ON phase2_collection_task_attempts(stage, task_key, attempted_at, id);
-
 CREATE TRIGGER IF NOT EXISTS chain_pool_snapshots_no_update
 BEFORE UPDATE ON chain_pool_snapshots
 BEGIN
@@ -356,6 +344,18 @@ BEFORE DELETE ON position_event_history
 BEGIN
     SELECT RAISE(ABORT, 'position_event_history is immutable');
 END;
+
+CREATE TABLE IF NOT EXISTS phase2_collection_task_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempted_at TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    task_key TEXT NOT NULL,
+    succeeded INTEGER NOT NULL,
+    outcome_category TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase2_collection_task_attempts
+ON phase2_collection_task_attempts(stage, task_key, attempted_at, id);
 
 CREATE TABLE IF NOT EXISTS chain_transaction_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3632,15 +3632,6 @@ class Storage:
             position_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT position_address) FROM position_event_history"
             ).fetchone()
-            phase2_task_attempts = conn.execute(
-                """
-                SELECT COUNT(*),
-                       SUM(CASE WHEN succeeded = 1 THEN 1 ELSE 0 END),
-                       SUM(CASE WHEN succeeded = 0 THEN 1 ELSE 0 END),
-                       MAX(attempted_at)
-                FROM phase2_collection_task_attempts
-                """
-            ).fetchone()
             position_attempts = conn.execute(
                 """
                 SELECT COUNT(*),
@@ -3648,6 +3639,15 @@ class Storage:
                        SUM(CASE WHEN succeeded = 0 THEN 1 ELSE 0 END),
                        MAX(attempted_at)
                 FROM phase2_position_observation_attempts
+                """
+            ).fetchone()
+            phase2_task_attempts = conn.execute(
+                """
+                SELECT COUNT(*),
+                       SUM(CASE WHEN succeeded = 1 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN succeeded = 0 THEN 1 ELSE 0 END),
+                       MAX(attempted_at)
+                FROM phase2_collection_task_attempts
                 """
             ).fetchone()
             chain_tx_events = conn.execute(
@@ -3690,14 +3690,14 @@ class Storage:
             "position_bin_snapshots": position_bins,
             "position_event_history": position_events[0],
             "position_event_position_count": position_events[1],
-            "phase2_collection_task_attempts": phase2_task_attempts[0],
-            "phase2_collection_task_successes": phase2_task_attempts[1] or 0,
-            "phase2_collection_task_failures": phase2_task_attempts[2] or 0,
-            "latest_phase2_collection_task_attempt": phase2_task_attempts[3],
             "phase2_position_observation_attempts": position_attempts[0],
             "phase2_position_observation_successes": position_attempts[1] or 0,
             "phase2_position_observation_failures": position_attempts[2] or 0,
             "latest_phase2_position_observation_attempt": position_attempts[3],
+            "phase2_collection_task_attempts": phase2_task_attempts[0],
+            "phase2_collection_task_successes": phase2_task_attempts[1] or 0,
+            "phase2_collection_task_failures": phase2_task_attempts[2] or 0,
+            "latest_phase2_collection_task_attempt": phase2_task_attempts[3],
             "chain_transaction_events": chain_tx_events[0],
             "chain_transaction_count": chain_tx_events[1],
             "chain_transaction_snapshots": chain_tx_snapshots[0],
