@@ -104,61 +104,53 @@ def _progress_counts(
     reconciliation: Any | None,
     calibration: Any | None,
 ) -> Phase2EvidenceProgressCounts:
+    def value(source: Any | None, name: str) -> int | None:
+        if source is None:
+            return None
+        raw = getattr(source, name, None)
+        return int(raw) if raw is not None else None
+
     return Phase2EvidenceProgressCounts(
-        positions_seen=(
-            int(reconciliation.positions_seen)
-            if reconciliation is not None
-            else None
+        positions_seen=value(reconciliation, "positions_seen"),
+        amount_bins_checked=value(
+            reconciliation,
+            "amount_bins_checked",
         ),
-        amount_bins_checked=(
-            int(reconciliation.amount_bins_checked)
-            if reconciliation is not None
-            else None
+        fee_intervals_eligible=value(
+            reconciliation,
+            "fee_intervals_eligible",
         ),
-        fee_intervals_eligible=(
-            int(reconciliation.fee_intervals_eligible)
-            if reconciliation is not None
-            else None
+        fee_bins_checked=value(
+            reconciliation,
+            "fee_bins_checked",
         ),
-        fee_bins_checked=(
-            int(reconciliation.fee_bins_checked)
-            if reconciliation is not None
-            else None
+        reward_intervals_eligible=value(
+            reconciliation,
+            "reward_intervals_eligible",
         ),
-        reward_intervals_eligible=(
-            int(reconciliation.reward_intervals_eligible)
-            if reconciliation is not None
-            else None
+        reward_growth_bins=value(
+            reconciliation,
+            "reward_bins_with_checkpoint_growth",
         ),
-        reward_growth_bins=(
-            int(reconciliation.reward_bins_with_checkpoint_growth)
-            if reconciliation is not None
-            else None
+        composition_eligible_samples=value(
+            calibration,
+            "composition_eligible_samples",
         ),
-        composition_eligible_samples=(
-            int(calibration.composition_eligible_samples)
-            if calibration is not None
-            else None
+        composition_exact_samples=value(
+            calibration,
+            "composition_exact_samples",
         ),
-        composition_exact_samples=(
-            int(calibration.composition_exact_samples)
-            if calibration is not None
-            else None
+        add_execution_matched_events=value(
+            calibration,
+            "add_execution_matched_events",
         ),
-        add_execution_matched_events=(
-            int(calibration.add_execution_matched_events)
-            if calibration is not None
-            else None
+        rebalance_guard_samples=value(
+            calibration,
+            "rebalance_guard_samples",
         ),
-        rebalance_guard_samples=(
-            int(calibration.rebalance_guard_samples)
-            if calibration is not None
-            else None
-        ),
-        transaction_fee_samples=(
-            int(calibration.transaction_fee_samples)
-            if calibration is not None
-            else None
+        transaction_fee_samples=value(
+            calibration,
+            "transaction_fee_samples",
         ),
     )
 
