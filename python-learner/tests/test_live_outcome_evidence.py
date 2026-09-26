@@ -233,3 +233,32 @@ def test_live_outcome_evidence_rejects_label_valuation_mismatch(
         match="realized return differs",
     ):
         build_live_outcome_evidence(str(storage.path))
+
+
+def test_live_outcome_evidence_matches_fractional_expected_return_rounding(
+    tmp_path,
+) -> None:
+    storage = Storage(tmp_path / "pio.db")
+    _insert(
+        storage,
+        position="P-FRACTIONAL",
+        pool="A",
+        model="M1",
+        expected_return_pct="1.234",
+        expected_downside_pct="2.5",
+        realized_return_bps=200,
+        realized_pnl_quote="20",
+        entry_outflow_quote="1000",
+        composition_cost_quote="0",
+        network_cost_quote="1",
+        fee_income_quote="0",
+        reward_income_quote="0",
+        created_at="2026-01-01T01:00:00+00:00",
+    )
+
+    report = build_live_outcome_evidence(str(storage.path))
+
+    assert report.samples_seen == 1
+    sample = report.samples[0]
+    assert sample.expected_net_return_bps == 123.0
+    assert sample.prediction_error_bps == 77
