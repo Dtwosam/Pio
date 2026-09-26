@@ -230,3 +230,19 @@ def test_manifest_rejects_non_hex_blob_hash(tmp_path):
             source_tree=source,
             manifest=manifest,
         )
+
+
+
+def test_preflight_rejects_directory_at_target_file_path(tmp_path):
+    repo, source, manifest, existing, _ = fixture_tree(tmp_path)
+    (repo / existing).unlink()
+    (repo / existing).mkdir()
+
+    report = MODULE.preflight_collection_stack(
+        repository=repo,
+        source_tree=source,
+        manifest=manifest,
+    )
+
+    assert report.content_ready is False
+    assert status_map(report)[existing] == "CONFLICT_NON_FILE"
