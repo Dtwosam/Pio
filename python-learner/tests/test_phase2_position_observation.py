@@ -429,3 +429,115 @@ def test_observer_classifies_executor_timeout(tmp_path):
 
     assert result.failures == 1
     assert result.failure_details[0].category == "EXECUTOR_TIMEOUT"
+
+
+
+def test_failed_never_seen_position_does_not_starve_rotation(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    inspected = []
+    first_attempt = True
+
+    def runner(command, **kwargs):
+        nonlocal first_attempt
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 2,
+                "positions_returned": 2,
+                "truncated": False,
+                "positions": [
+                    {"position_address": POSITIONS[0]},
+                    {"position_address": POSITIONS[1]},
+                ],
+            }
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps(payload), ""
+            )
+
+        inspected.append(command[2])
+        if command[2] == POSITIONS[0] and first_attempt:
+            first_attempt = False
+            return subprocess.CompletedProcess(
+                command, 1, "", "persistent failure"
+            )
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps(_snapshot(command[2])), ""
+        )
+
+    first = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:00:00+00:00",
+        runner=runner,
+    )
+    second = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:15:00+00:00",
+        runner=runner,
+    )
+
+    assert first.failure_details[0].category == "EXECUTOR_FAILED"
+    assert second.snapshots_saved == 1
+    assert inspected == [POSITIONS[0], POSITIONS[1]]
+
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT position_address, succeeded, failure_category, capture_slot
+            FROM phase2_position_observation_attempts
+            ORDER BY id
+            """
+        ).fetchall()
+    assert rows == [
+        (POSITIONS[0], 0, "EXECUTOR_FAILED", None),
+        (POSITIONS[1], 1, None, 450700000),
+    ]
+
+
+def test_attempt_ledger_uses_prior_snapshot_history_for_initial_rotation(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    inspected = []
+
+    ingest_payload = _snapshot(POSITIONS[0])
+    from meteora_learner.position_ingest import ingest_position_snapshot
+    ingest_position_snapshot(
+        storage,
+        ingest_payload,
+        observed_at="2026-09-26T14:45:00+00:00",
+    )
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 2,
+                "positions_returned": 2,
+                "truncated": False,
+                "positions": [
+                    {"position_address": POSITIONS[0]},
+                    {"position_address": POSITIONS[1]},
+                ],
+            }
+        else:
+            inspected.append(command[2])
+            payload = _snapshot(command[2])
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps(payload), ""
+        )
+
+    result = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:00:00+00:00",
+        runner=runner,
+    )
+
+    assert result.snapshots_saved == 1
+    assert inspected == [POSITIONS[1]]
