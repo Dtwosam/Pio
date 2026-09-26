@@ -8,6 +8,10 @@ from .market_pool_universe import (
     PoolUniverseDiscoveryReport,
     discover_pool_universe,
 )
+from .pool_market_data_quality import (
+    PoolMarketCoverageReport,
+    build_pool_market_coverage_report,
+)
 from .pool_market_learning import (
     PoolMarketLearningDataset,
     build_pool_market_learning_dataset_from_store,
@@ -28,6 +32,7 @@ class PoolMarketResearchCycleReport:
     status: str
     reason: str | None
     discovery: PoolUniverseDiscoveryReport | None
+    coverage: PoolMarketCoverageReport
     dataset: PoolMarketLearningDataset | None
     walk_forward: PoolMarketWalkForwardReport | None
 
@@ -75,6 +80,10 @@ def run_pool_market_research_cycle(
             max_pages=max_pages,
         )
 
+    coverage = build_pool_market_coverage_report(
+        str(storage.path)
+    )
+
     try:
         dataset = build_pool_market_learning_dataset_from_store(
             str(storage.path),
@@ -91,6 +100,7 @@ def run_pool_market_research_cycle(
             status="COLLECTING_HISTORY",
             reason=str(exc),
             discovery=discovery,
+            coverage=coverage,
             dataset=None,
             walk_forward=None,
         )
@@ -111,6 +121,7 @@ def run_pool_market_research_cycle(
             status="COLLECTING_HISTORY",
             reason=str(exc),
             discovery=discovery,
+            coverage=coverage,
             dataset=dataset,
             walk_forward=None,
         )
@@ -122,6 +133,7 @@ def run_pool_market_research_cycle(
         status="EVALUATED",
         reason=None,
         discovery=discovery,
+        coverage=coverage,
         dataset=dataset,
         walk_forward=walk_forward,
     )
