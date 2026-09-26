@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import json
+import sqlite3
 from typing import Any
 
 from .phase2_evidence_cycle import PHASE2_EVIDENCE_CYCLE_PROGRESS_TYPE
@@ -159,7 +160,7 @@ def build_phase2_progress_history(
         raise ValueError("limit must be positive")
 
     with storage.connect() as conn:
-        conn.row_factory = __import__("sqlite3").Row
+        conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
             SELECT id, created_at, as_of, status, qualified, evidence_json
