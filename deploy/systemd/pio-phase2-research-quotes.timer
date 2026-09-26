@@ -6,6 +6,7 @@ OnBootSec=2min
 OnUnitActiveSec=2min
 AccuracySec=15s
 Persistent=true
+Unit=pio-phase2-research-quotes.service
 
 [Install]
 WantedBy=timers.target
