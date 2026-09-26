@@ -288,3 +288,84 @@ def test_existing_position_table_is_migrated_with_capture_slots(tmp_path):
         "reward_mint_0",
         "reward_mint_1",
     } <= columns
+
+
+def test_phase2_position_observation_attempt_ledger_is_append_only(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    row_id = storage.save_phase2_position_observation_attempt(
+        pool_address="pool",
+        position_address="position",
+        attempted_at="2026-09-26T15:00:00+00:00",
+        succeeded=False,
+        failure_category="EXECUTOR_FAILED",
+    )
+    assert row_id > 0
+
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT pool_address, position_address, succeeded,
+                   failure_category, capture_slot
+            FROM phase2_position_observation_attempts
+            WHERE id = ?
+            """,
+            (row_id,),
+        ).fetchone()
+    assert row == (
+        "pool",
+        "position",
+        0,
+        "EXECUTOR_FAILED",
+        None,
+    )
+
+    status = storage.data_status()
+    assert status["phase2_position_observation_attempts"] == 1
+    assert status["phase2_position_observation_successes"] == 0
+    assert status["phase2_position_observation_failures"] == 1
+    assert status["latest_phase2_position_observation_attempt"] == (
+        "2026-09-26T15:00:00+00:00"
+    )
+
+    import sqlite3
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                UPDATE phase2_position_observation_attempts
+                SET failure_category = 'OTHER'
+                WHERE id = ?
+                """,
+                (row_id,),
+            )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM phase2_position_observation_attempts
+                WHERE id = ?
+                """,
+                (row_id,),
+            )
+
+
+def test_phase2_position_attempt_validation_is_fail_closed(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    with pytest.raises(ValueError, match="requires non-negative capture_slot"):
+        storage.save_phase2_position_observation_attempt(
+            pool_address="pool",
+            position_address="position",
+            attempted_at="2026-09-26T15:00:00+00:00",
+            succeeded=True,
+        )
+
+    with pytest.raises(ValueError, match="requires failure_category"):
+        storage.save_phase2_position_observation_attempt(
+            pool_address="pool",
+            position_address="position",
+            attempted_at="2026-09-26T15:00:00+00:00",
+            succeeded=False,
+        )
