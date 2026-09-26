@@ -401,7 +401,9 @@ def build_rotation_fee_semantics_report(
     eligible = [item for item in samples if item.eligible]
     return RotationFeeSemanticsReport(
         position_address=position_address,
-        transactions_seen=len(samples),
+        transactions_seen=len({
+            item.signature for item in samples
+        }),
         eligible_transactions=len(eligible),
         claim_fee_true_samples=sum(
             item.should_claim_fee is True for item in eligible
