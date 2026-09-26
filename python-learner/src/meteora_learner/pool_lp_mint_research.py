@@ -25,6 +25,12 @@ from .pool_lp_mint_ablation import (
     build_mint_enriched_lp_training_frame,
     evaluate_mint_feature_ablation,
 )
+from .pool_lp_outcome_coverage import (
+    OutcomeCoverageComparison,
+    OutcomeCoverageReport,
+    build_outcome_coverage_report,
+    compare_outcome_coverage,
+)
 from .pool_lp_tail_risk import (
     TailRiskCalibrationReport,
     evaluate_tail_risk_calibration,
@@ -55,6 +61,8 @@ class MintFeatureResearchReport:
     tail_risk_reason: str | None = None
     feature_drift: FeatureDriftReport | None = None
     feature_drift_reason: str | None = None
+    source_outcome_coverage: OutcomeCoverageReport | None = None
+    model_ready_outcome_coverage: OutcomeCoverageComparison | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -103,6 +111,16 @@ class MintFeatureResearchReport:
                 else None
             ),
             "feature_drift_reason": self.feature_drift_reason,
+            "source_outcome_coverage": (
+                self.source_outcome_coverage.to_record()
+                if self.source_outcome_coverage is not None
+                else None
+            ),
+            "model_ready_outcome_coverage": (
+                self.model_ready_outcome_coverage.to_record()
+                if self.model_ready_outcome_coverage is not None
+                else None
+            ),
         }
 
 
@@ -152,6 +170,10 @@ def run_mint_feature_research_from_dataset_file(
             mint_enrichment=None,
             ablation=None,
         )
+
+    source_outcome_coverage = build_outcome_coverage_report(
+        source
+    )
 
     required = {
         "pool_address",
@@ -228,6 +250,10 @@ def run_mint_feature_research_from_dataset_file(
         database_path,
         market_frame,
     )
+    model_ready_outcome_coverage = compare_outcome_coverage(
+        source,
+        mint_frame,
+    )
     if mint_frame.empty:
         return MintFeatureResearchReport(
             research_only=True,
@@ -243,6 +269,8 @@ def run_mint_feature_research_from_dataset_file(
             market_enrichment=market_report,
             mint_enrichment=mint_report,
             ablation=None,
+            source_outcome_coverage=source_outcome_coverage,
+            model_ready_outcome_coverage=model_ready_outcome_coverage,
         )
 
     try:
@@ -332,4 +360,6 @@ def run_mint_feature_research_from_dataset_file(
         tail_risk_reason=tail_risk_reason,
         feature_drift=feature_drift,
         feature_drift_reason=feature_drift_reason,
+        source_outcome_coverage=source_outcome_coverage,
+        model_ready_outcome_coverage=model_ready_outcome_coverage,
     )
