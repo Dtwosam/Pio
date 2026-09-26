@@ -75,6 +75,11 @@
       "pr": 31,
       "head": "395a888bc7b4c6ba1945b5ed8bf08ad049111e3a",
       "role": "fair bounded runner attempt ledger"
+    },
+    {
+      "pr": 34,
+      "head": "43c1db58529343feba597cc990ddcfd7938ee58d",
+      "role": "neutral exploration/revisit cadence"
     }
   ],
   "integration_notes": [
@@ -83,14 +88,15 @@
     "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger and PR31 bounded-runner attempt ledger",
     "position discovery failures are secret-safe and do not include raw executor stderr",
     "quote observer uses categorical failures on both Jupiter and injected fetch paths",
-    "bounded transaction/prestate runners rotate by append-only attempt history so failures cannot starve unseen work"
+    "bounded transaction/prestate runners rotate by append-only attempt history so failures cannot starve unseen work",
+    "neutral position collection reserves revisit budget for interval evidence without starving exploration"
   ],
   "critical_file_blobs": {
     "rust-executor/src/state_reader.rs": "30d1435af1329bca07f73d6639539b43503e84e9",
     "rust-executor/src/main.rs": "4f02019bca92e77faed70083c740cfc111db15d1",
     "python-learner/src/meteora_learner/storage.py": "39bcc99413df357b89d261e854861e9e4a3fff23",
     "python-learner/src/meteora_learner/research_store.py": "c9b9de5838d95a86bddffa6166b4d7a62e91cf16",
-    "python-learner/src/meteora_learner/phase2_position_observation.py": "f128dbae5ff9c7f32e32ccd6df79ef4dbe9e6257",
+    "python-learner/src/meteora_learner/phase2_position_observation.py": "d57cab120570fe91e7a289b228caa1b09b5885d5",
     "python-learner/src/meteora_learner/phase2_research_quotes.py": "c85cc56ce9185bf476f9cef06d74fd17153155de",
     "python-learner/src/meteora_learner/phase2_calibration_reinspection.py": "513e15c7c433473466291182cdbf22c74ea332bc",
     "python-learner/src/meteora_learner/phase2_prestate_verification_runner.py": "071a5b201cb048a0bda7c2b7a4c9b7ebf70409bb",
