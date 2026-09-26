@@ -21,6 +21,10 @@ from .pool_lp_mint_ablation import (
     build_mint_enriched_lp_training_frame,
     evaluate_mint_feature_ablation,
 )
+from .pool_lp_unseen_pool import (
+    UnseenPoolValidationReport,
+    evaluate_unseen_pool_walk_forward,
+)
 from .pool_market_learning import load_pool_market_history
 
 
@@ -37,6 +41,8 @@ class MintFeatureResearchReport:
     mint_enrichment: MintEnrichedLPTrainingFrameReport | None
     ablation: MintFeatureAblationReport | None
     context_ablation: ContextFeatureAblationReport | None = None
+    unseen_pool_validation: UnseenPoolValidationReport | None = None
+    unseen_pool_reason: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -67,6 +73,12 @@ class MintFeatureResearchReport:
                 if self.context_ablation is not None
                 else None
             ),
+            "unseen_pool_validation": (
+                self.unseen_pool_validation.to_record()
+                if self.unseen_pool_validation is not None
+                else None
+            ),
+            "unseen_pool_reason": self.unseen_pool_reason,
         }
 
 
@@ -239,6 +251,19 @@ def run_mint_feature_research_from_dataset_file(
             context_ablation=None,
         )
 
+    unseen_pool_validation = None
+    unseen_pool_reason = None
+    try:
+        unseen_pool_validation = evaluate_unseen_pool_walk_forward(
+            mint_frame,
+            min_train_decision_times=min_train_decision_times,
+            validation_decision_times=validation_decision_times,
+            step_decision_times=step_decision_times,
+            min_train_rows=min_train_rows,
+        )
+    except ValueError as exc:
+        unseen_pool_reason = str(exc)
+
     return MintFeatureResearchReport(
         research_only=True,
         policy_actionable=False,
@@ -251,4 +276,6 @@ def run_mint_feature_research_from_dataset_file(
         mint_enrichment=mint_report,
         ablation=ablation,
         context_ablation=context_ablation,
+        unseen_pool_validation=unseen_pool_validation,
+        unseen_pool_reason=unseen_pool_reason,
     )
