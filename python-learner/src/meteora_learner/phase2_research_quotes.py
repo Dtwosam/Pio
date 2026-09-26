@@ -168,6 +168,7 @@ def collect_phase2_research_quotes(
                     Phase2ResearchQuoteItem(
                         token_mint=mint,
                         status="FAILED",
+                        observed_at=observed_at or now(),
                         quote_per_atomic=None,
                         source=None,
                         error=str(exc)[:2000],
