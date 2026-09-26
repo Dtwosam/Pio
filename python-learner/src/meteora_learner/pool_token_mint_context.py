@@ -25,6 +25,20 @@ TOKEN_MINT_CONTEXT_FEATURE_COLUMNS = (
     "mint_x_program_standard_spl",
     "mint_x_program_token2022",
     "mint_x_program_matches_pool",
+    "mint_x_observation_count",
+    "mint_x_has_previous_snapshot",
+    "mint_x_seconds_since_previous_snapshot",
+    "mint_x_log10_supply_change_since_previous",
+    "mint_x_log10_supply_change_since_first",
+    "mint_x_mint_authority_changed_since_previous",
+    "mint_x_freeze_authority_changed_since_previous",
+    "mint_x_program_changed_since_previous",
+    "mint_x_extension_data_len_change_since_previous",
+    "mint_x_initialized_changed_since_previous",
+    "mint_x_mint_authority_change_count",
+    "mint_x_freeze_authority_change_count",
+    "mint_x_program_change_count",
+    "mint_x_extension_change_count",
     "mint_y_snapshot_age_seconds",
     "mint_y_log10_supply_tokens",
     "mint_y_decimals",
@@ -36,6 +50,20 @@ TOKEN_MINT_CONTEXT_FEATURE_COLUMNS = (
     "mint_y_program_standard_spl",
     "mint_y_program_token2022",
     "mint_y_program_matches_pool",
+    "mint_y_observation_count",
+    "mint_y_has_previous_snapshot",
+    "mint_y_seconds_since_previous_snapshot",
+    "mint_y_log10_supply_change_since_previous",
+    "mint_y_log10_supply_change_since_first",
+    "mint_y_mint_authority_changed_since_previous",
+    "mint_y_freeze_authority_changed_since_previous",
+    "mint_y_program_changed_since_previous",
+    "mint_y_extension_data_len_change_since_previous",
+    "mint_y_initialized_changed_since_previous",
+    "mint_y_mint_authority_change_count",
+    "mint_y_freeze_authority_change_count",
+    "mint_y_program_change_count",
+    "mint_y_extension_change_count",
 )
 
 
@@ -132,6 +160,162 @@ def _mint_features(
     }
 
 
+def _supply_log10(snapshot: dict[str, Any]) -> float:
+    decimals = int(snapshot["decimals"])
+    supply_atomic = int(str(snapshot["supply"]))
+    supply_tokens = supply_atomic / (10 ** decimals)
+    return math.log10(1.0 + supply_tokens)
+
+
+def _changed(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    key: str,
+) -> bool:
+    return left.get(key) != right.get(key)
+
+
+def _mint_history_features(
+    history: list[dict[str, Any]],
+    *,
+    decision_time: pd.Timestamp,
+    prefix: str,
+) -> dict[str, float]:
+    if not history:
+        names = (
+            "observation_count",
+            "has_previous_snapshot",
+            "seconds_since_previous_snapshot",
+            "log10_supply_change_since_previous",
+            "log10_supply_change_since_first",
+            "mint_authority_changed_since_previous",
+            "freeze_authority_changed_since_previous",
+            "program_changed_since_previous",
+            "extension_data_len_change_since_previous",
+            "initialized_changed_since_previous",
+            "mint_authority_change_count",
+            "freeze_authority_change_count",
+            "program_change_count",
+            "extension_change_count",
+        )
+        return {
+            f"{prefix}_{name}": np.nan
+            for name in names
+        }
+
+    current = history[-1]
+    current_time = _parse_time(current["observed_at"])
+    if current_time > decision_time:
+        raise AssertionError(
+            "as-of mint history contains a future snapshot"
+        )
+
+    has_previous = len(history) >= 2
+    previous = history[-2] if has_previous else current
+    previous_time = _parse_time(previous["observed_at"])
+
+    current_supply = _supply_log10(current)
+    previous_supply = _supply_log10(previous)
+    first_supply = _supply_log10(history[0])
+
+    mint_authority_changes = 0
+    freeze_authority_changes = 0
+    program_changes = 0
+    extension_changes = 0
+    for left, right in zip(history, history[1:]):
+        mint_authority_changes += int(
+            _changed(left, right, "mint_authority")
+        )
+        freeze_authority_changes += int(
+            _changed(left, right, "freeze_authority")
+        )
+        program_changes += int(
+            _changed(left, right, "token_program")
+        )
+        extension_changes += int(
+            _changed(
+                left,
+                right,
+                "token_2022_extension_data_len",
+            )
+            or _changed(
+                left,
+                right,
+                "has_token_2022_extension_data",
+            )
+        )
+
+    values = {
+        "observation_count": float(len(history)),
+        "has_previous_snapshot": float(has_previous),
+        "seconds_since_previous_snapshot": (
+            float((current_time - previous_time).total_seconds())
+            if has_previous
+            else 0.0
+        ),
+        "log10_supply_change_since_previous": (
+            current_supply - previous_supply
+            if has_previous
+            else 0.0
+        ),
+        "log10_supply_change_since_first": (
+            current_supply - first_supply
+        ),
+        "mint_authority_changed_since_previous": float(
+            has_previous
+            and _changed(
+                previous,
+                current,
+                "mint_authority",
+            )
+        ),
+        "freeze_authority_changed_since_previous": float(
+            has_previous
+            and _changed(
+                previous,
+                current,
+                "freeze_authority",
+            )
+        ),
+        "program_changed_since_previous": float(
+            has_previous
+            and _changed(
+                previous,
+                current,
+                "token_program",
+            )
+        ),
+        "extension_data_len_change_since_previous": (
+            float(
+                int(current["token_2022_extension_data_len"])
+                - int(previous["token_2022_extension_data_len"])
+            )
+            if has_previous
+            else 0.0
+        ),
+        "initialized_changed_since_previous": float(
+            has_previous
+            and _changed(
+                previous,
+                current,
+                "is_initialized",
+            )
+        ),
+        "mint_authority_change_count": float(
+            mint_authority_changes
+        ),
+        "freeze_authority_change_count": float(
+            freeze_authority_changes
+        ),
+        "program_change_count": float(program_changes),
+        "extension_change_count": float(extension_changes),
+    }
+    return {
+        f"{prefix}_{name}": value
+        for name, value in values.items()
+    }
+
+
 def attach_token_mint_context_from_store(
     database_path: str,
     decision_frame: pd.DataFrame,
@@ -204,14 +388,16 @@ def attach_token_mint_context_from_store(
                 "as-of chain pool lookup returned a future snapshot"
             )
 
-        x_mint = store.latest_mint_snapshot(
+        x_history = store.mint_snapshot_history(
             str(pool["token_x_mint"]),
             as_of=as_of,
         )
-        y_mint = store.latest_mint_snapshot(
+        y_history = store.mint_snapshot_history(
             str(pool["token_y_mint"]),
             as_of=as_of,
         )
+        x_mint = x_history[-1] if x_history else None
+        y_mint = y_history[-1] if y_history else None
         if x_mint is None:
             missing_x += 1
         if y_mint is None:
@@ -243,6 +429,20 @@ def attach_token_mint_context_from_store(
                     if pool.get("token_y_program") is not None
                     else None
                 ),
+                prefix="mint_y",
+            )
+        )
+        features.update(
+            _mint_history_features(
+                x_history,
+                decision_time=decision_time,
+                prefix="mint_x",
+            )
+        )
+        features.update(
+            _mint_history_features(
+                y_history,
+                decision_time=decision_time,
                 prefix="mint_y",
             )
         )
