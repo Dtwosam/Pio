@@ -144,3 +144,21 @@ def test_bundled_reference_patch_is_single_file_and_pinned_to_pr7():
     assert MODULE.PR7_HEAD == (
         "ea235e676b700891839f28b0250e23149cfb77f8"
     )
+
+
+
+def test_bundled_patch_reconstructs_reviewed_pr7_state_reader_blob(tmp_path):
+    repo = tmp_path / "repo"
+    target = repo / TARGET
+    target.parent.mkdir(parents=True)
+    target.write_bytes((ROOT / TARGET).read_bytes())
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "ci@example.invalid")
+    _git(repo, "config", "user.name", "CI")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "main state reader")
+
+    _git(repo, "apply", str(MODULE.REFERENCE_PATCH))
+    blob = _git(repo, "hash-object", str(TARGET)).stdout.strip()
+
+    assert blob == MODULE.PR7_TARGET_BLOB_SHA
