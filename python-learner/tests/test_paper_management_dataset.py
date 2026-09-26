@@ -2,9 +2,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from meteora_learner.paper_action_replay import (
+    PAPER_HOLD_VS_REBALANCE_EVIDENCE_TYPE,
+)
 from meteora_learner.paper_management_dataset import (
     PAPER_MANAGEMENT_DATASET_EVIDENCE_TYPE,
     build_paper_management_dataset,
+    build_persisted_paper_management_dataset,
+    load_persisted_paper_management_reports,
     persist_paper_management_dataset,
 )
 from meteora_learner.storage import Storage
@@ -212,4 +217,66 @@ def test_management_dataset_persistence_rejects_cross_pool_rows(tmp_path):
             storage,
             pool_address="pool",
             report=dataset,
+        )
+
+
+
+def test_persisted_legacy_gross_evidence_stays_unlabeled(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    legacy = {
+        "pool_address": "pool",
+        "decision_observed_at": "2026-09-26T10:00:00+00:00",
+        "end_observed_at": "2026-09-26T10:05:00+00:00",
+        "strategy": "SPOT",
+        "min_bin_id": 99,
+        "max_bin_id": 103,
+        "start_x": 11,
+        "start_y": 22,
+        "start_value_y_atomic": 33,
+        "gross_advantage_before_transition_cost_y_atomic": 999,
+        "reward_value_complete": True,
+        "transition_cost_complete": False,
+        "economics_complete": False,
+        "incomplete_economic_components": ["REBALANCE_TRANSITION_COST"],
+        "paper_only": True,
+        "actionable": False,
+        "live_authorized": False,
+    }
+    storage.save_advanced_edge_evidence(
+        edge_type=PAPER_HOLD_VS_REBALANCE_EVIDENCE_TYPE,
+        pool_address="pool",
+        as_of=legacy["decision_observed_at"],
+        status="GROSS_COMPARISON_TRANSITION_COST_INCOMPLETE",
+        qualified=False,
+        evidence=legacy,
+    )
+
+    reports = load_persisted_paper_management_reports(
+        storage,
+        pool_address="pool",
+    )
+    assert len(reports) == 1
+
+    dataset = build_persisted_paper_management_dataset(
+        storage,
+        pool_address="pool",
+    )
+
+    assert dataset.training_examples_built == 0
+    assert dataset.drop_reasons == (
+        ("QUOTE_NORMALIZATION_INCOMPLETE", 1),
+    )
+    observation = dataset.observations[0]
+    assert observation.quote_unit == "UNKNOWN"
+    assert observation.gross_advantage_before_transition_cost_quote is None
+    assert observation.target_action is None
+
+
+def test_persisted_dataset_requires_existing_gross_evidence(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    with pytest.raises(ValueError, match="no persisted PAPER"):
+        build_persisted_paper_management_dataset(
+            storage,
+            pool_address="pool",
         )
