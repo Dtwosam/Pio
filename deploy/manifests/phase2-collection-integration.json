@@ -65,11 +65,23 @@
       "pr": 29,
       "head": "4a1836bac8b7a321feea259be0b221250100e459",
       "role": "bounded strict prestate verification"
+    },
+    {
+      "pr": 30,
+      "head": "337d3d86ba99f2de2c02dd6b601ecf4847cb5d1f",
+      "role": "secret-safe prospective quote failures"
+    },
+    {
+      "pr": 31,
+      "head": "395a888bc7b4c6ba1945b5ed8bf08ad049111e3a",
+      "role": "fair bounded runner attempt ledger"
     }
   ],
   "integration_notes": [
     "research_store keeps PR12 position capture-slot columns and PR23 single-context pool-capture filtering",
     "calibration_queue keeps PR23 future-prestate classification and PR20 env-only RPC commands",
-    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger"
+    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger",
+    "quote observer uses categorical failures on both Jupiter and injected fetch paths",
+    "bounded transaction/prestate runners rotate by append-only attempt history so failures cannot starve unseen work"
   ]
 }
