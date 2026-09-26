@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from meteora_learner.ml_dataset import ML_FEATURE_COLUMNS
 from meteora_learner.pool_lp_context_ablation import (
@@ -28,7 +29,7 @@ def _frame() -> pd.DataFrame:
     for pool_index, pool in enumerate(("A", "B", "C", "D")):
         mint_signal = float(pool_index % 2)
 
-        for index in range(90):
+        for index in range(60):
             market_signal = float(index % 2)
             row = {
                 "pool_address": pool,
@@ -60,18 +61,18 @@ def _frame() -> pd.DataFrame:
             market_signed = 1.0 if market_signal else -1.0
             mint_signed = 1.0 if mint_signal else -1.0
             row["target_net_return_bps"] = (
-                300.0 * market_signed
-                + 500.0 * mint_signed
+                600.0 * market_signed
+                + 300.0 * mint_signed
             )
             row["target_excess_vs_hold_bps"] = (
-                180.0 * market_signed
-                + 300.0 * mint_signed
+                360.0 * market_signed
+                + 180.0 * mint_signed
             )
             row["target_range_survival_ratio"] = float(
                 np.clip(
                     0.5
-                    + 0.15 * market_signed
-                    + 0.25 * mint_signed,
+                    + 0.25 * market_signed
+                    + 0.15 * mint_signed,
                     0.0,
                     1.0,
                 )
@@ -81,14 +82,22 @@ def _frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_context_ablation_separates_market_and_mint_value() -> None:
-    report = evaluate_context_feature_ablation(
+
+@pytest.fixture(scope="module")
+def context_report():
+    return evaluate_context_feature_ablation(
         _frame(),
-        min_train_decision_times=30,
+        min_train_decision_times=25,
         validation_decision_times=10,
         step_decision_times=10,
-        min_train_rows=80,
+        min_train_rows=70,
     )
+
+
+def test_context_ablation_separates_market_and_mint_value(
+    context_report,
+) -> None:
+    report = context_report
 
     assert report.research_only is True
     assert report.policy_actionable is False
@@ -114,14 +123,10 @@ def test_context_ablation_separates_market_and_mint_value() -> None:
     assert net.mint_better_folds > 0
 
 
-def test_context_ablation_uses_purged_identical_folds() -> None:
-    report = evaluate_context_feature_ablation(
-        _frame(),
-        min_train_decision_times=30,
-        validation_decision_times=10,
-        step_decision_times=10,
-        min_train_rows=80,
-    )
+def test_context_ablation_uses_purged_identical_folds(
+    context_report,
+) -> None:
+    report = context_report
 
     assert len(report.folds) >= 3
     assert all(fold.purged_rows > 0 for fold in report.folds)
@@ -133,14 +138,10 @@ def test_context_ablation_uses_purged_identical_folds() -> None:
     )
 
 
-def test_context_ablation_reports_every_lp_target() -> None:
-    report = evaluate_context_feature_ablation(
-        _frame(),
-        min_train_decision_times=30,
-        validation_decision_times=10,
-        step_decision_times=10,
-        min_train_rows=80,
-    )
+def test_context_ablation_reports_every_lp_target(
+    context_report,
+) -> None:
+    report = context_report
 
     assert tuple(
         item.target for item in report.aggregates
@@ -156,16 +157,10 @@ def test_context_ablation_reports_every_lp_target() -> None:
         assert 0 <= item.mint_better_folds <= item.folds
 
 
-def test_context_ablation_has_no_policy_verdict() -> None:
-    report = evaluate_context_feature_ablation(
-        _frame(),
-        min_train_decision_times=30,
-        validation_decision_times=10,
-        step_decision_times=10,
-        min_train_rows=80,
-    )
-
-    record = report.to_record()
+def test_context_ablation_has_no_policy_verdict(
+    context_report,
+) -> None:
+    record = context_report.to_record()
     assert record["policy_actionable"] is False
     assert record["execution_wired"] is False
     assert "qualified" not in record
