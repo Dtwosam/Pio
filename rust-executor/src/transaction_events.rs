@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
 use anchor_client::solana_client::nonblocking::rpc_client::RpcClient;
@@ -61,6 +62,19 @@ pub struct RebalanceRequest {
     pub shrink_mode: u8,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TokenBalanceDelta {
+    pub account_index: u64,
+    pub account_address: Option<String>,
+    pub mint: String,
+    pub pre_owner: Option<String>,
+    pub post_owner: Option<String>,
+    pub pre_amount: String,
+    pub post_amount: String,
+    pub delta_amount: String,
+    pub decimals: Option<u8>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TransactionEventSnapshot {
     pub signature: String,
@@ -69,6 +83,7 @@ pub struct TransactionEventSnapshot {
     pub network_fee_lamports: Option<u64>,
     pub compute_units_consumed: Option<u64>,
     pub succeeded: Option<bool>,
+    pub token_balance_deltas: Vec<TokenBalanceDelta>,
     pub add_requests: Vec<LiquidityAddRequest>,
     pub rebalance_requests: Vec<RebalanceRequest>,
     pub events: Vec<TransactionEventRecord>,
@@ -267,6 +282,155 @@ fn decode_add_requests(value: &Value) -> Vec<LiquidityAddRequest> {
         .collect()
 }
 
+#[derive(Debug, Clone)]
+struct TokenBalancePoint {
+    amount: u64,
+    owner: Option<String>,
+    decimals: Option<u8>,
+}
+
+fn token_balance_array<'a>(
+    meta: &'a Value,
+    camel_key: &str,
+    snake_key: &str,
+) -> Option<&'a Vec<Value>> {
+    meta.get(camel_key)
+        .or_else(|| meta.get(snake_key))
+        .and_then(Value::as_array)
+}
+
+fn token_balance_map(
+    meta: &Value,
+    camel_key: &str,
+    snake_key: &str,
+) -> Result<BTreeMap<(u64, String), TokenBalancePoint>> {
+    let Some(entries) = token_balance_array(meta, camel_key, snake_key) else {
+        return Ok(BTreeMap::new());
+    };
+
+    let mut out = BTreeMap::new();
+    for entry in entries {
+        let account_index = entry
+            .get("accountIndex")
+            .or_else(|| entry.get("account_index"))
+            .and_then(Value::as_u64)
+            .context("token balance is missing account index")?;
+        let mint = entry
+            .get("mint")
+            .and_then(Value::as_str)
+            .context("token balance is missing mint")?
+            .to_string();
+        let ui_amount = entry
+            .get("uiTokenAmount")
+            .or_else(|| entry.get("ui_token_amount"))
+            .context("token balance is missing ui token amount")?;
+        let amount = ui_amount
+            .get("amount")
+            .and_then(Value::as_str)
+            .context("token balance is missing atomic amount")?
+            .parse::<u64>()
+            .context("token balance atomic amount is not u64")?;
+        let decimals = ui_amount
+            .get("decimals")
+            .and_then(Value::as_u64)
+            .map(u8::try_from)
+            .transpose()
+            .context("token balance decimals exceed u8")?;
+        let owner = entry
+            .get("owner")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        out.insert(
+            (account_index, mint),
+            TokenBalancePoint {
+                amount,
+                owner,
+                decimals,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn account_address_at(value: &Value, account_index: u64) -> Option<String> {
+    let index = usize::try_from(account_index).ok()?;
+    let account = value
+        .pointer("/transaction/transaction/message/accountKeys")
+        .and_then(Value::as_array)?
+        .get(index)?;
+    account
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| {
+            account
+                .get("pubkey")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+fn extract_token_balance_deltas(
+    value: &Value,
+) -> Result<Vec<TokenBalanceDelta>> {
+    let Some(meta) = value.pointer("/transaction/meta") else {
+        return Ok(Vec::new());
+    };
+    let pre = token_balance_map(
+        meta,
+        "preTokenBalances",
+        "pre_token_balances",
+    )?;
+    let post = token_balance_map(
+        meta,
+        "postTokenBalances",
+        "post_token_balances",
+    )?;
+
+    let keys: BTreeSet<(u64, String)> = pre
+        .keys()
+        .chain(post.keys())
+        .cloned()
+        .collect();
+    let mut out = Vec::new();
+    for (account_index, mint) in keys {
+        let before = pre.get(&(account_index, mint.clone()));
+        let after = post.get(&(account_index, mint.clone()));
+        let pre_amount = before.map(|item| item.amount).unwrap_or(0);
+        let post_amount = after.map(|item| item.amount).unwrap_or(0);
+        if pre_amount == post_amount {
+            continue;
+        }
+
+        let pre_decimals = before.and_then(|item| item.decimals);
+        let post_decimals = after.and_then(|item| item.decimals);
+        if (
+            pre_decimals.is_some()
+            && post_decimals.is_some()
+            && pre_decimals != post_decimals
+        ) {
+            anyhow::bail!(
+                "token balance decimals changed for account {account_index} mint {mint}"
+            );
+        }
+
+        out.push(TokenBalanceDelta {
+            account_index,
+            account_address: account_address_at(value, account_index),
+            mint,
+            pre_owner: before.and_then(|item| item.owner.clone()),
+            post_owner: after.and_then(|item| item.owner.clone()),
+            pre_amount: pre_amount.to_string(),
+            post_amount: post_amount.to_string(),
+            delta_amount: (
+                i128::from(post_amount) - i128::from(pre_amount)
+            )
+            .to_string(),
+            decimals: post_decimals.or(pre_decimals),
+        });
+    }
+    Ok(out)
+}
+
 fn extract_transaction_costs(value: &Value) -> (Option<u64>, Option<u64>, Option<bool>) {
     let meta = value.pointer("/transaction/meta");
     let fee = meta
@@ -356,6 +520,7 @@ pub async fn inspect_transaction_events(
     let rebalance_requests = decode_rebalance_requests(&value);
     let (network_fee_lamports, compute_units_consumed, succeeded) =
         extract_transaction_costs(&value);
+    let token_balance_deltas = extract_token_balance_deltas(&value)?;
 
     Ok(TransactionEventSnapshot {
         signature: signature.to_string(),
@@ -364,6 +529,7 @@ pub async fn inspect_transaction_events(
         network_fee_lamports,
         compute_units_consumed,
         succeeded,
+        token_balance_deltas,
         add_requests,
         rebalance_requests,
         events,
@@ -512,6 +678,144 @@ mod tests {
         assert_eq!(request.min_withdraw_y_amount, "200");
         assert_eq!(request.max_deposit_y_amount, "180");
         assert_eq!(request.shrink_mode, 2);
+    }
+
+    #[test]
+    fn extracts_changed_token_balances_in_atomic_units() {
+        let owner = anchor_client::solana_sdk::pubkey::Pubkey::new_unique();
+        let mint = anchor_client::solana_sdk::pubkey::Pubkey::new_unique();
+        let token_account =
+            anchor_client::solana_sdk::pubkey::Pubkey::new_unique();
+        let value = serde_json::json!({
+            "transaction": {
+                "transaction": {
+                    "message": {
+                        "accountKeys": [
+                            {"pubkey": "payer"},
+                            {"pubkey": token_account.to_string()}
+                        ]
+                    }
+                },
+                "meta": {
+                    "preTokenBalances": [
+                        {
+                            "accountIndex": 1,
+                            "mint": mint.to_string(),
+                            "owner": owner.to_string(),
+                            "uiTokenAmount": {
+                                "amount": "100",
+                                "decimals": 6
+                            }
+                        }
+                    ],
+                    "postTokenBalances": [
+                        {
+                            "accountIndex": 1,
+                            "mint": mint.to_string(),
+                            "owner": owner.to_string(),
+                            "uiTokenAmount": {
+                                "amount": "135",
+                                "decimals": 6
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+
+        let deltas = extract_token_balance_deltas(&value).unwrap();
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].account_index, 1);
+        assert_eq!(
+            deltas[0].account_address.as_deref(),
+            Some(token_account.to_string().as_str())
+        );
+        assert_eq!(deltas[0].mint, mint.to_string());
+        assert_eq!(
+            deltas[0].pre_owner.as_deref(),
+            Some(owner.to_string().as_str())
+        );
+        assert_eq!(
+            deltas[0].post_owner.as_deref(),
+            Some(owner.to_string().as_str())
+        );
+        assert_eq!(deltas[0].pre_amount, "100");
+        assert_eq!(deltas[0].post_amount, "135");
+        assert_eq!(deltas[0].delta_amount, "35");
+        assert_eq!(deltas[0].decimals, Some(6));
+    }
+
+    #[test]
+    fn token_balance_delta_handles_created_and_closed_accounts() {
+        let mint = anchor_client::solana_sdk::pubkey::Pubkey::new_unique();
+        let owner = anchor_client::solana_sdk::pubkey::Pubkey::new_unique();
+        let value = serde_json::json!({
+            "transaction": {
+                "meta": {
+                    "preTokenBalances": [
+                        {
+                            "accountIndex": 2,
+                            "mint": mint.to_string(),
+                            "owner": owner.to_string(),
+                            "uiTokenAmount": {
+                                "amount": "9",
+                                "decimals": 0
+                            }
+                        }
+                    ],
+                    "postTokenBalances": [
+                        {
+                            "accountIndex": 3,
+                            "mint": mint.to_string(),
+                            "owner": owner.to_string(),
+                            "uiTokenAmount": {
+                                "amount": "4",
+                                "decimals": 0
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+
+        let deltas = extract_token_balance_deltas(&value).unwrap();
+        assert_eq!(deltas.len(), 2);
+        assert_eq!(deltas[0].account_index, 2);
+        assert_eq!(deltas[0].delta_amount, "-9");
+        assert_eq!(deltas[1].account_index, 3);
+        assert_eq!(deltas[1].delta_amount, "4");
+    }
+
+    #[test]
+    fn token_balance_delta_ignores_unchanged_balances() {
+        let value = serde_json::json!({
+            "transaction": {
+                "meta": {
+                    "pre_token_balances": [
+                        {
+                            "account_index": 1,
+                            "mint": "mint",
+                            "ui_token_amount": {
+                                "amount": "5",
+                                "decimals": 0
+                            }
+                        }
+                    ],
+                    "post_token_balances": [
+                        {
+                            "account_index": 1,
+                            "mint": "mint",
+                            "ui_token_amount": {
+                                "amount": "5",
+                                "decimals": 0
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+
+        assert!(extract_token_balance_deltas(&value).unwrap().is_empty());
     }
 
     #[test]
