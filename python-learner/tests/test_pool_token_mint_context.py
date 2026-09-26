@@ -123,6 +123,11 @@ def test_mint_context_attaches_latest_prior_state(tmp_path) -> None:
     assert row["mint_y_has_token2022_extension_data"] == 1.0
     assert row["mint_x_program_matches_pool"] == 1.0
     assert row["mint_y_program_matches_pool"] == 1.0
+    assert row["mint_x_observation_count"] == 1.0
+    assert row["mint_x_has_previous_snapshot"] == 0.0
+    assert row["mint_x_seconds_since_previous_snapshot"] == 0.0
+    assert row["mint_x_log10_supply_change_since_previous"] == 0.0
+    assert row["mint_x_mint_authority_change_count"] == 0.0
     assert report.rows_with_both_mints == 1
 
 
@@ -219,3 +224,109 @@ def test_program_mismatch_is_feature_not_hard_rejection(tmp_path) -> None:
     assert len(enriched) == 1
     assert enriched.iloc[0]["mint_x_program_matches_pool"] == 0.0
     assert report.rows_with_both_mints == 1
+
+
+def test_mint_context_exposes_longitudinal_changes_as_of_decision(
+    tmp_path,
+) -> None:
+    storage = Storage(tmp_path / "pio.db")
+    _seed(storage)
+    _save_mint(
+        storage,
+        "MINT_X",
+        "2026-01-01T05:30:00+00:00",
+        program=STANDARD_SPL_TOKEN_PROGRAM,
+        supply="2000000000000",
+        mint_authority="NEW_AUTH",
+        extension_len=0,
+    )
+    _save_mint(
+        storage,
+        "MINT_X",
+        "2026-01-01T06:30:00+00:00",
+        program=STANDARD_SPL_TOKEN_PROGRAM,
+        supply="4000000000000",
+        mint_authority=None,
+        extension_len=0,
+    )
+
+    decisions = pd.DataFrame(
+        [
+            {
+                "pool_address": "POOL",
+                "decision_observed_at": "2026-01-01T06:00:00Z",
+            }
+        ]
+    )
+
+    enriched, _ = attach_token_mint_context_from_store(
+        str(storage.path),
+        decisions,
+    )
+    row = enriched.iloc[0]
+
+    assert row["mint_x_observation_count"] == 2.0
+    assert row["mint_x_has_previous_snapshot"] == 1.0
+    assert row["mint_x_seconds_since_previous_snapshot"] == 3600.0
+    assert row["mint_x_log10_supply_change_since_previous"] > 0.0
+    assert row["mint_x_log10_supply_change_since_first"] > 0.0
+    assert row["mint_x_mint_authority_changed_since_previous"] == 1.0
+    assert row["mint_x_mint_authority_change_count"] == 1.0
+
+    # The 06:30 snapshot is in the future relative to the decision and must
+    # not affect the as-of features.
+    assert row["mint_x_observation_count"] == 2.0
+    assert row["mint_x_mint_authority_active"] == 1.0
+
+
+def test_future_mint_history_change_cannot_alter_prior_features(
+    tmp_path,
+) -> None:
+    storage = Storage(tmp_path / "pio.db")
+    _seed(storage)
+
+    decisions = pd.DataFrame(
+        [
+            {
+                "pool_address": "POOL",
+                "decision_observed_at": "2026-01-01T05:00:00Z",
+            }
+        ]
+    )
+
+    before, _ = attach_token_mint_context_from_store(
+        str(storage.path),
+        decisions,
+    )
+
+    _save_mint(
+        storage,
+        "MINT_X",
+        "2026-01-01T07:00:00+00:00",
+        program=STANDARD_SPL_TOKEN_PROGRAM,
+        supply="999999999999999",
+        mint_authority="FUTURE_AUTH",
+        freeze_authority="FUTURE_FREEZE",
+        extension_len=0,
+    )
+
+    after, _ = attach_token_mint_context_from_store(
+        str(storage.path),
+        decisions,
+    )
+
+    dynamic_columns = [
+        "mint_x_observation_count",
+        "mint_x_has_previous_snapshot",
+        "mint_x_seconds_since_previous_snapshot",
+        "mint_x_log10_supply_change_since_previous",
+        "mint_x_log10_supply_change_since_first",
+        "mint_x_mint_authority_changed_since_previous",
+        "mint_x_freeze_authority_changed_since_previous",
+        "mint_x_mint_authority_change_count",
+        "mint_x_freeze_authority_change_count",
+    ]
+    for column in dynamic_columns:
+        assert before.iloc[0][column] == pytest.approx(
+            after.iloc[0][column]
+        )
