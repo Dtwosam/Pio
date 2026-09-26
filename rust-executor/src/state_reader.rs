@@ -623,9 +623,9 @@ pub async fn inspect_position(
     for ((index, pubkey), account) in final_indexes
         .into_iter()
         .zip(final_pubkeys)
-        .zip(accounts.into_iter().skip(3))
+        .zip(accounts.iter().skip(3))
     {
-        let Some(account) = account else {
+        let Some(account) = account.as_ref() else {
             continue;
         };
         if account.owner != commons::dlmm::ID {
