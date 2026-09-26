@@ -267,6 +267,14 @@ def test_phase2_position_observation_attempt_ledger_is_append_only(tmp_path):
         None,
     )
 
+    status = storage.data_status()
+    assert status["phase2_position_observation_attempts"] == 1
+    assert status["phase2_position_observation_successes"] == 0
+    assert status["phase2_position_observation_failures"] == 1
+    assert status["latest_phase2_position_observation_attempt"] == (
+        "2026-09-26T15:00:00+00:00"
+    )
+
     import sqlite3
 
     with pytest.raises(sqlite3.IntegrityError):
