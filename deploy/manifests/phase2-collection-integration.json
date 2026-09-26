@@ -48,7 +48,7 @@
     },
     {
       "pr": 25,
-      "head": "66562f305fece9dffaa0486044952da94232b9ff",
+      "head": "b9353d40ce693887a3d808ae9cd06641e8a00b6f",
       "role": "observer failure categories"
     },
     {
@@ -70,6 +70,7 @@
   "integration_notes": [
     "research_store keeps PR12 position capture-slot columns and PR23 single-context pool-capture filtering",
     "calibration_queue keeps PR23 future-prestate classification and PR20 env-only RPC commands",
-    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger"
+    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger",
+    "position discovery failures are secret-safe and do not include raw executor stderr"
   ]
 }
