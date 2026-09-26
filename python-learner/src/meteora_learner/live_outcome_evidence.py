@@ -115,12 +115,13 @@ def _sample(row: dict[str, Any]) -> LiveOutcomeEvidenceSample:
             "live learning evidence requires positive entry_outflow_quote"
         )
 
-    expected_return_bps = float(
+    expected_return_bps_int = int(
         _d(row["expected_net_return_pct"]) * BPS_PER_PERCENT
     )
+    expected_return_bps = float(expected_return_bps_int)
     stored_prediction_error = int(row["prediction_error_bps"])
-    calculated_prediction_error = int(
-        Decimal(label_return) - Decimal(str(expected_return_bps))
+    calculated_prediction_error = (
+        label_return - expected_return_bps_int
     )
     if stored_prediction_error != calculated_prediction_error:
         raise ValueError(
