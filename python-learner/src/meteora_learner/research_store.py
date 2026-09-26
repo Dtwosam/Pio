@@ -646,6 +646,36 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def transaction_event_count(
+        self,
+        signature: str,
+        *,
+        event_type: str | None = None,
+    ) -> int:
+        conn = self._connect()
+        try:
+            if event_type is None:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM chain_transaction_events
+                    WHERE signature = ?
+                    """,
+                    (signature,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM chain_transaction_events
+                    WHERE signature = ? AND event_type = ?
+                    """,
+                    (signature, event_type),
+                ).fetchone()
+        finally:
+            conn.close()
+        return int(row[0]) if row is not None else 0
+
     def rebalance_request(
         self,
         signature: str,
