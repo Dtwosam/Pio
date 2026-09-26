@@ -359,6 +359,9 @@ from .live_champion_monitor import (
     rollback_live_champion,
 )
 from .transaction_costs import build_transaction_cost_report
+from .rotation_token_flow_gaps import (
+    build_rotation_token_flow_gap_report,
+)
 from .wallet_flow import (
     WalletFlowCriteria,
     persist_wallet_flow_research,
@@ -4474,6 +4477,18 @@ def main() -> None:
         help="Meteora position address",
     )
 
+    token_flow_gaps = subparsers.add_parser(
+        "rotation-token-flow-gaps",
+        help=(
+            "Report rebalance transactions missing trustworthy "
+            "token-flow capture"
+        ),
+    )
+    token_flow_gaps.add_argument(
+        "--pool",
+        help="Optional Meteora pool address filter",
+    )
+
     composition_prestate = subparsers.add_parser(
         "composition-prestate",
         help="Find slot-bounded pre-add snapshots eligible for exact verification",
@@ -4957,6 +4972,15 @@ def main() -> None:
         result = build_transaction_cost_report(
             str(settings.database_path),
             position_address=args.position,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "rotation-token-flow-gaps":
+        settings = Settings.from_env()
+        result = build_rotation_token_flow_gap_report(
+            Storage(settings.database_path),
+            pool_address=args.pool,
         )
         print(json.dumps(result.to_record(), indent=2))
         return
