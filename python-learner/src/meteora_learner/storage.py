@@ -313,6 +313,7 @@ CREATE TABLE IF NOT EXISTS chain_transaction_snapshots (
     network_fee_lamports INTEGER,
     compute_units_consumed INTEGER,
     succeeded INTEGER,
+    token_balance_deltas_captured INTEGER NOT NULL DEFAULT 0,
     raw_json TEXT NOT NULL
 );
 
@@ -1472,6 +1473,10 @@ CHAIN_ADD_REQUEST_EXTRA_COLUMNS = {
     "weighted_distribution_json": "TEXT",
 }
 
+CHAIN_TX_SNAPSHOT_EXTRA_COLUMNS = {
+    "token_balance_deltas_captured": "INTEGER NOT NULL DEFAULT 0",
+}
+
 CHAIN_TX_EVENT_EXTRA_COLUMNS = {
     "owner_address": "TEXT",
     "x_withdrawn_amount": "TEXT",
@@ -1620,6 +1625,11 @@ class Storage:
             _ensure_columns(conn, "chain_pool_snapshots", CHAIN_POOL_EXTRA_COLUMNS)
             _ensure_columns(conn, "position_bin_snapshots", POSITION_BIN_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_position_snapshots", CHAIN_POSITION_EXTRA_COLUMNS)
+            _ensure_columns(
+                conn,
+                "chain_transaction_snapshots",
+                CHAIN_TX_SNAPSHOT_EXTRA_COLUMNS,
+            )
             _ensure_columns(conn, "chain_transaction_events", CHAIN_TX_EVENT_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_add_liquidity_requests", CHAIN_ADD_REQUEST_EXTRA_COLUMNS)
             _ensure_columns(
@@ -2344,9 +2354,15 @@ class Storage:
         network_fee_raw = snapshot.get("network_fee_lamports")
         compute_units_raw = snapshot.get("compute_units_consumed")
         succeeded_raw = snapshot.get("succeeded")
-        token_balance_deltas = snapshot.get("token_balance_deltas") or []
-        if not isinstance(token_balance_deltas, list):
-            raise ValueError("token_balance_deltas must be a list")
+        token_balance_deltas_captured = (
+            "token_balance_deltas" in snapshot
+        )
+        if token_balance_deltas_captured:
+            token_balance_deltas = snapshot.get("token_balance_deltas")
+            if not isinstance(token_balance_deltas, list):
+                raise ValueError("token_balance_deltas must be a list")
+        else:
+            token_balance_deltas = []
         add_requests = snapshot.get("add_requests") or []
         if not isinstance(add_requests, list):
             raise ValueError("add_requests must be a list")
@@ -2541,8 +2557,8 @@ class Storage:
                 INSERT INTO chain_transaction_snapshots(
                     observed_at, signature, slot, block_time,
                     network_fee_lamports, compute_units_consumed, succeeded,
-                    raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    token_balance_deltas_captured, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(signature) DO UPDATE SET
                     observed_at=excluded.observed_at,
                     slot=excluded.slot,
@@ -2550,6 +2566,12 @@ class Storage:
                     network_fee_lamports=excluded.network_fee_lamports,
                     compute_units_consumed=excluded.compute_units_consumed,
                     succeeded=excluded.succeeded,
+                    token_balance_deltas_captured=(
+                        MAX(
+                            chain_transaction_snapshots.token_balance_deltas_captured,
+                            excluded.token_balance_deltas_captured
+                        )
+                    ),
                     raw_json=excluded.raw_json
                 """,
                 (
@@ -2560,6 +2582,7 @@ class Storage:
                     int(network_fee_raw) if network_fee_raw is not None else None,
                     int(compute_units_raw) if compute_units_raw is not None else None,
                     int(bool(succeeded_raw)) if succeeded_raw is not None else None,
+                    int(token_balance_deltas_captured),
                     json.dumps(snapshot, separators=(",", ":")),
                 ),
             )
@@ -3531,7 +3554,9 @@ class Storage:
             ).fetchone()
             chain_tx_snapshots = conn.execute(
                 """
-                SELECT COUNT(*), SUM(CASE WHEN network_fee_lamports IS NOT NULL THEN 1 ELSE 0 END)
+                SELECT COUNT(*),
+                       SUM(CASE WHEN network_fee_lamports IS NOT NULL THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN token_balance_deltas_captured = 1 THEN 1 ELSE 0 END)
                 FROM chain_transaction_snapshots
                 """
             ).fetchone()
@@ -3574,6 +3599,9 @@ class Storage:
             "chain_transaction_snapshots": chain_tx_snapshots[0],
             "chain_transaction_token_balance_deltas": chain_tx_token_deltas,
             "transaction_fee_samples": chain_tx_snapshots[1] or 0,
+            "transaction_token_flow_capture_samples": (
+                chain_tx_snapshots[2] or 0
+            ),
             "chain_add_liquidity_requests": add_requests,
             "chain_rebalance_requests": rebalance_requests,
             "quality_failures": failures,
