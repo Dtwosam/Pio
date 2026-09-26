@@ -97,6 +97,7 @@ def save_rebalance(
     owner_change=False,
     extra_rebalance=False,
     signature="sig",
+    include_token_capture=True,
 ):
     events = [rebalance_event(fee_x=fee_x, fee_y=fee_y)]
     requests = [
@@ -118,32 +119,32 @@ def save_rebalance(
             )
         )
 
-    storage.save_chain_transaction_events(
-        {
-            "signature": signature,
-            "slot": 450700000,
-            "block_time": 1_700_000_000,
-            "network_fee_lamports": 5000,
-            "compute_units_consumed": 200000,
-            "succeeded": True,
-            "token_balance_deltas": [
-                token_delta(
-                    account_index=1,
-                    mint=X_MINT,
-                    delta=owner_x_delta,
-                    owner_change=owner_change,
-                ),
-                token_delta(
-                    account_index=2,
-                    mint=Y_MINT,
-                    delta=owner_y_delta,
-                ),
-            ],
-            "add_requests": [],
-            "rebalance_requests": requests,
-            "events": events,
-        }
-    )
+    payload = {
+        "signature": signature,
+        "slot": 450700000,
+        "block_time": 1_700_000_000,
+        "network_fee_lamports": 5000,
+        "compute_units_consumed": 200000,
+        "succeeded": True,
+        "add_requests": [],
+        "rebalance_requests": requests,
+        "events": events,
+    }
+    if include_token_capture:
+        payload["token_balance_deltas"] = [
+            token_delta(
+                account_index=1,
+                mint=X_MINT,
+                delta=owner_x_delta,
+                owner_change=owner_change,
+            ),
+            token_delta(
+                account_index=2,
+                mint=Y_MINT,
+                delta=owner_y_delta,
+            ),
+        ]
+    storage.save_chain_transaction_events(payload)
 
 
 def test_fee_separate_hypothesis_matches_owner_flow_exactly(tmp_path):
@@ -319,3 +320,61 @@ def test_fee_semantics_persistence_remains_non_qualified(tmp_path):
     assert saved["qualified"] is False
     assert saved["status"] == "UNRESOLVED_OBSERVATIONAL_EVIDENCE"
     assert saved["evidence"]["semantics_resolved"] is False
+
+
+
+def test_missing_token_flow_capture_is_ineligible_not_zero_flow(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool_identity(storage)
+    save_rebalance(
+        storage,
+        owner_x_delta=0,
+        owner_y_delta=0,
+        should_claim_fee=True,
+        fee_x=0,
+        fee_y=0,
+        include_token_capture=False,
+    )
+
+    report = build_rotation_fee_semantics_report(
+        storage,
+        position_address=POSITION,
+    )
+
+    assert report.transactions_seen == 1
+    assert report.eligible_transactions == 0
+    sample = report.samples[0]
+    assert sample.eligible is False
+    assert sample.evidence_class == "INELIGIBLE"
+    assert sample.owner_x_delta is None
+    assert sample.owner_y_delta is None
+    assert sample.exclusion_reason == (
+        "transaction token-balance capture missing"
+    )
+
+
+def test_explicit_empty_token_flow_capture_is_not_treated_as_missing(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool_identity(storage)
+    save_rebalance(
+        storage,
+        owner_x_delta=0,
+        owner_y_delta=0,
+        should_claim_fee=True,
+        fee_x=0,
+        fee_y=0,
+    )
+    with storage.connect() as conn:
+        conn.execute(
+            "DELETE FROM chain_transaction_token_balance_deltas"
+        )
+
+    report = build_rotation_fee_semantics_report(
+        storage,
+        position_address=POSITION,
+    )
+
+    assert report.eligible_transactions == 1
+    assert report.samples[0].evidence_class == "BOTH_HYPOTHESES_EXACT"
