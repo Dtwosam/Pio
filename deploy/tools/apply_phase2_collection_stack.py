@@ -148,10 +148,16 @@ def preflight_collection_stack(
             status = "SOURCE_OUTSIDE_TREE"
         elif source_path.is_symlink():
             status = "SOURCE_SYMLINK"
+        elif not source_path.exists():
+            status = "SOURCE_MISSING"
+        elif not source_path.is_file():
+            status = "SOURCE_NOT_REGULAR_FILE"
         elif not _resolves_within(repo, target_path):
             status = "TARGET_OUTSIDE_REPOSITORY"
         elif target_path.is_symlink():
             status = "CONFLICT_SYMLINK"
+        elif target_path.exists() and not target_path.is_file():
+            status = "CONFLICT_NON_FILE"
         else:
             source_blob = git_blob_sha(source_path)
             current_blob = git_blob_sha(target_path)
