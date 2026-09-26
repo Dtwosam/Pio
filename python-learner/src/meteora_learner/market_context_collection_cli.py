@@ -47,6 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip missing token mint context capture.",
     )
+    parser.add_argument(
+        "--refresh-mints",
+        action="store_true",
+        help=(
+            "Also refresh already-observed required mints oldest-snapshot "
+            "first to build longitudinal token/mint history."
+        ),
+    )
     parser.add_argument("--page-size", type=int, default=1000)
     parser.add_argument("--max-pages", type=int, default=100)
     parser.add_argument(
@@ -61,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mint-batch-limit",
+        type=int,
+        default=20,
+    )
+    parser.add_argument(
+        "--mint-refresh-batch-limit",
         type=int,
         default=20,
     )
@@ -84,11 +97,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     capture_chain = not args.no_chain
     refresh_chain = args.refresh_chain
     capture_mints = not args.no_mints
+    refresh_mints = args.refresh_mints
     if not (
         capture_universe
         or capture_chain
         or refresh_chain
         or capture_mints
+        or refresh_mints
     ):
         raise ValueError(
             "at least one collection stage must remain enabled"
@@ -108,12 +123,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         capture_chain_context=capture_chain,
         refresh_chain_context=refresh_chain,
         capture_mint_context=capture_mints,
+        refresh_mint_context=refresh_mints,
         settings=settings,
         page_size=args.page_size,
         max_pages=args.max_pages,
         chain_batch_limit=args.chain_batch_limit,
         chain_refresh_batch_limit=args.chain_refresh_batch_limit,
         mint_batch_limit=args.mint_batch_limit,
+        mint_refresh_batch_limit=args.mint_refresh_batch_limit,
         bin_array_radius=args.bin_array_radius,
         timeout_seconds=args.timeout_seconds,
     )
