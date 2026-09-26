@@ -121,7 +121,7 @@ def test_quote_observer_rejects_wrong_mint_response(tmp_path):
     assert report.quotes_refreshed == 0
     assert report.quotes_failed == 4
     assert all(
-        "does not match" in str(item.error)
+        item.error == "QUOTE_MINT_MISMATCH"
         for item in report.items
     )
 
@@ -175,3 +175,29 @@ def test_quote_observer_does_not_backdate_later_network_responses(tmp_path):
     assert first.available is True
     assert first.observed_at == "2026-09-26T16:06:00+00:00"
     assert second.available is False
+
+
+
+def test_quote_observer_failure_does_not_echo_fetch_exception(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(storage)
+    secret = "https://user:secret@example.invalid/price"
+
+    def fetch(_mint):
+        raise RuntimeError(f"request failed at {secret}")
+
+    report = collect_phase2_research_quotes(
+        storage,
+        pool_address=POOL,
+        observed_at="2026-09-26T16:05:00+00:00",
+        fetch_quote=fetch,
+    )
+
+    assert report.quotes_refreshed == 0
+    assert report.quotes_failed == 4
+    encoded = str(report.to_record())
+    assert secret not in encoded
+    assert "request failed" not in encoded
+    assert {
+        item.error for item in report.items
+    } == {"QUOTE_FETCH_FAILED"}
