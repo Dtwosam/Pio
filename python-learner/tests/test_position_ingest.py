@@ -3,6 +3,7 @@ import sqlite3
 import pytest
 
 from meteora_learner.position_ingest import ingest_position_snapshot
+from meteora_learner.research_store import ResearchStore
 from meteora_learner.storage import Storage
 
 
@@ -79,6 +80,18 @@ def test_position_snapshot_is_persisted(tmp_path):
     assert position == (
         "position", 450600000, 450600000, "pool", "3", "4"
     )
+    store = ResearchStore(str(storage.path))
+    latest = store.latest_position_snapshot("position")
+    at_time = store.position_snapshot_at(
+        "position",
+        "2026-09-22T12:00:00+00:00",
+    )
+    assert latest is not None
+    assert at_time is not None
+    assert latest["capture_slot_start"] == 450600000
+    assert latest["capture_slot_end"] == 450600000
+    assert at_time["capture_slot_start"] == 450600000
+    assert at_time["capture_slot_end"] == 450600000
     assert bin_row == (100, "3000", "31", "41", "300", "3", "4")
     assert storage.data_status()["position_bin_snapshots"] == 1
 
