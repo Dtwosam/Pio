@@ -105,6 +105,25 @@ def test_calibration_gap_reasons_are_counted_and_sorted(tmp_path):
     storage.save_position_events(rows)
 
     for idx, signature in enumerate(("sig-a", "sig-b"), start=1):
+        events = []
+        if signature == "sig-a":
+            events = [
+                {
+                    "event_index": 0,
+                    "parent_ix_index": idx,
+                    "event": {
+                        "event_type": "AddLiquidity",
+                        "event": {
+                            "lb_pair": "pool",
+                            "from": "user",
+                            "position": "position",
+                            "amount_x": "1",
+                            "amount_y": "2",
+                            "active_bin_id": 10,
+                        },
+                    },
+                }
+            ]
         storage.save_chain_transaction_events(
             {
                 "signature": signature,
@@ -119,7 +138,7 @@ def test_calibration_gap_reasons_are_counted_and_sorted(tmp_path):
                         "requested_amount_y": "2",
                     }
                 ],
-                "events": [],
+                "events": events,
             }
         )
 
@@ -129,14 +148,17 @@ def test_calibration_gap_reasons_are_counted_and_sorted(tmp_path):
         item.reason: item.count
         for item in report.composition_ineligibility_reasons
     }
-    assert reasons["unsupported exact allocation instruction: unsupported_add"] == 2
+    assert reasons[
+        "unsupported exact allocation instruction: unsupported_add"
+    ] == 1
+    assert reasons["AddLiquidity event decode missing"] == 1
     assert reasons["decoded Solana transaction snapshot missing"] == 1
     assert report.add_execution_events == 3
-    assert report.add_execution_matched_events == 0
-    assert report.add_execution_unmatched_samples == 3
+    assert report.add_execution_matched_events == 1
+    assert report.add_execution_unmatched_samples == 2
     add_reasons = {
         item.reason: item.count
         for item in report.add_execution_gap_reasons
     }
-    assert add_reasons["AddLiquidity event decode missing"] == 2
+    assert add_reasons["AddLiquidity event decode missing"] == 1
     assert add_reasons["add-liquidity request decode missing"] == 1
