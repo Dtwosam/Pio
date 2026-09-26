@@ -726,18 +726,20 @@ mod tests {
         let deltas = extract_token_balance_deltas(&value).unwrap();
         assert_eq!(deltas.len(), 1);
         assert_eq!(deltas[0].account_index, 1);
+        let token_account_string = token_account.to_string();
+        let owner_string = owner.to_string();
         assert_eq!(
             deltas[0].account_address.as_deref(),
-            Some(token_account.to_string().as_str())
+            Some(token_account_string.as_str())
         );
         assert_eq!(deltas[0].mint, mint.to_string());
         assert_eq!(
             deltas[0].pre_owner.as_deref(),
-            Some(owner.to_string().as_str())
+            Some(owner_string.as_str())
         );
         assert_eq!(
             deltas[0].post_owner.as_deref(),
-            Some(owner.to_string().as_str())
+            Some(owner_string.as_str())
         );
         assert_eq!(deltas[0].pre_amount, "100");
         assert_eq!(deltas[0].post_amount, "135");
