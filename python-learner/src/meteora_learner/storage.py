@@ -201,6 +201,21 @@ CREATE TABLE IF NOT EXISTS chain_position_snapshots (
 CREATE INDEX IF NOT EXISTS idx_chain_position_time
 ON chain_position_snapshots(position_address, observed_at);
 
+CREATE TABLE IF NOT EXISTS phase2_position_observation_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempted_at TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    position_address TEXT NOT NULL,
+    succeeded INTEGER NOT NULL,
+    failure_category TEXT,
+    capture_slot INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase2_position_attempt_pool_time
+ON phase2_position_observation_attempts(
+    pool_address, position_address, attempted_at, id
+);
+
 CREATE TABLE IF NOT EXISTS position_bin_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
@@ -290,6 +305,18 @@ CREATE TRIGGER IF NOT EXISTS bin_liquidity_snapshots_no_delete
 BEFORE DELETE ON bin_liquidity_snapshots
 BEGIN
     SELECT RAISE(ABORT, 'bin_liquidity_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase2_position_observation_attempts_no_update
+BEFORE UPDATE ON phase2_position_observation_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_position_observation_attempts is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase2_position_observation_attempts_no_delete
+BEFORE DELETE ON phase2_position_observation_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_position_observation_attempts is immutable');
 END;
 
 CREATE TRIGGER IF NOT EXISTS position_event_history_no_update
@@ -2110,6 +2137,80 @@ class Storage:
 
         return arrays_seen, len(bin_rows)
 
+    def save_phase2_position_observation_attempt(
+        self,
+        *,
+        pool_address: str,
+        position_address: str,
+        attempted_at: str,
+        succeeded: bool,
+        failure_category: str | None = None,
+        capture_slot: int | None = None,
+    ) -> int:
+        if not pool_address.strip():
+            raise ValueError("pool_address is required")
+        if not position_address.strip():
+            raise ValueError("position_address is required")
+        if succeeded:
+            if failure_category is not None:
+                raise ValueError(
+                    "successful observation attempt cannot have failure_category"
+                )
+            if capture_slot is None or int(capture_slot) < 0:
+                raise ValueError(
+                    "successful observation attempt requires non-negative capture_slot"
+                )
+        else:
+            if not failure_category:
+                raise ValueError(
+                    "failed observation attempt requires failure_category"
+                )
+            if capture_slot is not None:
+                raise ValueError(
+                    "failed observation attempt cannot have capture_slot"
+                )
+
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO phase2_position_observation_attempts(
+                    attempted_at, pool_address, position_address,
+                    succeeded, failure_category, capture_slot
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    attempted_at,
+                    pool_address,
+                    position_address,
+                    int(succeeded),
+                    failure_category,
+                    int(capture_slot) if capture_slot is not None else None,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def latest_phase2_position_observation_attempts(
+        self,
+        *,
+        pool_address: str,
+    ) -> dict[str, float]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT position_address,
+                       MAX(julianday(attempted_at)) AS attempted_jd
+                FROM phase2_position_observation_attempts
+                WHERE pool_address = ?
+                GROUP BY position_address
+                """,
+                (pool_address,),
+            ).fetchall()
+        return {
+            str(row[0]): float(row[1])
+            for row in rows
+            if row[1] is not None
+        }
+
     def save_chain_position_snapshot(
         self,
         snapshot: dict[str, Any],
@@ -3431,6 +3532,15 @@ class Storage:
             position_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT position_address) FROM position_event_history"
             ).fetchone()
+            position_attempts = conn.execute(
+                """
+                SELECT COUNT(*),
+                       SUM(CASE WHEN succeeded = 1 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN succeeded = 0 THEN 1 ELSE 0 END),
+                       MAX(attempted_at)
+                FROM phase2_position_observation_attempts
+                """
+            ).fetchone()
             chain_tx_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT signature) FROM chain_transaction_events"
             ).fetchone()
@@ -3471,6 +3581,10 @@ class Storage:
             "position_bin_snapshots": position_bins,
             "position_event_history": position_events[0],
             "position_event_position_count": position_events[1],
+            "phase2_position_observation_attempts": position_attempts[0],
+            "phase2_position_observation_successes": position_attempts[1] or 0,
+            "phase2_position_observation_failures": position_attempts[2] or 0,
+            "latest_phase2_position_observation_attempt": position_attempts[3],
             "chain_transaction_events": chain_tx_events[0],
             "chain_transaction_count": chain_tx_events[1],
             "chain_transaction_snapshots": chain_tx_snapshots[0],
