@@ -237,6 +237,10 @@ from .paper_account import (
     paper_account_snapshot,
     rebalance_paper_position,
 )
+from .paper_management_dataset import (
+    build_persisted_paper_management_dataset,
+    persist_paper_management_dataset,
+)
 from .paper_policy import evaluate_paper_position_policy
 from .paper_cycle import apply_paper_observation
 from .paper_runner import PaperBatchObservation, run_paper_observation_batch
@@ -4464,6 +4468,20 @@ def main() -> None:
         help="List actionable missing calibration work from the local database",
     )
 
+    paper_management_dataset = subparsers.add_parser(
+        "paper-management-dataset",
+        help=(
+            "Build the PAPER HOLD-vs-REBALANCE management dataset from "
+            "persisted evidence without inventing incomplete labels"
+        ),
+    )
+    paper_management_dataset.add_argument("--pool", required=True)
+    paper_management_dataset.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist the dataset snapshot as non-qualified research evidence",
+    )
+
     transaction_costs = subparsers.add_parser(
         "transaction-costs",
         help="Summarize real Solana fees and compute usage for one position",
@@ -4950,6 +4968,23 @@ def main() -> None:
             str(settings.database_path),
         )
         print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "paper-management-dataset":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_persisted_paper_management_dataset(
+            storage,
+            pool_address=args.pool,
+        )
+        payload = result.to_record()
+        if args.persist:
+            payload["evidence_id"] = persist_paper_management_dataset(
+                storage,
+                pool_address=args.pool,
+                report=result,
+            )
+        print(json.dumps(payload, indent=2))
         return
 
     if args.command == "transaction-costs":
