@@ -273,6 +273,18 @@ ON position_event_history(position_address, block_time, ix_index);
 CREATE INDEX IF NOT EXISTS idx_position_event_history_signature
 ON position_event_history(signature, ix_index);
 
+CREATE TABLE IF NOT EXISTS phase2_collection_task_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempted_at TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    task_key TEXT NOT NULL,
+    succeeded INTEGER NOT NULL,
+    outcome_category TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase2_collection_task_attempts
+ON phase2_collection_task_attempts(stage, task_key, attempted_at, id);
+
 CREATE TRIGGER IF NOT EXISTS chain_pool_snapshots_no_update
 BEFORE UPDATE ON chain_pool_snapshots
 BEGIN
@@ -344,18 +356,6 @@ BEFORE DELETE ON position_event_history
 BEGIN
     SELECT RAISE(ABORT, 'position_event_history is immutable');
 END;
-
-CREATE TABLE IF NOT EXISTS phase2_collection_task_attempts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    attempted_at TEXT NOT NULL,
-    stage TEXT NOT NULL,
-    task_key TEXT NOT NULL,
-    succeeded INTEGER NOT NULL,
-    outcome_category TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_phase2_collection_task_attempts
-ON phase2_collection_task_attempts(stage, task_key, attempted_at, id);
 
 CREATE TABLE IF NOT EXISTS chain_transaction_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
