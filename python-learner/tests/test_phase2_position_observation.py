@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from meteora_learner.phase2_position_observation import (
     collect_phase2_position_observations,
 )
@@ -541,3 +543,127 @@ def test_attempt_ledger_uses_prior_snapshot_history_for_initial_rotation(tmp_pat
 
     assert result.snapshots_saved == 1
     assert inspected == [POSITIONS[1]]
+
+
+
+def test_observer_reserves_revisit_slot_while_exploring_new_positions(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    third = "position-c"
+    inspected = []
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 3,
+                "positions_returned": 3,
+                "truncated": False,
+                "positions": [
+                    {"position_address": POSITIONS[0]},
+                    {"position_address": POSITIONS[1]},
+                    {"position_address": third},
+                ],
+            }
+        else:
+            inspected.append(command[2])
+            payload = _snapshot(command[2])
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    first = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=2,
+        min_revisit_per_run=1,
+        observed_at="2026-09-26T15:00:00+00:00",
+        runner=runner,
+    )
+    second = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=2,
+        min_revisit_per_run=1,
+        observed_at="2026-09-26T15:15:00+00:00",
+        runner=runner,
+    )
+
+    assert first.exploration_positions_selected == 2
+    assert first.revisit_positions_selected == 0
+    assert second.exploration_positions_selected == 1
+    assert second.revisit_positions_selected == 1
+    assert inspected == [
+        POSITIONS[0],
+        POSITIONS[1],
+        third,
+        POSITIONS[0],
+    ]
+    assert second.reconciliation_progress is not None
+    assert second.reconciliation_progress.fee_intervals_seen >= 1
+    assert second.reconciliation_progress.reward_intervals_seen >= 1
+
+
+def test_observer_single_slot_budget_preserves_exploration(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_phase2_position_observation_attempt(
+        pool_address=POOL,
+        position_address=POSITIONS[0],
+        attempted_at="2026-09-26T14:45:00+00:00",
+        succeeded=True,
+        capture_slot=450699999,
+    )
+    from meteora_learner.position_ingest import ingest_position_snapshot
+    ingest_position_snapshot(
+        storage,
+        _snapshot(POSITIONS[0]),
+        observed_at="2026-09-26T14:45:00+00:00",
+    )
+    inspected = []
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 2,
+                "positions_returned": 2,
+                "truncated": False,
+                "positions": [
+                    {"position_address": POSITIONS[0]},
+                    {"position_address": POSITIONS[1]},
+                ],
+            }
+        else:
+            inspected.append(command[2])
+            payload = _snapshot(command[2])
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    report = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        min_revisit_per_run=1,
+        observed_at="2026-09-26T15:00:00+00:00",
+        runner=runner,
+    )
+
+    assert inspected == [POSITIONS[1]]
+    assert report.exploration_positions_selected == 1
+    assert report.revisit_positions_selected == 0
+
+
+def test_observer_revisit_budget_cannot_be_negative(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    with pytest.raises(ValueError, match="cannot be negative"):
+        collect_phase2_position_observations(
+            storage,
+            pool_address=POOL,
+            executor_path="/executor",
+            min_revisit_per_run=-1,
+        )
