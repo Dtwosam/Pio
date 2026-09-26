@@ -28,7 +28,7 @@ class PatchResult:
     target: str
     ready: bool
     applied: bool
-    pr7_head: str
+    stack_head: str
     patch_sha256: str
     backup: str | None
 
@@ -122,7 +122,7 @@ def apply_guarded_patch(
             target=TARGET_PATH,
             ready=True,
             applied=False,
-            pr7_head=STACK_HEAD,
+            stack_head=STACK_HEAD,
             patch_sha256=patch_sha256,
             backup=None,
         )
@@ -145,7 +145,7 @@ def apply_guarded_patch(
         target=TARGET_PATH,
         ready=True,
         applied=True,
-        pr7_head=STACK_HEAD,
+        stack_head=STACK_HEAD,
         patch_sha256=patch_sha256,
         backup=str(backup),
     )
