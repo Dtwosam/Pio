@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from statistics import mean
 from typing import Any
 
-from .quote_registry import token_quote_status
+from .quote_registry import DEFAULT_QUOTE_UNIT, token_quote_status
 from .research_store import ResearchStore
 from .storage import Storage
 
@@ -26,6 +26,7 @@ class RotationTransitionCostSample:
     network_fee_lamports: int | None
     network_fee_quote: float | None
     sol_quote_per_atomic: float | None
+    sol_quote_source: str | None
     sol_quote_observed_at: str | None
     sol_quote_age_seconds: int | None
     quote_eligible: bool
@@ -39,6 +40,7 @@ class RotationTransitionCostSample:
 @dataclass(frozen=True)
 class RotationTransitionCostReport:
     position_address: str
+    quote_unit: str
     rotation_transactions: int
     quote_eligible_transactions: int
     quote_coverage_rate: float
@@ -135,6 +137,7 @@ def build_quote_normalized_rotation_cost_report(
 
         quote_value = None
         quote_per_atomic = None
+        quote_source = None
         quote_observed_at = None
         quote_age = None
         reason = None
@@ -155,6 +158,7 @@ def build_quote_normalized_rotation_cost_report(
                 as_of=_block_time_iso(block_time),
             )
             quote_per_atomic = status.quote_per_atomic
+            quote_source = status.source
             quote_observed_at = status.observed_at
             quote_age = status.age_seconds
             if not status.available:
@@ -177,6 +181,7 @@ def build_quote_normalized_rotation_cost_report(
                 network_fee_lamports=network_fee,
                 network_fee_quote=quote_value,
                 sol_quote_per_atomic=quote_per_atomic,
+                sol_quote_source=quote_source,
                 sol_quote_observed_at=quote_observed_at,
                 sol_quote_age_seconds=quote_age,
                 quote_eligible=quote_value is not None,
@@ -208,6 +213,7 @@ def build_quote_normalized_rotation_cost_report(
     ]
     return RotationTransitionCostReport(
         position_address=position_address,
+        quote_unit=DEFAULT_QUOTE_UNIT,
         rotation_transactions=len(samples),
         quote_eligible_transactions=len(quoted),
         quote_coverage_rate=len(quoted) / len(samples),
