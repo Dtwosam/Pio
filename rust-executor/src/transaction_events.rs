@@ -403,11 +403,10 @@ fn extract_token_balance_deltas(
 
         let pre_decimals = before.and_then(|item| item.decimals);
         let post_decimals = after.and_then(|item| item.decimals);
-        if (
-            pre_decimals.is_some()
+        if pre_decimals.is_some()
             && post_decimals.is_some()
             && pre_decimals != post_decimals
-        ) {
+        {
             anyhow::bail!(
                 "token balance decimals changed for account {account_index} mint {mint}"
             );
