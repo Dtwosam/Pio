@@ -7,6 +7,12 @@ from typing import Any
 
 import pandas as pd
 
+from .pool_api_metadata_ablation import (
+    APIMetadataAblationReport,
+    APIMetadataTrainingFrameReport,
+    build_api_metadata_enriched_lp_frame,
+    evaluate_api_metadata_ablation,
+)
 from .pool_lp_context_ablation import (
     ContextFeatureAblationReport,
     evaluate_context_feature_ablation,
@@ -63,6 +69,9 @@ class MintFeatureResearchReport:
     feature_drift_reason: str | None = None
     source_outcome_coverage: OutcomeCoverageReport | None = None
     model_ready_outcome_coverage: OutcomeCoverageComparison | None = None
+    api_metadata_enrichment: APIMetadataTrainingFrameReport | None = None
+    api_metadata_ablation: APIMetadataAblationReport | None = None
+    api_metadata_reason: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -121,6 +130,17 @@ class MintFeatureResearchReport:
                 if self.model_ready_outcome_coverage is not None
                 else None
             ),
+            "api_metadata_enrichment": (
+                self.api_metadata_enrichment.to_record()
+                if self.api_metadata_enrichment is not None
+                else None
+            ),
+            "api_metadata_ablation": (
+                self.api_metadata_ablation.to_record()
+                if self.api_metadata_ablation is not None
+                else None
+            ),
+            "api_metadata_reason": self.api_metadata_reason,
         }
 
 
@@ -346,6 +366,32 @@ def run_mint_feature_research_from_dataset_file(
     except ValueError as exc:
         feature_drift_reason = str(exc)
 
+    api_metadata_enrichment = None
+    api_metadata_ablation = None
+    api_metadata_reason = None
+    try:
+        metadata_frame, api_metadata_enrichment = (
+            build_api_metadata_enriched_lp_frame(
+                database_path,
+                mint_frame,
+            )
+        )
+        if metadata_frame.empty:
+            api_metadata_reason = (
+                "no mint-enriched LP rows have complete decision-time "
+                "pool API metadata"
+            )
+        else:
+            api_metadata_ablation = evaluate_api_metadata_ablation(
+                metadata_frame,
+                min_train_decision_times=min_train_decision_times,
+                validation_decision_times=validation_decision_times,
+                step_decision_times=step_decision_times,
+                min_train_rows=min_train_rows,
+            )
+    except ValueError as exc:
+        api_metadata_reason = str(exc)
+
     return MintFeatureResearchReport(
         research_only=True,
         policy_actionable=False,
@@ -366,4 +412,7 @@ def run_mint_feature_research_from_dataset_file(
         feature_drift_reason=feature_drift_reason,
         source_outcome_coverage=source_outcome_coverage,
         model_ready_outcome_coverage=model_ready_outcome_coverage,
+        api_metadata_enrichment=api_metadata_enrichment,
+        api_metadata_ablation=api_metadata_ablation,
+        api_metadata_reason=api_metadata_reason,
     )
