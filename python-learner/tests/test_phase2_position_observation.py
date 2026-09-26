@@ -11,9 +11,11 @@ POOL = "pool"
 POSITIONS = ("position-a", "position-b")
 
 
-def _snapshot(position, pool=POOL):
+def _snapshot(position, pool=POOL, capture_slot=450700000):
     return {
         "position_address": position,
+        "capture_slot_start": capture_slot,
+        "capture_slot_end": capture_slot,
         "pool_address": pool,
         "owner": "owner",
         "fee_owner": "fee-owner",
@@ -249,7 +251,10 @@ def test_observer_surfaces_discovery_truncation(tmp_path):
 def test_observer_progress_surfaces_repeated_position_intervals(tmp_path):
     storage = Storage(tmp_path / "pio.db")
 
+    inspection_count = 0
+
     def runner(command, **kwargs):
+        nonlocal inspection_count
         if command[1] == "discover-pool-positions-env":
             payload = {
                 "pool_address": POOL,
@@ -259,7 +264,11 @@ def test_observer_progress_surfaces_repeated_position_intervals(tmp_path):
                 "positions": [{"position_address": POSITIONS[0]}],
             }
         else:
-            payload = _snapshot(POSITIONS[0])
+            inspection_count += 1
+            payload = _snapshot(
+                POSITIONS[0],
+                capture_slot=450700000 + inspection_count,
+            )
         return subprocess.CompletedProcess(
             command, 0, stdout=json.dumps(payload), stderr=""
         )
@@ -287,3 +296,67 @@ def test_observer_progress_surfaces_repeated_position_intervals(tmp_path):
     assert second.reconciliation_progress.positions_seen == 1
     assert second.reconciliation_progress.fee_intervals_seen == 1
     assert second.reconciliation_progress.reward_intervals_seen == 1
+
+
+
+def test_observer_rejects_position_snapshot_without_capture_slots(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 1,
+                "positions_returned": 1,
+                "truncated": False,
+                "positions": [{"position_address": POSITIONS[0]}],
+            }
+        else:
+            payload = _snapshot(POSITIONS[0])
+            payload.pop("capture_slot_start")
+            payload.pop("capture_slot_end")
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    result = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        runner=runner,
+    )
+
+    assert result.snapshots_saved == 0
+    assert result.failures == 1
+    assert result.failed_positions == (POSITIONS[0],)
+
+
+def test_observer_rejects_mixed_context_position_snapshot(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 1,
+                "positions_returned": 1,
+                "truncated": False,
+                "positions": [{"position_address": POSITIONS[0]}],
+            }
+        else:
+            payload = _snapshot(POSITIONS[0])
+            payload["capture_slot_end"] += 1
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    result = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        runner=runner,
+    )
+
+    assert result.snapshots_saved == 0
+    assert result.failures == 1
+    assert result.failed_positions == (POSITIONS[0],)
