@@ -76,8 +76,9 @@ def run_market_context_collection_cycle(
 
     Ordering is intentional:
       1. discover/refresh the broad pool universe;
-      2. capture a neutral batch of missing chain pool state;
-      3. capture mints newly exposed by chain pool state.
+      2. optionally refresh already-observed pools oldest-chain-first;
+      3. capture a neutral batch of missing chain pool state;
+      4. capture mints newly exposed by chain pool state.
 
     The cycle collects evidence only. It performs no pool ranking, allocation,
     transaction construction, signing or submission.
@@ -85,6 +86,7 @@ def run_market_context_collection_cycle(
     if not (
         capture_universe
         or capture_chain_context
+        or refresh_chain_context
         or capture_mint_context
     ):
         raise ValueError(
