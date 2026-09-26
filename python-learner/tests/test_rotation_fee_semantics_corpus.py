@@ -44,6 +44,7 @@ def sample(
     quote_eligible=True,
     base_residual_quote=0.0,
     fee_residual_quote=0.0,
+    exclusion_reason=None,
 ):
     return SimpleNamespace(
         signature=signature,
@@ -54,6 +55,7 @@ def sample(
         quote_eligible=quote_eligible,
         base_residual_quote=base_residual_quote,
         fee_separate_residual_quote=fee_residual_quote,
+        exclusion_reason=exclusion_reason,
     )
 
 
@@ -486,3 +488,83 @@ def test_corpus_claim_cohort_preserves_evidence_classes(
         for item in cohorts["FALSE"].evidence_class_counts
     } == {"NEITHER_HYPOTHESIS_EXACT": 1}
     assert cohorts["FALSE"].quote_coverage_rate == 0.0
+
+
+
+def test_corpus_counts_controlled_ineligibility_reasons(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    install_store(monkeypatch)
+    reports = {
+        "position-a": report(
+            "position-a",
+            (
+                sample(
+                    "sig-a",
+                    eligible=False,
+                    quote_eligible=False,
+                    exclusion_reason=(
+                        "transaction token-balance capture missing"
+                    ),
+                ),
+                sample(
+                    "sig-b",
+                    eligible=False,
+                    quote_eligible=False,
+                    exclusion_reason=(
+                        "transaction contains multiple Rebalancing events; "
+                        "owner token flow is not uniquely attributable"
+                    ),
+                ),
+            ),
+            quote_eligible=0,
+            claim_true=0,
+            claim_false=0,
+            base_residual=0.0,
+            fee_residual=0.0,
+        ),
+        "position-b": report(
+            "position-b",
+            (
+                sample(
+                    "sig-c",
+                    eligible=False,
+                    quote_eligible=False,
+                    exclusion_reason=(
+                        "transaction token-balance capture missing"
+                    ),
+                ),
+            ),
+            quote_eligible=0,
+            claim_true=0,
+            claim_false=0,
+            base_residual=0.0,
+            fee_residual=0.0,
+        ),
+    }
+    monkeypatch.setattr(
+        "meteora_learner.rotation_fee_semantics_corpus.build_rotation_fee_semantics_report",
+        lambda storage, *, position_address, max_quote_age_seconds: reports[
+            position_address
+        ],
+    )
+
+    corpus = build_rotation_fee_semantics_corpus(
+        storage,
+        pool_address=POOL,
+    )
+
+    assert corpus.eligible_transactions == 0
+    assert [
+        (item.reason, item.count)
+        for item in corpus.ineligible_reason_counts
+    ] == [
+        ("transaction token-balance capture missing", 2),
+        (
+            "transaction contains multiple Rebalancing events; "
+            "owner token flow is not uniquely attributable",
+            1,
+        ),
+    ]
