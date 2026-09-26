@@ -21,12 +21,20 @@ ExecutorRunner = Callable[..., subprocess.CompletedProcess[str]]
 class Phase2ReconciliationProgress:
     positions_seen: int
     amount_positions_eligible: int
+    amount_positions_exact: int
     amount_bins_checked: int
+    amount_mismatched_bins: int
+    fee_intervals_seen: int
     fee_intervals_eligible: int
+    fee_intervals_exact: int
     fee_bins_checked: int
+    fee_mismatched_bins: int
+    reward_intervals_seen: int
     reward_intervals_eligible: int
+    reward_intervals_exact: int
     reward_bins_checked: int
     reward_bins_with_checkpoint_growth: int
+    reward_mismatched_bins: int
     strict_math_gate_passed: bool
 
 
@@ -180,14 +188,22 @@ def collect_phase2_position_observations(
         reconciliation_progress = Phase2ReconciliationProgress(
             positions_seen=corpus.positions_seen,
             amount_positions_eligible=corpus.amount_positions_eligible,
+            amount_positions_exact=corpus.amount_positions_exact,
             amount_bins_checked=corpus.amount_bins_checked,
+            amount_mismatched_bins=corpus.amount_mismatched_bins,
+            fee_intervals_seen=corpus.fee_intervals_seen,
             fee_intervals_eligible=corpus.fee_intervals_eligible,
+            fee_intervals_exact=corpus.fee_intervals_exact,
             fee_bins_checked=corpus.fee_bins_checked,
+            fee_mismatched_bins=corpus.fee_mismatched_bins,
+            reward_intervals_seen=corpus.reward_intervals_seen,
             reward_intervals_eligible=corpus.reward_intervals_eligible,
+            reward_intervals_exact=corpus.reward_intervals_exact,
             reward_bins_checked=corpus.reward_bins_checked,
             reward_bins_with_checkpoint_growth=(
                 corpus.reward_bins_with_checkpoint_growth
             ),
+            reward_mismatched_bins=corpus.reward_mismatched_bins,
             strict_math_gate_passed=corpus.strict_math_gate_passed,
         )
 
