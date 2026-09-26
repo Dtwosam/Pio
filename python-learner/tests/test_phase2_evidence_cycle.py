@@ -209,6 +209,7 @@ def test_evidence_cycle_isolates_stage_exception_and_hides_error_text(
         "positions",
         "reinspect",
         "prestates",
+        "reconciliation",
         "evidence",
         "queue",
     ]
