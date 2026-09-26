@@ -90,6 +90,11 @@ def test_observer_uses_env_only_executor_commands_and_saves_all_positions(tmp_pa
     assert result.snapshots_saved == 2
     assert result.bins_saved == 2
     assert result.failures == 0
+    assert result.reconciliation_progress is not None
+    assert result.reconciliation_progress.positions_seen == 2
+    assert result.reconciliation_progress.amount_bins_checked >= 0
+    assert result.reconciliation_progress.fee_intervals_seen == 0
+    assert result.reconciliation_progress.reward_intervals_seen == 0
     assert commands[0][1] == "discover-pool-positions-env"
     assert commands[0][3] == "5000"
     assert [item[1] for item in commands[1:]] == [
@@ -238,3 +243,47 @@ def test_observer_surfaces_discovery_truncation(tmp_path):
     assert result.positions_found == 5001
     assert result.positions_returned == 1
     assert result.positions_selected == 1
+
+
+
+def test_observer_progress_surfaces_repeated_position_intervals(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 1,
+                "positions_returned": 1,
+                "truncated": False,
+                "positions": [{"position_address": POSITIONS[0]}],
+            }
+        else:
+            payload = _snapshot(POSITIONS[0])
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    first = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:00:00+00:00",
+        runner=runner,
+    )
+    second = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:15:00+00:00",
+        runner=runner,
+    )
+
+    assert first.reconciliation_progress is not None
+    assert first.reconciliation_progress.fee_intervals_seen == 0
+    assert second.reconciliation_progress is not None
+    assert second.reconciliation_progress.positions_seen == 1
+    assert second.reconciliation_progress.fee_intervals_seen == 1
+    assert second.reconciliation_progress.reward_intervals_seen == 1
