@@ -120,6 +120,51 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def latest_mint_snapshot(
+        self,
+        mint_address: str,
+        *,
+        as_of: str | None = None,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            if as_of is None:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, mint_address, token_program,
+                           capture_slot_start, capture_slot_end,
+                           supply, decimals, is_initialized,
+                           mint_authority, freeze_authority,
+                           data_len, token_2022_extension_data_len,
+                           has_token_2022_extension_data
+                    FROM token_mint_snapshots
+                    WHERE mint_address = ?
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (mint_address,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, mint_address, token_program,
+                           capture_slot_start, capture_slot_end,
+                           supply, decimals, is_initialized,
+                           mint_authority, freeze_authority,
+                           data_len, token_2022_extension_data_len,
+                           has_token_2022_extension_data
+                    FROM token_mint_snapshots
+                    WHERE mint_address = ?
+                      AND julianday(observed_at) <= julianday(?)
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (mint_address, as_of),
+                ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
     def chain_observation_times(
         self,
         address: str,
