@@ -59,6 +59,8 @@ def test_cycle_reports_collecting_history_without_enough_data(
     assert report.reason is not None
     assert report.discovery is not None
     assert report.discovery.unique_pools_seen == 1
+    assert report.coverage.pools_seen == 1
+    assert report.coverage.observations_seen == 1
     assert report.walk_forward is None
     assert report.policy_actionable is False
     assert report.execution_wired is False
@@ -86,6 +88,8 @@ def test_cycle_builds_dataset_and_walk_forward_when_history_exists(
     assert report.status == "EVALUATED"
     assert report.reason is None
     assert report.discovery is None
+    assert report.coverage.pools_seen == 3
+    assert report.coverage.observations_seen == 240
     assert report.dataset is not None
     assert report.dataset.examples_built > 0
     assert report.walk_forward is not None
@@ -106,5 +110,7 @@ def test_cycle_never_turns_missing_history_into_synthetic_result(
     )
 
     assert report.status == "COLLECTING_HISTORY"
+    assert report.coverage.pools_seen == 0
+    assert report.coverage.observations_seen == 0
     assert report.dataset is None
     assert report.walk_forward is None
