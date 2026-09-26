@@ -92,7 +92,7 @@ def test_phase2_progress_history_reports_signed_numeric_deltas(tmp_path):
             "evidence_gap_count": 4,
         },
         work_queue_items=7,
-        task_counts=(("VERIFY_PRESTATE", 5), ("INSPECT_TRANSACTION", 2)),
+        task_counts=(("VERIFY_PRESTATE", 5), ("REINSPECT_TRANSACTION", 2)),
     )
 
     report = build_phase2_progress_history(
@@ -116,7 +116,8 @@ def test_phase2_progress_history_reports_signed_numeric_deltas(tmp_path):
     assert deltas["calibration.evidence_gap_count"] == -2
     assert deltas["work_queue_items"] == -5
     assert deltas["work_queue.VERIFY_PRESTATE"] == -3
-    assert deltas["work_queue.INSPECT_TRANSACTION"] == -2
+    assert deltas["work_queue.INSPECT_TRANSACTION"] == -4
+    assert deltas["work_queue.REINSPECT_TRANSACTION"] == 2
     assert "reconciliation.strict_math_gate_passed" not in deltas
     assert report.read_only is True
 
