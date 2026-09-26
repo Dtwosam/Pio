@@ -15,6 +15,7 @@ pio-market-research = "meteora_learner.pool_market_research_cli:main"
 pio-mint-feature-research = "meteora_learner.pool_lp_mint_research_cli:main"
 pio-market-context-capture = "meteora_learner.market_context_collection_cli:main"
 pio-live-outcome-evidence = "meteora_learner.live_outcome_evidence_cli:main"
+pio-current-pool-forecast = "meteora_learner.pool_market_current_forecast_cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
