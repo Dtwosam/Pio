@@ -195,3 +195,38 @@ def test_reviewed_manifest_is_apply_locked_and_matches_source_tree():
         assert base is None or (
             isinstance(base, str) and len(base) == 40
         )
+
+
+
+def test_preflight_rejects_symlinked_source_file(tmp_path):
+    repo, source, manifest, existing, _ = fixture_tree(tmp_path)
+    external = tmp_path / "external.py"
+    external.write_text("target\n", encoding="utf-8")
+    (source / existing).unlink()
+    (source / existing).symlink_to(external)
+
+    report = MODULE.preflight_collection_stack(
+        repository=repo,
+        source_tree=source,
+        manifest=manifest,
+    )
+
+    assert report.content_ready is False
+    assert status_map(report)[existing] in {
+        "SOURCE_SYMLINK",
+        "SOURCE_OUTSIDE_TREE",
+    }
+
+
+def test_manifest_rejects_non_hex_blob_hash(tmp_path):
+    repo, source, manifest, existing, _ = fixture_tree(tmp_path)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["deployment_target_file_blobs"][existing] = "z" * 40
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid target blob"):
+        MODULE.preflight_collection_stack(
+            repository=repo,
+            source_tree=source,
+            manifest=manifest,
+        )
