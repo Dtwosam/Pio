@@ -184,11 +184,24 @@ def build_phase2_progress_history(
     if latest is not None and previous is not None:
         latest_metrics = _numeric_metrics(latest)
         previous_metrics = _numeric_metrics(previous)
-        for metric in sorted(
+        common_metrics = (
             set(latest_metrics) & set(previous_metrics)
-        ):
-            before = previous_metrics[metric]
-            after = latest_metrics[metric]
+        )
+        queue_metrics = {
+            metric
+            for metric in (
+                set(latest_metrics) | set(previous_metrics)
+            )
+            if metric.startswith("work_queue.")
+            and metric != "work_queue_items"
+        }
+        for metric in sorted(common_metrics | queue_metrics):
+            if metric.startswith("work_queue."):
+                before = previous_metrics.get(metric, 0.0)
+                after = latest_metrics.get(metric, 0.0)
+            else:
+                before = previous_metrics[metric]
+                after = latest_metrics[metric]
             deltas.append(
                 Phase2ProgressDelta(
                     metric=metric,
