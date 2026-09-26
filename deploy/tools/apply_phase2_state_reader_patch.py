@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -11,6 +12,12 @@ import subprocess
 
 
 TARGET_PATH = "rust-executor/src/state_reader.rs"
+PR7_HEAD = "ea235e676b700891839f28b0250e23149cfb77f8"
+REFERENCE_PATCH = (
+    Path(__file__).resolve().parents[1]
+    / "patches"
+    / "phase2-pr7-state-reader.patch"
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +27,8 @@ class PatchResult:
     target: str
     ready: bool
     applied: bool
+    pr7_head: str
+    patch_sha256: str
     backup: str | None
 
     def to_record(self) -> dict[str, object]:
@@ -44,6 +53,29 @@ def changed_paths(patch_text: str) -> tuple[str, ...]:
     return tuple(sorted(paths))
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _require_pinned_patch(
+    patch: Path,
+    reference_patch: Path,
+) -> str:
+    if not reference_patch.is_file():
+        raise ValueError(
+            f"reviewed PR #7 reference patch is missing: {reference_patch}"
+        )
+    if patch.read_bytes() != reference_patch.read_bytes():
+        raise ValueError(
+            "patch bytes do not match the reviewed PR #7 reference patch"
+        )
+    return _sha256(patch)
+
+
 def run_git_apply(repo: Path, patch: Path, *, check_only: bool) -> None:
     command = ["git", "-C", str(repo), "apply"]
     if check_only:
@@ -58,9 +90,11 @@ def apply_guarded_patch(
     patch: str | Path,
     apply: bool = False,
     backup_dir: str | Path = "/opt/pio-backups",
+    reference_patch: str | Path = REFERENCE_PATCH,
 ) -> PatchResult:
     repo = Path(repository).resolve()
     patch_path = Path(patch).resolve()
+    reference_patch_path = Path(reference_patch).resolve()
     target = repo / TARGET_PATH
     if not (repo / ".git").exists():
         raise ValueError(f"repository is not a git working tree: {repo}")
@@ -69,6 +103,10 @@ def apply_guarded_patch(
     if not patch_path.is_file():
         raise ValueError(f"patch file does not exist: {patch_path}")
 
+    patch_sha256 = _require_pinned_patch(
+        patch_path,
+        reference_patch_path,
+    )
     paths = changed_paths(patch_path.read_text(encoding="utf-8"))
     if paths != (TARGET_PATH,):
         raise ValueError(
@@ -83,6 +121,8 @@ def apply_guarded_patch(
             target=TARGET_PATH,
             ready=True,
             applied=False,
+            pr7_head=PR7_HEAD,
+            patch_sha256=patch_sha256,
             backup=None,
         )
 
@@ -104,6 +144,8 @@ def apply_guarded_patch(
         target=TARGET_PATH,
         ready=True,
         applied=True,
+        pr7_head=PR7_HEAD,
+        patch_sha256=patch_sha256,
         backup=str(backup),
     )
 
@@ -117,7 +159,14 @@ def main() -> None:
         )
     )
     parser.add_argument("--repo", default="/opt/pio")
-    parser.add_argument("--patch", required=True)
+    parser.add_argument(
+        "--patch",
+        default=str(REFERENCE_PATCH),
+        help=(
+            "Patch to preflight/apply. Its bytes must exactly match the "
+            "bundled reviewed PR #7 patch."
+        ),
+    )
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--backup-dir", default="/opt/pio-backups")
     args = parser.parse_args()
