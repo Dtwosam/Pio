@@ -85,9 +85,8 @@ def _run_executor_json(
         timeout=timeout_seconds,
     )
     if completed.returncode != 0:
-        stderr = (completed.stderr or "").strip()
         raise RuntimeError(
-            f"executor failed with status {completed.returncode}: {stderr[:500]}"
+            f"executor failed with status {completed.returncode}"
         )
     try:
         return json.loads(completed.stdout)
