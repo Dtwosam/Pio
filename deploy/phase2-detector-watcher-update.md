@@ -19,6 +19,13 @@ Use snapshot_phase2_production_sources.py on the VPS to capture the exact files 
 - detector_unit=<exact detector unit file used by systemd>
 - watcher_unit=<exact watcher unit file used by systemd>
 
+Before capture, resolve the authoritative unit/drop-in paths without changing service state:
+
+- `systemctl show pio-phase2-add-detector.service -p FragmentPath -p DropInPaths`
+- `systemctl show pio-phase2-prestate-watch.service -p FragmentPath -p DropInPaths`
+
+Capture every returned unit/drop-in file that affects these services. Do **not** capture `/etc/pio/pio.env`, RPC credentials, API keys, or any other secret-bearing EnvironmentFile. The repository needs the unit contract, not production secrets.
+
 Capture active systemd drop-ins as additional labels. Use a new output directory and never reconstruct production source from memory.
 
 ## 2. Verify before import
