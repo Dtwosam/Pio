@@ -29,7 +29,7 @@ def test_phase2_collection_manifest_is_fail_closed_and_matches_state_reader():
     prs = [item["pr"] for item in components]
     assert len(prs) == len(set(prs))
     assert {
-        7, 8, 12, 17, 19, 20, 22, 23, 25, 26, 28, 29, 30, 31, 34
+        7, 8, 12, 17, 19, 20, 22, 23, 25, 28, 29, 30, 31, 43, 44
     } <= set(prs)
     assert all(
         re.fullmatch(r"[0-9a-f]{40}", str(item["head"]))
