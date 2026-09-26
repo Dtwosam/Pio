@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Pio Phase 2 research quote observer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
