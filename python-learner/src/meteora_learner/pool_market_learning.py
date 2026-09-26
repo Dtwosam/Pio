@@ -258,6 +258,36 @@ def build_pool_market_learning_dataset_from_store(
     )
 
 
+def build_pool_market_feature_history(
+    history: pd.DataFrame,
+    *,
+    volatility_window: int = 6,
+    drawdown_window: int = 12,
+    activity_window: int = 6,
+) -> pd.DataFrame:
+    """
+    Build decision-time-only market features from chronological observations.
+
+    No forward targets are created by this function.
+    """
+    if history.empty:
+        raise ValueError("pool-market history cannot be empty")
+    for name, value in (
+        ("volatility_window", volatility_window),
+        ("drawdown_window", drawdown_window),
+        ("activity_window", activity_window),
+    ):
+        if value < 1:
+            raise ValueError(f"{name} must be positive")
+
+    return _prepare_history(
+        history,
+        volatility_window=volatility_window,
+        drawdown_window=drawdown_window,
+        activity_window=activity_window,
+    )
+
+
 def build_pool_market_learning_dataset(
     history: pd.DataFrame,
     *,
