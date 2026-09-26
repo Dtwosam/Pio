@@ -1,4 +1,7 @@
-from meteora_learner.calibration_queue import build_calibration_work_queue
+from meteora_learner.calibration_queue import (
+    _needs_future_prestate,
+    build_calibration_work_queue,
+)
 from meteora_learner.storage import Storage
 
 
@@ -95,3 +98,17 @@ def test_queue_marks_missing_historical_prestate_as_future_sample(tmp_path):
     )
     assert item.shell_command is None
     assert "cannot be reconstructed safely" in item.reason
+
+
+
+def test_future_prestate_classifier_includes_single_context_gap():
+    assert _needs_future_prestate(
+        "no slot-bounded pre-add pool capture with matching active bin"
+    )
+    assert _needs_future_prestate(
+        "no single-context strict-prior pre-add pool capture "
+        "with matching active bin"
+    )
+    assert not _needs_future_prestate(
+        "add-liquidity request decode missing"
+    )
