@@ -1,0 +1,12 @@
+[Unit]
+Description=Pio Phase 2 research quote observer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/python -m meteora_learner.phase2_research_quotes
