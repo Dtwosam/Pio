@@ -180,6 +180,8 @@ def test_live_outcome_evidence_normalizes_quote_backed_costs(
     assert report.mean_composition_cost_bps == 100.0
     assert report.mean_network_cost_bps == 50.0
     assert report.mean_fee_income_bps == 200.0
+    assert report.action_cost_evidence is not None
+    assert report.action_cost_evidence.transition_pairs_inferred is False
 
     assert len(report.model_calibration) == 1
     assert report.model_calibration[0].model_version == "M1"
@@ -197,6 +199,9 @@ def test_live_outcome_evidence_empty_store_is_descriptive(
     assert report.positive_return_rate is None
     assert report.model_calibration == ()
     assert report.samples == ()
+    assert report.action_cost_evidence is not None
+    assert report.action_cost_evidence.samples_seen == 0
+    assert report.action_cost_evidence.transition_pairs_inferred is False
 
 
 def test_live_outcome_evidence_rejects_label_valuation_mismatch(
