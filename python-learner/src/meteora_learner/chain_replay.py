@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from .composition_fee import simulate_active_bin_composition_fee
 from .deposit_plan import (
@@ -91,6 +91,54 @@ class SmallLPReplayResult:
     replay_fidelity: str
     intervals: tuple[ReplayIntervalResult, ...]
     bins: tuple[ReplayBinResult, ...]
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ExistingLPBinContinuationResult:
+    bin_id: int
+    liquidity_share: int
+    start_supply: int
+    max_observed_share_bps: int
+    start_x_amount: int
+    start_y_amount: int
+    end_x_amount: int
+    end_y_amount: int
+    fee_x: int
+    fee_y: int
+    reward_one: int
+    reward_two: int
+
+
+@dataclass(frozen=True)
+class ExistingLPContinuationResult:
+    pool_address: str
+    start_observed_at: str
+    end_observed_at: str
+    observation_count: int
+    start_active_bin_id: int
+    end_active_bin_id: int
+    idle_x: int
+    idle_y: int
+    start_position_x: int
+    start_position_y: int
+    ending_x: int
+    ending_y: int
+    fee_x: int
+    fee_y: int
+    reward_one: int
+    reward_two: int
+    reward_mint_0: str | None
+    reward_mint_1: str | None
+    reward_fidelity: str
+    max_share_bps: int
+    max_observed_share_bps: int
+    composition_fee_applied: bool
+    replay_fidelity: str
+    intervals: tuple[ReplayIntervalResult, ...]
+    bins: tuple[ExistingLPBinContinuationResult, ...]
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -531,6 +579,343 @@ def replay_small_lp_history(
         replay_fidelity="SMALL_LP_CHAIN_PATH_V2",
         intervals=tuple(intervals),
         bins=tuple(results),
+    )
+
+
+def replay_existing_lp_history(
+    database_path: str,
+    *,
+    pool_address: str,
+    liquidity_shares: Mapping[int, int],
+    idle_x: int = 0,
+    idle_y: int = 0,
+    observation_limit: int = 12,
+    observation_times: Sequence[str] | None = None,
+    max_share_bps: int = 500,
+) -> ExistingLPContinuationResult:
+    """
+    Continue an already-open hypothetical LP without withdrawing/redepositing it.
+
+    The supplied per-bin liquidity shares remain fixed through the path. This is
+    the HOLD counterfactual primitive: no deposit plan is rebuilt and no entry
+    composition fee is charged again.
+    """
+    if not liquidity_shares:
+        raise ValueError("at least one existing liquidity share is required")
+    if any(int(share) <= 0 for share in liquidity_shares.values()):
+        raise ValueError("existing liquidity shares must be positive")
+    if idle_x < 0 or idle_y < 0:
+        raise ValueError("idle amounts cannot be negative")
+    if observation_limit < 2:
+        raise ValueError("observation_limit must be at least 2")
+    if observation_times is not None and len(observation_times) < 2:
+        raise ValueError("observation_times must contain at least two observations")
+    if not 1 <= max_share_bps <= 10_000:
+        raise ValueError("max_share_bps must be between 1 and 10000")
+
+    shares = {int(bin_id): int(share) for bin_id, share in liquidity_shares.items()}
+    store = ResearchStore(database_path)
+    if observation_times is None:
+        times_desc = store.chain_observation_times(
+            pool_address,
+            limit=observation_limit,
+        )
+        if len(times_desc) < 2:
+            raise ValueError("need at least two chain observations for continuation")
+        times = list(reversed(times_desc))
+    else:
+        times = [str(value) for value in observation_times]
+        if times != sorted(times) or len(set(times)) != len(times):
+            raise ValueError(
+                "observation_times must be unique and strictly ascending"
+            )
+
+    pool_snapshots: list[dict[str, Any]] = []
+    bin_snapshots: list[dict[int, dict[str, Any]]] = []
+    for observed_at in times:
+        pool = store.chain_pool_snapshot_at(pool_address, observed_at)
+        if pool is None:
+            raise ValueError(f"missing chain pool snapshot at {observed_at}")
+        pool_snapshots.append(pool)
+        bin_snapshots.append(
+            _row_by_bin(
+                store.load_bin_liquidity(
+                    pool_address,
+                    observed_at=observed_at,
+                )
+            )
+        )
+    _validate_pool_path(pool_snapshots)
+
+    reward_metadata_available = all(
+        pool.get("supports_limit_order") is not None
+        and pool.get("reward_mint_0") is not None
+        and pool.get("reward_mint_1") is not None
+        for pool in pool_snapshots
+    )
+    rewards_enabled = (
+        reward_metadata_available
+        and not bool(pool_snapshots[0]["supports_limit_order"])
+    )
+    reward_fidelity = (
+        "ONCHAIN_EFFECTIVE_REWARD_CHECKPOINT_V1"
+        if rewards_enabled
+        else (
+            "NOT_APPLICABLE_LIMIT_ORDER_POOL"
+            if reward_metadata_available
+            else "UNAVAILABLE_LEGACY_SNAPSHOT"
+        )
+    )
+
+    max_share_by_bin = {bin_id: 0 for bin_id in shares}
+    for snapshot_index, rows in enumerate(bin_snapshots):
+        for bin_id, share in shares.items():
+            row = rows.get(bin_id)
+            if row is None:
+                raise ValueError(
+                    f"chain snapshot {times[snapshot_index]} does not cover "
+                    f"existing bin {bin_id}"
+                )
+            supply = int(str(row["liquidity_supply"]))
+            if supply <= 0:
+                raise ValueError(
+                    f"counterfactual invalid: historical bin {bin_id} "
+                    f"has zero supply at {times[snapshot_index]}"
+                )
+            observed_bps = _share_bps(share, supply)
+            max_share_by_bin[bin_id] = max(
+                max_share_by_bin[bin_id],
+                observed_bps,
+            )
+            if share * 10_000 > supply * max_share_bps:
+                raise ValueError(
+                    f"existing share is too large in bin {bin_id} "
+                    f"at {times[snapshot_index]}: "
+                    f"{observed_bps} bps > {max_share_bps} bps limit"
+                )
+
+    bin_fee_x = {bin_id: 0 for bin_id in shares}
+    bin_fee_y = {bin_id: 0 for bin_id in shares}
+    bin_reward_one = {bin_id: 0 for bin_id in shares}
+    bin_reward_two = {bin_id: 0 for bin_id in shares}
+    intervals: list[ReplayIntervalResult] = []
+
+    for idx in range(len(times) - 1):
+        before_rows = bin_snapshots[idx]
+        after_rows = bin_snapshots[idx + 1]
+        interval_fee_x = 0
+        interval_fee_y = 0
+        interval_reward_one = 0
+        interval_reward_two = 0
+        interval_max_bps = 0
+
+        for bin_id, share in shares.items():
+            before = before_rows[bin_id]
+            after = after_rows[bin_id]
+            previous_supply = int(str(before["liquidity_supply"]))
+
+            delta_x = max(
+                0,
+                int(str(after["fee_amount_x_per_token_stored"]))
+                - int(str(before["fee_amount_x_per_token_stored"])),
+            )
+            delta_y = max(
+                0,
+                int(str(after["fee_amount_y_per_token_stored"]))
+                - int(str(before["fee_amount_y_per_token_stored"])),
+            )
+            adjusted_delta_x = (
+                delta_x * previous_supply // (previous_supply + share)
+            )
+            adjusted_delta_y = (
+                delta_y * previous_supply // (previous_supply + share)
+            )
+            fee_x = fee_from_checkpoint_delta(
+                liquidity_share=share,
+                fee_per_token_delta=adjusted_delta_x,
+            )
+            fee_y = fee_from_checkpoint_delta(
+                liquidity_share=share,
+                fee_per_token_delta=adjusted_delta_y,
+            )
+
+            reward_one = 0
+            reward_two = 0
+            if rewards_enabled:
+                delta_reward_one = max(
+                    0,
+                    int(str(after["reward_per_token_stored_0"]))
+                    - int(str(before["reward_per_token_stored_0"])),
+                )
+                delta_reward_two = max(
+                    0,
+                    int(str(after["reward_per_token_stored_1"]))
+                    - int(str(before["reward_per_token_stored_1"])),
+                )
+                adjusted_reward_one = (
+                    delta_reward_one
+                    * previous_supply
+                    // (previous_supply + share)
+                )
+                adjusted_reward_two = (
+                    delta_reward_two
+                    * previous_supply
+                    // (previous_supply + share)
+                )
+                reward_one = reward_from_checkpoint_delta(
+                    liquidity_share=share,
+                    reward_per_token_delta=adjusted_reward_one,
+                )
+                reward_two = reward_from_checkpoint_delta(
+                    liquidity_share=share,
+                    reward_per_token_delta=adjusted_reward_two,
+                )
+
+            bin_fee_x[bin_id] += fee_x
+            bin_fee_y[bin_id] += fee_y
+            bin_reward_one[bin_id] += reward_one
+            bin_reward_two[bin_id] += reward_two
+            interval_fee_x += fee_x
+            interval_fee_y += fee_y
+            interval_reward_one += reward_one
+            interval_reward_two += reward_two
+            interval_max_bps = max(
+                interval_max_bps,
+                _share_bps(share, previous_supply),
+                _share_bps(
+                    share,
+                    int(str(after["liquidity_supply"])),
+                ),
+            )
+
+        intervals.append(
+            ReplayIntervalResult(
+                start_observed_at=times[idx],
+                end_observed_at=times[idx + 1],
+                start_active_bin_id=int(
+                    pool_snapshots[idx]["active_bin_id"]
+                ),
+                end_active_bin_id=int(
+                    pool_snapshots[idx + 1]["active_bin_id"]
+                ),
+                fee_x=interval_fee_x,
+                fee_y=interval_fee_y,
+                reward_one=interval_reward_one,
+                reward_two=interval_reward_two,
+                max_observed_share_bps=interval_max_bps,
+            )
+        )
+
+    start_rows = bin_snapshots[0]
+    final_rows = bin_snapshots[-1]
+    bins: list[ExistingLPBinContinuationResult] = []
+    for bin_id, share in sorted(shares.items()):
+        start_row = start_rows[bin_id]
+        end_row = final_rows[bin_id]
+        start_supply = int(str(start_row["liquidity_supply"]))
+        end_supply = int(str(end_row["liquidity_supply"]))
+        start_x, start_y = amounts_from_liquidity_share(
+            liquidity_share=share,
+            bin_amount_x=int(str(start_row["amount_x"])),
+            bin_amount_y=int(str(start_row["amount_y"])),
+            liquidity_supply=start_supply,
+        )
+        end_x, end_y = amounts_from_liquidity_share(
+            liquidity_share=share,
+            bin_amount_x=int(str(end_row["amount_x"])),
+            bin_amount_y=int(str(end_row["amount_y"])),
+            liquidity_supply=end_supply,
+        )
+        bins.append(
+            ExistingLPBinContinuationResult(
+                bin_id=bin_id,
+                liquidity_share=share,
+                start_supply=start_supply,
+                max_observed_share_bps=max_share_by_bin[bin_id],
+                start_x_amount=start_x,
+                start_y_amount=start_y,
+                end_x_amount=end_x,
+                end_y_amount=end_y,
+                fee_x=bin_fee_x[bin_id],
+                fee_y=bin_fee_y[bin_id],
+                reward_one=bin_reward_one[bin_id],
+                reward_two=bin_reward_two[bin_id],
+            )
+        )
+
+    first_pool = pool_snapshots[0]
+    return ExistingLPContinuationResult(
+        pool_address=pool_address,
+        start_observed_at=times[0],
+        end_observed_at=times[-1],
+        observation_count=len(times),
+        start_active_bin_id=int(first_pool["active_bin_id"]),
+        end_active_bin_id=int(pool_snapshots[-1]["active_bin_id"]),
+        idle_x=idle_x,
+        idle_y=idle_y,
+        start_position_x=sum(item.start_x_amount for item in bins),
+        start_position_y=sum(item.start_y_amount for item in bins),
+        ending_x=sum(item.end_x_amount for item in bins),
+        ending_y=sum(item.end_y_amount for item in bins),
+        fee_x=sum(item.fee_x for item in bins),
+        fee_y=sum(item.fee_y for item in bins),
+        reward_one=sum(item.reward_one for item in bins),
+        reward_two=sum(item.reward_two for item in bins),
+        reward_mint_0=(
+            str(first_pool["reward_mint_0"])
+            if reward_metadata_available
+            else None
+        ),
+        reward_mint_1=(
+            str(first_pool["reward_mint_1"])
+            if reward_metadata_available
+            else None
+        ),
+        reward_fidelity=reward_fidelity,
+        max_share_bps=max_share_bps,
+        max_observed_share_bps=max(
+            max_share_by_bin.values(),
+            default=0,
+        ),
+        composition_fee_applied=False,
+        replay_fidelity="EXISTING_SMALL_LP_CONTINUATION_V1",
+        intervals=tuple(intervals),
+        bins=tuple(bins),
+    )
+
+
+def continue_small_lp_replay(
+    database_path: str,
+    *,
+    prior: SmallLPReplayResult,
+    observation_times: Sequence[str],
+    max_share_bps: int | None = None,
+) -> ExistingLPContinuationResult:
+    """Continue the exact hypothetical shares produced by a prior replay."""
+    times = [str(value) for value in observation_times]
+    if not times:
+        raise ValueError("observation_times cannot be empty")
+    if times[0] != prior.end_observed_at:
+        raise ValueError(
+            "continuation must start at the prior replay end observation"
+        )
+    shares = {item.bin_id: item.liquidity_share for item in prior.bins}
+    if len(shares) != len(prior.bins):
+        raise ValueError("prior replay contains duplicate bin ids")
+
+    return replay_existing_lp_history(
+        database_path,
+        pool_address=prior.pool_address,
+        liquidity_shares=shares,
+        idle_x=prior.idle_x,
+        idle_y=prior.idle_y,
+        observation_times=times,
+        observation_limit=len(times),
+        max_share_bps=(
+            prior.max_share_bps
+            if max_share_bps is None
+            else max_share_bps
+        ),
     )
 
 
