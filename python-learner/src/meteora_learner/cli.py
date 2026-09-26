@@ -36,6 +36,9 @@ from .position_history import collect_position_history
 from .phase2_calibration_reinspection import (
     run_phase2_calibration_reinspection,
 )
+from .phase2_evidence_cycle import (
+    run_phase2_read_only_evidence_cycle,
+)
 from .phase2_prestate_verification_runner import (
     run_phase2_prestate_verifications,
 )
@@ -4498,6 +4501,30 @@ def main() -> None:
     phase2_verify.add_argument("--max-tasks", type=int, default=10)
     phase2_verify.add_argument("--timeout-seconds", type=int, default=180)
 
+    phase2_cycle = subparsers.add_parser(
+        "phase2-evidence-step",
+        help="Run one bounded read-only Phase-2 evidence collection step",
+    )
+    phase2_cycle.add_argument("--pool", required=True)
+    phase2_cycle.add_argument(
+        "--executor",
+        default="/opt/pio/rust-executor/target/release/meteora-executor",
+    )
+    phase2_cycle.add_argument("--max-positions-per-run", type=int, default=50)
+    phase2_cycle.add_argument("--max-reinspection-tasks", type=int, default=25)
+    phase2_cycle.add_argument("--max-prestate-tasks", type=int, default=10)
+    phase2_cycle.add_argument("--position-timeout-seconds", type=int, default=120)
+    phase2_cycle.add_argument(
+        "--reinspection-timeout-seconds",
+        type=int,
+        default=120,
+    )
+    phase2_cycle.add_argument(
+        "--prestate-timeout-seconds",
+        type=int,
+        default=180,
+    )
+
     transaction_costs = subparsers.add_parser(
         "transaction-costs",
         help="Summarize real Solana fees and compute usage for one position",
@@ -5009,6 +5036,24 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if result.failures:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase2-evidence-step":
+        settings = Settings.from_env()
+        result = run_phase2_read_only_evidence_cycle(
+            Storage(settings.database_path),
+            pool_address=args.pool,
+            executor_path=args.executor,
+            max_positions_per_run=args.max_positions_per_run,
+            max_reinspection_tasks=args.max_reinspection_tasks,
+            max_prestate_tasks=args.max_prestate_tasks,
+            position_timeout_seconds=args.position_timeout_seconds,
+            reinspection_timeout_seconds=args.reinspection_timeout_seconds,
+            prestate_timeout_seconds=args.prestate_timeout_seconds,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if result.stages_partial or result.stages_failed:
             raise SystemExit(2)
         return
 
