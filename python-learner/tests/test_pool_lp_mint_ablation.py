@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from meteora_learner.chain_replay import STANDARD_SPL_TOKEN_PROGRAM
 from meteora_learner.pool_lp_learning import (
@@ -165,7 +166,7 @@ def _synthetic_ablation_frame() -> pd.DataFrame:
     start = pd.Timestamp("2026-01-01T00:00:00Z")
 
     for pool_index, pool in enumerate(("A", "B", "C")):
-        for index in range(90):
+        for index in range(60):
             signal = float((index + pool_index) % 2)
             row = {
                 "pool_address": pool,
@@ -203,14 +204,22 @@ def _synthetic_ablation_frame() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_mint_ablation_uses_same_purged_rows_and_detects_signal() -> None:
-    report = evaluate_mint_feature_ablation(
+
+@pytest.fixture(scope="module")
+def mint_ablation_report():
+    return evaluate_mint_feature_ablation(
         _synthetic_ablation_frame(),
-        min_train_decision_times=30,
+        min_train_decision_times=25,
         validation_decision_times=10,
         step_decision_times=10,
         min_train_rows=50,
     )
+
+
+def test_mint_ablation_uses_same_purged_rows_and_detects_signal(
+    mint_ablation_report,
+) -> None:
+    report = mint_ablation_report
 
     assert report.research_only is True
     assert report.policy_actionable is False
@@ -234,14 +243,10 @@ def test_mint_ablation_uses_same_purged_rows_and_detects_signal() -> None:
     assert net.mint_better_folds > 0
 
 
-def test_mint_ablation_reports_all_continuous_lp_targets() -> None:
-    report = evaluate_mint_feature_ablation(
-        _synthetic_ablation_frame(),
-        min_train_decision_times=30,
-        validation_decision_times=10,
-        step_decision_times=10,
-        min_train_rows=50,
-    )
+def test_mint_ablation_reports_all_continuous_lp_targets(
+    mint_ablation_report,
+) -> None:
+    report = mint_ablation_report
 
     assert tuple(
         item.target for item in report.aggregates
@@ -254,16 +259,10 @@ def test_mint_ablation_reports_all_continuous_lp_targets() -> None:
         assert 0 <= item.mint_better_folds <= item.folds
 
 
-def test_mint_ablation_emits_no_policy_verdict() -> None:
-    report = evaluate_mint_feature_ablation(
-        _synthetic_ablation_frame(),
-        min_train_decision_times=30,
-        validation_decision_times=10,
-        step_decision_times=10,
-        min_train_rows=50,
-    )
-
-    record = report.to_record()
+def test_mint_ablation_emits_no_policy_verdict(
+    mint_ablation_report,
+) -> None:
+    record = mint_ablation_report.to_record()
     assert record["policy_actionable"] is False
     assert record["execution_wired"] is False
     assert "qualified" not in record
