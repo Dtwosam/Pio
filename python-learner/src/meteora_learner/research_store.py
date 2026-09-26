@@ -165,6 +165,49 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def mint_snapshot_history(
+        self,
+        mint_address: str,
+        *,
+        as_of: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if as_of is None:
+                rows = conn.execute(
+                    """
+                    SELECT observed_at, mint_address, token_program,
+                           capture_slot_start, capture_slot_end,
+                           supply, decimals, is_initialized,
+                           mint_authority, freeze_authority,
+                           data_len, token_2022_extension_data_len,
+                           has_token_2022_extension_data
+                    FROM token_mint_snapshots
+                    WHERE mint_address = ?
+                    ORDER BY julianday(observed_at) ASC, id ASC
+                    """,
+                    (mint_address,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT observed_at, mint_address, token_program,
+                           capture_slot_start, capture_slot_end,
+                           supply, decimals, is_initialized,
+                           mint_authority, freeze_authority,
+                           data_len, token_2022_extension_data_len,
+                           has_token_2022_extension_data
+                    FROM token_mint_snapshots
+                    WHERE mint_address = ?
+                      AND julianday(observed_at) <= julianday(?)
+                    ORDER BY julianday(observed_at) ASC, id ASC
+                    """,
+                    (mint_address, as_of),
+                ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def chain_observation_times(
         self,
         address: str,
