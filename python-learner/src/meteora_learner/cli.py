@@ -37,6 +37,7 @@ from .phase2_calibration_reinspection import (
     run_phase2_calibration_reinspection,
 )
 from .phase2_evidence_cycle import (
+    persist_phase2_evidence_cycle_progress,
     run_phase2_read_only_evidence_cycle,
 )
 from .phase2_prestate_verification_runner import (
@@ -4530,6 +4531,14 @@ def main() -> None:
         type=int,
         default=180,
     )
+    phase2_cycle.add_argument(
+        "--persist-progress",
+        action="store_true",
+        help=(
+            "Persist a compact non-qualified technical progress record "
+            "after the collection step"
+        ),
+    )
 
     transaction_costs = subparsers.add_parser(
         "transaction-costs",
@@ -5047,8 +5056,9 @@ def main() -> None:
 
     if args.command == "phase2-evidence-step":
         settings = Settings.from_env()
+        storage = Storage(settings.database_path)
         result = run_phase2_read_only_evidence_cycle(
-            Storage(settings.database_path),
+            storage,
             pool_address=args.pool,
             executor_path=args.executor,
             max_positions_per_run=args.max_positions_per_run,
@@ -5058,7 +5068,15 @@ def main() -> None:
             reinspection_timeout_seconds=args.reinspection_timeout_seconds,
             prestate_timeout_seconds=args.prestate_timeout_seconds,
         )
-        print(json.dumps(result.to_record(), indent=2))
+        output = result.to_record()
+        if args.persist_progress:
+            output["progress_evidence_id"] = (
+                persist_phase2_evidence_cycle_progress(
+                    storage,
+                    report=result,
+                )
+            )
+        print(json.dumps(output, indent=2))
         if result.stages_partial or result.stages_failed:
             raise SystemExit(2)
         return
