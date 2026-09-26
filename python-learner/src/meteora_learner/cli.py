@@ -358,6 +358,10 @@ from .live_champion_monitor import (
     persist_live_champion_report,
     rollback_live_champion,
 )
+from .rotation_transition_cost_envelope import (
+    build_rotation_transition_cost_envelope,
+    persist_rotation_transition_cost_envelope,
+)
 from .transaction_costs import build_transaction_cost_report
 from .wallet_flow import (
     WalletFlowCriteria,
@@ -4474,6 +4478,25 @@ def main() -> None:
         help="Meteora position address",
     )
 
+    rotation_envelope = subparsers.add_parser(
+        "rotation-transition-envelope",
+        help=(
+            "Research-only quote-normalized rebalance transition value-drag "
+            "envelope under unresolved owner-flow hypotheses"
+        ),
+    )
+    rotation_envelope.add_argument("--position", required=True)
+    rotation_envelope.add_argument(
+        "--max-quote-age-seconds",
+        type=int,
+        default=300,
+    )
+    rotation_envelope.add_argument(
+        "--persist",
+        action="store_true",
+        help="Persist non-qualified research evidence",
+    )
+
     composition_prestate = subparsers.add_parser(
         "composition-prestate",
         help="Find slot-bounded pre-add snapshots eligible for exact verification",
@@ -4959,6 +4982,23 @@ def main() -> None:
             position_address=args.position,
         )
         print(json.dumps(result.to_record(), indent=2))
+        return
+
+    if args.command == "rotation-transition-envelope":
+        settings = Settings.from_env()
+        storage = Storage(settings.database_path)
+        result = build_rotation_transition_cost_envelope(
+            storage,
+            position_address=args.position,
+            max_quote_age_seconds=args.max_quote_age_seconds,
+        )
+        payload = result.to_record()
+        if args.persist:
+            payload["evidence_id"] = persist_rotation_transition_cost_envelope(
+                storage,
+                report=result,
+            )
+        print(json.dumps(payload, indent=2))
         return
 
     if args.command == "composition-prestate":
