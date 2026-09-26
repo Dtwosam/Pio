@@ -177,3 +177,36 @@ Later work should add richer features and realized LP outcomes, including chain
 liquidity competition, token/mint state, execution costs, composition costs,
 rebalance costs and actual position PnL, before learned outputs can be evaluated
 as a candidate capital-allocation policy.
+
+
+## Market context joined to LP outcomes
+
+The research branch now also connects market-wide state to the existing LP
+learning examples:
+
+- `pool_lp_learning.py`
+  - attaches the latest market observation available at or before each LP
+    decision;
+  - uses a strict backward/as-of join, so a later market observation cannot
+    leak into an earlier LP decision;
+  - keeps unmatched/incomplete rows visible in a coverage report;
+  - builds combined LP + market feature frames only from complete real
+    observations.
+
+- `pool_lp_training.py`
+  - trains continuous models for LP net return, excess-vs-hold, range survival
+    and derived downside magnitude;
+  - purges overlapping forward labels at the train/validation boundary;
+  - compares model error with a simple train-median baseline;
+  - emits no rank, allocation or live action.
+
+- `pool_lp_walk_forward.py`
+  - evaluates the combined LP + market learner through expanding time windows;
+  - purges overlapping labels in every fold;
+  - reports per-target error and baseline improvement across unseen periods;
+  - remains research-only and non-actionable.
+
+This bridge is important because market-wide pool discovery alone cannot answer
+whether a pool is economically attractive to Pio. The eventual learner needs
+to connect market state, pool conditions, LP range/strategy state and later
+realized LP outcomes in one evidence chain.
