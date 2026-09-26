@@ -17,6 +17,12 @@ from .pool_lp_context_ablation import (
     ContextFeatureAblationReport,
     evaluate_context_feature_ablation,
 )
+from .pool_execution_cost_context import (
+    ExecutionCostAblationReport,
+    ExecutionCostTrainingFrameReport,
+    build_execution_cost_enriched_lp_frame,
+    evaluate_execution_cost_ablation,
+)
 from .pool_lp_feature_drift import (
     FeatureDriftReport,
     evaluate_feature_drift,
@@ -72,6 +78,9 @@ class MintFeatureResearchReport:
     api_metadata_enrichment: APIMetadataTrainingFrameReport | None = None
     api_metadata_ablation: APIMetadataAblationReport | None = None
     api_metadata_reason: str | None = None
+    execution_cost_enrichment: ExecutionCostTrainingFrameReport | None = None
+    execution_cost_ablation: ExecutionCostAblationReport | None = None
+    execution_cost_reason: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -141,6 +150,17 @@ class MintFeatureResearchReport:
                 else None
             ),
             "api_metadata_reason": self.api_metadata_reason,
+            "execution_cost_enrichment": (
+                self.execution_cost_enrichment.to_record()
+                if self.execution_cost_enrichment is not None
+                else None
+            ),
+            "execution_cost_ablation": (
+                self.execution_cost_ablation.to_record()
+                if self.execution_cost_ablation is not None
+                else None
+            ),
+            "execution_cost_reason": self.execution_cost_reason,
         }
 
 
@@ -392,6 +412,32 @@ def run_mint_feature_research_from_dataset_file(
     except ValueError as exc:
         api_metadata_reason = str(exc)
 
+    execution_cost_enrichment = None
+    execution_cost_ablation = None
+    execution_cost_reason = None
+    try:
+        execution_frame, execution_cost_enrichment = (
+            build_execution_cost_enriched_lp_frame(
+                database_path,
+                mint_frame,
+            )
+        )
+        if execution_frame.empty:
+            execution_cost_reason = (
+                "no mint-enriched LP rows have complete prior "
+                "execution-cost history"
+            )
+        else:
+            execution_cost_ablation = evaluate_execution_cost_ablation(
+                execution_frame,
+                min_train_decision_times=min_train_decision_times,
+                validation_decision_times=validation_decision_times,
+                step_decision_times=step_decision_times,
+                min_train_rows=min_train_rows,
+            )
+    except ValueError as exc:
+        execution_cost_reason = str(exc)
+
     return MintFeatureResearchReport(
         research_only=True,
         policy_actionable=False,
@@ -415,4 +461,7 @@ def run_mint_feature_research_from_dataset_file(
         api_metadata_enrichment=api_metadata_enrichment,
         api_metadata_ablation=api_metadata_ablation,
         api_metadata_reason=api_metadata_reason,
+        execution_cost_enrichment=execution_cost_enrichment,
+        execution_cost_ablation=execution_cost_ablation,
+        execution_cost_reason=execution_cost_reason,
     )
