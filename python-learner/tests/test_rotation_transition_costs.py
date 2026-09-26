@@ -150,3 +150,121 @@ def test_rotation_cost_deduplicates_network_fee_by_signature(tmp_path):
     assert report.rotation_transactions == 1
     assert report.total_network_fee_lamports == 7000
     assert report.total_network_fee_quote == 7000.0
+
+
+
+def test_rotation_owner_token_flows_are_quote_normalized_separately_from_cost(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    payload = snapshot()
+    payload["token_balance_deltas"] = [
+        {
+            "account_index": 2,
+            "account_address": "x-account",
+            "mint": "mint-x",
+            "pre_owner": "owner",
+            "post_owner": "owner",
+            "pre_amount": "100",
+            "post_amount": "130",
+            "delta_amount": "30",
+            "decimals": 6,
+        },
+        {
+            "account_index": 3,
+            "account_address": "y-account",
+            "mint": "mint-y",
+            "pre_owner": "owner",
+            "post_owner": "owner",
+            "pre_amount": "200",
+            "post_amount": "180",
+            "delta_amount": "-20",
+            "decimals": 6,
+        },
+    ]
+    storage.save_chain_transaction_events(payload)
+    observed = datetime.fromtimestamp(BLOCK_TIME, tz=timezone.utc)
+    for mint, quote in (
+        (WRAPPED_SOL_MINT, 0.00000002),
+        ("mint-x", 2.0),
+        ("mint-y", 1.0),
+    ):
+        save_token_quote(
+            storage,
+            token_mint=mint,
+            quote_per_atomic=quote,
+            source="TEST",
+            observed_at=observed.isoformat(),
+        )
+
+    report = build_quote_normalized_rotation_cost_report(
+        storage,
+        position_address="position",
+    )
+
+    assert report.owner_token_flow_mints == 2
+    assert report.owner_token_flow_quote_eligible_mints == 2
+    assert report.owner_token_flow_quote_coverage_rate == 1.0
+    assert report.quoted_owner_token_flow_net == pytest.approx(40.0)
+    assert report.total_network_fee_quote == pytest.approx(0.00014)
+    assert report.cost_components_complete is False
+
+    sample = report.samples[0]
+    assert sample.owner_address == "owner"
+    by_mint = {item.mint: item for item in sample.owner_token_flows}
+    assert by_mint["mint-x"].atomic_delta == 30
+    assert by_mint["mint-x"].quote_value == pytest.approx(60.0)
+    assert by_mint["mint-x"].quote_source == "TEST"
+    assert by_mint["mint-y"].atomic_delta == -20
+    assert by_mint["mint-y"].quote_value == pytest.approx(-20.0)
+
+
+def test_rotation_owner_token_flow_rejects_owner_change_attribution(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    payload = snapshot()
+    payload["token_balance_deltas"] = [
+        {
+            "account_index": 2,
+            "account_address": "token-account",
+            "mint": "mint-x",
+            "pre_owner": "owner",
+            "post_owner": "other-owner",
+            "pre_amount": "100",
+            "post_amount": "130",
+            "delta_amount": "30",
+            "decimals": 6,
+        }
+    ]
+    storage.save_chain_transaction_events(payload)
+    observed = datetime.fromtimestamp(BLOCK_TIME, tz=timezone.utc)
+    save_token_quote(
+        storage,
+        token_mint=WRAPPED_SOL_MINT,
+        quote_per_atomic=0.00000002,
+        source="TEST",
+        observed_at=observed.isoformat(),
+    )
+    save_token_quote(
+        storage,
+        token_mint="mint-x",
+        quote_per_atomic=2.0,
+        source="TEST",
+        observed_at=observed.isoformat(),
+    )
+
+    report = build_quote_normalized_rotation_cost_report(
+        storage,
+        position_address="position",
+    )
+
+    assert report.owner_token_flow_mints == 1
+    assert report.owner_token_flow_quote_eligible_mints == 0
+    assert report.owner_token_flow_quote_coverage_rate == 0.0
+    assert report.quoted_owner_token_flow_net == 0.0
+    flow = report.samples[0].owner_token_flows[0]
+    assert flow.attribution_eligible is False
+    assert flow.quote_eligible is False
+    assert flow.quote_value is None
+    assert flow.exclusion_reason == (
+        "token account owner changed during transaction"
+    )

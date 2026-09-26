@@ -14,6 +14,21 @@ WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112"
 
 
 @dataclass(frozen=True)
+class RotationOwnerTokenFlow:
+    mint: str
+    account_count: int
+    atomic_delta: int
+    attribution_eligible: bool
+    quote_per_atomic: float | None
+    quote_value: float | None
+    quote_source: str | None
+    quote_observed_at: str | None
+    quote_age_seconds: int | None
+    quote_eligible: bool
+    exclusion_reason: str | None
+
+
+@dataclass(frozen=True)
 class RotationTransitionCostSample:
     signature: str
     block_time: int | None
@@ -35,6 +50,8 @@ class RotationTransitionCostSample:
     reported_y_fee_amount: int
     reported_reward_one: int
     reported_reward_two: int
+    owner_address: str | None
+    owner_token_flows: tuple[RotationOwnerTokenFlow, ...]
 
 
 @dataclass(frozen=True)
@@ -47,6 +64,10 @@ class RotationTransitionCostReport:
     total_network_fee_lamports: int
     total_network_fee_quote: float
     mean_network_fee_quote: float | None
+    owner_token_flow_mints: int
+    owner_token_flow_quote_eligible_mints: int
+    owner_token_flow_quote_coverage_rate: float | None
+    quoted_owner_token_flow_net: float
     cost_components_complete: bool
     included_cost_components: tuple[str, ...]
     excluded_unclassified_components: tuple[str, ...]
@@ -63,6 +84,87 @@ def _block_time_iso(block_time: int) -> str:
     ).isoformat()
 
 
+def _owner_token_flows(
+    storage: Storage,
+    store: ResearchStore,
+    *,
+    signature: str,
+    owner_address: str | None,
+    block_time: int | None,
+    max_quote_age_seconds: int,
+) -> tuple[RotationOwnerTokenFlow, ...]:
+    if owner_address is None:
+        return ()
+
+    rows = store.transaction_token_balance_deltas(
+        signature,
+        owner_address=owner_address,
+    )
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["mint"]), []).append(row)
+
+    flows: list[RotationOwnerTokenFlow] = []
+    for mint in sorted(grouped):
+        mint_rows = grouped[mint]
+        atomic_delta = sum(
+            int(str(row["delta_amount"])) for row in mint_rows
+        )
+        ambiguous_owner_change = any(
+            row.get("pre_owner") is not None
+            and row.get("post_owner") is not None
+            and str(row["pre_owner"]) != str(row["post_owner"])
+            for row in mint_rows
+        )
+        attribution_eligible = not ambiguous_owner_change
+
+        quote_per_atomic = None
+        quote_value = None
+        quote_source = None
+        quote_observed_at = None
+        quote_age = None
+        reason = None
+
+        if not attribution_eligible:
+            reason = "token account owner changed during transaction"
+        elif block_time is None:
+            reason = "transaction block time missing"
+        else:
+            status = token_quote_status(
+                storage,
+                token_mint=mint,
+                max_age_seconds=max_quote_age_seconds,
+                as_of=_block_time_iso(block_time),
+            )
+            quote_per_atomic = status.quote_per_atomic
+            quote_source = status.source
+            quote_observed_at = status.observed_at
+            quote_age = status.age_seconds
+            if not status.available:
+                reason = "token quote missing at transaction time"
+            elif not status.fresh or status.quote_per_atomic is None:
+                reason = "token quote stale at transaction time"
+            else:
+                quote_value = atomic_delta * status.quote_per_atomic
+
+        flows.append(
+            RotationOwnerTokenFlow(
+                mint=mint,
+                account_count=len(mint_rows),
+                atomic_delta=atomic_delta,
+                attribution_eligible=attribution_eligible,
+                quote_per_atomic=quote_per_atomic,
+                quote_value=quote_value,
+                quote_source=quote_source,
+                quote_observed_at=quote_observed_at,
+                quote_age_seconds=quote_age,
+                quote_eligible=quote_value is not None,
+                exclusion_reason=reason,
+            )
+        )
+    return tuple(flows)
+
+
 def build_quote_normalized_rotation_cost_report(
     storage: Storage,
     *,
@@ -72,9 +174,11 @@ def build_quote_normalized_rotation_cost_report(
     """
     Quote-normalize the part of a rebalance transition cost that is unambiguous.
 
-    Today that means the Solana transaction fee only. Rebalancing event fields
-    named x_fee_amount/y_fee_amount and rewards remain visible but are excluded
-    from cost totals until their economic direction is explicitly validated.
+    The only component counted as transition cost is the Solana transaction
+    fee. Owner token-account deltas are captured and quote-normalized separately
+    as signed observed flows; they are not assigned an economic meaning here.
+    Rebalancing event x_fee_amount/y_fee_amount and reward fields remain visible
+    but excluded from cost totals until their direction is explicitly validated.
     Network fees are deduplicated by transaction signature.
     """
     if not position_address.strip():
@@ -168,6 +272,20 @@ def build_quote_normalized_rotation_cost_report(
             else:
                 quote_value = network_fee * status.quote_per_atomic
 
+        owner_address = (
+            str(first["owner_address"])
+            if first.get("owner_address") is not None
+            else None
+        )
+        owner_token_flows = _owner_token_flows(
+            storage,
+            store,
+            signature=signature,
+            owner_address=owner_address,
+            block_time=block_time,
+            max_quote_age_seconds=max_quote_age_seconds,
+        )
+
         samples.append(
             RotationTransitionCostSample(
                 signature=signature,
@@ -198,6 +316,8 @@ def build_quote_normalized_rotation_cost_report(
                 reported_reward_two=sum(
                     int(str(item["reward_two"])) for item in grouped
                 ),
+                owner_address=owner_address,
+                owner_token_flows=owner_token_flows,
             )
         )
 
@@ -211,6 +331,21 @@ def build_quote_normalized_rotation_cost_report(
         for item in samples
         if item.network_fee_lamports is not None
     ]
+    owner_flows = [
+        flow
+        for sample in samples
+        for flow in sample.owner_token_flows
+    ]
+    quoted_owner_flows = [
+        flow.quote_value
+        for flow in owner_flows
+        if flow.quote_value is not None
+    ]
+    owner_flow_coverage = (
+        len(quoted_owner_flows) / len(owner_flows)
+        if owner_flows
+        else None
+    )
     return RotationTransitionCostReport(
         position_address=position_address,
         quote_unit=DEFAULT_QUOTE_UNIT,
@@ -222,6 +357,10 @@ def build_quote_normalized_rotation_cost_report(
         mean_network_fee_quote=(
             float(mean(quoted)) if quoted else None
         ),
+        owner_token_flow_mints=len(owner_flows),
+        owner_token_flow_quote_eligible_mints=len(quoted_owner_flows),
+        owner_token_flow_quote_coverage_rate=owner_flow_coverage,
+        quoted_owner_token_flow_net=float(sum(quoted_owner_flows)),
         cost_components_complete=False,
         included_cost_components=("SOLANA_NETWORK_FEE",),
         excluded_unclassified_components=(

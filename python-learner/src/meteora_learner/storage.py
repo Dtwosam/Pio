@@ -313,11 +313,35 @@ CREATE TABLE IF NOT EXISTS chain_transaction_snapshots (
     network_fee_lamports INTEGER,
     compute_units_consumed INTEGER,
     succeeded INTEGER,
+    token_balance_deltas_captured INTEGER NOT NULL DEFAULT 0,
     raw_json TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_chain_tx_snapshot_time
 ON chain_transaction_snapshots(block_time, slot);
+
+CREATE TABLE IF NOT EXISTS chain_transaction_token_balance_deltas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observed_at TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    account_index INTEGER NOT NULL,
+    account_address TEXT,
+    mint TEXT NOT NULL,
+    pre_owner TEXT,
+    post_owner TEXT,
+    pre_amount TEXT NOT NULL,
+    post_amount TEXT NOT NULL,
+    delta_amount TEXT NOT NULL,
+    decimals INTEGER,
+    raw_json TEXT NOT NULL,
+    UNIQUE(signature, account_index, mint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chain_tx_token_delta_signature
+ON chain_transaction_token_balance_deltas(signature, account_index);
+
+CREATE INDEX IF NOT EXISTS idx_chain_tx_token_delta_owner_mint
+ON chain_transaction_token_balance_deltas(post_owner, pre_owner, mint);
 
 CREATE TABLE IF NOT EXISTS chain_add_liquidity_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1449,6 +1473,10 @@ CHAIN_ADD_REQUEST_EXTRA_COLUMNS = {
     "weighted_distribution_json": "TEXT",
 }
 
+CHAIN_TX_SNAPSHOT_EXTRA_COLUMNS = {
+    "token_balance_deltas_captured": "INTEGER NOT NULL DEFAULT 0",
+}
+
 CHAIN_TX_EVENT_EXTRA_COLUMNS = {
     "owner_address": "TEXT",
     "x_withdrawn_amount": "TEXT",
@@ -1597,6 +1625,11 @@ class Storage:
             _ensure_columns(conn, "chain_pool_snapshots", CHAIN_POOL_EXTRA_COLUMNS)
             _ensure_columns(conn, "position_bin_snapshots", POSITION_BIN_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_position_snapshots", CHAIN_POSITION_EXTRA_COLUMNS)
+            _ensure_columns(
+                conn,
+                "chain_transaction_snapshots",
+                CHAIN_TX_SNAPSHOT_EXTRA_COLUMNS,
+            )
             _ensure_columns(conn, "chain_transaction_events", CHAIN_TX_EVENT_EXTRA_COLUMNS)
             _ensure_columns(conn, "chain_add_liquidity_requests", CHAIN_ADD_REQUEST_EXTRA_COLUMNS)
             _ensure_columns(
@@ -2321,6 +2354,15 @@ class Storage:
         network_fee_raw = snapshot.get("network_fee_lamports")
         compute_units_raw = snapshot.get("compute_units_consumed")
         succeeded_raw = snapshot.get("succeeded")
+        token_balance_deltas_captured = (
+            "token_balance_deltas" in snapshot
+        )
+        if token_balance_deltas_captured:
+            token_balance_deltas = snapshot.get("token_balance_deltas")
+            if not isinstance(token_balance_deltas, list):
+                raise ValueError("token_balance_deltas must be a list")
+        else:
+            token_balance_deltas = []
         add_requests = snapshot.get("add_requests") or []
         if not isinstance(add_requests, list):
             raise ValueError("add_requests must be a list")
@@ -2515,8 +2557,8 @@ class Storage:
                 INSERT INTO chain_transaction_snapshots(
                     observed_at, signature, slot, block_time,
                     network_fee_lamports, compute_units_consumed, succeeded,
-                    raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    token_balance_deltas_captured, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(signature) DO UPDATE SET
                     observed_at=excluded.observed_at,
                     slot=excluded.slot,
@@ -2524,6 +2566,12 @@ class Storage:
                     network_fee_lamports=excluded.network_fee_lamports,
                     compute_units_consumed=excluded.compute_units_consumed,
                     succeeded=excluded.succeeded,
+                    token_balance_deltas_captured=(
+                        MAX(
+                            chain_transaction_snapshots.token_balance_deltas_captured,
+                            excluded.token_balance_deltas_captured
+                        )
+                    ),
                     raw_json=excluded.raw_json
                 """,
                 (
@@ -2534,9 +2582,79 @@ class Storage:
                     int(network_fee_raw) if network_fee_raw is not None else None,
                     int(compute_units_raw) if compute_units_raw is not None else None,
                     int(bool(succeeded_raw)) if succeeded_raw is not None else None,
+                    int(token_balance_deltas_captured),
                     json.dumps(snapshot, separators=(",", ":")),
                 ),
             )
+            token_delta_rows = []
+            for item in token_balance_deltas:
+                if not isinstance(item, dict):
+                    raise ValueError(
+                        "token balance delta entry must be an object"
+                    )
+                pre_amount = int(str(item["pre_amount"]))
+                post_amount = int(str(item["post_amount"]))
+                delta_amount = int(str(item["delta_amount"]))
+                if post_amount - pre_amount != delta_amount:
+                    raise ValueError(
+                        "token balance delta does not match pre/post amounts"
+                    )
+                decimals_raw = item.get("decimals")
+                token_delta_rows.append(
+                    (
+                        observed_at,
+                        signature,
+                        int(item["account_index"]),
+                        (
+                            str(item["account_address"])
+                            if item.get("account_address") is not None
+                            else None
+                        ),
+                        str(item["mint"]),
+                        (
+                            str(item["pre_owner"])
+                            if item.get("pre_owner") is not None
+                            else None
+                        ),
+                        (
+                            str(item["post_owner"])
+                            if item.get("post_owner") is not None
+                            else None
+                        ),
+                        str(pre_amount),
+                        str(post_amount),
+                        str(delta_amount),
+                        (
+                            int(decimals_raw)
+                            if decimals_raw is not None
+                            else None
+                        ),
+                        json.dumps(item, separators=(",", ":")),
+                    )
+                )
+            if token_delta_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO chain_transaction_token_balance_deltas(
+                        observed_at, signature, account_index,
+                        account_address, mint, pre_owner, post_owner,
+                        pre_amount, post_amount, delta_amount, decimals,
+                        raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(signature, account_index, mint) DO UPDATE SET
+                        observed_at=excluded.observed_at,
+                        account_address=excluded.account_address,
+                        pre_owner=excluded.pre_owner,
+                        post_owner=excluded.post_owner,
+                        pre_amount=excluded.pre_amount,
+                        post_amount=excluded.post_amount,
+                        delta_amount=excluded.delta_amount,
+                        decimals=excluded.decimals,
+                        raw_json=excluded.raw_json
+                    """,
+                    token_delta_rows,
+                )
+
             request_rows = []
             for request in add_requests:
                 if not isinstance(request, dict):
@@ -3436,10 +3554,15 @@ class Storage:
             ).fetchone()
             chain_tx_snapshots = conn.execute(
                 """
-                SELECT COUNT(*), SUM(CASE WHEN network_fee_lamports IS NOT NULL THEN 1 ELSE 0 END)
+                SELECT COUNT(*),
+                       SUM(CASE WHEN network_fee_lamports IS NOT NULL THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN token_balance_deltas_captured = 1 THEN 1 ELSE 0 END)
                 FROM chain_transaction_snapshots
                 """
             ).fetchone()
+            chain_tx_token_deltas = conn.execute(
+                "SELECT COUNT(*) FROM chain_transaction_token_balance_deltas"
+            ).fetchone()[0]
             add_requests = conn.execute(
                 "SELECT COUNT(*) FROM chain_add_liquidity_requests"
             ).fetchone()[0]
@@ -3474,7 +3597,11 @@ class Storage:
             "chain_transaction_events": chain_tx_events[0],
             "chain_transaction_count": chain_tx_events[1],
             "chain_transaction_snapshots": chain_tx_snapshots[0],
+            "chain_transaction_token_balance_deltas": chain_tx_token_deltas,
             "transaction_fee_samples": chain_tx_snapshots[1] or 0,
+            "transaction_token_flow_capture_samples": (
+                chain_tx_snapshots[2] or 0
+            ),
             "chain_add_liquidity_requests": add_requests,
             "chain_rebalance_requests": rebalance_requests,
             "quality_failures": failures,

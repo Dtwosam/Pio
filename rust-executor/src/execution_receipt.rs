@@ -121,6 +121,7 @@ mod tests {
             network_fee_lamports: Some(5000),
             compute_units_consumed: Some(100_000),
             succeeded: Some(succeeded),
+            token_balance_deltas: vec![],
             add_requests: vec![],
             rebalance_requests: vec![],
             events: vec![],
