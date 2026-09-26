@@ -1,12 +1,21 @@
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 
 import pytest
 
-from deploy.tools.snapshot_phase2_production_sources import (
-    capture_production_sources,
+
+ROOT = Path(__file__).resolve().parents[2]
+TOOL = ROOT / "deploy" / "tools" / "snapshot_phase2_production_sources.py"
+SPEC = importlib.util.spec_from_file_location(
+    "snapshot_phase2_production_sources",
+    TOOL,
 )
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+capture_production_sources = MODULE.capture_production_sources
 
 
 def sha256(path: Path) -> str:
