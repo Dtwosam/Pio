@@ -13,6 +13,7 @@ import subprocess
 
 TARGET_PATH = "rust-executor/src/state_reader.rs"
 PR7_HEAD = "ea235e676b700891839f28b0250e23149cfb77f8"
+PR7_TARGET_BLOB_SHA = "493f3e13229a1194483f33f1b03806266e321378"
 REFERENCE_PATCH = (
     Path(__file__).resolve().parents[1]
     / "patches"
