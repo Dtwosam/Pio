@@ -173,10 +173,12 @@ The research branch does not yet:
 - replace the Phase 2 / Phase 3 / paper / controlled-live promotion lineage;
 - claim that predictive accuracy is sufficient for economic profitability.
 
-Later work should add richer features and realized LP outcomes, including chain
-liquidity competition, token/mint state, execution costs, composition costs,
-rebalance costs and actual position PnL, before learned outputs can be evaluated
-as a candidate capital-allocation policy.
+The research branch now includes chain-liquidity state, token/mint context,
+normalized pool API metadata, historical execution-cost context, composition
+fee ratios, learned cross-sectional ranking evidence and rotation-transition
+evidence. Remaining evidence gaps include comparable realized exit/re-entry
+transition costs and actual controlled-live position PnL once upstream gates
+permit those observations.
 
 
 ## Market context joined to LP outcomes
@@ -210,3 +212,37 @@ This bridge is important because market-wide pool discovery alone cannot answer
 whether a pool is economically attractive to Pio. The eventual learner needs
 to connect market state, pool conditions, LP range/strategy state and later
 realized LP outcomes in one evidence chain.
+
+
+## Learned ranking and rotation evidence
+
+The research branch now tests the parts needed for future market-wide pool
+selection without turning them into live policy:
+
+- `pool_execution_cost_context.py`
+  - attaches only execution evidence available before each decision;
+  - deduplicates transaction receipts by signature;
+  - exposes Solana network fees and compute usage;
+  - normalizes add underfill and composition fees as dimensionless basis-point
+    ratios so raw token atomic units are not compared across unrelated mints;
+  - evaluates incremental predictive value with identical purged folds.
+
+- `pool_lp_cross_sectional_ranking.py`
+  - trains only on earlier, fully realized labels;
+  - evaluates contemporaneous candidate ordering on unseen future timestamps;
+  - reports rank correlation, realized top-candidate regret, uplift versus the
+    contemporaneous median, and separate downside-ranking quality;
+  - does not combine return and downside into a hand-written score.
+
+- `pool_lp_rotation_evidence.py`
+  - records when the learned leader changes through future validation periods;
+  - measures the predicted advantage of the new leader over staying in the
+    prior leader;
+  - records the realized advantage afterward;
+  - reports churn/leader-change frequency and predicted-vs-realized switch
+    evidence;
+  - explicitly marks exit/re-entry transition costs as not yet included and
+    does not choose a switching threshold.
+
+These components are evidence generators. They remain research-only,
+non-actionable, and disconnected from execution.
