@@ -69,6 +69,9 @@ def test_quote_observer_persists_every_successful_research_quote(tmp_path):
     assert report.mints_requested == 4
     assert report.quotes_refreshed == 4
     assert report.quotes_failed == 0
+    assert {
+        item.observed_at for item in report.items
+    } == {"2026-09-26T16:05:00+00:00"}
     for mint in (X, Y, R, WRAPPED_SOL_MINT):
         status = token_quote_status(
             storage,
@@ -121,3 +124,54 @@ def test_quote_observer_rejects_wrong_mint_response(tmp_path):
         "does not match" in str(item.error)
         for item in report.items
     )
+
+
+
+def test_quote_observer_does_not_backdate_later_network_responses(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    save_pool(storage)
+    mints = required_pool_research_quote_mints(
+        storage,
+        pool_address=POOL,
+    )
+
+    timestamps = iter(
+        (
+            "2026-09-26T16:05:00+00:00",
+            "2026-09-26T16:06:00+00:00",
+            "2026-09-26T16:07:00+00:00",
+            "2026-09-26T16:08:00+00:00",
+            "2026-09-26T16:09:00+00:00",
+        )
+    )
+    report = collect_phase2_research_quotes(
+        storage,
+        pool_address=POOL,
+        fetch_quote=lambda mint: quote(mint),
+        now=lambda: next(timestamps),
+    )
+
+    assert report.observed_at == "2026-09-26T16:05:00+00:00"
+    assert [item.token_mint for item in report.items] == list(mints)
+    assert [item.observed_at for item in report.items] == [
+        "2026-09-26T16:06:00+00:00",
+        "2026-09-26T16:07:00+00:00",
+        "2026-09-26T16:08:00+00:00",
+        "2026-09-26T16:09:00+00:00",
+    ]
+
+    first = token_quote_status(
+        storage,
+        token_mint=mints[0],
+        max_age_seconds=300,
+        as_of="2026-09-26T16:06:30+00:00",
+    )
+    second = token_quote_status(
+        storage,
+        token_mint=mints[1],
+        max_age_seconds=300,
+        as_of="2026-09-26T16:06:30+00:00",
+    )
+    assert first.available is True
+    assert first.observed_at == "2026-09-26T16:06:00+00:00"
+    assert second.available is False
