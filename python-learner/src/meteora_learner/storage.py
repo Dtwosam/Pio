@@ -3532,6 +3532,15 @@ class Storage:
             position_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT position_address) FROM position_event_history"
             ).fetchone()
+            position_attempts = conn.execute(
+                """
+                SELECT COUNT(*),
+                       SUM(CASE WHEN succeeded = 1 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN succeeded = 0 THEN 1 ELSE 0 END),
+                       MAX(attempted_at)
+                FROM phase2_position_observation_attempts
+                """
+            ).fetchone()
             chain_tx_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT signature) FROM chain_transaction_events"
             ).fetchone()
@@ -3572,6 +3581,10 @@ class Storage:
             "position_bin_snapshots": position_bins,
             "position_event_history": position_events[0],
             "position_event_position_count": position_events[1],
+            "phase2_position_observation_attempts": position_attempts[0],
+            "phase2_position_observation_successes": position_attempts[1] or 0,
+            "phase2_position_observation_failures": position_attempts[2] or 0,
+            "latest_phase2_position_observation_attempt": position_attempts[3],
             "chain_transaction_events": chain_tx_events[0],
             "chain_transaction_count": chain_tx_events[1],
             "chain_transaction_snapshots": chain_tx_snapshots[0],
