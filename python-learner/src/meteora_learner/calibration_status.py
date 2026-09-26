@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -11,15 +12,25 @@ from .transaction_costs import build_transaction_cost_report
 
 
 @dataclass(frozen=True)
+class CalibrationGapCount:
+    reason: str
+    count: int
+
+
+@dataclass(frozen=True)
 class Phase2CalibrationEvidence:
     add_positions: int
     composition_add_events: int
     composition_eligible_samples: int
     composition_exact_samples: int
     composition_mismatched_samples: int
+    composition_ineligible_samples: int
+    composition_ineligibility_reasons: tuple[CalibrationGapCount, ...]
     add_execution_events: int
     add_execution_request_decodes: int
     add_execution_matched_events: int
+    add_execution_unmatched_samples: int
+    add_execution_gap_reasons: tuple[CalibrationGapCount, ...]
     add_active_guard_samples: int
     add_active_guard_violations: int
     rebalance_positions: int
@@ -49,9 +60,12 @@ def build_phase2_calibration_evidence(
     composition_eligible = 0
     composition_exact = 0
     composition_mismatched = 0
+    composition_ineligible = 0
+    composition_reasons: Counter[str] = Counter()
     add_execution_events = 0
     add_request_decodes = 0
     add_matched = 0
+    add_gap_reasons: Counter[str] = Counter()
     add_guard_samples = 0
     add_guard_violations = 0
 
@@ -64,13 +78,19 @@ def build_phase2_calibration_evidence(
                 database_path,
                 position_address=position,
             )
-        except ValueError:
-            pass
+        except ValueError as exc:
+            composition_reasons[f"composition report unavailable: {exc}"] += 1
         else:
             composition_add_events += composition.add_events
             composition_eligible += composition.eligible_samples
             composition_exact += composition.exact_samples
             composition_mismatched += composition.mismatched_samples
+            for entry in composition.entries:
+                if not entry.eligible:
+                    composition_ineligible += 1
+                    composition_reasons[
+                        entry.reason or "composition sample ineligible"
+                    ] += 1
 
         try:
             add_execution = build_add_execution_calibration(
@@ -83,6 +103,11 @@ def build_phase2_calibration_evidence(
             add_execution_events += add_execution.add_events
             add_request_decodes += add_execution.request_decodes
             add_matched += add_execution.matched_add_events
+            for sample in add_execution.samples:
+                if not sample.request_decoded:
+                    add_gap_reasons["add-liquidity request decode missing"] += 1
+                elif not sample.add_event_found:
+                    add_gap_reasons["AddLiquidity event decode missing"] += 1
             add_guard_samples += add_execution.guard_samples
             add_guard_violations += add_execution.guard_violations
 
@@ -164,9 +189,27 @@ def build_phase2_calibration_evidence(
         composition_eligible_samples=composition_eligible,
         composition_exact_samples=composition_exact,
         composition_mismatched_samples=composition_mismatched,
+        composition_ineligible_samples=composition_ineligible,
+        composition_ineligibility_reasons=tuple(
+            CalibrationGapCount(reason=reason, count=count)
+            for reason, count in sorted(
+                composition_reasons.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ),
         add_execution_events=add_execution_events,
         add_execution_request_decodes=add_request_decodes,
         add_execution_matched_events=add_matched,
+        add_execution_unmatched_samples=(
+            add_execution_events - add_matched
+        ),
+        add_execution_gap_reasons=tuple(
+            CalibrationGapCount(reason=reason, count=count)
+            for reason, count in sorted(
+                add_gap_reasons.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ),
         add_active_guard_samples=add_guard_samples,
         add_active_guard_violations=add_guard_violations,
         rebalance_positions=len(rebalance_positions),
