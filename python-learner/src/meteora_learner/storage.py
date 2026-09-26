@@ -321,6 +321,18 @@ BEGIN
     SELECT RAISE(ABORT, 'phase2_position_observation_attempts is immutable');
 END;
 
+CREATE TRIGGER IF NOT EXISTS phase2_collection_task_attempts_no_update
+BEFORE UPDATE ON phase2_collection_task_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_collection_task_attempts is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase2_collection_task_attempts_no_delete
+BEFORE DELETE ON phase2_collection_task_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_collection_task_attempts is immutable');
+END;
+
 CREATE TRIGGER IF NOT EXISTS position_event_history_no_update
 BEFORE UPDATE ON position_event_history
 BEGIN
@@ -332,6 +344,18 @@ BEFORE DELETE ON position_event_history
 BEGIN
     SELECT RAISE(ABORT, 'position_event_history is immutable');
 END;
+
+CREATE TABLE IF NOT EXISTS phase2_collection_task_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempted_at TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    task_key TEXT NOT NULL,
+    succeeded INTEGER NOT NULL,
+    outcome_category TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase2_collection_task_attempts
+ON phase2_collection_task_attempts(stage, task_key, attempted_at, id);
 
 CREATE TABLE IF NOT EXISTS chain_transaction_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2426,6 +2450,64 @@ class Storage:
                     )
         return len(rows)
 
+    def save_phase2_collection_task_attempt(
+        self,
+        *,
+        stage: str,
+        task_key: str,
+        attempted_at: str,
+        succeeded: bool,
+        outcome_category: str,
+    ) -> int:
+        if not stage.strip():
+            raise ValueError("stage is required")
+        if not task_key.strip():
+            raise ValueError("task_key is required")
+        if not outcome_category.strip():
+            raise ValueError("outcome_category is required")
+
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO phase2_collection_task_attempts(
+                    attempted_at, stage, task_key,
+                    succeeded, outcome_category
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    attempted_at,
+                    stage,
+                    task_key,
+                    int(succeeded),
+                    outcome_category,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def latest_phase2_collection_task_attempts(
+        self,
+        *,
+        stage: str,
+    ) -> dict[str, float]:
+        if not stage.strip():
+            raise ValueError("stage is required")
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT task_key,
+                       MAX(julianday(attempted_at)) AS attempted_jd
+                FROM phase2_collection_task_attempts
+                WHERE stage = ?
+                GROUP BY task_key
+                """,
+                (stage,),
+            ).fetchall()
+        return {
+            str(row[0]): float(row[1])
+            for row in rows
+            if row[1] is not None
+        }
+
     def save_chain_transaction_events(
         self,
         snapshot: dict[str, Any],
@@ -3559,6 +3641,15 @@ class Storage:
                 FROM phase2_position_observation_attempts
                 """
             ).fetchone()
+            phase2_task_attempts = conn.execute(
+                """
+                SELECT COUNT(*),
+                       SUM(CASE WHEN succeeded = 1 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN succeeded = 0 THEN 1 ELSE 0 END),
+                       MAX(attempted_at)
+                FROM phase2_collection_task_attempts
+                """
+            ).fetchone()
             chain_tx_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT signature) FROM chain_transaction_events"
             ).fetchone()
@@ -3603,6 +3694,10 @@ class Storage:
             "phase2_position_observation_successes": position_attempts[1] or 0,
             "phase2_position_observation_failures": position_attempts[2] or 0,
             "latest_phase2_position_observation_attempt": position_attempts[3],
+            "phase2_collection_task_attempts": phase2_task_attempts[0],
+            "phase2_collection_task_successes": phase2_task_attempts[1] or 0,
+            "phase2_collection_task_failures": phase2_task_attempts[2] or 0,
+            "latest_phase2_collection_task_attempt": phase2_task_attempts[3],
             "chain_transaction_events": chain_tx_events[0],
             "chain_transaction_count": chain_tx_events[1],
             "chain_transaction_snapshots": chain_tx_snapshots[0],
