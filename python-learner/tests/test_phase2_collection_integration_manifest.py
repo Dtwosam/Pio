@@ -33,3 +33,11 @@ def test_phase2_collection_manifest_is_fail_closed_and_matches_state_reader():
         re.fullmatch(r"[0-9a-f]{40}", str(item["head"]))
         for item in components
     )
+
+    critical_files = payload["critical_file_blobs"]
+    assert critical_files
+    for relative_path, expected_blob in critical_files.items():
+        path = ROOT / relative_path
+        assert path.is_file()
+        assert re.fullmatch(r"[0-9a-f]{40}", str(expected_blob))
+        assert expected_blob == git_blob_sha(path)
