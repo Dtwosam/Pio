@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import json
+from types import SimpleNamespace
 from typing import Any, Sequence
 
-from .paper_action_replay import PaperHoldVsRebalanceReplayReport
+from .paper_action_replay import (
+    PAPER_HOLD_VS_REBALANCE_EVIDENCE_TYPE,
+    PaperHoldVsRebalanceReplayReport,
+)
 from .storage import Storage
 
 
@@ -132,13 +137,26 @@ def build_paper_management_dataset(
         )
 
         exclusion = None
-        if not report.quote_normalization_complete:
+        quote_complete = bool(
+            getattr(report, "quote_normalization_complete", False)
+        )
+        reward_complete = bool(
+            getattr(report, "reward_value_complete", False)
+        )
+        transition_complete = bool(
+            getattr(report, "transition_cost_complete", False)
+        )
+        economics_complete = bool(
+            getattr(report, "economics_complete", False)
+        )
+
+        if not quote_complete:
             exclusion = "QUOTE_NORMALIZATION_INCOMPLETE"
-        elif not report.reward_value_complete:
+        elif not reward_complete:
             exclusion = "REWARD_VALUATION_INCOMPLETE"
-        elif not report.transition_cost_complete:
+        elif not transition_complete:
             exclusion = "TRANSITION_COST_INCOMPLETE"
-        elif not report.economics_complete:
+        elif not economics_complete:
             exclusion = "ECONOMICS_INCOMPLETE"
         elif final_net is None:
             exclusion = "FINAL_NET_ADVANTAGE_MISSING"
@@ -162,18 +180,26 @@ def build_paper_management_dataset(
             start_x=report.start_x,
             start_y=report.start_y,
             start_value_y_atomic=report.start_value_y_atomic,
-            quote_unit=report.quote_unit,
-            quote_normalization_complete=(
-                report.quote_normalization_complete
-            ),
-            economics_complete=report.economics_complete,
-            transition_cost_complete=report.transition_cost_complete,
-            reward_value_complete=report.reward_value_complete,
+            quote_unit=str(getattr(report, "quote_unit", "UNKNOWN")),
+            quote_normalization_complete=quote_complete,
+            economics_complete=economics_complete,
+            transition_cost_complete=transition_complete,
+            reward_value_complete=reward_complete,
             gross_advantage_before_transition_cost_quote=(
-                report.gross_advantage_before_transition_cost_quote
+                float(getattr(
+                    report,
+                    "gross_advantage_before_transition_cost_quote",
+                    0.0,
+                ))
+                if getattr(
+                    report,
+                    "gross_advantage_before_transition_cost_quote",
+                    None,
+                ) is not None
+                else None
             ),
             incomplete_economic_components=tuple(
-                report.incomplete_economic_components
+                getattr(report, "incomplete_economic_components", ())
             ),
             training_eligible=exclusion is None,
             training_exclusion_reason=exclusion,
@@ -245,3 +271,58 @@ def persist_paper_management_dataset(
         qualified=False,
         evidence=report.to_record(),
     )
+
+
+
+def load_persisted_paper_management_reports(
+    storage: Storage,
+    *,
+    pool_address: str,
+) -> tuple[Any, ...]:
+    if not pool_address.strip():
+        raise ValueError("pool_address is required")
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT evidence_json
+            FROM advanced_edge_evidence
+            WHERE edge_type = ?
+              AND pool_address = ?
+            ORDER BY id ASC
+            """,
+            (
+                PAPER_HOLD_VS_REBALANCE_EVIDENCE_TYPE,
+                pool_address,
+            ),
+        ).fetchall()
+
+    reports: list[Any] = []
+    for row in rows:
+        try:
+            payload = json.loads(str(row[0]))
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "persisted PAPER management evidence is invalid JSON"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "persisted PAPER management evidence must be an object"
+            )
+        reports.append(SimpleNamespace(**payload))
+    return tuple(reports)
+
+
+def build_persisted_paper_management_dataset(
+    storage: Storage,
+    *,
+    pool_address: str,
+) -> PaperManagementDatasetReport:
+    reports = load_persisted_paper_management_reports(
+        storage,
+        pool_address=pool_address,
+    )
+    if not reports:
+        raise ValueError(
+            f"no persisted PAPER HOLD-vs-REBALANCE evidence for {pool_address}"
+        )
+    return build_paper_management_dataset(reports)
