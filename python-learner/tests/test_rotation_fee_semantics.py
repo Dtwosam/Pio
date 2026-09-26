@@ -217,7 +217,7 @@ def test_zero_reported_fee_makes_both_hypotheses_identical(tmp_path):
     )
 
     assert report.both_hypotheses_match == 1
-    assert report.samples[0].evidence_class == "NEITHER_HYPOTHESIS_EXACT"
+    assert report.samples[0].evidence_class == "BOTH_HYPOTHESES_EXACT"
 
 
 def test_multiple_rebalance_events_are_not_attributed_to_shared_owner_flow(tmp_path):
