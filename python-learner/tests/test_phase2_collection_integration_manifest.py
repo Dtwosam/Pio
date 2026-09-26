@@ -28,8 +28,16 @@ def test_phase2_collection_manifest_is_fail_closed_and_matches_state_reader():
     assert components
     prs = [item["pr"] for item in components]
     assert len(prs) == len(set(prs))
-    assert {7, 8, 12, 17, 19, 20, 22, 23, 25, 26, 28, 29} <= set(prs)
+    assert {7, 8, 12, 17, 19, 20, 22, 23, 25, 26, 28, 29, 30, 31} <= set(prs)
     assert all(
         re.fullmatch(r"[0-9a-f]{40}", str(item["head"]))
         for item in components
     )
+
+    critical_files = payload["critical_file_blobs"]
+    assert critical_files
+    for relative_path, expected_blob in critical_files.items():
+        path = ROOT / relative_path
+        assert path.is_file()
+        assert re.fullmatch(r"[0-9a-f]{40}", str(expected_blob))
+        assert expected_blob == git_blob_sha(path)

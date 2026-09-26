@@ -65,11 +65,41 @@
       "pr": 29,
       "head": "4a1836bac8b7a321feea259be0b221250100e459",
       "role": "bounded strict prestate verification"
+    },
+    {
+      "pr": 30,
+      "head": "337d3d86ba99f2de2c02dd6b601ecf4847cb5d1f",
+      "role": "secret-safe prospective quote failures"
+    },
+    {
+      "pr": 31,
+      "head": "395a888bc7b4c6ba1945b5ed8bf08ad049111e3a",
+      "role": "fair bounded runner attempt ledger"
     }
   ],
   "integration_notes": [
     "research_store keeps PR12 position capture-slot columns and PR23 single-context pool-capture filtering",
     "calibration_queue keeps PR23 future-prestate classification and PR20 env-only RPC commands",
-    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger"
-  ]
+    "storage keeps PR12 position capture slots plus PR26 append-only observer attempt ledger",
+    "quote observer uses categorical failures on both Jupiter and injected fetch paths",
+    "bounded transaction/prestate runners rotate by append-only attempt history so failures cannot starve unseen work"
+  ],
+  "critical_file_blobs": {
+    "rust-executor/src/state_reader.rs": "30d1435af1329bca07f73d6639539b43503e84e9",
+    "rust-executor/src/main.rs": "4f02019bca92e77faed70083c740cfc111db15d1",
+    "python-learner/src/meteora_learner/storage.py": "b294f047e1cf501245c8efaeb56ccea798de481b",
+    "python-learner/src/meteora_learner/research_store.py": "c9b9de5838d95a86bddffa6166b4d7a62e91cf16",
+    "python-learner/src/meteora_learner/phase2_position_observation.py": "9b86d6354cc798fa687089baa112911c1bd6811a",
+    "python-learner/src/meteora_learner/phase2_research_quotes.py": "c85cc56ce9185bf476f9cef06d74fd17153155de",
+    "python-learner/src/meteora_learner/phase2_calibration_reinspection.py": "513e15c7c433473466291182cdbf22c74ea332bc",
+    "python-learner/src/meteora_learner/phase2_prestate_verification_runner.py": "071a5b201cb048a0bda7c2b7a4c9b7ebf70409bb",
+    "python-learner/src/meteora_learner/calibration_queue.py": "d22786a5d4f40c993b1f818aecd2cc777820c832",
+    "python-learner/src/meteora_learner/calibration_status.py": "1d08de528f135a9453bc231faece45cb18c8d09f",
+    "python-learner/src/meteora_learner/composition_prestate.py": "feb13b8ea90af0875f85f6a4b955ee145193d4e4",
+    "python-learner/src/meteora_learner/composition_reconciliation.py": "4114c1e617d017c0ec79144558d6b7a8599140fa",
+    "deploy/systemd/pio-phase2-position-observer.service": "9e9ec1404f7f79c0a5ab2aeebcf6e6c24a90fe86",
+    "deploy/systemd/pio-phase2-position-observer.timer": "5bddd9dd84912ecec38e99290ed223e8c5778968",
+    "deploy/systemd/pio-phase2-research-quotes.service": "9f9012528f29c0683e8d8ea3ffce64fc619944a4",
+    "deploy/systemd/pio-phase2-research-quotes.timer": "8b025d8892e072e0775a3dc78f68d1a703be0931"
+  }
 }
