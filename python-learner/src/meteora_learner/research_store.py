@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Sequence
 
 
 class ResearchStore:
@@ -737,6 +737,71 @@ class ResearchStore:
                       AND p2.observed_at = p.observed_at
                 )
                 ORDER BY p.address ASC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
+    def pool_snapshot_history(
+        self,
+        *,
+        pool_addresses: Sequence[str] | None = None,
+        start_observed_at: str | None = None,
+        end_observed_at: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if pool_addresses is not None:
+            normalized = [str(value).strip() for value in pool_addresses]
+            if any(not value for value in normalized):
+                raise ValueError("pool_addresses cannot contain blank values")
+            if not normalized:
+                return []
+            placeholders = ", ".join("?" for _ in normalized)
+            clauses.append(f"p.address IN ({placeholders})")
+            params.extend(normalized)
+
+        if start_observed_at is not None:
+            clauses.append(
+                "julianday(p.observed_at) >= julianday(?)"
+            )
+            params.append(start_observed_at)
+        if end_observed_at is not None:
+            clauses.append(
+                "julianday(p.observed_at) <= julianday(?)"
+            )
+            params.append(end_observed_at)
+
+        where = ""
+        if clauses:
+            where = "AND " + " AND ".join(clauses)
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT p.observed_at, p.address, p.name, p.tvl,
+                       p.volume_24h, p.fees_24h, p.current_price,
+                       p.bin_step, p.active_bin_id, p.apr, p.apy,
+                       p.token_x_symbol, p.token_y_symbol,
+                       p.token_x_decimals, p.token_y_decimals,
+                       p.dynamic_fee_pct, p.base_fee_pct, p.max_fee_pct,
+                       p.protocol_fee_pct, p.collect_fee_mode,
+                       p.is_blacklisted, p.pool_created_at
+                FROM pool_snapshots p
+                WHERE p.id = (
+                    SELECT MAX(p2.id)
+                    FROM pool_snapshots p2
+                    WHERE p2.address = p.address
+                      AND p2.observed_at = p.observed_at
+                )
+                {where}
+                ORDER BY p.address ASC,
+                         julianday(p.observed_at) ASC,
+                         p.id ASC
                 """,
                 params,
             ).fetchall()
