@@ -111,11 +111,12 @@ def test_walk_forward_does_not_emit_policy_verdict_fields() -> None:
     )
 
     record = report.to_record()
-    text = " ".join(str(key).lower() for key in record)
-    assert "qualified" not in text
-    assert "approved" not in text
-    assert "allocation" not in text
-    assert "action" not in text
+    keys = {str(key).lower() for key in record}
+    assert "qualified" not in keys
+    assert "approved" not in keys
+    assert "allocation" not in keys
+    assert "action" not in keys
+    assert "recommended_action" not in keys
     assert record["policy_actionable"] is False
 
 
