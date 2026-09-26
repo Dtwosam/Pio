@@ -136,6 +136,14 @@ def test_gross_comparison_uses_same_inventory_and_forward_window(
     assert report.reward_value_complete is True
     assert report.transition_cost_complete is False
     assert report.economics_complete is False
+    assert report.complete_economic_components == (
+        "HOLD_INVENTORY_AND_FEE_VALUE",
+        "REBALANCE_INVENTORY_AND_FEE_VALUE",
+        "REBALANCE_COMPOSITION_COST",
+    )
+    assert report.incomplete_economic_components == (
+        "REBALANCE_TRANSITION_COST",
+    )
     assert report.paper_only is True
     assert report.actionable is False
     assert report.live_authorized is False
@@ -163,6 +171,10 @@ def test_nonzero_rewards_keep_gross_economics_incomplete(
 
     assert report.reward_value_complete is False
     assert report.economics_complete is False
+    assert report.incomplete_economic_components == (
+        "REBALANCE_TRANSITION_COST",
+        "REWARD_VALUATION",
+    )
     assert report.actionable is False
 
 
