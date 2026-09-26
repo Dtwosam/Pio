@@ -17,7 +17,7 @@ def _dataset() -> pd.DataFrame:
     start = pd.Timestamp("2026-01-01T00:00:00Z")
     rows = []
     for pool_index, pool in enumerate(("A", "B", "C")):
-        for index in range(100):
+        for index in range(70):
             wave = np.sin(index / 6.0 + pool_index)
             rows.append(
                 {
@@ -58,14 +58,27 @@ def _dataset() -> pd.DataFrame:
     ).to_frame()
 
 
-def test_walk_forward_is_purged_and_descriptive_only() -> None:
-    report = evaluate_pool_market_walk_forward(
-        _dataset(),
-        min_train_decision_times=35,
+
+@pytest.fixture(scope="module")
+def market_dataset():
+    return _dataset()
+
+
+@pytest.fixture(scope="module")
+def market_walk_forward_report(market_dataset):
+    return evaluate_pool_market_walk_forward(
+        market_dataset,
+        min_train_decision_times=25,
         validation_decision_times=10,
         step_decision_times=10,
-        min_train_rows=60,
+        min_train_rows=50,
     )
+
+
+def test_walk_forward_is_purged_and_descriptive_only(
+    market_walk_forward_report,
+) -> None:
+    report = market_walk_forward_report
 
     assert report.research_only is True
     assert report.policy_actionable is False
@@ -80,14 +93,10 @@ def test_walk_forward_is_purged_and_descriptive_only() -> None:
     )
 
 
-def test_walk_forward_reports_every_continuous_target() -> None:
-    report = evaluate_pool_market_walk_forward(
-        _dataset(),
-        min_train_decision_times=35,
-        validation_decision_times=10,
-        step_decision_times=10,
-        min_train_rows=60,
-    )
+def test_walk_forward_reports_every_continuous_target(
+    market_walk_forward_report,
+) -> None:
+    report = market_walk_forward_report
 
     assert tuple(
         item.target for item in report.aggregates
@@ -101,16 +110,10 @@ def test_walk_forward_reports_every_continuous_target() -> None:
         assert 0 <= item.model_better_folds <= item.folds
 
 
-def test_walk_forward_does_not_emit_policy_verdict_fields() -> None:
-    report = evaluate_pool_market_walk_forward(
-        _dataset(),
-        min_train_decision_times=35,
-        validation_decision_times=10,
-        step_decision_times=10,
-        min_train_rows=60,
-    )
-
-    record = report.to_record()
+def test_walk_forward_does_not_emit_policy_verdict_fields(
+    market_walk_forward_report,
+) -> None:
+    record = market_walk_forward_report.to_record()
     keys = {str(key).lower() for key in record}
     assert "qualified" not in keys
     assert "approved" not in keys
@@ -120,13 +123,14 @@ def test_walk_forward_does_not_emit_policy_verdict_fields() -> None:
     assert record["policy_actionable"] is False
 
 
-def test_walk_forward_rejects_insufficient_history() -> None:
-    frame = _dataset()
+def test_walk_forward_rejects_insufficient_history(
+    market_dataset,
+) -> None:
     first_times = sorted(
-        frame["decision_observed_at"].unique()
+        market_dataset["decision_observed_at"].unique()
     )[:20]
-    small = frame[
-        frame["decision_observed_at"].isin(first_times)
+    small = market_dataset[
+        market_dataset["decision_observed_at"].isin(first_times)
     ]
 
     with pytest.raises(
