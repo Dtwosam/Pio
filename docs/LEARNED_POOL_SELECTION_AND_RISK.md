@@ -246,3 +246,44 @@ selection without turning them into live policy:
 
 These components are evidence generators. They remain research-only,
 non-actionable, and disconnected from execution.
+
+
+## Longitudinal mint and chain context
+
+The research branch now refreshes and learns from repeated on-chain context
+rather than treating initial snapshots as permanent:
+
+- `market_mint_refresh.py`
+  - refreshes already-observed required token mints oldest-snapshot-first;
+  - ordering is neutral and does not use economic/risk fields;
+  - supports longitudinal changes in supply, mint/freeze authority and
+    Token-2022 extension state;
+  - is opt-in through `pio-market-context-capture --refresh-mints`.
+
+- `pool_token_mint_context.py`
+  - includes as-of mint observation count and previous-snapshot availability;
+  - exposes time since previous observation;
+  - exposes supply change in log space;
+  - exposes mint/freeze authority, token-program, initialization and extension
+    changes plus cumulative change counts;
+  - future mint snapshots cannot affect earlier decision rows.
+
+- `market_chain_refresh.py`
+  - refreshes already-observed discovered pools oldest-chain-snapshot-first;
+  - is opt-in through `pio-market-context-capture --refresh-chain`.
+
+- `pool_chain_context.py`
+  - converts as-of chain/bin history into decision-time learning features;
+  - exposes active-bin movement, liquidity-shape levels and changes;
+  - exposes exact chain fee-rate fields and protocol share;
+  - exposes raw fee-checkpoint growth only as activity, never as realized LP
+    fee income;
+  - future chain refreshes cannot affect earlier decision rows.
+
+- `pool_chain_context_ablation.py`
+  - compares identical complete rows with and without longitudinal chain
+    context using purged walk-forward folds;
+  - is integrated into the canonical research report as optional evidence.
+
+These additions remain research-only and do not create economic cutoffs,
+allocation rules, transaction construction, signing or submission.
