@@ -201,6 +201,21 @@ CREATE TABLE IF NOT EXISTS chain_position_snapshots (
 CREATE INDEX IF NOT EXISTS idx_chain_position_time
 ON chain_position_snapshots(position_address, observed_at);
 
+CREATE TABLE IF NOT EXISTS phase2_position_observation_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempted_at TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    position_address TEXT NOT NULL,
+    succeeded INTEGER NOT NULL,
+    failure_category TEXT,
+    capture_slot INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase2_position_attempt_pool_time
+ON phase2_position_observation_attempts(
+    pool_address, position_address, attempted_at, id
+);
+
 CREATE TABLE IF NOT EXISTS position_bin_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
@@ -290,6 +305,18 @@ CREATE TRIGGER IF NOT EXISTS bin_liquidity_snapshots_no_delete
 BEFORE DELETE ON bin_liquidity_snapshots
 BEGIN
     SELECT RAISE(ABORT, 'bin_liquidity_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase2_position_observation_attempts_no_update
+BEFORE UPDATE ON phase2_position_observation_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_position_observation_attempts is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase2_position_observation_attempts_no_delete
+BEFORE DELETE ON phase2_position_observation_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_position_observation_attempts is immutable');
 END;
 
 CREATE TRIGGER IF NOT EXISTS position_event_history_no_update
@@ -2109,6 +2136,79 @@ class Storage:
                 )
 
         return arrays_seen, len(bin_rows)
+
+    def save_phase2_position_observation_attempt(
+        self,
+        *,
+        pool_address: str,
+        position_address: str,
+        attempted_at: str,
+        succeeded: bool,
+        failure_category: str | None = None,
+        capture_slot: int | None = None,
+    ) -> int:
+        if not pool_address.strip():
+            raise ValueError("pool_address is required")
+        if not position_address.strip():
+            raise ValueError("position_address is required")
+        if succeeded:
+            if failure_category is not None:
+                raise ValueError(
+                    "successful observation attempt cannot have failure_category"
+                )
+            if capture_slot is None or int(capture_slot) < 0:
+                raise ValueError(
+                    "successful observation attempt requires non-negative capture_slot"
+                )
+        else:
+            if not failure_category:
+                raise ValueError(
+                    "failed observation attempt requires failure_category"
+                )
+            if capture_slot is not None:
+                raise ValueError(
+                    "failed observation attempt cannot have capture_slot"
+                )
+
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO phase2_position_observation_attempts(
+                    attempted_at, pool_address, position_address,
+                    succeeded, failure_category, capture_slot
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    attempted_at,
+                    pool_address,
+                    position_address,
+                    int(succeeded),
+                    failure_category,
+                    int(capture_slot) if capture_slot is not None else None,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def latest_phase2_position_observation_attempts(
+        self,
+        *,
+        pool_address: str,
+    ) -> dict[str, str]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT position_address, MAX(attempted_at) AS attempted_at
+                FROM phase2_position_observation_attempts
+                WHERE pool_address = ?
+                GROUP BY position_address
+                """,
+                (pool_address,),
+            ).fetchall()
+        return {
+            str(row[0]): str(row[1])
+            for row in rows
+            if row[1] is not None
+        }
 
     def save_chain_position_snapshot(
         self,
