@@ -36,6 +36,9 @@ from .position_history import collect_position_history
 from .phase2_calibration_reinspection import (
     run_phase2_calibration_reinspection,
 )
+from .phase2_prestate_verification_runner import (
+    run_phase2_prestate_verifications,
+)
 from .phase2_gate import Phase2PromotionCriteria, evaluate_phase2_promotion_gate
 from .phase_promotion import (
     PHASE2,
@@ -4481,6 +4484,20 @@ def main() -> None:
     phase2_reinspect.add_argument("--max-tasks", type=int, default=25)
     phase2_reinspect.add_argument("--timeout-seconds", type=int, default=120)
 
+    phase2_verify = subparsers.add_parser(
+        "phase2-verify-prestates",
+        help=(
+            "Run bounded read-only single-context prestate verifier tasks "
+            "from the Phase-2 calibration queue"
+        ),
+    )
+    phase2_verify.add_argument(
+        "--executor",
+        default="/opt/pio/rust-executor/target/release/meteora-executor",
+    )
+    phase2_verify.add_argument("--max-tasks", type=int, default=10)
+    phase2_verify.add_argument("--timeout-seconds", type=int, default=180)
+
     transaction_costs = subparsers.add_parser(
         "transaction-costs",
         help="Summarize real Solana fees and compute usage for one position",
@@ -4979,6 +4996,19 @@ def main() -> None:
         )
         print(json.dumps(result.to_record(), indent=2))
         if result.signatures_failed:
+            raise SystemExit(2)
+        return
+
+    if args.command == "phase2-verify-prestates":
+        settings = Settings.from_env()
+        result = run_phase2_prestate_verifications(
+            Storage(settings.database_path),
+            executor_path=args.executor,
+            max_tasks=args.max_tasks,
+            timeout_seconds=args.timeout_seconds,
+        )
+        print(json.dumps(result.to_record(), indent=2))
+        if result.failures:
             raise SystemExit(2)
         return
 
