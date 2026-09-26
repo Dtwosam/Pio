@@ -7,6 +7,10 @@ from typing import Any
 
 import pandas as pd
 
+from .pool_lp_context_ablation import (
+    ContextFeatureAblationReport,
+    evaluate_context_feature_ablation,
+)
 from .pool_lp_learning import (
     EnrichedLPTrainingFrameReport,
     build_market_enriched_lp_training_frame,
@@ -32,6 +36,7 @@ class MintFeatureResearchReport:
     market_enrichment: EnrichedLPTrainingFrameReport | None
     mint_enrichment: MintEnrichedLPTrainingFrameReport | None
     ablation: MintFeatureAblationReport | None
+    context_ablation: ContextFeatureAblationReport | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -55,6 +60,11 @@ class MintFeatureResearchReport:
             "ablation": (
                 self.ablation.to_record()
                 if self.ablation is not None
+                else None
+            ),
+            "context_ablation": (
+                self.context_ablation.to_record()
+                if self.context_ablation is not None
                 else None
             ),
         }
@@ -207,6 +217,13 @@ def run_mint_feature_research_from_dataset_file(
             step_decision_times=step_decision_times,
             min_train_rows=min_train_rows,
         )
+        context_ablation = evaluate_context_feature_ablation(
+            mint_frame,
+            min_train_decision_times=min_train_decision_times,
+            validation_decision_times=validation_decision_times,
+            step_decision_times=step_decision_times,
+            min_train_rows=min_train_rows,
+        )
     except ValueError as exc:
         return MintFeatureResearchReport(
             research_only=True,
@@ -219,6 +236,7 @@ def run_mint_feature_research_from_dataset_file(
             market_enrichment=market_report,
             mint_enrichment=mint_report,
             ablation=None,
+            context_ablation=None,
         )
 
     return MintFeatureResearchReport(
@@ -232,4 +250,5 @@ def run_mint_feature_research_from_dataset_file(
         market_enrichment=market_report,
         mint_enrichment=mint_report,
         ablation=ablation,
+        context_ablation=context_ablation,
     )
