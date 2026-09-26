@@ -464,7 +464,7 @@ def build_phase2_evidence_cycle_progress(
     queue_items: list[dict[str, Any]] = []
     if isinstance(report.work_queue, dict):
         raw_items = report.work_queue.get("items")
-        if isinstance(raw_items, list):
+        if isinstance(raw_items, (list, tuple)):
             queue_items = [
                 item for item in raw_items if isinstance(item, dict)
             ]
