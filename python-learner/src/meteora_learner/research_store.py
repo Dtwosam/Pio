@@ -496,6 +496,68 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def pool_execution_action_rows(
+        self,
+        pool_address: str,
+    ) -> list[dict[str, Any]]:
+        """
+        Load decoded add/rebalance action rows plus receipt/request/composition data.
+
+        CompositionFee rows are joined by transaction signature and parent
+        instruction index. One action may therefore appear more than once when
+        multiple composition-fee events were emitted; callers must aggregate by
+        action event before calculating statistics.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    a.observed_at,
+                    a.signature,
+                    a.event_index,
+                    a.parent_ix_index,
+                    a.block_time,
+                    a.event_type,
+                    a.position_address,
+                    a.amount_x,
+                    a.amount_y,
+                    a.x_withdrawn_amount,
+                    a.x_added_amount,
+                    a.y_withdrawn_amount,
+                    a.y_added_amount,
+                    t.network_fee_lamports,
+                    t.compute_units_consumed,
+                    t.succeeded,
+                    r.requested_amount_x,
+                    r.requested_amount_y,
+                    c.event_index AS composition_event_index,
+                    c.token_x_fee_amount AS composition_fee_x,
+                    c.token_y_fee_amount AS composition_fee_y
+                FROM chain_transaction_events a
+                LEFT JOIN chain_transaction_snapshots t
+                  ON t.signature = a.signature
+                LEFT JOIN chain_add_liquidity_requests r
+                  ON r.signature = a.signature
+                 AND r.instruction_index = a.parent_ix_index
+                LEFT JOIN chain_transaction_events c
+                  ON c.signature = a.signature
+                 AND c.parent_ix_index = a.parent_ix_index
+                 AND c.event_type = 'CompositionFee'
+                WHERE a.lb_pair = ?
+                  AND a.event_type IN ('AddLiquidity', 'Rebalancing')
+                  AND a.block_time IS NOT NULL
+                ORDER BY a.block_time ASC,
+                         a.signature ASC,
+                         a.event_index ASC,
+                         c.event_index ASC
+                """,
+                (pool_address,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def transaction_snapshot(self, signature: str) -> dict[str, Any] | None:
         conn = self._connect()
         try:
