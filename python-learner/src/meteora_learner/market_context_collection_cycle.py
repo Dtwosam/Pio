@@ -8,6 +8,10 @@ from .market_chain_context import (
     MarketChainContextCaptureReport,
     run_market_chain_context_capture,
 )
+from .market_chain_refresh import (
+    MarketChainRefreshReport,
+    run_market_chain_refresh,
+)
 from .market_mint_context import (
     InspectMint,
     MarketMintContextCaptureReport,
@@ -31,10 +35,13 @@ class MarketContextCollectionCycleReport:
     status: str
     discovery: PoolUniverseDiscoveryReport | None
     chain_context: MarketChainContextCaptureReport | None
+    chain_refresh: MarketChainRefreshReport | None
     mint_context: MarketMintContextCaptureReport | None
     pools_discovered: int
     chain_pools_captured: int
     chain_pools_failed: int
+    chain_pools_refreshed: int
+    chain_refresh_failed: int
     mints_captured: int
     mints_failed: int
 
@@ -47,6 +54,7 @@ def run_market_context_collection_cycle(
     *,
     capture_universe: bool = True,
     capture_chain_context: bool = True,
+    refresh_chain_context: bool = False,
     capture_mint_context: bool = True,
     observed_at: str | None = None,
     settings: Settings | None = None,
@@ -56,6 +64,7 @@ def run_market_context_collection_cycle(
     page_size: int = 1000,
     max_pages: int = 100,
     chain_batch_limit: int = 10,
+    chain_refresh_batch_limit: int = 10,
     mint_batch_limit: int = 20,
     bin_array_radius: int = 0,
     rust_manifest_path: str | None = None,
@@ -86,6 +95,7 @@ def run_market_context_collection_cycle(
 
     discovery: PoolUniverseDiscoveryReport | None = None
     chain_context: MarketChainContextCaptureReport | None = None
+    chain_refresh: MarketChainRefreshReport | None = None
     mint_context: MarketMintContextCaptureReport | None = None
 
     if capture_universe:
@@ -96,6 +106,18 @@ def run_market_context_collection_cycle(
             fetch_page=fetch_page,
             page_size=page_size,
             max_pages=max_pages,
+        )
+
+    if refresh_chain_context:
+        chain_refresh = run_market_chain_refresh(
+            storage,
+            batch_limit=chain_refresh_batch_limit,
+            bin_array_radius=bin_array_radius,
+            inspector=pool_inspector,
+            rust_manifest_path=rust_manifest_path,
+            rust_binary_path=rust_binary_path,
+            timeout_seconds=timeout_seconds,
+            ingest_observed_at=observed_at,
         )
 
     if capture_chain_context:
@@ -142,6 +164,16 @@ def run_market_context_collection_cycle(
         )
         else 0
     )
+    chain_refreshed = (
+        chain_refresh.pools_refreshed
+        if chain_refresh is not None
+        else 0
+    )
+    chain_refresh_failed = (
+        chain_refresh.pools_failed
+        if chain_refresh is not None
+        else 0
+    )
     mints_captured = (
         mint_context.captured
         if mint_context is not None
@@ -153,9 +185,9 @@ def run_market_context_collection_cycle(
         else 0
     )
 
-    if chain_failed or mints_failed:
+    if chain_failed or chain_refresh_failed or mints_failed:
         status = "PARTIAL"
-    elif chain_captured or mints_captured:
+    elif chain_captured or chain_refreshed or mints_captured:
         status = "CAPTURED"
     elif discovery is not None and discovery.snapshots_saved:
         status = "DISCOVERED"
@@ -170,10 +202,13 @@ def run_market_context_collection_cycle(
         status=status,
         discovery=discovery,
         chain_context=chain_context,
+        chain_refresh=chain_refresh,
         mint_context=mint_context,
         pools_discovered=pools_discovered,
         chain_pools_captured=chain_captured,
         chain_pools_failed=chain_failed,
+        chain_pools_refreshed=chain_refreshed,
+        chain_refresh_failed=chain_refresh_failed,
         mints_captured=mints_captured,
         mints_failed=mints_failed,
     )
