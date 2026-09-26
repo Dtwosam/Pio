@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Sequence
 
 
 class ResearchStore:
@@ -119,6 +119,94 @@ class ResearchStore:
         finally:
             conn.close()
         return dict(row) if row is not None else None
+
+    def latest_mint_snapshot(
+        self,
+        mint_address: str,
+        *,
+        as_of: str | None = None,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            if as_of is None:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, mint_address, token_program,
+                           capture_slot_start, capture_slot_end,
+                           supply, decimals, is_initialized,
+                           mint_authority, freeze_authority,
+                           data_len, token_2022_extension_data_len,
+                           has_token_2022_extension_data
+                    FROM token_mint_snapshots
+                    WHERE mint_address = ?
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (mint_address,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, mint_address, token_program,
+                           capture_slot_start, capture_slot_end,
+                           supply, decimals, is_initialized,
+                           mint_authority, freeze_authority,
+                           data_len, token_2022_extension_data_len,
+                           has_token_2022_extension_data
+                    FROM token_mint_snapshots
+                    WHERE mint_address = ?
+                      AND julianday(observed_at) <= julianday(?)
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (mint_address, as_of),
+                ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
+    def mint_snapshot_history(
+        self,
+        mint_address: str,
+        *,
+        as_of: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if as_of is None:
+                rows = conn.execute(
+                    """
+                    SELECT observed_at, mint_address, token_program,
+                           capture_slot_start, capture_slot_end,
+                           supply, decimals, is_initialized,
+                           mint_authority, freeze_authority,
+                           data_len, token_2022_extension_data_len,
+                           has_token_2022_extension_data
+                    FROM token_mint_snapshots
+                    WHERE mint_address = ?
+                    ORDER BY julianday(observed_at) ASC, id ASC
+                    """,
+                    (mint_address,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT observed_at, mint_address, token_program,
+                           capture_slot_start, capture_slot_end,
+                           supply, decimals, is_initialized,
+                           mint_authority, freeze_authority,
+                           data_len, token_2022_extension_data_len,
+                           has_token_2022_extension_data
+                    FROM token_mint_snapshots
+                    WHERE mint_address = ?
+                      AND julianday(observed_at) <= julianday(?)
+                    ORDER BY julianday(observed_at) ASC, id ASC
+                    """,
+                    (mint_address, as_of),
+                ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
 
     def chain_observation_times(
         self,
@@ -451,6 +539,157 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def live_valued_action_rows(
+        self,
+    ) -> list[dict[str, Any]]:
+        """
+        Load valued LIVE position actions with the persisted quote-evidence blob.
+
+        The quote evidence was produced by the immutable position valuation and
+        is not recomputed here.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    v.position_address,
+                    v.pool_address,
+                    v.quote_unit,
+                    v.entry_outflow_quote,
+                    v.max_age_seconds,
+                    v.quote_evidence_json,
+                    e.decision_id,
+                    e.signature,
+                    e.event_time,
+                    e.action,
+                    e.prior_status,
+                    e.next_status
+                FROM live_position_valuations v
+                JOIN live_position_events e
+                  ON e.position_address = v.position_address
+                ORDER BY julianday(e.event_time) ASC,
+                         e.decision_id ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
+    def live_learning_evidence_rows(
+        self,
+    ) -> list[dict[str, Any]]:
+        """
+        Load immutable valued LIVE learning labels with their exact quote-backed
+        cost decomposition. This is read-only research evidence.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    l.position_address,
+                    l.decision_id,
+                    l.pool_address,
+                    l.model_version,
+                    l.strategy,
+                    l.min_bin_id,
+                    l.max_bin_id,
+                    l.range_width_bins,
+                    l.proposed_capital_quote,
+                    l.expected_net_return_pct,
+                    l.expected_downside_pct,
+                    l.realized_pnl_quote,
+                    l.realized_return_bps,
+                    l.prediction_error_bps,
+                    l.target_positive_return,
+                    l.quote_unit,
+                    l.opened_signature,
+                    l.closed_decision_id,
+                    l.created_at AS label_created_at,
+                    v.valued_execution_count,
+                    v.principal_cashflow_quote,
+                    v.composition_cost_quote,
+                    v.fee_income_quote,
+                    v.reward_income_quote,
+                    v.network_cost_quote,
+                    v.entry_outflow_quote,
+                    v.realized_return_bps AS valuation_realized_return_bps,
+                    v.max_age_seconds,
+                    v.created_at AS valuation_created_at
+                FROM live_learning_labels l
+                JOIN live_position_valuations v
+                  ON v.position_address = l.position_address
+                ORDER BY julianday(l.created_at) ASC,
+                         l.position_address ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
+    def pool_execution_action_rows(
+        self,
+        pool_address: str,
+    ) -> list[dict[str, Any]]:
+        """
+        Load decoded add/rebalance action rows plus receipt/request/composition data.
+
+        CompositionFee rows are joined by transaction signature and parent
+        instruction index. One action may therefore appear more than once when
+        multiple composition-fee events were emitted; callers must aggregate by
+        action event before calculating statistics.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    a.observed_at,
+                    a.signature,
+                    a.event_index,
+                    a.parent_ix_index,
+                    a.block_time,
+                    a.event_type,
+                    a.position_address,
+                    a.amount_x,
+                    a.amount_y,
+                    a.x_withdrawn_amount,
+                    a.x_added_amount,
+                    a.y_withdrawn_amount,
+                    a.y_added_amount,
+                    t.network_fee_lamports,
+                    t.compute_units_consumed,
+                    t.succeeded,
+                    r.requested_amount_x,
+                    r.requested_amount_y,
+                    c.event_index AS composition_event_index,
+                    c.token_x_fee_amount AS composition_fee_x,
+                    c.token_y_fee_amount AS composition_fee_y
+                FROM chain_transaction_events a
+                LEFT JOIN chain_transaction_snapshots t
+                  ON t.signature = a.signature
+                LEFT JOIN chain_add_liquidity_requests r
+                  ON r.signature = a.signature
+                 AND r.instruction_index = a.parent_ix_index
+                LEFT JOIN chain_transaction_events c
+                  ON c.signature = a.signature
+                 AND c.parent_ix_index = a.parent_ix_index
+                 AND c.event_type = 'CompositionFee'
+                WHERE a.lb_pair = ?
+                  AND a.event_type IN ('AddLiquidity', 'Rebalancing')
+                  AND a.block_time IS NOT NULL
+                ORDER BY a.block_time ASC,
+                         a.signature ASC,
+                         a.event_index ASC,
+                         c.event_index ASC
+                """,
+                (pool_address,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def transaction_snapshot(self, signature: str) -> dict[str, Any] | None:
         conn = self._connect()
         try:
@@ -737,6 +976,120 @@ class ResearchStore:
                       AND p2.observed_at = p.observed_at
                 )
                 ORDER BY p.address ASC
+                """,
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
+    def latest_api_pool_snapshot(
+        self,
+        pool_address: str,
+        *,
+        as_of: str | None = None,
+    ) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            if as_of is None:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, address, name, tvl,
+                           volume_24h, fees_24h, current_price,
+                           bin_step, active_bin_id, apr, apy,
+                           token_x_symbol, token_y_symbol,
+                           token_x_decimals, token_y_decimals,
+                           dynamic_fee_pct, base_fee_pct, max_fee_pct,
+                           protocol_fee_pct, collect_fee_mode,
+                           is_blacklisted, pool_created_at
+                    FROM pool_snapshots
+                    WHERE address = ?
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (pool_address,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT observed_at, address, name, tvl,
+                           volume_24h, fees_24h, current_price,
+                           bin_step, active_bin_id, apr, apy,
+                           token_x_symbol, token_y_symbol,
+                           token_x_decimals, token_y_decimals,
+                           dynamic_fee_pct, base_fee_pct, max_fee_pct,
+                           protocol_fee_pct, collect_fee_mode,
+                           is_blacklisted, pool_created_at
+                    FROM pool_snapshots
+                    WHERE address = ?
+                      AND julianday(observed_at) <= julianday(?)
+                    ORDER BY julianday(observed_at) DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (pool_address, as_of),
+                ).fetchone()
+        finally:
+            conn.close()
+        return dict(row) if row is not None else None
+
+    def pool_snapshot_history(
+        self,
+        *,
+        pool_addresses: Sequence[str] | None = None,
+        start_observed_at: str | None = None,
+        end_observed_at: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if pool_addresses is not None:
+            normalized = [str(value).strip() for value in pool_addresses]
+            if any(not value for value in normalized):
+                raise ValueError("pool_addresses cannot contain blank values")
+            if not normalized:
+                return []
+            placeholders = ", ".join("?" for _ in normalized)
+            clauses.append(f"p.address IN ({placeholders})")
+            params.extend(normalized)
+
+        if start_observed_at is not None:
+            clauses.append(
+                "julianday(p.observed_at) >= julianday(?)"
+            )
+            params.append(start_observed_at)
+        if end_observed_at is not None:
+            clauses.append(
+                "julianday(p.observed_at) <= julianday(?)"
+            )
+            params.append(end_observed_at)
+
+        where = ""
+        if clauses:
+            where = "AND " + " AND ".join(clauses)
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT p.observed_at, p.address, p.name, p.tvl,
+                       p.volume_24h, p.fees_24h, p.current_price,
+                       p.bin_step, p.active_bin_id, p.apr, p.apy,
+                       p.token_x_symbol, p.token_y_symbol,
+                       p.token_x_decimals, p.token_y_decimals,
+                       p.dynamic_fee_pct, p.base_fee_pct, p.max_fee_pct,
+                       p.protocol_fee_pct, p.collect_fee_mode,
+                       p.is_blacklisted, p.pool_created_at
+                FROM pool_snapshots p
+                WHERE p.id = (
+                    SELECT MAX(p2.id)
+                    FROM pool_snapshots p2
+                    WHERE p2.address = p.address
+                      AND p2.observed_at = p.observed_at
+                )
+                {where}
+                ORDER BY p.address ASC,
+                         julianday(p.observed_at) ASC,
+                         p.id ASC
                 """,
                 params,
             ).fetchall()
