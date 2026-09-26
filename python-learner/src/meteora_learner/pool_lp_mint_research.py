@@ -11,6 +11,10 @@ from .pool_lp_context_ablation import (
     ContextFeatureAblationReport,
     evaluate_context_feature_ablation,
 )
+from .pool_lp_feature_drift import (
+    FeatureDriftReport,
+    evaluate_feature_drift,
+)
 from .pool_lp_learning import (
     EnrichedLPTrainingFrameReport,
     build_market_enriched_lp_training_frame,
@@ -49,6 +53,8 @@ class MintFeatureResearchReport:
     unseen_pool_reason: str | None = None
     tail_risk_calibration: TailRiskCalibrationReport | None = None
     tail_risk_reason: str | None = None
+    feature_drift: FeatureDriftReport | None = None
+    feature_drift_reason: str | None = None
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -91,6 +97,12 @@ class MintFeatureResearchReport:
                 else None
             ),
             "tail_risk_reason": self.tail_risk_reason,
+            "feature_drift": (
+                self.feature_drift.to_record()
+                if self.feature_drift is not None
+                else None
+            ),
+            "feature_drift_reason": self.feature_drift_reason,
         }
 
 
@@ -289,6 +301,19 @@ def run_mint_feature_research_from_dataset_file(
     except ValueError as exc:
         tail_risk_reason = str(exc)
 
+    feature_drift = None
+    feature_drift_reason = None
+    try:
+        feature_drift = evaluate_feature_drift(
+            mint_frame,
+            min_train_decision_times=min_train_decision_times,
+            validation_decision_times=validation_decision_times,
+            step_decision_times=step_decision_times,
+            min_train_rows=min_train_rows,
+        )
+    except ValueError as exc:
+        feature_drift_reason = str(exc)
+
     return MintFeatureResearchReport(
         research_only=True,
         policy_actionable=False,
@@ -305,4 +330,6 @@ def run_mint_feature_research_from_dataset_file(
         unseen_pool_reason=unseen_pool_reason,
         tail_risk_calibration=tail_risk_calibration,
         tail_risk_reason=tail_risk_reason,
+        feature_drift=feature_drift,
+        feature_drift_reason=feature_drift_reason,
     )
