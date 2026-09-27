@@ -17,6 +17,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - docs/PHASE7_CONTROLLED_LIVE_RUNBOOK.md
 - docs/PHASE9_RESEARCH_RUNBOOK.md
 - deploy/manual-market-paper-production-preflight.md
+- deploy/manual-market-paper-conflict-evidence.md
 - deploy/manual-market-paper-handoff.md
 - deploy/manual-market-paper-deployment-plan.md
 - deploy/manual-market-paper-deployment-gate.md
@@ -45,13 +46,14 @@ The current production continuation is evidence-first and read-only:
 - the exact production detector/watcher sources and unit contracts are tracked and regression-tested;
 - never pull, checkout, reset, restore, or clean over `/opt/pio` because production may contain important local changes;
 - the manual market/PAPER readiness path preflights only the exact Phase-2 shared prerequisites (`research_store.py` and `storage.py`), the separately guarded state reader, and the locked runtime-only PAPER overlay;
+- if that readiness preflight is blocked, `deploy/tools/collect_manual_market_paper_conflict_evidence.py` records only exact current/base/target hashes, file sizes, service/cursor state, and categorized Git-read failures; the normal handoff/plan/gate path stops until those production-local bytes are reviewed;
 - capture a sealed production-state handoff with `deploy/tools/manual_market_paper_handoff.py`;
 - turn that handoff into a deterministic, non-mutating operation list with `deploy/tools/build_manual_market_paper_deployment_plan.py`;
 - immediately before any future separately reviewed mutation, run `deploy/tools/check_manual_market_paper_deployment_gate.py` so current production must still match the sealed handoff and saved plan exactly; preserve the emitted `gate_sha256` report as sealed review evidence;
 - then run `deploy/tools/build_manual_market_paper_mutation_review.py` so the fresh gate, exact expected-current production blobs/absence, reviewed source targets, patch bytes, symlink safety, and rollback requirements are sealed as `review_sha256`;
-- no current manifest, handoff, plan, or passing gate authorizes deployment, service restart, timer enablement, detector cursor movement, transaction signing/submission, or real capital.
+- no conflict-evidence report, manifest, handoff, plan, passing gate, or passing mutation review authorizes deployment, service restart, timer enablement, detector cursor movement, transaction signing/submission, or real capital.
 
-The next production action, once the production host is reachable, is therefore: fresh read-only readiness -> sealed handoff -> deterministic deployment plan -> fresh read-only deployment gate -> read-only file-level mutation review. Any selective file mutation after that remains a separate review/authorization step and must preserve all unrelated production-local files.
+The production decision tree is therefore: fresh read-only readiness; if blocked, collect sealed conflict evidence and stop; if clean, continue through sealed handoff -> deterministic deployment plan -> fresh read-only deployment gate -> read-only file-level mutation review. Any selective file mutation after that remains a separate review/authorization step and must preserve all unrelated production-local files.
 
 Current research paths:
 - `DISCRETE_COMPLETED_BIN_V1`: OHLC inventory/IL studies.

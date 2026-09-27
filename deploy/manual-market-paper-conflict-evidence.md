@@ -1,0 +1,100 @@
+# Manual market/PAPER conflict evidence
+
+Use this only when the manual market/PAPER production readiness check is
+**not** clean.
+
+This path is diagnostic and read-only. It does not apply an overlay, change
+`/opt/pio`, restart services, enable a timer, move a detector cursor, sign or
+submit a transaction, or authorize production mutation.
+
+Reviewed source head for this diagnostic:
+
+```text
+32d28e286687c53635c147da20f0da388af36f50
+```
+
+## Why this exists
+
+A blocked readiness result can mean a production file no longer matches either
+the reviewed base or reviewed target. The production tree may contain important
+local fixes, so the correct response is to identify those bytes, not overwrite
+them.
+
+The collector records hashes and metadata only. It does not print production
+source contents.
+
+It also diagnoses Git metadata reads. If a normal read fails because Git rejects
+the repository ownership, it may retry that same **read-only command** with a
+per-command `safe.directory` override. It never changes global or repository
+Git configuration.
+
+## Run the collector
+
+Build an isolated reviewed source outside `/opt/pio`:
+
+~~~bash
+set -euo pipefail
+
+REVIEWED_REF="32d28e286687c53635c147da20f0da388af36f50"
+SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
+EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
+
+git clone --quiet https://github.com/Dtwosam/Pio.git "$SRC"
+git -C "$SRC" checkout --quiet --detach "$REVIEWED_REF"
+test "$(git -C "$SRC" rev-parse HEAD)" = "$REVIEWED_REF"
+
+python3 "$SRC/deploy/tools/collect_manual_market_paper_conflict_evidence.py" \
+  --repo /opt/pio \
+  --source-tree "$SRC" \
+  > "$EVIDENCE"
+
+python3 -m json.tool "$EVIDENCE"
+~~~
+
+This collector does not require a PAPER account identifier because it is not
+checking whether a named PAPER systemd unit is safe to activate. A real PAPER
+account identifier is still required before the normal readiness/handoff path
+can proceed.
+
+## What it records
+
+For the Phase-2 shared prerequisites and the runtime overlay it records:
+
+- path and preflight status;
+- expected base Git blob;
+- reviewed target Git blob;
+- reviewed source Git blob;
+- current production Git blob;
+- SHA-256 and byte size of current/source regular files.
+
+For the dedicated state reader it records:
+
+- current production blob/SHA-256/size;
+- reviewed base and target blobs;
+- reviewed target digest metadata;
+- reviewed patch SHA-256 and patch scope;
+- whether the current file is already target, ready for the reviewed patch, or
+  conflicts.
+
+It also records:
+
+- detector/watcher active state;
+- the retained target-pool cursor, read only;
+- production HEAD and tracked-change count when readable;
+- categorized Git read failures;
+- whether a per-command `safe.directory` override recovered those reads;
+- a canonical `evidence_sha256` sealing the report.
+
+## Stop boundary
+
+Do not run the handoff, deployment-plan, deployment-gate, mutation-review, or
+any apply path while the readiness preflight is blocked.
+
+Do not resolve a reported conflict with `git checkout`, `git reset`,
+`git restore`, `git clean`, a pull over `/opt/pio`, a detector/watcher
+restart, or a cursor edit.
+
+Review the exact conflict hashes first. If they match known reviewed source
+lineage, that lineage can be reconciled explicitly. If they are genuinely
+production-local changes, they must be reviewed and preserved or deliberately
+ported before the normal read-only readiness chain can resume.

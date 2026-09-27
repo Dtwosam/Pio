@@ -7,7 +7,7 @@ action, transaction signing/submission, or real-capital action.
 Reviewed source head for this preflight:
 
 ```text
-531d17d7e07111c0ed143c41bee6317448ca0c33
+32d28e286687c53635c147da20f0da388af36f50
 ```
 
 ## 1. Build an isolated reviewed source tree
@@ -18,7 +18,7 @@ production working tree.
 ```bash
 set -euo pipefail
 
-REVIEWED_REF="531d17d7e07111c0ed143c41bee6317448ca0c33"
+REVIEWED_REF="32d28e286687c53635c147da20f0da388af36f50"
 SRC="/var/tmp/pio-manual-paper-preflight-${REVIEWED_REF:0:12}"
 
 rm -rf "$SRC"
@@ -75,10 +75,15 @@ The checker only:
   detector/watcher services are active, and the named PAPER units are inactive.
 - `mutation_authorized=false`: the checker never authorizes mutation.
 
-A nonzero exit means the deployment preflight is not clean. Stop and inspect the
-reported path/status categories. Do not work around a conflict with `git
-checkout`, `git reset`, `git restore`, `git clean`, a service restart, or
-manual detector-cursor edits.
+A nonzero exit means the deployment preflight is not clean. Stop the normal
+handoff/plan/gate sequence. Collect sealed read-only conflict evidence using
+`manual-market-paper-conflict-evidence.md`, then review the exact current/base/
+target hashes before deciding how the production-local bytes should be
+preserved or reconciled.
+
+Do not work around a conflict with `git checkout`, `git reset`, `git
+restore`, `git clean`, a pull over `/opt/pio`, a service restart, or manual
+detector-cursor edits.
 
 ## 5. Continue only through read-only artifacts
 
@@ -86,7 +91,8 @@ If the report is clean, the next reviewed steps are still non-mutating:
 
 1. capture the sealed handoff in `manual-market-paper-handoff.md`;
 2. build the deterministic deployment plan in `manual-market-paper-deployment-plan.md`;
-3. run the fresh production gate in `manual-market-paper-deployment-gate.md` and preserve its sealed `gate_sha256` report;\n4. run the read-only file-level mutation review in `manual-market-paper-mutation-review.md` and preserve its sealed `review_sha256` report before any future separately authorized mutation.
+3. run the fresh production gate in `manual-market-paper-deployment-gate.md` and preserve its sealed `gate_sha256` report;
+4. run the read-only file-level mutation review in `manual-market-paper-mutation-review.md` and preserve its sealed `review_sha256` report before any future separately authorized mutation.
 
 Do not create a PAPER account, apply an overlay, enable a timer, restart the
 detector/watcher, move a detector cursor, or run the manual market/PAPER cycle
