@@ -10,7 +10,7 @@ submit a transaction, or authorize production mutation.
 Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1
+69c2303da5dd291d9cf249e45c9749aeb3e582f5
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1"
+REVIEWED_REF="69c2303da5dd291d9cf249e45c9749aeb3e582f5"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -292,7 +292,7 @@ because validation was blocked on Cargo. Reuse its sealed candidate report and
 candidate file with a fresh reviewed source checkout, for example:
 
 ~~~bash
-REVIEWED_REF="706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1"
+REVIEWED_REF="69c2303da5dd291d9cf249e45c9749aeb3e582f5"
 SRC="$(mktemp -d /var/tmp/pio-candidate-validation-source.XXXXXX)"
 CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
 VALIDATION_REPORT="/var/tmp/pio-state-reader-candidate-validation.retry.json"
@@ -336,7 +336,7 @@ For the currently sealed candidate, reuse:
 Export only the candidate-vs-reviewed-target delta:
 
 ~~~bash
-REVIEWED_REF="706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1"
+REVIEWED_REF="69c2303da5dd291d9cf249e45c9749aeb3e582f5"
 SRC="$(mktemp -d /var/tmp/pio-portable-patch-source.XXXXXX)"
 CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
 PATCH="/var/tmp/pio-state-reader-preserved-candidate.patch"
@@ -400,7 +400,7 @@ reviewed source and validate the transferred patch:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1"
+REVIEWED_REF="69c2303da5dd291d9cf249e45c9749aeb3e582f5"
 SRC="$(mktemp -d /var/tmp/pio-portable-validation-source.XXXXXX)"
 PATCH="$PWD/pio-state-reader-preserved-candidate.patch"
 PATCH_REPORT="$PWD/pio-state-reader-preserved-candidate.patch.json"
@@ -438,6 +438,36 @@ The portable validator:
 
 A passing `validation_ready=true` result validates the exact preserved
 candidate bytes, but still does not authorize copying them into production.
+
+The preserved research-store candidate has a matching bounded portable exporter
+and off-host Python validator:
+`export_manual_market_paper_research_store_candidate_patch.py` and
+`validate_manual_market_paper_research_store_portable_patch.py`. Its off-host
+validator reconstructs exact candidate blob
+`31bd88e3d74490f5d0b617ff4b36383e7e12e18f`, gives the temporary workspace
+source precedence, and runs compile plus focused semantic pytest coverage
+without installing packages or touching production.
+
+## Combine both portable validations
+
+After **both** portable validations are ready, do not jump to the old
+handoff/plan/gate path. Build the sealed preservation review described in
+`manual-market-paper-preservation-review.md`.
+
+That review binds:
+
+- research-store production-local blob
+  `f9deb47c10c88a4e1e364dd12d6c7569c3826a98` to preserved candidate
+  `31bd88e3d74490f5d0b617ff4b36383e7e12e18f`;
+- state-reader production-local blob
+  `d1267db6708b91bc8cacabffcd397a380866c79a` to preserved candidate
+  `f54a1021cf8f89d285bde957d1f72d81857ec2fa`.
+
+A ready preservation review means only that a separate reviewed-source/manifests
+rebase may be prepared. It does not authorize a production write. After that
+source rebase is reviewed and merged, start the production read-only chain again
+from fresh readiness; old handoff/plan/gate/mutation-review artifacts are
+superseded.
 
 ## Stop boundary
 
