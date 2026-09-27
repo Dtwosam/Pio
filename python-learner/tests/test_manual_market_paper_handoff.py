@@ -55,15 +55,34 @@ def _report(**overrides):
             "error_category": None,
         },
         "market_paper": {
-            "content_ready": True,
+            "content_ready": False,
             "deployed": False,
             "apply_authorized": False,
-            "files_changed": 5,
-            "status_counts": {"READY_CREATE": 5},
+            "files_changed": 4,
+            "status_counts": {
+                "CONFLICT_MODIFIED": 1,
+                "READY_CREATE": 4,
+            },
+            "pending": [
+                {"path": "c.py", "status": "READY_CREATE"},
+            ],
+            "nonready": [
+                {"path": "shared.py", "status": "CONFLICT_MODIFIED"},
+            ],
+        },
+        "market_paper_after_prerequisites": {
+            "content_ready": True,
+            "files_changed": 4,
+            "status_counts": {
+                "ALREADY_TARGET": 1,
+                "READY_CREATE": 4,
+            },
             "pending": [
                 {"path": "c.py", "status": "READY_CREATE"},
             ],
             "nonready": [],
+            "projected_prerequisite_paths": ["shared.py"],
+            "mutation_authorized": False,
         },
         "deployment_preflight_clean": True,
         "runtime_files_deployed": False,
@@ -152,6 +171,40 @@ def test_handoff_requires_explicit_safe_manual_account_state():
     assert MODULE.build_handoff_snapshot(
         _report(deployment_preflight_clean=False)
     )["handoff_ready"] is False
+
+
+
+def test_v1_handoff_snapshot_is_rejected_after_projection_schema_change():
+    snapshot = MODULE.build_handoff_snapshot(_report())
+    snapshot["format_version"] = 1
+    snapshot["artifact_type"] = "MANUAL_MARKET_PAPER_PREFLIGHT_HANDOFF_V1"
+
+    try:
+        MODULE.validate_handoff_snapshot(snapshot)
+    except ValueError as exc:
+        assert "unsupported handoff snapshot format" in str(exc)
+    else:
+        raise AssertionError("obsolete V1 handoff must fail closed")
+
+
+def test_verify_binds_projected_market_preflight_state():
+    snapshot = MODULE.build_handoff_snapshot(_report())
+    changed_projection = dict(
+        _report()["market_paper_after_prerequisites"]
+    )
+    changed_projection["projected_prerequisite_paths"] = ["other.py"]
+
+    result = MODULE.compare_handoff_snapshot(
+        snapshot,
+        _report(
+            market_paper_after_prerequisites=changed_projection,
+        ),
+    )
+
+    assert result["state_matches"] is False
+    assert result["changed_sections"] == (
+        "market_paper_after_prerequisites",
+    )
 
 
 def test_snapshot_tamper_fails_closed():
