@@ -94,6 +94,17 @@ def test_python_discovery_accepts_explicit_existing_executable():
     assert resolved == str(Path(sys.executable).resolve())
 
 
+def test_validation_env_prioritizes_temporary_workspace_source(tmp_path, monkeypatch):
+    python_dir = tmp_path / "python-learner"
+    monkeypatch.setenv("PYTHONPATH", "/existing/path")
+
+    env = MODULE._validation_env(python_dir)
+
+    expected = str(python_dir / "src")
+    assert env["PYTHONPATH"].split(__import__("os").pathsep)[0] == expected
+    assert "/existing/path" in env["PYTHONPATH"].split(__import__("os").pathsep)[1:]
+
+
 def test_pytest_probe_succeeds_in_test_environment(tmp_path):
     assert MODULE._probe_pytest(
         python_executable=str(Path(sys.executable).resolve()),
@@ -180,6 +191,7 @@ def _synthetic_report(
         "candidate_size": 456,
         "patch_file": "/private/tmp/research-store-candidate.patch",
         "workspace_under_var_tmp": True,
+        "workspace_source_precedence": True,
         "python_executable": python,
         "python_available": python_available,
         "pytest_available": pytest_available,
@@ -297,6 +309,8 @@ def test_portable_validator_is_production_blind_and_installs_nothing():
     assert '"--patch-file"' in source
     assert '"--patch-report"' in source
     assert '"--python-bin"' in source
+    assert "PYTHONPATH" in source
+    assert "_validation_env" in source
     assert 'git", "apply"' in source
     assert 'git", "checkout' not in source
     assert 'git", "reset' not in source
