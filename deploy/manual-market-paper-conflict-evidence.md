@@ -7,10 +7,10 @@ This path is diagnostic and read-only. It does not apply an overlay, change
 `/opt/pio`, restart services, enable a timer, move a detector cursor, sign or
 submit a transaction, or authorize production mutation.
 
-Reviewed source head for this diagnostic:
+Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-32d28e286687c53635c147da20f0da388af36f50
+2659e256d8a27f023760a694044e0ba452d9eb8e
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="32d28e286687c53635c147da20f0da388af36f50"
+REVIEWED_REF="2659e256d8a27f023760a694044e0ba452d9eb8e"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -84,6 +84,39 @@ It also records:
 - categorized Git read failures;
 - whether a per-command `safe.directory` override recovered those reads;
 - a canonical `evidence_sha256` sealing the report.
+
+## Three-way reconciliation analysis
+
+After the sealed conflict evidence identifies the exact production-local blobs,
+run the read-only reconciliation analyzer from the same reviewed source tree:
+
+~~~bash
+RECONCILIATION="/var/tmp/pio-manual-paper-conflict-reconciliation.json"
+
+python3 "$SRC/deploy/tools/analyze_manual_market_paper_conflict_reconciliation.py" \
+  --repo /opt/pio \
+  --source-tree "$SRC" \
+  > "$RECONCILIATION"
+
+python3 -m json.tool "$RECONCILIATION"
+~~~
+
+The analyzer is bound to the reviewed production baseline
+`ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8`. For only
+`research_store.py` and `state_reader.rs`, it compares:
+
+1. the exact baseline bytes from production HEAD;
+2. the current production-local bytes;
+3. the reviewed target bytes.
+
+It uses `git merge-file -p --diff3` on temporary files only. The report emits
+local/reviewed patch hashes and statistics, `CLEAN` or `CONFLICT` merge
+status, and a candidate merged blob/SHA-256 when clean. It deliberately emits
+no candidate source contents and never writes a merged candidate to
+`/opt/pio`.
+
+Even `all_merge_clean=true` requires manual candidate review before any
+production change.
 
 ## Stop boundary
 
