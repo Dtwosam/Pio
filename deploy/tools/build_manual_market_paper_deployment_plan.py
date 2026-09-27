@@ -43,6 +43,27 @@ LAYER_ORDER = (
     "STATE_READER",
     "MARKET_PAPER_RUNTIME",
 )
+EXPECTED_HANDOFF_ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_PREFLIGHT_HANDOFF_V1"
+STATE_READER_TARGET = "rust-executor/src/state_reader.rs"
+PLAN_IDENTITY_FIELDS = (
+    "format_version",
+    "artifact_type",
+    "handoff_artifact_type",
+    "handoff_state_sha256",
+    "reviewed_source_blobs",
+    "required_layer_order",
+    "operations",
+    "operation_count",
+    "deployment_needed",
+    "plan_ready",
+    "requires_fresh_handoff_verification",
+    "production_deployment_authorized",
+    "mutation_authorized",
+    "service_restart_authorized",
+    "detector_cursor_movement_authorized",
+    "paper_timer_enable_authorized",
+    "live_capital_authorized",
+)
 
 
 def _git_blob_sha(path: Path) -> str:
@@ -445,6 +466,129 @@ def build_deployment_plan(
     }
 
 
+
+def _is_hex_digest(value: Any, length: int) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == length
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
+
+
+def validate_deployment_plan(plan: dict[str, Any]) -> None:
+    if not isinstance(plan, dict):
+        raise ValueError("deployment plan must be a JSON object")
+
+    expected_keys = set(PLAN_IDENTITY_FIELDS) | {"plan_sha256"}
+    if set(plan) != expected_keys:
+        raise ValueError("deployment plan fields do not match reviewed schema")
+    if plan.get("format_version") != FORMAT_VERSION:
+        raise ValueError("unsupported deployment plan format")
+    if plan.get("artifact_type") != ARTIFACT_TYPE:
+        raise ValueError("unexpected deployment plan artifact type")
+    if plan.get("handoff_artifact_type") != EXPECTED_HANDOFF_ARTIFACT_TYPE:
+        raise ValueError("deployment plan handoff schema is unexpected")
+    if not _is_hex_digest(plan.get("handoff_state_sha256"), 64):
+        raise ValueError("deployment plan handoff state digest is invalid")
+
+    expected_source_blobs = {
+        str(path): blob
+        for path, blob in sorted(
+            REVIEWED_SOURCE_BLOBS.items(),
+            key=lambda item: str(item[0]),
+        )
+    }
+    if plan.get("reviewed_source_blobs") != expected_source_blobs:
+        raise ValueError("deployment plan reviewed-source lineage mismatch")
+    if plan.get("required_layer_order") != list(LAYER_ORDER):
+        raise ValueError("deployment plan layer order is unexpected")
+
+    operations = plan.get("operations")
+    if not isinstance(operations, list):
+        raise ValueError("deployment plan operations must be a list")
+    if plan.get("operation_count") != len(operations):
+        raise ValueError("deployment plan operation count mismatch")
+    if plan.get("deployment_needed") is not bool(operations):
+        raise ValueError("deployment plan deployment-needed flag mismatch")
+    if plan.get("plan_ready") is not True:
+        raise ValueError("deployment plan must be marked ready")
+    if plan.get("requires_fresh_handoff_verification") is not True:
+        raise ValueError("deployment plan must require fresh handoff verification")
+
+    for field in (
+        "production_deployment_authorized",
+        "mutation_authorized",
+        "service_restart_authorized",
+        "detector_cursor_movement_authorized",
+        "paper_timer_enable_authorized",
+        "live_capital_authorized",
+    ):
+        if plan.get(field) is not False:
+            raise ValueError(f"deployment plan must keep {field}=false")
+
+    seen_paths: set[str] = set()
+    previous_layer = -1
+    state_reader_operations = 0
+    for item in operations:
+        if not isinstance(item, dict):
+            raise ValueError("deployment plan operation is invalid")
+        layer = item.get("layer")
+        if layer not in LAYER_ORDER:
+            raise ValueError(f"deployment plan layer is invalid: {layer}")
+        layer_index = LAYER_ORDER.index(layer)
+        if layer_index < previous_layer:
+            raise ValueError("deployment plan operations are out of layer order")
+        previous_layer = layer_index
+
+        path = item.get("path")
+        if not isinstance(path, str) or not path:
+            raise ValueError("deployment plan operation path is invalid")
+        if path in seen_paths:
+            raise ValueError(f"deployment plan path is duplicated: {path}")
+        seen_paths.add(path)
+
+        operation = item.get("operation")
+        target_blob = item.get("target_blob")
+        if not _is_hex_digest(target_blob, 40):
+            raise ValueError(f"deployment plan target blob is invalid: {path}")
+
+        if layer == "STATE_READER":
+            state_reader_operations += 1
+            if state_reader_operations > 1:
+                raise ValueError("deployment plan has multiple state-reader operations")
+            if operation != "APPLY_REVIEWED_PATCH":
+                raise ValueError("state-reader operation must use reviewed patch")
+            if path != STATE_READER_TARGET:
+                raise ValueError("state-reader operation targets unexpected path")
+            if not _is_hex_digest(item.get("expected_current_blob"), 40):
+                raise ValueError("state-reader expected-current blob is invalid")
+            if not _is_hex_digest(item.get("patch_sha256"), 64):
+                raise ValueError("state-reader patch digest is invalid")
+            if item.get("backup_required") is not True:
+                raise ValueError("state-reader operation must require backup")
+            continue
+
+        if operation not in {"CREATE_FILE", "UPDATE_FILE"}:
+            raise ValueError(f"copy operation type is invalid: {path}")
+        if item.get("source_blob") != target_blob:
+            raise ValueError(f"copy source/target blob mismatch: {path}")
+        if operation == "CREATE_FILE":
+            if item.get("expected_current_blob") is not None:
+                raise ValueError("create operation must require an absent target")
+            if item.get("backup_required") is not False:
+                raise ValueError("create operation must not claim a backup")
+        else:
+            if not _is_hex_digest(item.get("expected_current_blob"), 40):
+                raise ValueError("update expected-current blob is invalid")
+            if item.get("backup_required") is not True:
+                raise ValueError("update operation must require backup")
+
+    identity = {field: plan[field] for field in PLAN_IDENTITY_FIELDS}
+    expected_digest = hashlib.sha256(_canonical_bytes(identity)).hexdigest()
+    if plan.get("plan_sha256") != expected_digest:
+        raise ValueError("deployment plan digest mismatch")
+
+
 def _load_handoff(path: Path) -> dict[str, Any]:
     payload = _load_json(path)
     return payload
@@ -467,6 +611,7 @@ def main() -> None:
         source_tree=args.source_tree,
         handoff_snapshot=_load_handoff(Path(args.handoff)),
     )
+    validate_deployment_plan(plan)
     print(json.dumps(plan, indent=2, sort_keys=True))
 
 
