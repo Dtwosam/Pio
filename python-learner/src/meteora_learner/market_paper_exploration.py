@@ -161,6 +161,7 @@ def run_market_paper_exploration(
     intake_max_pools: int = 500,
     quote_max_age_seconds: int = 300,
     max_share_bps: int = 500,
+    observed_at: str | None = None,
     intake_runner: IntakeRunner = build_market_paper_intake,
     quote_refresher: QuoteRefresher = refresh_jupiter_quotes_for_mints,
     quote_status_loader: QuoteStatusLoader = token_quote_status,
@@ -189,7 +190,7 @@ def run_market_paper_exploration(
         raise ValueError("network_cost_quote must be non-negative and finite")
 
     paper_account_snapshot(storage, account_id=account_id)
-    observed_at = utc_now_iso()
+    observed_at = observed_at or utc_now_iso()
     scheduler_state = scheduler_state_loader(
         storage,
         account_id=account_id,

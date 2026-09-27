@@ -113,6 +113,7 @@ def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
         per_position_capital_quote=100,
         network_cost_quote=1,
         max_new_positions=2,
+        observed_at="2026-09-27T08:05:00+00:00",
         intake_runner=lambda database_path, **kwargs: _intake("A", "B"),
         quote_refresher=refresh,
         quote_status_loader=status,
@@ -126,6 +127,7 @@ def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
     assert entries[0]["as_of"] == "2026-09-27T08:00:00+00:00"
     assert entries[1]["amount_y"] == 400
     assert entries[1]["network_cost_y_atomic"] == 4
+    assert report.observed_at == "2026-09-27T08:05:00+00:00"
     assert report.positions_opened == 2
     assert report.status == "COMPLETE"
     assert report.paper_only is True
