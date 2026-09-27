@@ -90,21 +90,25 @@ def test_market_paper_manifest_target_blobs_match_source_tree():
         )
 
 
-def test_shared_store_bases_require_reviewed_phase2_targets():
+def test_shared_store_files_live_only_in_selective_prerequisite():
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    phase2 = json.loads(PHASE2.read_text(encoding="utf-8"))
+    prerequisite = json.loads(PREREQUISITE.read_text(encoding="utf-8"))
 
-    for relative in payload["phase2_prerequisite_files"]:
-        assert relative in {
-            "python-learner/src/meteora_learner/research_store.py",
-            "python-learner/src/meteora_learner/storage.py",
-        }
-        assert payload["deployment_base_file_blobs"][relative] == (
-            phase2["deployment_target_file_blobs"][relative]
-        )
-        assert payload["deployment_target_file_blobs"][relative] == (
-            phase2["deployment_target_file_blobs"][relative]
-        )
+    prerequisite_files = set(payload["phase2_prerequisite_files"])
+    runtime_files = set(payload["deployment_files"])
+
+    assert prerequisite_files == {
+        "python-learner/src/meteora_learner/research_store.py",
+        "python-learner/src/meteora_learner/storage.py",
+    }
+    assert prerequisite_files == set(prerequisite["deployment_files"])
+    assert runtime_files.isdisjoint(prerequisite_files)
+    assert runtime_files.isdisjoint(
+        prerequisite["deployment_target_file_blobs"]
+    )
+    assert runtime_files.isdisjoint(
+        prerequisite["deployment_base_file_blobs"]
+    )
 
 
 def test_market_paper_manifest_is_preflight_only_with_existing_guard():
