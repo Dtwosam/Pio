@@ -49,10 +49,16 @@ git -C "$SRC" fetch --no-tags origin <REVIEWED_COMMIT>
 git -C "$SRC" checkout --detach <REVIEWED_COMMIT>
 ```
 
-## 3. Run preflight only
+## 3. Run both preflights only
 
-Run the tool from the clean source tree. The reviewed manifest is deliberately
-apply-locked.
+The manual evidence source deployment is intentionally split into two reviewed
+guards.
+
+### 3a. Generic source overlay preflight
+
+Run the collection-stack tool from the clean source tree. Its reviewed manifest
+is deliberately apply-locked and excludes
+`rust-executor/src/state_reader.rs`.
 
 ```bash
 python3 "$SRC/deploy/tools/apply_phase2_collection_stack.py" \
@@ -61,7 +67,21 @@ python3 "$SRC/deploy/tools/apply_phase2_collection_stack.py" \
   --manifest "$SRC/deploy/manifests/phase2-collection-integration.json"
 ```
 
-The tool must not be invoked with `--apply`.
+Do not pass `--apply`.
+
+### 3b. Dedicated state-reader patch preflight
+
+Run the reviewed PR #21-derived guard separately for
+`rust-executor/src/state_reader.rs`:
+
+```bash
+python3 "$SRC/deploy/tools/apply_phase2_single_slot_stack_patch.py" \
+  --repo /opt/pio \
+  --patch "$SRC/deploy/patches/phase2-single-slot-stack-state-reader.patch"
+```
+
+Do not pass `--apply`. This guard verifies the exact reviewed patch bytes and
+runs its patch applicability checks without changing the production file.
 
 ## 4. Required preflight result
 
@@ -78,7 +98,9 @@ hold:
   - `READY_CREATE`
   - `READY_UPDATE`
 
-Any `CONFLICT_*`, `SOURCE_*`, or outside-tree status is a hard stop.
+Any `CONFLICT_*`, `SOURCE_*`, or outside-tree status from the generic
+overlay is a hard stop. Any non-applicable or local-conflict result from the
+dedicated state-reader guard is also a hard stop.
 
 A conflict is evidence that production contains bytes not represented by the
 reviewed base/target lineage. Capture the path plus current/base/target blob
@@ -92,7 +114,7 @@ also confirm:
 
 - the detector is healthy and any active backlog has reached a safe natural
   commit point;
-- production-local conflicts have been reconciled explicitly;
+- production-local conflicts from both deployment guards have been reconciled explicitly;
 - the exact source tree and manifest remain the reviewed bytes;
 - no service restart or detector cursor movement is required;
 - the first evidence cycle will be run manually and bounded before any timer is

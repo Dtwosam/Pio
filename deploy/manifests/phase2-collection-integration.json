@@ -89,7 +89,7 @@
     "quote and position observer failures are categorical and do not expose raw transport/RPC error text",
     "neutral position collection reserves revisit capacity when budget permits so fee/reward intervals can accumulate without starving exploration"
   ],
-  "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_ONLY",
+  "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER",
   "deployment_target_ref": "7b306f05e842bffdcc6144de39d0346b97e2ab67",
   "deployment_base_ref": "45d7f6b2f44a2e621d1d8c34220dd61d3a413b9b",
   "deployment_files": [
@@ -109,8 +109,7 @@
     "python-learner/src/meteora_learner/reconciliation_corpus.py",
     "python-learner/src/meteora_learner/research_store.py",
     "python-learner/src/meteora_learner/storage.py",
-    "rust-executor/src/main.rs",
-    "rust-executor/src/state_reader.rs"
+    "rust-executor/src/main.rs"
   ],
   "deployment_target_file_blobs": {
     "python-learner/src/meteora_learner/calibration_queue.py": "d22786a5d4f40c993b1f818aecd2cc777820c832",
@@ -129,8 +128,7 @@
     "python-learner/src/meteora_learner/reconciliation_corpus.py": "ad0f1ea02ad684028e48374f4a07079946ddb0d1",
     "python-learner/src/meteora_learner/research_store.py": "c9b9de5838d95a86bddffa6166b4d7a62e91cf16",
     "python-learner/src/meteora_learner/storage.py": "39bcc99413df357b89d261e854861e9e4a3fff23",
-    "rust-executor/src/main.rs": "4f02019bca92e77faed70083c740cfc111db15d1",
-    "rust-executor/src/state_reader.rs": "30d1435af1329bca07f73d6639539b43503e84e9"
+    "rust-executor/src/main.rs": "4f02019bca92e77faed70083c740cfc111db15d1"
   },
   "deployment_base_file_blobs": {
     "python-learner/src/meteora_learner/calibration_queue.py": "daacbd260b4ce5175742232f4a03065e94eaaf97",
@@ -149,8 +147,7 @@
     "python-learner/src/meteora_learner/reconciliation_corpus.py": "aca05f30643648887e53b4a18624acdb03e9e458",
     "python-learner/src/meteora_learner/research_store.py": "16a86b63272ad48f4c185b39ecc2e0c14276ff9f",
     "python-learner/src/meteora_learner/storage.py": "0436cb1cadd073702ae7dad702fc4eb4241845d6",
-    "rust-executor/src/main.rs": "f82b0460eebd06ea99e6a7a56a90817eed027c6f",
-    "rust-executor/src/state_reader.rs": "50b2291d3cdb1b727bc443beaca780e7a6e20e85"
+    "rust-executor/src/main.rs": "f82b0460eebd06ea99e6a7a56a90817eed027c6f"
   },
   "deployment_source_tree_required": true,
   "deployment_guard_apply_locked": true
