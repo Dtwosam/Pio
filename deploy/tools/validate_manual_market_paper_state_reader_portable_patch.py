@@ -23,6 +23,8 @@ REVIEWED_SOURCE_BLOBS = {
     EXPORTER_TOOL: "c3d18d14b0b8ba983c9b26f8d3f6ade7da88d852",
 }
 
+EXPECTED_CANDIDATE_BLOB = "f54a1021cf8f89d285bde957d1f72d81857ec2fa"
+
 COMMANDS = (
     ("cargo_test", ("test", "--quiet")),
     (
@@ -273,6 +275,9 @@ def validate_portable_validation_report(report: dict[str, Any]) -> None:
     ):
         if not _is_hex_digest(report.get(field), length):
             raise ValueError(f"portable validation {field} is invalid")
+
+    if report.get("candidate_git_blob") != EXPECTED_CANDIDATE_BLOB:
+        raise ValueError("portable validation candidate blob mismatch")
 
     for field in ("patch_size", "candidate_size"):
         value = report.get(field)
