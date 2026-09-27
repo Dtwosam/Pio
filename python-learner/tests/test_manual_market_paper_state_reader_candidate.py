@@ -335,6 +335,25 @@ def test_rehashed_candidate_report_cannot_authorize_mutation():
         raise AssertionError("rehashed authorization flip must fail closed")
 
 
+def test_rehashed_candidate_report_cannot_redirect_target_path():
+    report = _synthetic_report()
+    report["path"] = "rust-executor/src/main.rs"
+    identity = {
+        field: report[field]
+        for field in MODULE.IDENTITY_FIELDS
+    }
+    report["report_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+    try:
+        MODULE.validate_candidate_report(report)
+    except ValueError as exc:
+        assert "path scope mismatch" in str(exc)
+    else:
+        raise AssertionError("rehashed path redirect must fail closed")
+
+
 def test_candidate_tool_has_only_explicit_var_tmp_output_write():
     source = TOOL.read_text(encoding="utf-8")
 

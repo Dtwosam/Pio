@@ -1,0 +1,412 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+from typing import Any
+
+
+FORMAT_VERSION = 1
+ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_STATE_READER_CANDIDATE_VALIDATION_V1"
+
+BUILDER_TOOL = Path("deploy/tools/build_manual_market_paper_state_reader_candidate.py")
+REVIEWED_SOURCE_BLOBS = {
+    BUILDER_TOOL: "1c97fc8db482de015b2463f6d2a4823e8003628e",
+}
+
+COMMANDS = (
+    ("cargo_test", ("cargo", "test", "--quiet")),
+    (
+        "cargo_test_live_submit",
+        ("cargo", "test", "--quiet", "--features", "live-submit"),
+    ),
+)
+
+IDENTITY_FIELDS = (
+    "format_version",
+    "artifact_type",
+    "reviewed_source_blobs",
+    "reviewed_source_head",
+    "candidate_report_sha256",
+    "candidate_git_blob",
+    "candidate_sha256",
+    "candidate_size",
+    "candidate_path",
+    "validation_workspace_under_var_tmp",
+    "validation_commands",
+    "all_commands_passed",
+    "validation_ready",
+    "production_file_modified",
+    "requires_separate_mutation_authorization",
+    "production_deployment_authorized",
+    "mutation_authorized",
+    "service_restart_authorized",
+    "detector_cursor_movement_authorized",
+    "paper_timer_enable_authorized",
+    "live_capital_authorized",
+)
+
+
+def _canonical_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+
+def _git_blob_sha_bytes(payload: bytes) -> str:
+    header = f"blob {len(payload)}\0".encode()
+    return hashlib.sha1(header + payload).hexdigest()
+
+
+def _git_blob_sha(path: Path) -> str:
+    return _git_blob_sha_bytes(path.read_bytes())
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _is_hex_digest(value: Any, length: int) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == length
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
+
+
+def _load_module(path: Path, name: str) -> Any:
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load reviewed module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _verify_reviewed_source(source: Path) -> None:
+    for relative, expected in REVIEWED_SOURCE_BLOBS.items():
+        path = source / relative
+        if not path.is_file():
+            raise ValueError(f"reviewed validation artifact is missing: {relative}")
+        if path.is_symlink():
+            raise ValueError(f"reviewed validation artifact is a symlink: {relative}")
+        if _git_blob_sha(path) != expected:
+            raise ValueError(f"reviewed validation artifact mismatch: {relative}")
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"JSON artifact must be an object: {path}")
+    return value
+
+
+def _reviewed_source_head(source: Path) -> str:
+    proc = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(source),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise ValueError("cannot read reviewed source HEAD")
+    head = proc.stdout.strip()
+    if not _is_hex_digest(head, 40):
+        raise ValueError("reviewed source HEAD is invalid")
+    return head
+
+
+def _command_result(
+    *,
+    name: str,
+    command: tuple[str, ...],
+    cwd: Path,
+    env: dict[str, str],
+) -> dict[str, Any]:
+    proc = subprocess.run(
+        list(command),
+        cwd=str(cwd),
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    stdout = proc.stdout if isinstance(proc.stdout, bytes) else str(proc.stdout).encode()
+    stderr = proc.stderr if isinstance(proc.stderr, bytes) else str(proc.stderr).encode()
+    return {
+        "name": name,
+        "argv": list(command),
+        "returncode": int(proc.returncode),
+        "passed": proc.returncode == 0,
+        "stdout_sha256": _sha256_bytes(stdout),
+        "stdout_size": len(stdout),
+        "stderr_sha256": _sha256_bytes(stderr),
+        "stderr_size": len(stderr),
+    }
+
+
+def validate_validation_report(report: dict[str, Any]) -> None:
+    if not isinstance(report, dict):
+        raise ValueError("candidate validation report must be a JSON object")
+
+    expected_keys = set(IDENTITY_FIELDS) | {"report_sha256"}
+    if set(report) != expected_keys:
+        raise ValueError("candidate validation report fields do not match reviewed schema")
+    if report.get("format_version") != FORMAT_VERSION:
+        raise ValueError("unsupported candidate validation report format")
+    if report.get("artifact_type") != ARTIFACT_TYPE:
+        raise ValueError("unexpected candidate validation artifact type")
+
+    expected_source_blobs = {
+        str(path): blob
+        for path, blob in sorted(
+            REVIEWED_SOURCE_BLOBS.items(),
+            key=lambda item: str(item[0]),
+        )
+    }
+    if report.get("reviewed_source_blobs") != expected_source_blobs:
+        raise ValueError("candidate validation source lineage mismatch")
+
+    for field, length in (
+        ("reviewed_source_head", 40),
+        ("candidate_report_sha256", 64),
+        ("candidate_git_blob", 40),
+        ("candidate_sha256", 64),
+        ("report_sha256", 64),
+    ):
+        if not _is_hex_digest(report.get(field), length):
+            raise ValueError(f"candidate validation {field} is invalid")
+
+    size = report.get("candidate_size")
+    if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+        raise ValueError("candidate validation size is invalid")
+
+    candidate_path = report.get("candidate_path")
+    if (
+        not isinstance(candidate_path, str)
+        or not candidate_path.startswith("/var/tmp/")
+    ):
+        raise ValueError("candidate validation path must remain under /var/tmp")
+    if report.get("validation_workspace_under_var_tmp") is not True:
+        raise ValueError("candidate validation workspace scope is invalid")
+
+    commands = report.get("validation_commands")
+    if not isinstance(commands, list) or len(commands) != len(COMMANDS):
+        raise ValueError("candidate validation command set is invalid")
+
+    expected_names = [item[0] for item in COMMANDS]
+    if [item.get("name") for item in commands] != expected_names:
+        raise ValueError("candidate validation command ordering is invalid")
+
+    for (expected_name, expected_argv), item in zip(COMMANDS, commands, strict=True):
+        if not isinstance(item, dict):
+            raise ValueError("candidate validation command result is invalid")
+        if set(item) != {
+            "name",
+            "argv",
+            "returncode",
+            "passed",
+            "stdout_sha256",
+            "stdout_size",
+            "stderr_sha256",
+            "stderr_size",
+        }:
+            raise ValueError("candidate validation command schema mismatch")
+        if item["name"] != expected_name or item["argv"] != list(expected_argv):
+            raise ValueError("candidate validation command identity mismatch")
+        if (
+            not isinstance(item["returncode"], int)
+            or isinstance(item["returncode"], bool)
+        ):
+            raise ValueError("candidate validation return code is invalid")
+        if not isinstance(item["passed"], bool):
+            raise ValueError("candidate validation passed flag is invalid")
+        if item["passed"] is not (item["returncode"] == 0):
+            raise ValueError("candidate validation passed flag mismatch")
+        for digest in ("stdout_sha256", "stderr_sha256"):
+            if not _is_hex_digest(item[digest], 64):
+                raise ValueError("candidate validation output digest is invalid")
+        for size_field in ("stdout_size", "stderr_size"):
+            if (
+                not isinstance(item[size_field], int)
+                or isinstance(item[size_field], bool)
+                or item[size_field] < 0
+            ):
+                raise ValueError("candidate validation output size is invalid")
+
+    all_passed = all(item["passed"] for item in commands)
+    if report.get("all_commands_passed") is not all_passed:
+        raise ValueError("candidate validation aggregate pass flag mismatch")
+    if report.get("validation_ready") is not all_passed:
+        raise ValueError("candidate validation ready flag mismatch")
+    if report.get("production_file_modified") is not False:
+        raise ValueError("candidate validation must not modify production")
+    if report.get("requires_separate_mutation_authorization") is not True:
+        raise ValueError("candidate validation must require separate mutation authorization")
+
+    for field in (
+        "production_deployment_authorized",
+        "mutation_authorized",
+        "service_restart_authorized",
+        "detector_cursor_movement_authorized",
+        "paper_timer_enable_authorized",
+        "live_capital_authorized",
+    ):
+        if report.get(field) is not False:
+            raise ValueError(f"candidate validation requires {field}=false")
+
+    identity = {field: report[field] for field in IDENTITY_FIELDS}
+    expected_digest = hashlib.sha256(_canonical_bytes(identity)).hexdigest()
+    if report["report_sha256"] != expected_digest:
+        raise ValueError("candidate validation report digest mismatch")
+
+
+def validate_candidate(
+    *,
+    source_tree: str | Path,
+    candidate_report: dict[str, Any],
+) -> dict[str, Any]:
+    source = Path(source_tree).resolve()
+    if not source.is_dir():
+        raise ValueError(f"reviewed source tree is missing: {source}")
+
+    _verify_reviewed_source(source)
+    builder_module = _load_module(
+        source / BUILDER_TOOL,
+        "manual_market_paper_state_reader_candidate_validation_builder",
+    )
+    builder_module.validate_candidate_report(candidate_report)
+
+    candidate_path = Path(str(candidate_report["output_path"]))
+    candidate_path_resolved = candidate_path.resolve(strict=True)
+    var_tmp = Path("/var/tmp").resolve()
+    if var_tmp not in candidate_path_resolved.parents:
+        raise ValueError("candidate file escaped /var/tmp")
+    if candidate_path.is_symlink() or not candidate_path.is_file():
+        raise ValueError("candidate file is not a regular file")
+
+    candidate = candidate_path.read_bytes()
+    if _git_blob_sha_bytes(candidate) != candidate_report["candidate_git_blob"]:
+        raise ValueError("candidate Git blob no longer matches sealed report")
+    if _sha256_bytes(candidate) != candidate_report["candidate_sha256"]:
+        raise ValueError("candidate SHA-256 no longer matches sealed report")
+    if len(candidate) != candidate_report["candidate_size"]:
+        raise ValueError("candidate size no longer matches sealed report")
+
+    source_head = _reviewed_source_head(source)
+
+    with tempfile.TemporaryDirectory(
+        prefix="pio-state-reader-validation-",
+        dir="/var/tmp",
+    ) as tmp:
+        root = Path(tmp)
+        workspace = root / "source"
+        cargo_target = root / "cargo-target"
+        shutil.copytree(
+            source,
+            workspace,
+            ignore=shutil.ignore_patterns(
+                ".git",
+                "target",
+                ".venv",
+                "__pycache__",
+                ".pytest_cache",
+            ),
+        )
+
+        target_path = workspace / str(candidate_report["path"])
+        if not target_path.is_file() or target_path.is_symlink():
+            raise ValueError("temporary validation target is not a regular file")
+        target_path.write_bytes(candidate)
+
+        if _git_blob_sha(target_path) != candidate_report["candidate_git_blob"]:
+            raise ValueError("temporary candidate install verification failed")
+
+        rust_dir = workspace / "rust-executor"
+        env = dict(os.environ)
+        env["CARGO_BUILD_JOBS"] = "1"
+        env["CARGO_TARGET_DIR"] = str(cargo_target)
+
+        command_results = [
+            _command_result(
+                name=name,
+                command=command,
+                cwd=rust_dir,
+                env=env,
+            )
+            for name, command in COMMANDS
+        ]
+
+    all_passed = all(item["passed"] for item in command_results)
+    identity = {
+        "format_version": FORMAT_VERSION,
+        "artifact_type": ARTIFACT_TYPE,
+        "reviewed_source_blobs": {
+            str(path): blob
+            for path, blob in sorted(
+                REVIEWED_SOURCE_BLOBS.items(),
+                key=lambda item: str(item[0]),
+            )
+        },
+        "reviewed_source_head": source_head,
+        "candidate_report_sha256": candidate_report["report_sha256"],
+        "candidate_git_blob": candidate_report["candidate_git_blob"],
+        "candidate_sha256": candidate_report["candidate_sha256"],
+        "candidate_size": candidate_report["candidate_size"],
+        "candidate_path": str(candidate_path_resolved),
+        "validation_workspace_under_var_tmp": True,
+        "validation_commands": command_results,
+        "all_commands_passed": all_passed,
+        "validation_ready": all_passed,
+        "production_file_modified": False,
+        "requires_separate_mutation_authorization": True,
+        "production_deployment_authorized": False,
+        "mutation_authorized": False,
+        "service_restart_authorized": False,
+        "detector_cursor_movement_authorized": False,
+        "paper_timer_enable_authorized": False,
+        "live_capital_authorized": False,
+    }
+    report = {
+        **identity,
+        "report_sha256": hashlib.sha256(_canonical_bytes(identity)).hexdigest(),
+    }
+    validate_validation_report(report)
+    return report
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate a sealed state-reader preserved-fix candidate in a "
+            "temporary copy of the reviewed source. The production repository "
+            "is never read or written by this tool. Rust tests run with "
+            "CARGO_BUILD_JOBS=1 and a temporary CARGO_TARGET_DIR."
+        )
+    )
+    parser.add_argument("--source-tree", required=True)
+    parser.add_argument("--candidate-report", required=True)
+    args = parser.parse_args()
+
+    report = validate_candidate(
+        source_tree=args.source_tree,
+        candidate_report=_load_json(Path(args.candidate_report)),
+    )
+    print(json.dumps(report, indent=2, sort_keys=True))
+    if not report["validation_ready"]:
+        raise SystemExit(3)
+
+
+if __name__ == "__main__":
+    main()
