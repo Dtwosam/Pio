@@ -89,8 +89,18 @@ def test_preflight_accepts_exact_base_and_new_files(tmp_path):
     )
 
 
-def test_apply_refuses_while_manifest_authorization_is_locked(tmp_path):
+def test_apply_refuses_while_manifest_authorization_is_locked(
+    tmp_path,
+    monkeypatch,
+):
     repo, source, manifest, existing, created = fixture_tree(tmp_path)
+
+    monkeypatch.setattr(MODULE, "DEFAULT_MANIFEST", manifest)
+    monkeypatch.setattr(
+        MODULE,
+        "REVIEWED_DEFAULT_MANIFEST_BLOB",
+        MODULE.git_blob_sha(manifest),
+    )
 
     with pytest.raises(ValueError, match="not authorized"):
         MODULE.apply_guarded_collection_stack(
