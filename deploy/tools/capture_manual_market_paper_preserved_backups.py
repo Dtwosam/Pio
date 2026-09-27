@@ -175,6 +175,21 @@ def _safe_relative_path(raw: Any) -> Path:
     return Path(*pure.parts)
 
 
+def _safe_backup_relative_path(raw: Any) -> Path:
+    if not isinstance(raw, str) or not raw or "\\" in raw:
+        raise ValueError("backup-capture backup-relative path is invalid")
+    pure = PurePosixPath(raw)
+    if pure.is_absolute():
+        raise ValueError("backup-capture backup-relative path must be relative")
+    if any(part in {"", ".", ".."} for part in pure.parts):
+        raise ValueError("backup-capture backup-relative path is unsafe")
+    if not pure.parts or pure.parts[0] != "files":
+        raise ValueError("backup-capture backup-relative path must be under files/")
+    if "/".join(pure.parts) != raw:
+        raise ValueError("backup-capture backup-relative path is not normalized")
+    return Path(*pure.parts)
+
+
 def _parent_safety(root: Path, relative: Path) -> tuple[bool, str | None]:
     current = root
     for part in relative.parts[:-1]:
@@ -480,8 +495,7 @@ def validate_backup_capture(report: dict[str, Any]) -> None:
             if entry.get("rollback_blob") != expected_current:
                 raise ValueError("backup-capture update rollback blob mismatch")
             backup_relative = entry.get("backup_relative_path")
-            if not isinstance(backup_relative, str) or not backup_relative.startswith("files/"):
-                raise ValueError("backup-capture backup path is invalid")
+            _safe_backup_relative_path(backup_relative)
             for field, length in (
                 ("production_observed_blob", 40),
                 ("post_capture_observed_blob", 40),
