@@ -136,6 +136,46 @@ baseline established:
 
 Only the Rust overlap regions need further content-level review.
 
+## Build the preserved research-store candidate outside production
+
+The clean three-way merge for `research_store.py` is now represented by an
+exact-evidence builder rather than only a remembered candidate hash.
+
+The builder is locked to:
+
+- production HEAD
+  `ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8`;
+- reviewed base blob
+  `16a86b63272ad48f4c185b39ecc2e0c14276ff9f`;
+- production-local current blob
+  `f9deb47c10c88a4e1e364dd12d6c7569c3826a98`;
+- reviewed target blob
+  `c9b9de5838d95a86bddffa6166b4d7a62e91cf16`;
+- clean merged candidate blob
+  `31bd88e3d74490f5d0b617ff4b36383e7e12e18f`.
+
+Construct it only under `/var/tmp`:
+
+~~~bash
+STAMP="$(date +%Y%m%d%H%M%S)"
+RESEARCH_CANDIDATE="/var/tmp/pio-research-store-preserved-candidate.$STAMP.py"
+RESEARCH_CANDIDATE_REPORT="/var/tmp/pio-research-store-preserved-candidate.$STAMP.json"
+
+python3 "$SRC/deploy/tools/build_manual_market_paper_research_store_candidate.py" \
+  --repo /opt/pio \
+  --source-tree "$SRC" \
+  --output "$RESEARCH_CANDIDATE" \
+  > "$RESEARCH_CANDIDATE_REPORT"
+
+python3 -m json.tool "$RESEARCH_CANDIDATE_REPORT"
+~~~
+
+The builder re-reads the exact production base/current bytes, re-runs the clean
+three-way merge, requires the candidate Git blob above, writes exactly one
+candidate file under `/var/tmp`, and seals SHA-256/size/diff metadata. It never
+writes `/opt/pio`, and it keeps mutation/service/cursor/timer/capital
+authorization false.
+
 ## Collect only the two state-reader conflict hunks
 
 Use a fresh isolated source at the reviewed commit above:
