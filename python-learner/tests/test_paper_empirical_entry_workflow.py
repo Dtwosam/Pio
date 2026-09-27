@@ -77,7 +77,11 @@ def test_workflow_opens_only_selected_paper_candidate(tmp_path):
 
     def entry_opener(storage_arg, **kwargs):
         seen["entry"] = kwargs
-        return SimpleNamespace(opened=True)
+        return SimpleNamespace(
+            opened=True,
+            paper_only=True,
+            live_authorized=False,
+        )
 
     report = run_empirical_paper_entry_workflow(
         storage,
@@ -102,6 +106,29 @@ def test_workflow_opens_only_selected_paper_candidate(tmp_path):
     assert report.status == "OPENED"
     assert report.paper_only is True
     assert report.live_authorized is False
+
+
+def test_workflow_rejects_entry_result_that_crosses_paper_boundary(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    with pytest.raises(ValueError, match="opener crossed PAPER-only boundary"):
+        run_empirical_paper_entry_workflow(
+            storage,
+            account_id="paper",
+            position_id="pos",
+            event_key="enter-pos",
+            pool_address="pool",
+            amount_x=10,
+            amount_y=20,
+            capital_quote=100,
+            network_cost_y_atomic=5,
+            candidate_runner=lambda database_path, **kwargs: _cycle(),
+            entry_opener=lambda storage_arg, **kwargs: SimpleNamespace(
+                opened=True,
+                paper_only=False,
+                live_authorized=True,
+            ),
+        )
 
 
 def test_workflow_no_selection_never_calls_entry(tmp_path):
