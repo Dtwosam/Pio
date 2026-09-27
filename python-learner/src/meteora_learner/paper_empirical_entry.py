@@ -30,6 +30,8 @@ class EmpiricalPaperEntryResult:
     position: PaperPositionSnapshot | None
     account: PaperAccountSnapshot
     counterfactual: PaperCounterfactualState | None
+    paper_only: bool
+    live_authorized: bool
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -98,6 +100,8 @@ def open_empirical_paper_candidate(
             position=None,
             account=account,
             counterfactual=None,
+            paper_only=True,
+            live_authorized=False,
         )
 
     store = ResearchStore(storage.path)
@@ -167,4 +171,6 @@ def open_empirical_paper_candidate(
             capital_quote=float(capital),
             preview=preview,
         ),
+        paper_only=True,
+        live_authorized=False,
     )

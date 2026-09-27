@@ -1,0 +1,12 @@
+[Unit]
+Description=Accumulate bounded Phase 2 evidence and progress lineage
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+Unit=pio-phase2-evidence-cycle.service
+
+[Install]
+WantedBy=timers.target

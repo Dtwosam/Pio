@@ -139,6 +139,8 @@ def test_empirical_entry_opens_chain_bound_virtual_position(tmp_path) -> None:
 
     assert result.opened is True
     assert result.bound is True
+    assert result.paper_only is True
+    assert result.live_authorized is False
     assert result.position is not None
     assert result.position.policy_source == "EMPIRICAL_PAPER"
     assert result.position.strategy == "SPOT"
@@ -178,6 +180,8 @@ def test_empirical_entry_does_not_open_without_selection(tmp_path) -> None:
     )
     assert result.opened is False
     assert result.bound is False
+    assert result.paper_only is True
+    assert result.live_authorized is False
     assert result.position is None
     assert result.account.cash_quote == 1000
 
