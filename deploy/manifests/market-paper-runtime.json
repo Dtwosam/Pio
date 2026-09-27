@@ -14,7 +14,7 @@
     "python-learner/src/meteora_learner/research_store.py",
     "python-learner/src/meteora_learner/storage.py"
   ],
-  "deployment_target_ref": "d572228d84617b8d055c1113beb4c9bad4ea46bc",
+  "deployment_target_ref": "98da2ebfc55c8135d1989836da1b8b7726ba7f3f",
   "deployment_files": [
     "python-learner/src/meteora_learner/jupiter_quotes.py",
     "python-learner/src/meteora_learner/manual_market_paper_cycle.py",
