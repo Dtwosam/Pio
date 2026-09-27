@@ -206,3 +206,26 @@ def test_storage_model_status_cannot_skip_promotion_stages(tmp_path):
             expected_status="OFFLINE_CANDIDATE",
             new_status="CHAMPION",
         )
+
+
+def test_empirical_paper_source_never_requires_model_registry(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(
+        storage,
+        account_id="paper",
+        starting_cash_quote=1000,
+    )
+    position = open_paper_position(
+        storage,
+        event_key="enter-empirical",
+        account_id="paper",
+        position_id="empirical-pos",
+        pool_address="pool",
+        policy_source="EMPIRICAL_PAPER",
+        strategy="SPOT",
+        min_bin_id=-1,
+        max_bin_id=1,
+        capital_quote=100,
+    )
+    assert position.policy_source == "EMPIRICAL_PAPER"
+    assert position.model_id is None

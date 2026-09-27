@@ -313,13 +313,20 @@ def _open_paper_position_in_conn(
         raise ValueError("position_id and pool_address are required")
     if not policy_source.strip() or not strategy.strip():
         raise ValueError("policy_source and strategy are required")
-    allowed_sources = {"DETERMINISTIC", "ML_CHALLENGER", "ML_CHAMPION"}
+    allowed_sources = {
+        "DETERMINISTIC",
+        "EMPIRICAL_PAPER",
+        "ML_CHALLENGER",
+        "ML_CHAMPION",
+    }
     if policy_source not in allowed_sources:
         raise ValueError(
             f"policy_source must be one of {sorted(allowed_sources)}"
         )
-    if policy_source == "DETERMINISTIC" and model_id is not None:
-        raise ValueError("deterministic paper positions cannot specify model_id")
+    if policy_source in {"DETERMINISTIC", "EMPIRICAL_PAPER"} and model_id is not None:
+        raise ValueError(
+            "non-ML paper positions cannot specify model_id"
+        )
     if policy_source in {"ML_CHALLENGER", "ML_CHAMPION"} and not model_id:
         raise ValueError("ML paper positions require model_id")
     if min_bin_id > max_bin_id:
