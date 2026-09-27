@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -158,6 +159,10 @@ def test_exact_current_state_passes_read_only_gate_without_authorizing_mutation(
     assert gate.paper_timer_enable_authorized is False
     assert gate.live_capital_authorized is False
 
+    record = json.loads(json.dumps(gate.to_record()))
+    MODULE.validate_deployment_gate_report(record)
+    assert len(record["gate_sha256"]) == 64
+
 
 def test_cursor_drift_fails_gate_even_when_current_handoff_is_otherwise_ready():
     saved_report = _report()
@@ -236,6 +241,97 @@ def test_tampered_saved_plan_is_rejected_before_gate_evaluation():
         assert "mutation_authorized=false" in str(exc)
     else:
         raise AssertionError("tampered plan must fail closed")
+
+
+def _reseal_gate_record(record):
+    identity = {
+        field: record[field]
+        for field in MODULE.GATE_IDENTITY_FIELDS
+    }
+    record["gate_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+
+def test_tampered_gate_report_digest_is_rejected():
+    report = _report()
+    handoff, plan = _artifacts(report)
+    gate = MODULE.evaluate_deployment_gate(
+        source_tree=ROOT,
+        saved_handoff=handoff,
+        saved_plan=plan,
+        current_report=copy.deepcopy(report),
+    ).to_record()
+
+    gate["operation_count"] += 1
+
+    try:
+        MODULE.validate_deployment_gate_report(gate)
+    except ValueError as exc:
+        assert "deployment-needed flag mismatch" in str(exc) or "digest mismatch" in str(exc)
+    else:
+        raise AssertionError("tampered gate report must fail closed")
+
+
+def test_rehashed_gate_report_cannot_authorize_mutation():
+    report = _report()
+    handoff, plan = _artifacts(report)
+    gate = MODULE.evaluate_deployment_gate(
+        source_tree=ROOT,
+        saved_handoff=handoff,
+        saved_plan=plan,
+        current_report=copy.deepcopy(report),
+    ).to_record()
+
+    gate["mutation_authorized"] = True
+    _reseal_gate_record(gate)
+
+    try:
+        MODULE.validate_deployment_gate_report(gate)
+    except ValueError as exc:
+        assert "mutation_authorized=false" in str(exc)
+    else:
+        raise AssertionError("rehashed authorization flip must fail closed")
+
+
+def test_rehashed_gate_report_cannot_hide_state_consistency_rules():
+    report = _report()
+    handoff, plan = _artifacts(report)
+    gate = MODULE.evaluate_deployment_gate(
+        source_tree=ROOT,
+        saved_handoff=handoff,
+        saved_plan=plan,
+        current_report=copy.deepcopy(report),
+    ).to_record()
+
+    gate["changed_sections"] = ["target_pool_cursor"]
+    _reseal_gate_record(gate)
+
+    try:
+        MODULE.validate_deployment_gate_report(gate)
+    except ValueError as exc:
+        assert "matching deployment gate state" in str(exc)
+    else:
+        raise AssertionError("inconsistent rehashed gate report must fail closed")
+
+
+def test_gate_report_schema_rejects_extra_fields_even_when_digest_is_unchanged():
+    report = _report()
+    handoff, plan = _artifacts(report)
+    gate = MODULE.evaluate_deployment_gate(
+        source_tree=ROOT,
+        saved_handoff=handoff,
+        saved_plan=plan,
+        current_report=copy.deepcopy(report),
+    ).to_record()
+    gate["unexpected"] = "field"
+
+    try:
+        MODULE.validate_deployment_gate_report(gate)
+    except ValueError as exc:
+        assert "fields do not match reviewed schema" in str(exc)
+    else:
+        raise AssertionError("gate schema drift must fail closed")
 
 
 def test_gate_source_contains_only_read_only_handoff_path():
