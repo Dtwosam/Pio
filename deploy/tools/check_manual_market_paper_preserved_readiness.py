@@ -210,6 +210,18 @@ def _resolves_within(root: Path, path: Path) -> bool:
     return True
 
 
+def _has_symlink_parent(root: Path, path: Path) -> bool:
+    root_resolved = root.resolve()
+    current = path.parent
+    while current != root:
+        if current.is_symlink():
+            return True
+        if current == current.parent:
+            return True
+        current = current.parent
+    return root.is_symlink() or root.resolve() != root_resolved
+
+
 def _run_read_only(
     args: list[str],
     *,
@@ -331,6 +343,8 @@ def _verify_private_bundle(
         target = resolved / relative
         if not _resolves_within(resolved, target):
             raise ValueError(f"private bundle path escapes root: {relative}")
+        if _has_symlink_parent(resolved, target):
+            raise ValueError(f"private bundle target has a symlinked parent: {relative}")
         if target.is_symlink() or not target.is_file():
             raise ValueError(f"private bundle target is not a regular file: {relative}")
         if _git_blob_sha(target) != entry["preserved_candidate_blob"]:
@@ -360,6 +374,8 @@ def _classify_preserved_file(
 
     if not _resolves_within(source_tree, source):
         status = "SOURCE_OUTSIDE_TREE"
+    elif _has_symlink_parent(source_tree, source):
+        status = "SOURCE_SYMLINK_PARENT"
     elif source.is_symlink():
         status = "SOURCE_SYMLINK"
     elif not source.exists():
@@ -368,6 +384,8 @@ def _classify_preserved_file(
         status = "SOURCE_NOT_REGULAR_FILE"
     elif not _resolves_within(repository, target):
         status = "TARGET_OUTSIDE_REPOSITORY"
+    elif _has_symlink_parent(repository, target):
+        status = "CONFLICT_SYMLINK_PARENT"
     elif target.is_symlink():
         status = "CONFLICT_SYMLINK"
     elif target.exists() and not target.is_file():
