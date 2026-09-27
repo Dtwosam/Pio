@@ -259,15 +259,17 @@ The current manual market/PAPER production path is read-only and fail-closed:
 - reviewed source is isolated outside `/opt/pio`;
 - Phase-2 prerequisite preflight is narrowed to only `research_store.py` and `storage.py` through `deploy/manifests/market-paper-phase2-prerequisites.json`;
 - the single-slot state-reader change remains on its separate guarded patch path;
-- the market/PAPER runtime overlay remains apply-locked and production-deployment unauthorized;
+- the runtime-only market/PAPER overlay remains apply-locked and production-deployment unauthorized;
 - the named PAPER service and timer must both be explicitly inactive for manual-mode readiness;
 - the retained target-pool cursor is read, never written;
 - `deploy/tools/manual_market_paper_handoff.py` seals production HEAD, the exact tracked working-tree diff hash, service state, PAPER unit state, target cursor, and all prerequisite/runtime preflight summaries into one deterministic SHA-256 identity;
-- handoff verification must re-run the read-only preflight and reject any bound state drift before any later separately reviewed mutation.
+- `deploy/tools/build_manual_market_paper_deployment_plan.py` validates that handoff and the exact reviewed source lineage, then emits only the ordered prerequisite -> state-reader -> runtime operations that would be needed, with expected-current/target blobs and a sealed plan digest; it has no production mutation path;
+- `deploy/tools/check_manual_market_paper_deployment_gate.py` validates the saved handoff and plan, rebuilds the plan from reviewed source, re-runs current production readiness, and requires exact state identity before reporting `gate_ready=true`;
+- even a passing deployment gate explicitly requires separate mutation authorization and keeps deployment, service restart, cursor movement, PAPER timer enablement, signing/submission, and live-capital authorization false.
 
-The reviewed preflight sequence is documented in `deploy/manual-market-paper-production-preflight.md` and `deploy/manual-market-paper-handoff.md`. A clean preflight or matching handoff is evidence for review only. It never means deployment is authorized.
+The reviewed read-only sequence is documented in `deploy/manual-market-paper-production-preflight.md`, `deploy/manual-market-paper-handoff.md`, `deploy/manual-market-paper-deployment-plan.md`, and `deploy/manual-market-paper-deployment-gate.md`. A clean preflight, matching handoff, valid plan, or passing gate is evidence for review only. None of them authorizes production mutation.
 
-The remaining system gates are real evidence rather than missing core implementation: Phase 2 still needs sufficient real reconciliation/calibration coverage for promotion, and Phase 5 still needs long real PAPER endurance/restart validation, multi-observation position evidence, and persisted promotion evidence. No later phase may treat code existence, a clean deployment preflight, or a PAPER handoff as a substitute for those promotion gates.
+The remaining system gates are real evidence rather than missing core implementation: Phase 2 still needs sufficient real reconciliation/calibration coverage for promotion, and Phase 5 still needs long real PAPER endurance/restart validation, multi-observation position evidence, and persisted promotion evidence. No later phase may treat code existence, a clean deployment preflight, a PAPER handoff/plan/gate, or deployment tooling as a substitute for those promotion gates.
 
 ## 10. System split
 

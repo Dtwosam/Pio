@@ -7,7 +7,7 @@ action, transaction signing/submission, or real-capital action.
 Reviewed source head for this preflight:
 
 ```text
-b4f1dce4e7f03423f416fee53f08618292f65d00
+a9c3c6ef4d1d48f592e65983e964632ae0fb6d9e
 ```
 
 ## 1. Build an isolated reviewed source tree
@@ -18,7 +18,7 @@ production working tree.
 ```bash
 set -euo pipefail
 
-REVIEWED_REF="b4f1dce4e7f03423f416fee53f08618292f65d00"
+REVIEWED_REF="a9c3c6ef4d1d48f592e65983e964632ae0fb6d9e"
 SRC="/var/tmp/pio-manual-paper-preflight-${REVIEWED_REF:0:12}"
 
 rm -rf "$SRC"
@@ -80,9 +80,14 @@ reported path/status categories. Do not work around a conflict with `git
 checkout`, `git reset`, `git restore`, `git clean`, a service restart, or
 manual detector-cursor edits.
 
-## 5. Stop boundary
+## 5. Continue only through read-only artifacts
 
-Even if the report is clean, do not create a PAPER account, apply an overlay,
-enable a timer, or run the manual market/PAPER cycle from this runbook. Those
-actions require a separate reviewed step after the production conflict map is
-known.
+If the report is clean, the next reviewed steps are still non-mutating:
+
+1. capture the sealed handoff in `manual-market-paper-handoff.md`;
+2. build the deterministic deployment plan in `manual-market-paper-deployment-plan.md`;
+3. run the fresh production gate in `manual-market-paper-deployment-gate.md` immediately before any future separately reviewed mutation.
+
+Do not create a PAPER account, apply an overlay, enable a timer, restart the
+detector/watcher, move a detector cursor, or run the manual market/PAPER cycle
+from this runbook. A clean preflight is evidence only.
