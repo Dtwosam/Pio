@@ -1,6 +1,6 @@
 # Manual market/PAPER preflight handoff
 
-This step turns one clean read-only production preflight into a sealed JSON
+This step turns one clean read-only production preflight into a sealed V2 JSON
 handoff that can be checked again immediately before any separately reviewed
 deployment step.
 
@@ -14,7 +14,7 @@ The production tree intentionally contains local/uncommitted fixes. A clean
 preflight result is therefore not enough by itself: the relevant production
 state can change between review and a later deployment.
 
-The handoff records the exact safety-relevant preflight state and a canonical
+The V2 handoff records the exact safety-relevant preflight state and a canonical
 SHA-256 digest. Verification re-runs the same read-only readiness checker and
 fails closed when any bound section changes, including:
 
@@ -95,3 +95,17 @@ This handoff is evidence for review only. It always emits
 `mutation_authorized=false`. A later deployment tool or runbook must keep its
 own explicit authorization boundary and must verify this snapshot immediately
 before applying any reviewed overlay.
+
+
+## Staged-preflight semantics
+
+Handoff V2 binds both the current market/PAPER overlay report and the separate
+`market_paper_after_prerequisites` projection. The projection may resolve a
+current shared-file conflict only when the prerequisite guard already proves
+that exact file is `ALREADY_TARGET`, `READY_CREATE`, or `READY_UPDATE`, and
+the prerequisite target blob satisfies the market/PAPER base/target relation.
+
+This does not simulate arbitrary edits and does not write a shadow tree. Source
+mismatches, symlinks, non-files, unexpected content, or prerequisite conflicts
+remain non-ready. V1 handoff snapshots are intentionally rejected after this
+schema change.
