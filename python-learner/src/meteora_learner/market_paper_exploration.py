@@ -305,6 +305,7 @@ def run_market_paper_exploration(
                 network_cost_y_atomic=network_atomic,
                 entry_cost_quote=float(network_cost),
                 max_share_bps=max_share_bps,
+                as_of=decision_at,
             )
             if (
                 not entry.paper_only

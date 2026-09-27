@@ -95,6 +95,7 @@ def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
     assert [row["pool_address"] for row in entries] == ["A", "B"]
     assert entries[0]["amount_y"] == 200
     assert entries[0]["network_cost_y_atomic"] == 2
+    assert entries[0]["as_of"] == "2026-09-27T08:00:00+00:00"
     assert entries[1]["amount_y"] == 400
     assert entries[1]["network_cost_y_atomic"] == 4
     assert report.positions_opened == 2
