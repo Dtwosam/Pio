@@ -12,9 +12,10 @@
   "deployment_target_ref": "c5624ec4516ceb9bbdd6285ccb69c4d0d81c3804",
   "production_git_baseline_ref": "ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8",
   "prerequisite_collection_target_ref": "7b306f05e842bffdcc6144de39d0346b97e2ab67",
+  "prerequisite_collection_manifest": "deploy/manifests/market-paper-phase2-prerequisites.json",
   "prerequisite_state_reader_target_blob": "30d1435af1329bca07f73d6639539b43503e84e9",
   "prerequisite_notes": [
-    "Phase-2 collection overlay must be reviewed/deployed before this overlay.",
+    "The selective Phase-2 shared-store prerequisite overlay must be reviewed/deployed before this overlay.",
     "research_store.py and storage.py intentionally require the reviewed Phase-2 target blobs as their current/base state.",
     "The dedicated state-reader guard remains separate and must already classify the production file as the reviewed target before market-chain collection is considered deploy-ready.",
     "Files absent from the production Git baseline are expected to be absent unless production preflight proves otherwise; any unexpected local file fails closed.",

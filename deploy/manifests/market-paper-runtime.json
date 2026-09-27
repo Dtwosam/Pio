@@ -9,7 +9,7 @@
   "deployment_scope": "MANUAL_MARKET_PAPER_RUNTIME",
   "production_base_ref": "ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8",
   "phase2_collection_prerequisite_ref": "7b306f05e842bffdcc6144de39d0346b97e2ab67",
-  "phase2_collection_prerequisite_manifest": "deploy/manifests/phase2-collection-integration.json",
+  "phase2_collection_prerequisite_manifest": "deploy/manifests/market-paper-phase2-prerequisites.json",
   "phase2_prerequisite_files": [
     "python-learner/src/meteora_learner/research_store.py",
     "python-learner/src/meteora_learner/storage.py"

@@ -7,7 +7,7 @@ action, transaction signing/submission, or real-capital action.
 Reviewed source head for this preflight:
 
 ```text
-4815d662cd364b29a48460b233477564b5d39a68
+bf93b7a5cea8d831c0c5431d5e0a3cc81edec485
 ```
 
 ## 1. Build an isolated reviewed source tree
@@ -18,7 +18,7 @@ production working tree.
 ```bash
 set -euo pipefail
 
-REVIEWED_REF="4815d662cd364b29a48460b233477564b5d39a68"
+REVIEWED_REF="bf93b7a5cea8d831c0c5431d5e0a3cc81edec485"
 SRC="/var/tmp/pio-manual-paper-preflight-${REVIEWED_REF:0:12}"
 
 rm -rf "$SRC"
@@ -58,7 +58,7 @@ The checker only:
 - reads the production Git HEAD and tracked-change count;
 - reads the retained detector cursor JSON without writing it;
 - asks systemd whether the detector/watcher and named PAPER units are active;
-- runs the Phase-2 collection overlay preflight;
+- runs the selective Phase-2 shared-store prerequisite preflight;
 - runs the dedicated state-reader guard with `apply=False`;
 - runs the locked market/PAPER overlay preflight.
 
@@ -66,7 +66,7 @@ The checker only:
 
 - `deployment_preflight_clean=true`: all reviewed source/base relationships are
   conflict-free. This does **not** mean anything was deployed.
-- `runtime_files_deployed=true`: Phase-2 shared files, state reader, and
+- `runtime_files_deployed=true`: the exact Phase-2 shared prerequisites, state reader, and
   market/PAPER runtime files are already at their reviewed targets.
 - `manual_mode_safe=true`: the named PAPER service and timer both explicitly
   report `inactive`.

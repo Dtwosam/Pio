@@ -78,6 +78,23 @@ def test_reviewed_source_artifact_mismatch_fails_closed(tmp_path):
         raise AssertionError("modified reviewed manifest must fail closed")
 
 
+def test_phase2_readiness_scope_is_only_market_paper_shared_prerequisites():
+    path = ROOT / MODULE.PHASE2_PREREQUISITES_MANIFEST
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert payload["production_deployment_authorized"] is False
+    assert payload["deployment_guard_apply_locked"] is True
+    assert set(payload["deployment_files"]) == {
+        "python-learner/src/meteora_learner/research_store.py",
+        "python-learner/src/meteora_learner/storage.py",
+    }
+    assert "python-learner/src/meteora_learner/cli.py" not in payload["deployment_files"]
+    assert not any(
+        item.startswith("scripts/") or item.startswith("deploy/systemd/")
+        for item in payload["deployment_files"]
+    )
+
+
 def test_overlay_summary_separates_preflight_from_deployed_state():
     ready = MODULE._overlay_summary(
         _overlay("READY_UPDATE", "READY_CREATE")

@@ -86,6 +86,9 @@ def test_market_paper_manifest_enforces_phase2_shared_file_prerequisite():
     assert payload["prerequisite_collection_target_ref"] == (
         "7b306f05e842bffdcc6144de39d0346b97e2ab67"
     )
+    assert payload["prerequisite_collection_manifest"] == (
+        "deploy/manifests/market-paper-phase2-prerequisites.json"
+    )
     assert bases[
         "python-learner/src/meteora_learner/research_store.py"
     ] == "c9b9de5838d95a86bddffa6166b4d7a62e91cf16"

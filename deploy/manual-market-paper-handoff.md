@@ -23,7 +23,7 @@ fails closed when any bound section changes, including:
 - detector/watcher service state;
 - selected PAPER service/timer state;
 - retained target-pool detector cursor;
-- Phase-2 overlay status;
+- selective Phase-2 shared-store prerequisite status;
 - single-slot state-reader status;
 - manual market/PAPER overlay status;
 - readiness flags.
