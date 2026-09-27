@@ -10,10 +10,10 @@ import sys
 from typing import Any, Callable
 
 
-FORMAT_VERSION = 1
-ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_PREFLIGHT_HANDOFF_V1"
+FORMAT_VERSION = 2
+ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_PREFLIGHT_HANDOFF_V2"
 READINESS_TOOL = Path("deploy/tools/check_manual_market_paper_readiness.py")
-EXPECTED_READINESS_TOOL_BLOB = "d685c45492397fb921d9524abdd3757e8f7d7fab"
+EXPECTED_READINESS_TOOL_BLOB = "e2e788ad68db1fc3fb2818c8a65258025505afba"
 
 IDENTITY_FIELDS = (
     "repository",
@@ -31,6 +31,7 @@ IDENTITY_FIELDS = (
     "phase2",
     "state_reader",
     "market_paper",
+    "market_paper_after_prerequisites",
     "deployment_preflight_clean",
     "runtime_files_deployed",
     "operational_services_healthy",
@@ -184,7 +185,7 @@ def compare_handoff_snapshot(
     )
     return {
         "format_version": FORMAT_VERSION,
-        "artifact_type": "MANUAL_MARKET_PAPER_PREFLIGHT_VERIFY_V1",
+        "artifact_type": "MANUAL_MARKET_PAPER_PREFLIGHT_VERIFY_V2",
         "snapshot_handoff_ready": bool(snapshot["handoff_ready"]),
         "current_handoff_ready": bool(current["handoff_ready"]),
         "state_matches": matches,
