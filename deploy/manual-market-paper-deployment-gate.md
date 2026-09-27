@@ -1,7 +1,8 @@
 # Manual market/PAPER deployment gate
 
 This is the final read-only check immediately before any future separately
-reviewed production mutation.
+reviewed production mutation. It follows the production preflight, sealed
+handoff, and deterministic deployment-plan stages; it does not replace them.
 
 It binds three things together:
 
