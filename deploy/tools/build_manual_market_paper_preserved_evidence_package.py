@@ -46,6 +46,16 @@ PACKAGE_FIELDS = (
     "gate_sha256",
     "mutation_review_sha256",
     "private_bundle_sha256",
+    "handoff_capture_readiness_sha256",
+    "plan_handoff_sha256",
+    "plan_handoff_state_sha256",
+    "gate_saved_handoff_sha256",
+    "gate_saved_handoff_state_sha256",
+    "gate_saved_plan_sha256",
+    "review_handoff_state_sha256",
+    "review_plan_sha256",
+    "review_saved_gate_sha256",
+    "review_fresh_gate_sha256",
     "readiness_to_handoff_bound",
     "handoff_to_plan_bound",
     "plan_to_gate_bound",
@@ -222,6 +232,16 @@ def build_evidence_package_from_validated(
         "gate_sha256": gate["gate_sha256"],
         "mutation_review_sha256": review["review_sha256"],
         "private_bundle_sha256": private_bundle_sha256,
+        "handoff_capture_readiness_sha256": handoff["capture_readiness_sha256"],
+        "plan_handoff_sha256": plan["handoff_sha256"],
+        "plan_handoff_state_sha256": plan["handoff_state_sha256"],
+        "gate_saved_handoff_sha256": gate["saved_handoff_sha256"],
+        "gate_saved_handoff_state_sha256": gate["saved_handoff_state_sha256"],
+        "gate_saved_plan_sha256": gate["saved_plan_sha256"],
+        "review_handoff_state_sha256": review["handoff_state_sha256"],
+        "review_plan_sha256": review["plan_sha256"],
+        "review_saved_gate_sha256": review["saved_gate_sha256"],
+        "review_fresh_gate_sha256": review["fresh_gate_sha256"],
         "readiness_to_handoff_bound": readiness_to_handoff,
         "handoff_to_plan_bound": handoff_to_plan,
         "plan_to_gate_bound": plan_to_gate,
@@ -274,10 +294,51 @@ def validate_evidence_package(package: dict[str, Any]) -> None:
         "gate_sha256",
         "mutation_review_sha256",
         "private_bundle_sha256",
+        "handoff_capture_readiness_sha256",
+        "plan_handoff_sha256",
+        "plan_handoff_state_sha256",
+        "gate_saved_handoff_sha256",
+        "gate_saved_handoff_state_sha256",
+        "gate_saved_plan_sha256",
+        "review_handoff_state_sha256",
+        "review_plan_sha256",
+        "review_saved_gate_sha256",
+        "review_fresh_gate_sha256",
         "package_sha256",
     ):
         if not _is_hex_digest(package.get(field), 64):
             raise ValueError(f"preserved evidence package {field} is invalid")
+
+    expected_readiness_to_handoff = (
+        package["handoff_capture_readiness_sha256"] == package["readiness_sha256"]
+    )
+    expected_handoff_to_plan = bool(
+        package["plan_handoff_sha256"] == package["handoff_sha256"]
+        and package["plan_handoff_state_sha256"] == package["handoff_state_sha256"]
+    )
+    expected_plan_to_gate = bool(
+        package["gate_saved_handoff_sha256"] == package["handoff_sha256"]
+        and package["gate_saved_handoff_state_sha256"] == package["handoff_state_sha256"]
+        and package["gate_saved_plan_sha256"] == package["plan_sha256"]
+    )
+    expected_gate_to_review = bool(
+        package["review_handoff_state_sha256"] == package["handoff_state_sha256"]
+        and package["review_plan_sha256"] == package["plan_sha256"]
+        and package["review_saved_gate_sha256"] == package["gate_sha256"]
+    )
+    expected_fresh_gate = bool(
+        package["review_fresh_gate_sha256"] == package["review_saved_gate_sha256"]
+        and package["review_saved_gate_sha256"] == package["gate_sha256"]
+    )
+    for field, expected in (
+        ("readiness_to_handoff_bound", expected_readiness_to_handoff),
+        ("handoff_to_plan_bound", expected_handoff_to_plan),
+        ("plan_to_gate_bound", expected_plan_to_gate),
+        ("gate_to_review_bound", expected_gate_to_review),
+        ("fresh_gate_matches_saved", expected_fresh_gate),
+    ):
+        if package.get(field) is not expected:
+            raise ValueError(f"preserved evidence package {field} mismatch")
 
     required_true = (
         "readiness_to_handoff_bound",
