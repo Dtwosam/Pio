@@ -80,6 +80,37 @@ def test_exploration_refuses_to_race_active_paper_scheduler(tmp_path):
     assert report.items == ()
 
 
+def test_exploration_blocks_unhealthy_scheduler_state(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+
+    def should_not_run(*args, **kwargs):
+        raise AssertionError("unhealthy scheduler must block exploration")
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="unhealthy",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        observed_at="2026-09-27T08:05:00+00:00",
+        intake_runner=should_not_run,
+        quote_refresher=should_not_run,
+        entry_runner=should_not_run,
+        scheduler_state_loader=lambda storage_arg, **kwargs: SimpleNamespace(
+            owner_id=None,
+            lease_until=None,
+            last_status="WAITING_QUOTES",
+            consecutive_failures=0,
+        ),
+    )
+
+    assert report.status == "SCHEDULER_UNHEALTHY"
+    assert report.positions_opened == 0
+    assert report.positions_already_applied == 0
+    assert report.items == ()
+
+
 def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     create_paper_account(storage, account_id="paper", starting_cash_quote=1000)

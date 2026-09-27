@@ -28,6 +28,13 @@ QuoteRefresher = Callable[..., tuple[Any, ...]]
 SchedulerStateLoader = Callable[..., PaperSchedulerState]
 
 
+ENTRY_SAFE_SCHEDULER_STATUSES = {
+    "COMPLETE",
+    "IDLE",
+    "NO_NEW_OBSERVATIONS",
+}
+
+
 @dataclass(frozen=True)
 class MarketPaperExplorationItem:
     pool_address: str
@@ -126,6 +133,26 @@ def _scheduler_busy(
     return _parse_time(state.lease_until) > _parse_time(as_of)
 
 
+def _scheduler_entry_block(
+    state: PaperSchedulerState,
+    *,
+    as_of: str,
+) -> str | None:
+    if _scheduler_busy(state, as_of=as_of):
+        return "SCHEDULER_BUSY"
+
+    failures = int(getattr(state, "consecutive_failures", 0) or 0)
+    last_status = getattr(state, "last_status", None)
+    if failures > 0:
+        return "SCHEDULER_UNHEALTHY"
+    if (
+        last_status is not None
+        and last_status not in ENTRY_SAFE_SCHEDULER_STATUSES
+    ):
+        return "SCHEDULER_UNHEALTHY"
+    return None
+
+
 def _atomic_budget(
     *,
     capital_quote: Decimal,
@@ -195,7 +222,11 @@ def run_market_paper_exploration(
         storage,
         account_id=account_id,
     )
-    if _scheduler_busy(scheduler_state, as_of=observed_at):
+    scheduler_block = _scheduler_entry_block(
+        scheduler_state,
+        as_of=observed_at,
+    )
+    if scheduler_block is not None:
         return MarketPaperExplorationReport(
             account_id=account_id,
             run_id=run_id,
@@ -203,7 +234,7 @@ def run_market_paper_exploration(
             paper_only=True,
             policy_actionable=False,
             live_authorized=False,
-            status="SCHEDULER_BUSY",
+            status=scheduler_block,
             pools_ready=0,
             pools_considered=0,
             positions_opened=0,
