@@ -34,6 +34,18 @@ class MarketResearchStage:
         return asdict(self)
 
 
+def _safe_child_record(value: Any, fields: tuple[str, ...]) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    serializer = getattr(value, "to_record", None)
+    if callable(serializer):
+        return serializer()
+    return {
+        name: getattr(value, name, None)
+        for name in fields
+    }
+
+
 @dataclass(frozen=True)
 class MarketResearchCycleReport:
     research_only: bool
@@ -53,20 +65,41 @@ class MarketResearchCycleReport:
             "policy_actionable": self.policy_actionable,
             "execution_wired": self.execution_wired,
             "status": self.status,
-            "discovery": (
-                self.discovery.to_record()
-                if self.discovery is not None
-                else None
+            "discovery": _safe_child_record(
+                self.discovery,
+                (
+                    "research_only",
+                    "policy_actionable",
+                    "execution_wired",
+                    "pages_fetched",
+                    "unique_pools_seen",
+                    "snapshots_saved",
+                    "invalid_rows",
+                    "stop_reason",
+                ),
             ),
-            "chain_history": (
-                self.chain_history.to_record()
-                if self.chain_history is not None
-                else None
+            "chain_history": _safe_child_record(
+                self.chain_history,
+                (
+                    "research_only",
+                    "read_only_capture",
+                    "policy_actionable",
+                    "execution_wired",
+                    "status",
+                ),
             ),
-            "intake": (
-                self.intake.to_record()
-                if self.intake is not None
-                else None
+            "intake": _safe_child_record(
+                self.intake,
+                (
+                    "research_only",
+                    "paper_only",
+                    "policy_actionable",
+                    "execution_wired",
+                    "minimum_chain_observations",
+                    "pools_seen",
+                    "pools_considered",
+                    "pools_ready",
+                ),
             ),
             "stages": [item.to_record() for item in self.stages],
         }

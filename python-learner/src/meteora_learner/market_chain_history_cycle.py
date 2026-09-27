@@ -28,6 +28,32 @@ class MarketChainHistoryStage:
         return asdict(self)
 
 
+def _safe_attr(value: Any, name: str) -> Any:
+    return getattr(value, name, None) if value is not None else None
+
+
+def _context_queue_record(queue: Any) -> dict[str, Any] | None:
+    if queue is None:
+        return None
+    return {
+        "discovered_pools": _safe_attr(queue, "discovered_pools"),
+        "chain_observed_pools": _safe_attr(queue, "chain_observed_pools"),
+        "missing_chain_pools": _safe_attr(queue, "missing_chain_pools"),
+        "batch_limit": _safe_attr(queue, "batch_limit"),
+    }
+
+
+def _refresh_queue_record(queue: Any) -> dict[str, Any] | None:
+    if queue is None:
+        return None
+    return {
+        "discovered_pools": _safe_attr(queue, "discovered_pools"),
+        "chain_observed_pools": _safe_attr(queue, "chain_observed_pools"),
+        "refreshable_pools": _safe_attr(queue, "refreshable_pools"),
+        "batch_limit": _safe_attr(queue, "batch_limit"),
+    }
+
+
 @dataclass(frozen=True)
 class MarketChainHistoryCycleReport:
     research_only: bool
@@ -42,67 +68,48 @@ class MarketChainHistoryCycleReport:
     def to_record(self) -> dict[str, Any]:
         context = None
         if self.context is not None:
-            capture = self.context.capture
+            capture = _safe_attr(self.context, "capture")
             context = {
-                "queue_before": {
-                    "discovered_pools": self.context.queue_before.discovered_pools,
-                    "chain_observed_pools": (
-                        self.context.queue_before.chain_observed_pools
-                    ),
-                    "missing_chain_pools": (
-                        self.context.queue_before.missing_chain_pools
-                    ),
-                    "batch_limit": self.context.queue_before.batch_limit,
-                },
+                "queue_before": _context_queue_record(
+                    _safe_attr(self.context, "queue_before")
+                ),
                 "capture": (
                     None
                     if capture is None
                     else {
-                        "pools_attempted": capture.pools_attempted,
-                        "pools_captured": capture.pools_captured,
-                        "pools_failed": capture.pools_failed,
-                        "target_met": capture.target_met,
-                        "preferred_target_met": capture.preferred_target_met,
+                        "pools_attempted": _safe_attr(capture, "pools_attempted"),
+                        "pools_captured": _safe_attr(capture, "pools_captured"),
+                        "pools_failed": _safe_attr(capture, "pools_failed"),
+                        "target_met": _safe_attr(capture, "target_met"),
+                        "preferred_target_met": _safe_attr(
+                            capture,
+                            "preferred_target_met",
+                        ),
                     }
                 ),
-                "queue_after": {
-                    "discovered_pools": self.context.queue_after.discovered_pools,
-                    "chain_observed_pools": (
-                        self.context.queue_after.chain_observed_pools
-                    ),
-                    "missing_chain_pools": (
-                        self.context.queue_after.missing_chain_pools
-                    ),
-                    "batch_limit": self.context.queue_after.batch_limit,
-                },
+                "queue_after": _context_queue_record(
+                    _safe_attr(self.context, "queue_after")
+                ),
             }
 
         refresh = None
         if self.refresh is not None:
             refresh = {
-                "queue_before": {
-                    "discovered_pools": self.refresh.queue_before.discovered_pools,
-                    "chain_observed_pools": (
-                        self.refresh.queue_before.chain_observed_pools
-                    ),
-                    "refreshable_pools": (
-                        self.refresh.queue_before.refreshable_pools
-                    ),
-                    "batch_limit": self.refresh.queue_before.batch_limit,
-                },
-                "pools_attempted": self.refresh.pools_attempted,
-                "pools_refreshed": self.refresh.pools_refreshed,
-                "pools_failed": self.refresh.pools_failed,
-                "queue_after": {
-                    "discovered_pools": self.refresh.queue_after.discovered_pools,
-                    "chain_observed_pools": (
-                        self.refresh.queue_after.chain_observed_pools
-                    ),
-                    "refreshable_pools": (
-                        self.refresh.queue_after.refreshable_pools
-                    ),
-                    "batch_limit": self.refresh.queue_after.batch_limit,
-                },
+                "queue_before": _refresh_queue_record(
+                    _safe_attr(self.refresh, "queue_before")
+                ),
+                "pools_attempted": _safe_attr(
+                    self.refresh,
+                    "pools_attempted",
+                ),
+                "pools_refreshed": _safe_attr(
+                    self.refresh,
+                    "pools_refreshed",
+                ),
+                "pools_failed": _safe_attr(self.refresh, "pools_failed"),
+                "queue_after": _refresh_queue_record(
+                    _safe_attr(self.refresh, "queue_after")
+                ),
             }
 
         return {
