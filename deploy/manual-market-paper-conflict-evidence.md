@@ -10,7 +10,7 @@ submit a transaction, or authorize production mutation.
 Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-2659e256d8a27f023760a694044e0ba452d9eb8e
+641f6140d32ec6bb661fbf05cdd2ef71223f816f
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="2659e256d8a27f023760a694044e0ba452d9eb8e"
+REVIEWED_REF="641f6140d32ec6bb661fbf05cdd2ef71223f816f"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -109,9 +109,11 @@ The analyzer is bound to the reviewed production baseline
 2. the current production-local bytes;
 3. the reviewed target bytes.
 
-It uses `git merge-file -p --diff3` on temporary files only. The report emits
-local/reviewed patch hashes and statistics, `CLEAN` or `CONFLICT` merge
-status, and a candidate merged blob/SHA-256 when clean. It deliberately emits
+It uses `git merge-file -p --diff3` on temporary files only. Git's positive
+`merge-file` return values are conflict counts (up to 127), so any such value
+is reported as `CONFLICT`; only a true execution error fails the analyzer. The
+report emits local/reviewed patch hashes and statistics, `CLEAN` or `CONFLICT`
+merge status, and a candidate merged blob/SHA-256 when clean. It deliberately emits
 no candidate source contents and never writes a merged candidate to
 `/opt/pio`.
 
