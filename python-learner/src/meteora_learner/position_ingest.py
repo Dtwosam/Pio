@@ -47,6 +47,22 @@ def ingest_position_snapshot(
     if int(payload["lower_bin_id"]) > int(payload["upper_bin_id"]):
         raise ValueError("position lower_bin_id cannot exceed upper_bin_id")
 
+    capture_start = payload.get("capture_slot_start")
+    capture_end = payload.get("capture_slot_end")
+    if (capture_start is None) != (capture_end is None):
+        raise ValueError(
+            "position capture slots must be supplied together"
+        )
+    if capture_start is not None:
+        start = int(capture_start)
+        end = int(capture_end)
+        if start < 0 or end < 0:
+            raise ValueError("position capture slots cannot be negative")
+        if start > end:
+            raise ValueError(
+                "position capture_slot_start cannot exceed capture_slot_end"
+            )
+
     bins = storage.save_chain_position_snapshot(payload, observed_at=observed_at)
     return PositionIngestResult(
         position_address=str(payload["position_address"]),

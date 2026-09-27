@@ -148,9 +148,24 @@ def build_composition_prestate_candidates(
                 pool_address,
                 target_slot=transaction_slot,
                 active_bin_id=active_bin_id,
+                require_single_context=True,
             )
             if capture is None:
-                reason = "no slot-bounded pre-add pool capture with matching active bin"
+                legacy_capture = store.pool_capture_before_slot(
+                    pool_address,
+                    target_slot=transaction_slot,
+                    active_bin_id=active_bin_id,
+                )
+                if legacy_capture is None:
+                    reason = (
+                        "no slot-bounded pre-add pool capture with matching "
+                        "active bin"
+                    )
+                else:
+                    reason = (
+                        "no single-context strict-prior pre-add pool capture "
+                        "with matching active bin"
+                    )
 
         if reason is None and capture is not None:
             if (

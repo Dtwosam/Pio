@@ -1,0 +1,12 @@
+[Unit]
+Description=Accumulate neutral Phase 2 position reconciliation evidence
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+Unit=pio-phase2-position-observer.service
+
+[Install]
+WantedBy=timers.target
