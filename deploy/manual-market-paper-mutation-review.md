@@ -77,8 +77,16 @@ requiring backup capture before any future mutation, but deliberately keeps:
 - **backup_material_captured=false**
 - **requires_backup_capture_before_mutation=true** when an update/patch exists.
 
-A future mutation executor must capture and verify the actual rollback bytes
-before changing an update/patch target. This review does not create that backup.
+This review does not create that backup. In the preservation-aware path, the
+next reviewed rollback-material stage is
+`deploy/tools/capture_manual_market_paper_preserved_backups.py`, documented in
+`manual-market-paper-preserved-backup-capture.md`.
+
+That backup tool validates the complete preserved evidence package, re-checks
+the production expected-current files, captures only required rollback bytes
+under `/var/tmp`, verifies their exact blob identities, and re-checks the
+production targets after capture. A ready backup capture still does not
+authorize mutation.
 
 ## Result
 
@@ -105,7 +113,9 @@ Even when the review passes:
 ## Stop boundary
 
 A passing mutation review is evidence for a separate production-change review;
-it is not a deployment command.
+it is not a deployment command. For the preservation-aware chain, continue only
+to the sealed evidence package and the private rollback-backup capture; both
+remain non-authorizing.
 
 A preservation review is not interchangeable with this mutation review. The
 preservation review authorizes neither source rebase nor production mutation;
