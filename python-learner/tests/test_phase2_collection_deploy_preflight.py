@@ -289,3 +289,18 @@ def test_apply_rejects_modified_default_manifest_bytes(
             apply=True,
             backup_dir=tmp_path / "backups",
         )
+
+
+def test_reviewed_manifest_reserves_state_reader_for_dedicated_guard():
+    payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
+
+    assert payload["deployment_scope"] == (
+        "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER"
+    )
+    assert "rust-executor/src/state_reader.rs" not in payload["deployment_files"]
+    assert "rust-executor/src/state_reader.rs" not in (
+        payload["deployment_target_file_blobs"]
+    )
+    assert "rust-executor/src/state_reader.rs" not in (
+        payload["deployment_base_file_blobs"]
+    )
