@@ -10,7 +10,7 @@ submit a transaction, or authorize production mutation.
 Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-affe01eafdf01d7ca8ea098900b2de7890a62ec0
+f73eb7d056de99e9d1ef07131188d2a8018edfc9
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="affe01eafdf01d7ca8ea098900b2de7890a62ec0"
+REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -252,7 +252,7 @@ because validation was blocked on Cargo. Reuse its sealed candidate report and
 candidate file with a fresh reviewed source checkout, for example:
 
 ~~~bash
-REVIEWED_REF="affe01eafdf01d7ca8ea098900b2de7890a62ec0"
+REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
 SRC="$(mktemp -d /var/tmp/pio-candidate-validation-source.XXXXXX)"
 CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
 VALIDATION_REPORT="/var/tmp/pio-state-reader-candidate-validation.retry.json"
@@ -296,7 +296,7 @@ For the currently sealed candidate, reuse:
 Export only the candidate-vs-reviewed-target delta:
 
 ~~~bash
-REVIEWED_REF="affe01eafdf01d7ca8ea098900b2de7890a62ec0"
+REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
 SRC="$(mktemp -d /var/tmp/pio-portable-patch-source.XXXXXX)"
 CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
 PATCH="/var/tmp/pio-state-reader-preserved-candidate.patch"
@@ -329,6 +329,75 @@ rather than guessed ahead of time.
 This patch is suitable for off-host validation of the exact candidate. Do not
 publish it into normal public repository history solely to obtain CI; it contains
 preserved production-local source changes.
+
+## Validate the portable patch on a non-production host
+
+The current production-host validation result is sealed as:
+
+- candidate report SHA-256:
+  `de66e27efa3e267f404025fb69e44df620ab7d593eece502f7d65b6f71cc4040`;
+- candidate Git blob:
+  `f54a1021cf8f89d285bde957d1f72d81857ec2fa`;
+- production-host validation blocker: `CARGO_NOT_FOUND`;
+- production remained unmodified and mutation remained unauthorized.
+
+Do not install Rust on production merely to continue validation.
+
+After exporting the bounded patch and patch report, transfer only those two
+artifacts privately to a non-production host. For example, from the validating
+host:
+
+~~~bash
+scp ubuntu@<production-host>:/var/tmp/pio-state-reader-preserved-candidate.patch .
+scp ubuntu@<production-host>:/var/tmp/pio-state-reader-preserved-candidate.patch.json .
+~~~
+
+Do not upload the patch to normal public repository history.
+
+On a non-production host with an already-installed Cargo toolchain, clone the
+reviewed source and validate the transferred patch:
+
+~~~bash
+set -euo pipefail
+
+REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
+SRC="$(mktemp -d /var/tmp/pio-portable-validation-source.XXXXXX)"
+PATCH="$PWD/pio-state-reader-preserved-candidate.patch"
+PATCH_REPORT="$PWD/pio-state-reader-preserved-candidate.patch.json"
+VALIDATION_REPORT="$PWD/pio-state-reader-portable-validation.json"
+
+git clone --quiet https://github.com/Dtwosam/Pio.git "$SRC"
+git -C "$SRC" checkout --quiet --detach "$REVIEWED_REF"
+test "$(git -C "$SRC" rev-parse HEAD)" = "$REVIEWED_REF"
+
+set +e
+python3 "$SRC/deploy/tools/validate_manual_market_paper_state_reader_portable_patch.py" \
+  --source-tree "$SRC" \
+  --patch-report "$PATCH_REPORT" \
+  --patch-file "$PATCH" \
+  > "$VALIDATION_REPORT"
+VALIDATION_RC=$?
+set -e
+
+python3 -m json.tool "$VALIDATION_REPORT"
+printf 'validation_exit_code: %s\n' "$VALIDATION_RC"
+~~~
+
+The portable validator:
+
+1. validates the sealed patch report;
+2. validates the transferred patch SHA-256 and size;
+3. copies reviewed source into a temporary workspace under `/var/tmp`;
+4. runs `git apply --check` and applies the patch only in that temporary copy;
+5. requires the reconstructed `state_reader.rs` to equal candidate Git blob
+   `f54a1021cf8f89d285bde957d1f72d81857ec2fa` plus its sealed SHA-256/size;
+6. discovers only an already-installed Cargo executable;
+7. runs default and `live-submit` Rust tests with `CARGO_BUILD_JOBS=1`;
+8. seals reconstruction/toolchain/test results while keeping every production
+   authorization false.
+
+A passing `validation_ready=true` result validates the exact preserved
+candidate bytes, but still does not authorize copying them into production.
 
 ## Stop boundary
 
