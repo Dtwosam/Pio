@@ -54,6 +54,7 @@ class MarketPaperExplorationReport:
     pools_ready: int
     pools_considered: int
     positions_opened: int
+    positions_already_applied: int
     max_new_positions: int
     items: tuple[MarketPaperExplorationItem, ...]
 
@@ -70,6 +71,26 @@ def _open_pools(storage: Storage, *, account_id: str) -> set[str]:
             WHERE account_id = ? AND status = 'OPEN'
             """,
             (account_id,),
+        ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def _run_position_ids(
+    storage: Storage,
+    *,
+    account_id: str,
+    run_id: str,
+) -> set[str]:
+    prefix = f"empirical:{account_id}:{run_id}:"
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT position_id
+            FROM paper_positions
+            WHERE account_id = ?
+              AND substr(position_id, 1, ?) = ?
+            """,
+            (account_id, len(prefix), prefix),
         ).fetchall()
     return {str(row[0]) for row in rows}
 
@@ -185,6 +206,7 @@ def run_market_paper_exploration(
             pools_ready=0,
             pools_considered=0,
             positions_opened=0,
+            positions_already_applied=0,
             max_new_positions=max_new_positions,
             items=(),
         )
@@ -208,6 +230,12 @@ def run_market_paper_exploration(
         for item in intake.pools
         if item.ready_for_candidate_cycle
     ]
+    already_applied_ids = _run_position_ids(
+        storage,
+        account_id=account_id,
+        run_id=run_id,
+    )
+    already_applied = len(already_applied_ids)
 
     contexts: dict[str, tuple[str, str]] = {}
     items: list[MarketPaperExplorationItem] = []
@@ -283,7 +311,7 @@ def run_market_paper_exploration(
     opened = 0
     considered = 0
     for item in ready:
-        if opened >= max_new_positions:
+        if already_applied + opened >= max_new_positions:
             break
         pool_address = item.pool_address
         context = contexts.get(pool_address)
@@ -331,8 +359,6 @@ def run_market_paper_exploration(
                 ).fetchone()
             if existing is not None:
                 status = "ALREADY_APPLIED"
-                if str(existing[0]) == "OPEN":
-                    opened += 1
                 items.append(
                     MarketPaperExplorationItem(
                         pool_address=pool_address,
@@ -403,6 +429,7 @@ def run_market_paper_exploration(
         pools_ready=len(ready),
         pools_considered=considered,
         positions_opened=opened,
+        positions_already_applied=already_applied,
         max_new_positions=max_new_positions,
         items=tuple(items),
     )

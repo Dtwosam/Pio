@@ -132,6 +132,50 @@ def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
     assert report.live_authorized is False
 
 
+def test_run_id_cap_counts_already_applied_positions_across_retries(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    _chain(storage, "A", "mint-a", "2026-09-27T08:00:00+00:00")
+    _chain(storage, "B", "mint-b", "2026-09-27T08:00:00+00:00")
+    open_paper_position(
+        storage,
+        event_key="existing-r1-a",
+        account_id="paper",
+        position_id="empirical:paper:r1:A",
+        pool_address="A",
+        policy_source="DETERMINISTIC",
+        strategy="SPOT",
+        min_bin_id=0,
+        max_bin_id=0,
+        capital_quote=100,
+    )
+
+    entries = []
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="r1",
+        per_position_capital_quote=100,
+        network_cost_quote=0,
+        max_new_positions=1,
+        intake_runner=lambda database_path, **kwargs: _intake("A", "B"),
+        quote_refresher=lambda *args, **kwargs: (),
+        quote_status_loader=lambda *args, **kwargs: SimpleNamespace(
+            fresh=True,
+            quote_per_atomic=1,
+        ),
+        entry_runner=lambda storage_arg, **kwargs: entries.append(kwargs),
+        scheduler_state_loader=lambda storage_arg, **kwargs: SimpleNamespace(
+            owner_id=None,
+            lease_until=None,
+        ),
+    )
+
+    assert entries == []
+    assert report.positions_opened == 0
+    assert report.positions_already_applied == 1
+
+
 def test_exploration_skips_pool_already_open_in_account(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
