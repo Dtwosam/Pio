@@ -433,9 +433,6 @@ def validate_preservation_bundle(bundle: dict[str, Any]) -> None:
     ):
         if bundle.get(field) is not True:
             raise ValueError(f"preservation bundle requires {field}=true")
-        raise ValueError(
-            "preservation bundle must require separate mutation authorization"
-        )
 
     for field in (
         "production_deployment_authorized",
