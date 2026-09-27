@@ -140,6 +140,58 @@ def test_busy_scheduler_blocks_new_entries(tmp_path):
     assert report.new_entries_skipped_reason == "SCHEDULER_BUSY"
 
 
+def test_waiting_quotes_scheduler_status_blocks_new_entries(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    def explore(*args, **kwargs):
+        raise AssertionError("WAITING_QUOTES must block new entries")
+
+    report = run_manual_market_paper_cycle(
+        storage,
+        account_id="paper",
+        run_id="waiting-quotes",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        observed_at=NOW,
+        research_runner=lambda storage_arg, **kwargs: _research(),
+        scheduler_runner=lambda storage_arg, **kwargs: _scheduler(
+            "WAITING_QUOTES"
+        ),
+        exploration_runner=explore,
+    )
+
+    assert report.status == "PARTIAL"
+    assert report.exploration is None
+    assert report.new_entries_skipped_reason == (
+        "SCHEDULER_WAITING_QUOTES"
+    )
+
+
+def test_exploration_unhealthy_race_is_partial_and_fail_closed(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    report = run_manual_market_paper_cycle(
+        storage,
+        account_id="paper",
+        run_id="unhealthy-race",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        observed_at=NOW,
+        research_runner=lambda storage_arg, **kwargs: _research(),
+        scheduler_runner=lambda storage_arg, **kwargs: _scheduler(),
+        exploration_runner=lambda storage_arg, **kwargs: _exploration(
+            opened=0,
+            status="SCHEDULER_UNHEALTHY",
+        ),
+    )
+
+    assert report.status == "PARTIAL"
+    assert report.new_entries_skipped_reason == (
+        "EXPLORATION_SCHEDULER_UNHEALTHY"
+    )
+    assert report.new_positions_pending_next_tick == 0
+
+
 def test_failed_scheduler_blocks_entries_and_redacts_raw_error(tmp_path):
     storage = Storage(tmp_path / "pio.db")
 

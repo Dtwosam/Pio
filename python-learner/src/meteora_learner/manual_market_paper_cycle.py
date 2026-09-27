@@ -23,11 +23,10 @@ ResearchRunner = Callable[..., MarketResearchCycleReport]
 SchedulerRunner = Callable[..., ScheduledPaperTickReport]
 ExplorationRunner = Callable[..., MarketPaperExplorationReport]
 
-BLOCKING_SCHEDULER_STATUSES = {
-    "BUSY",
-    "FAILED",
-    "MARKET_REFRESH_FAILED",
-    "PARTIAL",
+ENTRY_SAFE_SCHEDULER_STATUSES = {
+    "COMPLETE",
+    "IDLE",
+    "NO_NEW_OBSERVATIONS",
 }
 
 
@@ -205,7 +204,7 @@ def run_manual_market_paper_cycle(
     skip_reason = None
     exploration = None
 
-    if scheduler.status in BLOCKING_SCHEDULER_STATUSES:
+    if scheduler.status not in ENTRY_SAFE_SCHEDULER_STATUSES:
         skip_reason = f"SCHEDULER_{scheduler.status}"
     elif research.status == "FAILED":
         skip_reason = "MARKET_RESEARCH_FAILED"
@@ -224,8 +223,8 @@ def run_manual_market_paper_cycle(
             observed_at=timestamp,
         )
         _check_exploration(exploration)
-        if exploration.status == "SCHEDULER_BUSY":
-            skip_reason = "EXPLORATION_SCHEDULER_BUSY"
+        if exploration.status != "COMPLETE":
+            skip_reason = f"EXPLORATION_{exploration.status}"
 
     pending = (
         exploration.positions_opened
@@ -233,12 +232,18 @@ def run_manual_market_paper_cycle(
         else 0
     )
 
-    if skip_reason == "EXPLORATION_SCHEDULER_BUSY":
+    if (
+        scheduler.status == "BUSY"
+        or skip_reason == "EXPLORATION_SCHEDULER_BUSY"
+    ):
         status = "BUSY"
-    elif scheduler.status == "BUSY":
-        status = "BUSY"
-    elif scheduler.status in BLOCKING_SCHEDULER_STATUSES:
+    elif scheduler.status not in ENTRY_SAFE_SCHEDULER_STATUSES:
         status = "PARTIAL" if research.status != "FAILED" else "FAILED"
+    elif (
+        exploration is not None
+        and exploration.status != "COMPLETE"
+    ):
+        status = "PARTIAL"
     elif research.status == "FAILED":
         status = "PARTIAL"
     elif research.status == "PARTIAL":
