@@ -67,17 +67,21 @@ Every authorization field remains false, including
 An empty operation list is valid when every required production file is already
 at its reviewed target.
 
+## Fresh read-only gate
+
+After saving the plan, run
+`check_manual_market_paper_deployment_gate.py` immediately before any future
+separately reviewed mutation. The gate validates this plan, rebuilds it from the
+reviewed source and handoff, re-runs current production readiness, and fails if
+any bound production state has drifted.
+
 ## Stop boundary
 
-Do not turn the plan into file mutations from this step.
+Do not turn the plan into file mutations from this step. A passing fresh gate
+still reports `requires_separate_mutation_authorization=true` and
+`mutation_authorized=false`.
 
-Any later executor must be separately reviewed and must, immediately before
-mutation:
-
-1. re-run the sealed handoff verification against current production;
-2. require an exact state match;
-3. bind itself to the exact saved plan digest and reviewed source artifacts;
-4. preserve backups and rollback for every update/patch;
-5. leave detector/watcher services running unless a concrete failure separately
-   requires intervention;
-6. never move the Phase-2 detector cursor as part of PAPER deployment.
+Any later executor must be separately reviewed and must preserve backups and
+rollback for every update/patch, leave detector/watcher services running unless
+a concrete failure separately requires intervention, and never move the Phase-2
+detector cursor as part of PAPER deployment.
