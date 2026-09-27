@@ -24,6 +24,7 @@ EXPECTED_HUNK_EVIDENCE_SHA256 = (
 EXPECTED_PRODUCTION_HEAD = "ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8"
 EXPECTED_CURRENT_BLOB = "d1267db6708b91bc8cacabffcd397a380866c79a"
 EXPECTED_TARGET_BLOB = "30d1435af1329bca07f73d6639539b43503e84e9"
+EXPECTED_PATH = "rust-executor/src/state_reader.rs"
 
 EXPECTED_CONFLICTS = (
     {
@@ -298,6 +299,12 @@ def validate_candidate_report(report: dict[str, Any]) -> None:
         raise ValueError("candidate report current blob mismatch")
     if report.get("target_blob") != EXPECTED_TARGET_BLOB:
         raise ValueError("candidate report target blob mismatch")
+    if report.get("path") != EXPECTED_PATH:
+        raise ValueError("candidate report path scope mismatch")
+
+    repository = report.get("repository")
+    if not isinstance(repository, str) or not repository.startswith("/"):
+        raise ValueError("candidate report repository must be absolute")
 
     resolutions = report.get("resolutions")
     if not isinstance(resolutions, list) or len(resolutions) != 2:
