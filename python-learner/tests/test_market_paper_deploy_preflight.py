@@ -7,6 +7,12 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "deploy" / "tools" / "apply_phase2_collection_stack.py"
 MANIFEST = ROOT / "deploy" / "manifests" / "market-paper-manual-cycle.json"
+PREREQUISITE = (
+    ROOT
+    / "deploy"
+    / "manifests"
+    / "market-paper-phase2-prerequisites.json"
+)
 
 SPEC = importlib.util.spec_from_file_location(
     "apply_phase2_collection_stack_for_market_paper",
@@ -35,8 +41,6 @@ EXPECTED_RUNTIME_FILES = {
     "python-learner/src/meteora_learner/paper_chain_valuation.py",
     "python-learner/src/meteora_learner/paper_empirical_entry.py",
     "python-learner/src/meteora_learner/paper_empirical_entry_workflow.py",
-    "python-learner/src/meteora_learner/research_store.py",
-    "python-learner/src/meteora_learner/storage.py",
 }
 
 
@@ -70,6 +74,8 @@ def test_market_paper_manifest_has_exact_runtime_scope_and_target_blobs():
 
     assert "python-learner/pyproject.toml" not in paths
     assert "python-learner/src/meteora_learner/cli.py" not in paths
+    assert "python-learner/src/meteora_learner/research_store.py" not in paths
+    assert "python-learner/src/meteora_learner/storage.py" not in paths
     assert "rust-executor/src/state_reader.rs" not in paths
     assert "rust-executor/src/main.rs" not in paths
 
