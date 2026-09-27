@@ -46,10 +46,10 @@ The current production continuation is evidence-first and read-only:
 - the manual market/PAPER readiness path preflights only the exact Phase-2 shared prerequisites (`research_store.py` and `storage.py`), the separately guarded state reader, and the locked runtime-only PAPER overlay;
 - capture a sealed production-state handoff with `deploy/tools/manual_market_paper_handoff.py`;
 - turn that handoff into a deterministic, non-mutating operation list with `deploy/tools/build_manual_market_paper_deployment_plan.py`;
-- immediately before any future separately reviewed mutation, run `deploy/tools/check_manual_market_paper_deployment_gate.py` so current production must still match the sealed handoff and saved plan exactly;
+- immediately before any future separately reviewed mutation, run `deploy/tools/check_manual_market_paper_deployment_gate.py` so current production must still match the sealed handoff and saved plan exactly; preserve the emitted `gate_sha256` report as sealed review evidence;
 - no current manifest, handoff, plan, or passing gate authorizes deployment, service restart, timer enablement, detector cursor movement, transaction signing/submission, or real capital.
 
-The next production action, once the production host is reachable, is therefore: fresh read-only readiness -> sealed handoff -> deterministic deployment plan -> fresh read-only deployment gate. Any selective file mutation after that remains a separate review/authorization step and must preserve all unrelated production-local files.
+The next production action, once the production host is reachable, is therefore: fresh read-only readiness -> sealed handoff -> deterministic deployment plan -> fresh read-only deployment gate with a sealed gate digest. Any selective file mutation after that remains a separate review/authorization step and must preserve all unrelated production-local files.
 
 Current research paths:
 - `DISCRETE_COMPLETED_BIN_V1`: OHLC inventory/IL studies.

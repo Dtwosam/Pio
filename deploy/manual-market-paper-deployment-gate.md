@@ -11,18 +11,25 @@ It binds three things together:
 3. a fresh read-only production readiness result from the current /opt/pio
    tree.
 
-A passing gate still does **not** authorize deployment.
+A passing gate still does **not** authorize deployment. The emitted report is
+itself sealed with a canonical `gate_sha256` so the exact gate evidence can be
+reviewed later without treating mutable console text as authority.
 
 ## Run the gate
 
 Use the same reviewed source lineage used to build the handoff and plan:
 
 ~~~bash
+GATE_REPORT=/var/tmp/pio-manual-paper-deployment-gate.json
+
 python3 "$SRC/deploy/tools/check_manual_market_paper_deployment_gate.py" \
   --repo /opt/pio \
   --source-tree "$SRC" \
   --handoff /var/tmp/pio-manual-paper-preflight-handoff.json \
-  --plan /var/tmp/pio-manual-paper-deployment-plan.json
+  --plan /var/tmp/pio-manual-paper-deployment-plan.json \
+  > "$GATE_REPORT"
+
+cat "$GATE_REPORT"
 ~~~
 
 The gate derives the PAPER account and target pool from the sealed handoff. They
@@ -63,6 +70,12 @@ No source file is copied or patched during this gate.
 
 **changed_sections** identifies top-level handoff fields that drifted.
 
+**gate_sha256** seals the complete reviewed gate identity: the handoff/plan
+digests, fresh-state match result, changed-section list, operation/deployment
+flags, readiness evidence, and all authorization locks. The tool validates that
+schema and digest before emitting the report. Re-hashing a modified report does
+not make an authorization flip or contradictory readiness evidence valid.
+
 Even when the gate passes:
 
 - **requires_separate_mutation_authorization=true**;
@@ -76,7 +89,8 @@ Even when the gate passes:
 Do not interpret a passing gate as permission to mutate /opt/pio.
 
 The next step, if production deployment is explicitly reviewed later, is a
-separate selective executor bound to the exact gate inputs and plan digest. It
-must not use broad Git operations, must re-check every expected-current blob
-immediately before each operation, and must provide rollback for every update
-or patch.
+separate selective executor bound to the exact sealed handoff, plan digest, and
+gate digest. The gate remains point-in-time evidence, so that future executor
+must still re-check every expected-current blob immediately before each
+operation. It must not use broad Git operations and must provide rollback for
+every update or patch.
