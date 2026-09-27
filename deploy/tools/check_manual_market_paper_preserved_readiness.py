@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 FORMAT_VERSION = 1
 ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_PRESERVED_READINESS_V1"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 TARGET_POOL = "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ"
 DETECTOR_SERVICE = "pio-phase2-add-detector.service"
@@ -569,6 +570,61 @@ def _validate_layer_record(value: Any, *, label: str) -> None:
         raise ValueError(f"preserved readiness {label} must not authorize apply")
 
 
+def _manifest_contract(
+    manifest_path: Path,
+    *,
+    preserved_overrides: dict[str, tuple[str | None, str]] | None = None,
+) -> list[tuple[str, str | None, str]]:
+    expected_blob = REVIEWED_SOURCE_BLOBS[manifest_path]
+    resolved = REPO_ROOT / manifest_path
+    if resolved.is_symlink() or not resolved.is_file():
+        raise ValueError(f"preserved readiness manifest is invalid: {manifest_path}")
+    if _git_blob_sha(resolved) != expected_blob:
+        raise ValueError(f"preserved readiness manifest blob mismatch: {manifest_path}")
+
+    payload = _load_json(resolved)
+    files = payload.get("deployment_files")
+    bases = payload.get("deployment_base_file_blobs")
+    targets = payload.get("deployment_target_file_blobs")
+    if not isinstance(files, list) or not isinstance(bases, dict) or not isinstance(targets, dict):
+        raise ValueError(f"preserved readiness manifest schema is invalid: {manifest_path}")
+
+    overrides = preserved_overrides or {}
+    contract: list[tuple[str, str | None, str]] = []
+    for raw in files:
+        relative = _safe_relative_path(str(raw))
+        if relative in overrides:
+            base_blob, target_blob = overrides[relative]
+        else:
+            base_blob = bases.get(relative)
+            target_blob = targets.get(relative)
+        if base_blob is not None and not _is_hex_digest(base_blob, 40):
+            raise ValueError(f"preserved readiness manifest base blob is invalid: {relative}")
+        if not _is_hex_digest(target_blob, 40):
+            raise ValueError(f"preserved readiness manifest target blob is invalid: {relative}")
+        contract.append((relative, base_blob, target_blob))
+    return contract
+
+
+def _validate_layer_contract(
+    value: dict[str, Any],
+    contract: list[tuple[str, str | None, str]],
+    *,
+    label: str,
+) -> None:
+    files = value["files"]
+    observed = [
+        (
+            item["path"],
+            item["expected_current_blob"],
+            item["target_blob"],
+        )
+        for item in files
+    ]
+    if observed != contract:
+        raise ValueError(f"preserved readiness {label} deployment contract mismatch")
+
+
 def _validate_state_record(value: Any) -> None:
     if not isinstance(value, dict):
         raise ValueError("preserved readiness state_reader must be an object")
@@ -672,12 +728,49 @@ def validate_preserved_readiness(report: dict[str, Any]) -> None:
     ):
         raise ValueError("preserved readiness paper account is invalid")
 
+    for path_field in ("repository", "reviewed_source_tree"):
+        value = report.get(path_field)
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            raise ValueError(f"preserved readiness {path_field} must be absolute")
+    bundle_value = report.get("private_bundle_dir")
+    if (
+        not isinstance(bundle_value, str)
+        or not bundle_value.startswith("/var/tmp/")
+        or ".." in PurePosixPath(bundle_value).parts
+    ):
+        raise ValueError("preserved readiness private bundle path is invalid")
+
+    cursor = report.get("target_pool_cursor")
+    if cursor is not None and (not isinstance(cursor, str) or not cursor):
+        raise ValueError("preserved readiness target cursor is invalid")
+
     if report.get("target_pool") != TARGET_POOL:
         raise ValueError("preserved readiness target pool mismatch")
 
     _validate_layer_record(report.get("phase2"), label="phase2")
     _validate_state_record(report.get("state_reader"))
     _validate_layer_record(report.get("market_paper"), label="market_paper")
+
+    phase2_contract = _manifest_contract(
+        PHASE2_MANIFEST,
+        preserved_overrides={
+            RESEARCH_STORE_PATH: (
+                EXPECTED_RESEARCH_STORE_CURRENT_BLOB,
+                EXPECTED_RESEARCH_STORE_CANDIDATE_BLOB,
+            ),
+        },
+    )
+    runtime_contract = _manifest_contract(RUNTIME_MANIFEST)
+    _validate_layer_contract(
+        report["phase2"],
+        phase2_contract,
+        label="phase2",
+    )
+    _validate_layer_contract(
+        report["market_paper"],
+        runtime_contract,
+        label="market_paper",
+    )
 
     expected_operational = (
         report["detector_service"] == "active"
