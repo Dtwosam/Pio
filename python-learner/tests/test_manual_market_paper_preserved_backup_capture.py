@@ -319,6 +319,25 @@ def test_backup_report_validates_ready_non_authorizing_capture():
     assert report["mutation_authorized"] is False
 
 
+def test_rehashed_backup_report_cannot_escape_backup_files_tree():
+    report = _synthetic_report()
+    report["operation_backups"][0]["backup_relative_path"] = "files/../../escape"
+    identity = {
+        field: report[field]
+        for field in MODULE.REPORT_FIELDS
+    }
+    report["backup_capture_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+    try:
+        MODULE.validate_backup_capture(report)
+    except ValueError as exc:
+        assert "backup-relative path is unsafe" in str(exc)
+    else:
+        raise AssertionError("rehashed backup path traversal must fail closed")
+
+
 def test_tampered_backup_report_fails_digest_validation():
     report = _synthetic_report()
     report["operation_backups"][0]["backup_size"] += 1
