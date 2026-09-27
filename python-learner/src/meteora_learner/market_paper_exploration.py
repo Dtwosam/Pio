@@ -70,24 +70,16 @@ def _open_pools(storage: Storage, *, account_id: str) -> set[str]:
     return {str(row[0]) for row in rows}
 
 
-def _latest_chain_pool(
+def _chain_pool_at(
     storage: Storage,
     *,
     pool_address: str,
-) -> tuple[str, dict[str, Any]] | None:
-    store = ResearchStore(storage.path)
-    times = store.chain_observation_times(
+    observed_at: str,
+) -> dict[str, Any] | None:
+    return ResearchStore(storage.path).chain_pool_snapshot_at(
         pool_address,
-        limit=1,
-        ascending=False,
+        observed_at,
     )
-    if not times:
-        return None
-    observed_at = str(times[0])
-    pool = store.chain_pool_snapshot_at(pool_address, observed_at)
-    if pool is None:
-        return None
-    return observed_at, pool
 
 
 def _atomic_budget(
@@ -190,8 +182,8 @@ def run_market_paper_exploration(
                 )
             )
             continue
-        latest = _latest_chain_pool(storage, pool_address=pool_address)
-        if latest is None:
+        decision_at = item.latest_chain_observed_at
+        if decision_at is None:
             items.append(
                 MarketPaperExplorationItem(
                     pool_address=pool_address,
@@ -204,7 +196,24 @@ def run_market_paper_exploration(
                 )
             )
             continue
-        decision_at, pool = latest
+        pool = _chain_pool_at(
+            storage,
+            pool_address=pool_address,
+            observed_at=decision_at,
+        )
+        if pool is None:
+            items.append(
+                MarketPaperExplorationItem(
+                    pool_address=pool_address,
+                    token_y_mint=None,
+                    decision_observed_at=decision_at,
+                    status="CHAIN_CONTEXT_MISSING",
+                    position_id=None,
+                    amount_y_atomic=None,
+                    network_cost_y_atomic=None,
+                )
+            )
+            continue
         token_y_mint = str(pool.get("token_y_mint", "")).strip()
         if not token_y_mint:
             items.append(

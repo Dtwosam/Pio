@@ -46,6 +46,7 @@ def _intake(*pools):
             SimpleNamespace(
                 pool_address=pool,
                 ready_for_candidate_cycle=True,
+                latest_chain_observed_at="2026-09-27T08:00:00+00:00",
             )
             for pool in pools
         ),
