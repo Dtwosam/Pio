@@ -7,7 +7,7 @@ action, transaction signing/submission, or real-capital action.
 Reviewed source head for this preflight:
 
 ```text
-ead5b78004a6a17078a0b76da9d5f13d3b533d5d
+4815d662cd364b29a48460b233477564b5d39a68
 ```
 
 ## 1. Build an isolated reviewed source tree
@@ -18,7 +18,7 @@ production working tree.
 ```bash
 set -euo pipefail
 
-REVIEWED_REF="ead5b78004a6a17078a0b76da9d5f13d3b533d5d"
+REVIEWED_REF="4815d662cd364b29a48460b233477564b5d39a68"
 SRC="/var/tmp/pio-manual-paper-preflight-${REVIEWED_REF:0:12}"
 
 rm -rf "$SRC"

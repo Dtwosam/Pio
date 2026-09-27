@@ -85,6 +85,10 @@ def test_overlay_summary_separates_preflight_from_deployed_state():
     assert ready.content_ready is True
     assert ready.deployed is False
     assert ready.files_changed == 2
+    assert ready.pending == (
+        {"path": "file-0.py", "status": "READY_UPDATE"},
+        {"path": "file-1.py", "status": "READY_CREATE"},
+    )
 
     deployed = MODULE._overlay_summary(
         _overlay("ALREADY_TARGET", "ALREADY_TARGET")
@@ -92,12 +96,14 @@ def test_overlay_summary_separates_preflight_from_deployed_state():
     assert deployed.content_ready is True
     assert deployed.deployed is True
     assert deployed.files_changed == 0
+    assert deployed.pending == ()
 
     conflict = MODULE._overlay_summary(
         _overlay("ALREADY_TARGET", "CONFLICT_MODIFIED")
     )
     assert conflict.content_ready is False
     assert conflict.deployed is False
+    assert conflict.pending == ()
     assert conflict.nonready == (
         {"path": "file-1.py", "status": "CONFLICT_MODIFIED"},
     )
