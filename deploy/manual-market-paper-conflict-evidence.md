@@ -10,7 +10,7 @@ submit a transaction, or authorize production mutation.
 Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-affe01eafdf01d7ca8ea098900b2de7890a62ec0
+f73eb7d056de99e9d1ef07131188d2a8018edfc9
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="affe01eafdf01d7ca8ea098900b2de7890a62ec0"
+REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -135,6 +135,46 @@ baseline established:
   `30d1435af1329bca07f73d6639539b43503e84e9`.
 
 Only the Rust overlap regions need further content-level review.
+
+## Build the preserved research-store candidate outside production
+
+The clean three-way merge for `research_store.py` is now represented by an
+exact-evidence builder rather than only a remembered candidate hash.
+
+The builder is locked to:
+
+- production HEAD
+  `ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8`;
+- reviewed base blob
+  `16a86b63272ad48f4c185b39ecc2e0c14276ff9f`;
+- production-local current blob
+  `f9deb47c10c88a4e1e364dd12d6c7569c3826a98`;
+- reviewed target blob
+  `c9b9de5838d95a86bddffa6166b4d7a62e91cf16`;
+- clean merged candidate blob
+  `31bd88e3d74490f5d0b617ff4b36383e7e12e18f`.
+
+Construct it only under `/var/tmp`:
+
+~~~bash
+STAMP="$(date +%Y%m%d%H%M%S)"
+RESEARCH_CANDIDATE="/var/tmp/pio-research-store-preserved-candidate.$STAMP.py"
+RESEARCH_CANDIDATE_REPORT="/var/tmp/pio-research-store-preserved-candidate.$STAMP.json"
+
+python3 "$SRC/deploy/tools/build_manual_market_paper_research_store_candidate.py" \
+  --repo /opt/pio \
+  --source-tree "$SRC" \
+  --output "$RESEARCH_CANDIDATE" \
+  > "$RESEARCH_CANDIDATE_REPORT"
+
+python3 -m json.tool "$RESEARCH_CANDIDATE_REPORT"
+~~~
+
+The builder re-reads the exact production base/current bytes, re-runs the clean
+three-way merge, requires the candidate Git blob above, writes exactly one
+candidate file under `/var/tmp`, and seals SHA-256/size/diff metadata. It never
+writes `/opt/pio`, and it keeps mutation/service/cursor/timer/capital
+authorization false.
 
 ## Collect only the two state-reader conflict hunks
 
@@ -252,7 +292,7 @@ because validation was blocked on Cargo. Reuse its sealed candidate report and
 candidate file with a fresh reviewed source checkout, for example:
 
 ~~~bash
-REVIEWED_REF="affe01eafdf01d7ca8ea098900b2de7890a62ec0"
+REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
 SRC="$(mktemp -d /var/tmp/pio-candidate-validation-source.XXXXXX)"
 CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
 VALIDATION_REPORT="/var/tmp/pio-state-reader-candidate-validation.retry.json"
@@ -296,7 +336,7 @@ For the currently sealed candidate, reuse:
 Export only the candidate-vs-reviewed-target delta:
 
 ~~~bash
-REVIEWED_REF="affe01eafdf01d7ca8ea098900b2de7890a62ec0"
+REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
 SRC="$(mktemp -d /var/tmp/pio-portable-patch-source.XXXXXX)"
 CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
 PATCH="/var/tmp/pio-state-reader-preserved-candidate.patch"
@@ -329,6 +369,75 @@ rather than guessed ahead of time.
 This patch is suitable for off-host validation of the exact candidate. Do not
 publish it into normal public repository history solely to obtain CI; it contains
 preserved production-local source changes.
+
+## Validate the portable patch on a non-production host
+
+The current production-host validation result is sealed as:
+
+- candidate report SHA-256:
+  `de66e27efa3e267f404025fb69e44df620ab7d593eece502f7d65b6f71cc4040`;
+- candidate Git blob:
+  `f54a1021cf8f89d285bde957d1f72d81857ec2fa`;
+- production-host validation blocker: `CARGO_NOT_FOUND`;
+- production remained unmodified and mutation remained unauthorized.
+
+Do not install Rust on production merely to continue validation.
+
+After exporting the bounded patch and patch report, transfer only those two
+artifacts privately to a non-production host. For example, from the validating
+host:
+
+~~~bash
+scp ubuntu@<production-host>:/var/tmp/pio-state-reader-preserved-candidate.patch .
+scp ubuntu@<production-host>:/var/tmp/pio-state-reader-preserved-candidate.patch.json .
+~~~
+
+Do not upload the patch to normal public repository history.
+
+On a non-production host with an already-installed Cargo toolchain, clone the
+reviewed source and validate the transferred patch:
+
+~~~bash
+set -euo pipefail
+
+REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
+SRC="$(mktemp -d /var/tmp/pio-portable-validation-source.XXXXXX)"
+PATCH="$PWD/pio-state-reader-preserved-candidate.patch"
+PATCH_REPORT="$PWD/pio-state-reader-preserved-candidate.patch.json"
+VALIDATION_REPORT="$PWD/pio-state-reader-portable-validation.json"
+
+git clone --quiet https://github.com/Dtwosam/Pio.git "$SRC"
+git -C "$SRC" checkout --quiet --detach "$REVIEWED_REF"
+test "$(git -C "$SRC" rev-parse HEAD)" = "$REVIEWED_REF"
+
+set +e
+python3 "$SRC/deploy/tools/validate_manual_market_paper_state_reader_portable_patch.py" \
+  --source-tree "$SRC" \
+  --patch-report "$PATCH_REPORT" \
+  --patch-file "$PATCH" \
+  > "$VALIDATION_REPORT"
+VALIDATION_RC=$?
+set -e
+
+python3 -m json.tool "$VALIDATION_REPORT"
+printf 'validation_exit_code: %s\n' "$VALIDATION_RC"
+~~~
+
+The portable validator:
+
+1. validates the sealed patch report;
+2. validates the transferred patch SHA-256 and size;
+3. copies reviewed source into a temporary workspace under `/var/tmp`;
+4. runs `git apply --check` and applies the patch only in that temporary copy;
+5. requires the reconstructed `state_reader.rs` to equal candidate Git blob
+   `f54a1021cf8f89d285bde957d1f72d81857ec2fa` plus its sealed SHA-256/size;
+6. discovers only an already-installed Cargo executable;
+7. runs default and `live-submit` Rust tests with `CARGO_BUILD_JOBS=1`;
+8. seals reconstruction/toolchain/test results while keeping every production
+   authorization false.
+
+A passing `validation_ready=true` result validates the exact preserved
+candidate bytes, but still does not authorize copying them into production.
 
 ## Stop boundary
 
