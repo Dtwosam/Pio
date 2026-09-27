@@ -53,6 +53,33 @@ def _intake(*pools):
     )
 
 
+def test_exploration_refuses_to_race_active_paper_scheduler(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+
+    def should_not_run(*args, **kwargs):
+        raise AssertionError("market exploration must stop while scheduler is busy")
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="busy",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        intake_runner=should_not_run,
+        quote_refresher=should_not_run,
+        entry_runner=should_not_run,
+        scheduler_state_loader=lambda storage_arg, **kwargs: SimpleNamespace(
+            owner_id="worker",
+            lease_until="2099-01-01T00:00:00+00:00",
+        ),
+    )
+
+    assert report.status == "SCHEDULER_BUSY"
+    assert report.positions_opened == 0
+    assert report.items == ()
+
+
 def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
@@ -100,6 +127,7 @@ def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
     assert entries[1]["amount_y"] == 400
     assert entries[1]["network_cost_y_atomic"] == 4
     assert report.positions_opened == 2
+    assert report.status == "COMPLETE"
     assert report.paper_only is True
     assert report.live_authorized is False
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_CEILING
 from typing import Any, Callable
 
@@ -10,6 +11,7 @@ from .market_paper_intake import (
     build_market_paper_intake,
 )
 from .paper_account import paper_account_snapshot
+from .paper_scheduler import PaperSchedulerState, paper_scheduler_state
 from .paper_empirical_entry_workflow import (
     EmpiricalPaperEntryWorkflowReport,
     run_empirical_paper_entry_workflow,
@@ -23,6 +25,7 @@ IntakeRunner = Callable[..., MarketPaperIntakeReport]
 EntryRunner = Callable[..., EmpiricalPaperEntryWorkflowReport]
 QuoteStatusLoader = Callable[..., TokenQuoteStatus]
 QuoteRefresher = Callable[..., tuple[Any, ...]]
+SchedulerStateLoader = Callable[..., PaperSchedulerState]
 
 
 @dataclass(frozen=True)
@@ -47,6 +50,7 @@ class MarketPaperExplorationReport:
     paper_only: bool
     policy_actionable: bool
     live_authorized: bool
+    status: str
     pools_ready: int
     pools_considered: int
     positions_opened: int
@@ -80,6 +84,25 @@ def _chain_pool_at(
         pool_address,
         observed_at,
     )
+
+
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("market PAPER timestamps require timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _scheduler_busy(
+    state: PaperSchedulerState,
+    *,
+    as_of: str,
+) -> bool:
+    if state.owner_id is None:
+        return False
+    if state.lease_until is None:
+        return True
+    return _parse_time(state.lease_until) > _parse_time(as_of)
 
 
 def _atomic_budget(
@@ -121,6 +144,7 @@ def run_market_paper_exploration(
     quote_refresher: QuoteRefresher = refresh_jupiter_quotes_for_mints,
     quote_status_loader: QuoteStatusLoader = token_quote_status,
     entry_runner: EntryRunner = run_empirical_paper_entry_workflow,
+    scheduler_state_loader: SchedulerStateLoader = paper_scheduler_state,
 ) -> MarketPaperExplorationReport:
     """
     Open a bounded number of new virtual PAPER positions from ready market pools.
@@ -145,6 +169,26 @@ def run_market_paper_exploration(
 
     paper_account_snapshot(storage, account_id=account_id)
     observed_at = utc_now_iso()
+    scheduler_state = scheduler_state_loader(
+        storage,
+        account_id=account_id,
+    )
+    if _scheduler_busy(scheduler_state, as_of=observed_at):
+        return MarketPaperExplorationReport(
+            account_id=account_id,
+            run_id=run_id,
+            observed_at=observed_at,
+            paper_only=True,
+            policy_actionable=False,
+            live_authorized=False,
+            status="SCHEDULER_BUSY",
+            pools_ready=0,
+            pools_considered=0,
+            positions_opened=0,
+            max_new_positions=max_new_positions,
+            items=(),
+        )
+
     intake = intake_runner(
         storage.path,
         minimum_chain_observations=minimum_chain_observations,
@@ -355,6 +399,7 @@ def run_market_paper_exploration(
         paper_only=True,
         policy_actionable=False,
         live_authorized=False,
+        status="COMPLETE",
         pools_ready=len(ready),
         pools_considered=considered,
         positions_opened=opened,
