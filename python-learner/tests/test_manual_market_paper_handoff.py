@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 
@@ -25,6 +27,7 @@ def _report(**overrides):
         "source_tree": "/var/tmp/reviewed",
         "production_head": "abc123",
         "tracked_changes": 3,
+        "tracked_diff_sha256": "0" * 64,
         "detector_service": "active",
         "watcher_service": "active",
         "paper_account": "paper-proof",
@@ -75,6 +78,52 @@ def _report(**overrides):
 def test_pinned_readiness_tool_blob_matches_reviewed_source():
     path = ROOT / MODULE.READINESS_TOOL
     assert MODULE._git_blob_sha(path) == MODULE.EXPECTED_READINESS_TOOL_BLOB
+
+
+def test_tracked_diff_fingerprint_hashes_bytes_without_exposing_them(tmp_path):
+    seen = []
+    diff = b"diff --git a/a.py b/a.py\n+local production fix\n"
+
+    def runner(args, **kwargs):
+        seen.append((tuple(args), kwargs))
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout=diff,
+            stderr=b"",
+        )
+
+    digest = MODULE._tracked_diff_sha256(tmp_path, runner=runner)
+
+    assert digest == hashlib.sha256(diff).hexdigest()
+    assert seen[0][0] == (
+        "git",
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "--no-textconv",
+        "HEAD",
+        "--",
+    )
+    assert seen[0][1]["capture_output"] is True
+    assert seen[0][1]["check"] is False
+
+
+def test_tracked_diff_fingerprint_fails_closed_on_git_error(tmp_path):
+    def runner(args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=1,
+            stdout=b"",
+            stderr=b"failure",
+        )
+
+    try:
+        MODULE._tracked_diff_sha256(tmp_path, runner=runner)
+    except ValueError as exc:
+        assert "cannot fingerprint" in str(exc)
+    else:
+        raise AssertionError("git diff failure must fail closed")
 
 
 def test_snapshot_is_deterministic_and_never_authorizes_mutation():
@@ -145,6 +194,17 @@ def test_verify_reports_cursor_drift_without_mutating_snapshot():
     assert json.dumps(snapshot, sort_keys=True) == before
 
 
+def test_verify_reports_same_count_but_different_tracked_diff():
+    snapshot = MODULE.build_handoff_snapshot(_report())
+    result = MODULE.compare_handoff_snapshot(
+        snapshot,
+        _report(tracked_diff_sha256="f" * 64),
+    )
+
+    assert result["state_matches"] is False
+    assert result["changed_sections"] == ("tracked_diff_sha256",)
+
+
 def test_verify_accepts_exact_same_relevant_state():
     report = _report()
     snapshot = MODULE.build_handoff_snapshot(report)
@@ -161,6 +221,8 @@ def test_source_has_no_apply_restart_or_cursor_write_path():
 
     assert "mutation_authorized" in source
     assert "build_production_readiness" in source
+    assert "--no-ext-diff" in source
+    assert "--no-textconv" in source
     assert "apply=True" not in source
     assert 'systemctl", "restart' not in source
     assert 'systemctl", "start' not in source
