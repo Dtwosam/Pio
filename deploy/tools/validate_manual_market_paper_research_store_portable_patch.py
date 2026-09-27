@@ -27,6 +27,8 @@ REVIEWED_SOURCE_BLOBS = {
     EXPORTER_TOOL: "1c70ecdd49005fa55bc381dc9c40e705e6c9b508",
 }
 
+EXPECTED_CANDIDATE_BLOB = "31bd88e3d74490f5d0b617ff4b36383e7e12e18f"
+
 COMMANDS = (
     (
         "py_compile",
@@ -332,6 +334,11 @@ def validate_portable_validation_report(report: dict[str, Any]) -> None:
             raise ValueError(
                 f"research-store portable validation {field} is invalid"
             )
+
+    if report.get("candidate_git_blob") != EXPECTED_CANDIDATE_BLOB:
+        raise ValueError(
+            "research-store portable validation candidate blob mismatch"
+        )
 
     for field in ("patch_size", "candidate_size"):
         value = report.get(field)
