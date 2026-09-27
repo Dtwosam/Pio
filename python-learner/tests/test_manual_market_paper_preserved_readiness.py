@@ -101,6 +101,29 @@ def test_preserved_file_classification_ready_update_and_target(tmp_path):
     assert deployed.status == "ALREADY_TARGET"
 
 
+def test_preserved_file_classification_rejects_symlinked_parent(tmp_path):
+    repo = tmp_path / "repo"
+    source = tmp_path / "source"
+    repo.mkdir()
+    source.mkdir()
+
+    real_source_parent = source / "real"
+    real_source_parent.mkdir()
+    (real_source_parent / "file.rs").write_bytes(b"candidate\n")
+    (source / "alias").symlink_to(real_source_parent, target_is_directory=True)
+
+    candidate_blob = MODULE._git_blob_sha_bytes(b"candidate\n")
+    result = MODULE._classify_preserved_file(
+        repository=repo,
+        source_tree=source,
+        relative="alias/file.rs",
+        expected_current_blob="1" * 40,
+        target_blob=candidate_blob,
+    )
+
+    assert result.status == "SOURCE_SYMLINK_PARENT"
+
+
 def test_preserved_file_classification_rejects_unexpected_drift(tmp_path):
     repo = tmp_path / "repo"
     source = tmp_path / "source"
@@ -356,6 +379,8 @@ def test_preserved_readiness_has_read_only_production_surface():
 
     assert '"is-active"' in source
     assert "safe.directory=" in source
+    assert "SOURCE_SYMLINK_PARENT" in source
+    assert "CONFLICT_SYMLINK_PARENT" in source
     assert ".write_text(" not in source
     assert ".write_bytes(" not in source
     assert "shutil" not in source
