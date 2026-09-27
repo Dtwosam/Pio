@@ -18,7 +18,8 @@ The handoff records the exact safety-relevant preflight state and a canonical
 SHA-256 digest. Verification re-runs the same read-only readiness checker and
 fails closed when any bound section changes, including:
 
-- production Git HEAD or tracked-change count;
+- production Git HEAD and tracked-change count;
+- a SHA-256 fingerprint of the exact tracked working-tree diff;
 - detector/watcher service state;
 - selected PAPER service/timer state;
 - retained target-pool detector cursor;
@@ -26,6 +27,11 @@ fails closed when any bound section changes, including:
 - single-slot state-reader status;
 - manual market/PAPER overlay status;
 - readiness flags.
+
+The tracked-diff fingerprint is computed from `git diff --binary` with external
+diffs and text conversion disabled. Raw diff bytes are never written into the
+handoff. The tool fingerprints the tracked diff both before and after the
+read-only readiness pass and fails closed if it changes during capture.
 
 The isolated reviewed source-tree path itself is not part of the identity, so a
 fresh clone of the exact reviewed source can verify the same production state.
@@ -76,9 +82,12 @@ Verification succeeds only when:
 - the full production-state digest matches exactly.
 
 When state differs, `changed_sections` identifies the top-level areas that
-changed. Do not work around drift by checking out, resetting, cleaning, pulling
-over `/opt/pio`, restarting the detector/watcher, or editing the detector
-cursor. Re-review the new read-only state instead.
+changed. A `tracked_diff_sha256` change means the tracked local source content
+changed even if the tracked-change count stayed identical.
+
+Do not work around drift by checking out, resetting, cleaning, pulling over
+`/opt/pio`, restarting the detector/watcher, or editing the detector cursor.
+Re-review the new read-only state instead.
 
 ## Stop boundary
 
