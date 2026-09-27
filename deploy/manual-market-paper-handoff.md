@@ -89,9 +89,18 @@ Do not work around drift by checking out, resetting, cleaning, pulling over
 `/opt/pio`, restarting the detector/watcher, or editing the detector cursor.
 Re-review the new read-only state instead.
 
+## Next read-only stages
+
+After a handoff is captured, build the deterministic saved plan with
+`build_manual_market_paper_deployment_plan.py`. Immediately before any future
+separately reviewed mutation, run
+`check_manual_market_paper_deployment_gate.py`; the gate re-runs current
+production readiness and requires the current state to match this handoff and
+the saved plan exactly.
+
 ## Stop boundary
 
 This handoff is evidence for review only. It always emits
-`mutation_authorized=false`. A later deployment tool or runbook must keep its
-own explicit authorization boundary and must verify this snapshot immediately
-before applying any reviewed overlay.
+`mutation_authorized=false`. The deployment plan and fresh gate also remain
+non-authorizing. Do not apply reviewed overlays, restart services, move the
+detector cursor, enable PAPER automation, or use real capital from this step.
