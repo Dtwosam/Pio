@@ -53,6 +53,7 @@ IDENTITY_FIELDS = (
     "candidate_size",
     "patch_file",
     "workspace_under_var_tmp",
+    "workspace_source_precedence",
     "python_executable",
     "python_available",
     "pytest_available",
@@ -181,6 +182,18 @@ def _resolve_python(python_bin: str | None) -> str | None:
         if resolved_path.is_file() and os.access(resolved_path, os.X_OK):
             return key
     return None
+
+
+def _validation_env(python_dir: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    workspace_src = python_dir / "src"
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(workspace_src)
+        if not existing
+        else str(workspace_src) + os.pathsep + existing
+    )
+    return env
 
 
 def _probe_pytest(
@@ -355,6 +368,10 @@ def validate_portable_validation_report(report: dict[str, Any]) -> None:
     if report.get("workspace_under_var_tmp") is not True:
         raise ValueError(
             "research-store portable validation workspace scope is invalid"
+        )
+    if report.get("workspace_source_precedence") is not True:
+        raise ValueError(
+            "research-store portable validation must bind temporary source precedence"
         )
 
     python_available = report.get("python_available")
@@ -616,7 +633,7 @@ def validate_portable_patch(
         python_executable = _resolve_python(python_bin)
         python_available = python_executable is not None
         python_dir = workspace / "python-learner"
-        env = dict(os.environ)
+        env = _validation_env(python_dir)
         if python_available:
             pytest_available = _probe_pytest(
                 python_executable=python_executable,
@@ -703,6 +720,7 @@ def validate_portable_patch(
         "candidate_size": patch_report["candidate_size"],
         "patch_file": str(patch_path),
         "workspace_under_var_tmp": True,
+        "workspace_source_precedence": True,
         "python_executable": python_executable,
         "python_available": python_available,
         "pytest_available": pytest_available,
