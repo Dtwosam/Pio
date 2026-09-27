@@ -53,6 +53,39 @@ def _overlay(*statuses, authorized=False):
     )
 
 
+
+def _deploy_file(
+    path,
+    status,
+    *,
+    expected_base_blob,
+    target_blob,
+    source_blob,
+    current_blob,
+):
+    return SimpleNamespace(
+        path=path,
+        status=status,
+        expected_base_blob=expected_base_blob,
+        target_blob=target_blob,
+        source_blob=source_blob,
+        current_blob=current_blob,
+    )
+
+
+def _deploy_report(*files):
+    ready = {"ALREADY_TARGET", "READY_CREATE", "READY_UPDATE"}
+    return SimpleNamespace(
+        content_ready=all(item.status in ready for item in files),
+        apply_authorized=False,
+        files_changed=sum(
+            item.status in {"READY_CREATE", "READY_UPDATE"}
+            for item in files
+        ),
+        files=tuple(files),
+    )
+
+
 def test_reviewed_readiness_source_artifacts_are_exactly_pinned():
     MODULE._verify_reviewed_source_artifacts(ROOT)
 
@@ -124,6 +157,144 @@ def test_overlay_summary_separates_preflight_from_deployed_state():
     assert conflict.nonready == (
         {"path": "file-1.py", "status": "CONFLICT_MODIFIED"},
     )
+
+
+
+def test_projected_market_preflight_resolves_only_safe_prerequisite_transition():
+    old_blob = "1" * 40
+    shared_target = "2" * 40
+    runtime_target = "3" * 40
+
+    prerequisite_file = _deploy_file(
+        "shared.py",
+        "READY_UPDATE",
+        expected_base_blob=old_blob,
+        target_blob=shared_target,
+        source_blob=shared_target,
+        current_blob=old_blob,
+    )
+    prerequisite_report = _deploy_report(prerequisite_file)
+
+    shared_market = _deploy_file(
+        "shared.py",
+        "CONFLICT_MODIFIED",
+        expected_base_blob=shared_target,
+        target_blob=shared_target,
+        source_blob=shared_target,
+        current_blob=old_blob,
+    )
+    runtime_file = _deploy_file(
+        "runtime.py",
+        "READY_CREATE",
+        expected_base_blob=None,
+        target_blob=runtime_target,
+        source_blob=runtime_target,
+        current_blob=None,
+    )
+    market_report = _deploy_report(shared_market, runtime_file)
+    assert market_report.content_ready is False
+
+    projected = MODULE._projected_market_overlay_summary(
+        market_report,
+        prerequisite_report,
+    )
+
+    assert projected.content_ready is True
+    assert projected.files_changed == 1
+    assert projected.status_counts == {
+        "ALREADY_TARGET": 1,
+        "READY_CREATE": 1,
+    }
+    assert projected.pending == (
+        {"path": "runtime.py", "status": "READY_CREATE"},
+    )
+    assert projected.nonready == ()
+    assert projected.projected_prerequisite_paths == ("shared.py",)
+    assert projected.mutation_authorized is False
+
+    # Projection is in-memory only. The current-state report remains a conflict.
+    assert shared_market.current_blob == old_blob
+    assert shared_market.status == "CONFLICT_MODIFIED"
+
+
+def test_projected_market_preflight_does_not_hide_prerequisite_conflict():
+    old_blob = "1" * 40
+    shared_target = "2" * 40
+
+    prerequisite_report = _deploy_report(
+        _deploy_file(
+            "shared.py",
+            "CONFLICT_MODIFIED",
+            expected_base_blob="0" * 40,
+            target_blob=shared_target,
+            source_blob=shared_target,
+            current_blob=old_blob,
+        )
+    )
+    market_report = _deploy_report(
+        _deploy_file(
+            "shared.py",
+            "CONFLICT_MODIFIED",
+            expected_base_blob=shared_target,
+            target_blob=shared_target,
+            source_blob=shared_target,
+            current_blob=old_blob,
+        )
+    )
+
+    projected = MODULE._projected_market_overlay_summary(
+        market_report,
+        prerequisite_report,
+    )
+
+    assert prerequisite_report.content_ready is False
+    assert projected.content_ready is False
+    assert projected.projected_prerequisite_paths == ()
+    assert projected.nonready == (
+        {"path": "shared.py", "status": "CONFLICT_MODIFIED"},
+    )
+
+
+def test_projected_market_preflight_preserves_structural_conflict():
+    target = "2" * 40
+    prerequisite_report = _deploy_report(
+        _deploy_file(
+            "shared.py",
+            "ALREADY_TARGET",
+            expected_base_blob="1" * 40,
+            target_blob=target,
+            source_blob=target,
+            current_blob=target,
+        )
+    )
+    market_report = _deploy_report(
+        _deploy_file(
+            "shared.py",
+            "CONFLICT_SYMLINK",
+            expected_base_blob=target,
+            target_blob=target,
+            source_blob=None,
+            current_blob=None,
+        )
+    )
+
+    projected = MODULE._projected_market_overlay_summary(
+        market_report,
+        prerequisite_report,
+    )
+
+    assert projected.content_ready is False
+    assert projected.nonready == (
+        {"path": "shared.py", "status": "CONFLICT_SYMLINK"},
+    )
+    assert projected.projected_prerequisite_paths == ()
+
+
+def test_deployment_preflight_uses_projected_market_state_not_current_conflict():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "market_paper_after_prerequisites.content_ready" in source
+    assert "and market_paper.content_ready" not in source
 
 
 def test_read_only_command_runner_never_requests_mutating_git_or_systemctl():
