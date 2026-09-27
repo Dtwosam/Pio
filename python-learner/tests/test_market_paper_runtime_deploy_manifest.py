@@ -8,11 +8,11 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "deploy" / "manifests" / "market-paper-runtime.json"
-PHASE2 = (
+PREREQUISITE = (
     ROOT
     / "deploy"
     / "manifests"
-    / "phase2-collection-integration.json"
+    / "market-paper-phase2-prerequisites.json"
 )
 TOOL = ROOT / "deploy" / "tools" / "apply_phase2_collection_stack.py"
 
@@ -43,8 +43,6 @@ EXPECTED_RUNTIME = {
     "python-learner/src/meteora_learner/paper_chain_valuation.py",
     "python-learner/src/meteora_learner/paper_empirical_entry.py",
     "python-learner/src/meteora_learner/paper_empirical_entry_workflow.py",
-    "python-learner/src/meteora_learner/research_store.py",
-    "python-learner/src/meteora_learner/storage.py",
 }
 
 
