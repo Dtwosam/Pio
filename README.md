@@ -23,6 +23,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - deploy/manual-market-paper-deployment-plan.md
 - deploy/manual-market-paper-deployment-gate.md
 - deploy/manual-market-paper-mutation-review.md
+- deploy/manual-market-paper-preserved-evidence-package.md
 - deploy/market-paper-manual-activation.md
 
 ## Current status
@@ -63,7 +64,7 @@ The current production continuation is evidence-first and read-only:
 - then run `deploy/tools/build_manual_market_paper_mutation_review.py` so the fresh gate, exact expected-current production blobs/absence, reviewed source targets, patch bytes, symlink safety, and rollback requirements are sealed as `review_sha256`;
 - no conflict-evidence report, manifest, handoff, plan, passing gate, or passing mutation review authorizes deployment, service restart, timer enablement, detector cursor movement, transaction signing/submission, or real capital.
 
-The production decision tree is therefore: fresh read-only readiness; if blocked, collect sealed conflict evidence, run read-only reconciliation, construct and privately validate the exact preserved candidates off production, then combine those validations into a sealed preservation review. A ready preservation review leads to a reviewed source/manifests rebase—not directly to mutation review—and all old readiness/handoff/plan/gate artifacts are superseded. After that rebase, restart from fresh readiness -> sealed handoff -> deterministic deployment plan -> fresh deployment gate -> read-only mutation review. Any selective production mutation remains a separate review/authorization step and must preserve all unrelated production-local files.
+The production decision tree is therefore: fresh read-only readiness; if blocked, collect sealed conflict evidence, run read-only reconciliation, construct and privately validate the exact preserved candidates off production, then combine those validations into a sealed preservation review. A ready preservation review leads to a reviewed source/manifests rebase—not directly to mutation review—and all old readiness/handoff/plan/gate artifacts are superseded. After that rebase, restart from fresh preserved readiness -> sealed preserved handoff -> deterministic preserved deployment plan -> fresh preserved deployment gate -> read-only preserved mutation review -> sealed preserved evidence package. The final package proves only that the read-only lineage is internally consistent; any selective production mutation remains a separate review/authorization step and must preserve all unrelated production-local files.
 
 Current research paths:
 - `DISCRETE_COMPLETED_BIN_V1`: OHLC inventory/IL studies.
