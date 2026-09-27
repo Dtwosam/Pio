@@ -7,6 +7,12 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "deploy" / "tools" / "apply_phase2_collection_stack.py"
 MANIFEST = ROOT / "deploy" / "manifests" / "market-paper-manual-cycle.json"
+PREREQUISITE = (
+    ROOT
+    / "deploy"
+    / "manifests"
+    / "market-paper-phase2-prerequisites.json"
+)
 
 SPEC = importlib.util.spec_from_file_location(
     "apply_phase2_collection_stack_for_market_paper",
@@ -35,8 +41,6 @@ EXPECTED_RUNTIME_FILES = {
     "python-learner/src/meteora_learner/paper_chain_valuation.py",
     "python-learner/src/meteora_learner/paper_empirical_entry.py",
     "python-learner/src/meteora_learner/paper_empirical_entry_workflow.py",
-    "python-learner/src/meteora_learner/research_store.py",
-    "python-learner/src/meteora_learner/storage.py",
 }
 
 
@@ -70,6 +74,8 @@ def test_market_paper_manifest_has_exact_runtime_scope_and_target_blobs():
 
     assert "python-learner/pyproject.toml" not in paths
     assert "python-learner/src/meteora_learner/cli.py" not in paths
+    assert "python-learner/src/meteora_learner/research_store.py" not in paths
+    assert "python-learner/src/meteora_learner/storage.py" not in paths
     assert "rust-executor/src/state_reader.rs" not in paths
     assert "rust-executor/src/main.rs" not in paths
 
@@ -81,7 +87,7 @@ def test_market_paper_manifest_has_exact_runtime_scope_and_target_blobs():
 
 def test_market_paper_manifest_enforces_phase2_shared_file_prerequisite():
     payload = _payload()
-    bases = payload["deployment_base_file_blobs"]
+    prerequisite = json.loads(PREREQUISITE.read_text(encoding="utf-8"))
 
     assert payload["prerequisite_collection_target_ref"] == (
         "7b306f05e842bffdcc6144de39d0346b97e2ab67"
@@ -89,12 +95,13 @@ def test_market_paper_manifest_enforces_phase2_shared_file_prerequisite():
     assert payload["prerequisite_collection_manifest"] == (
         "deploy/manifests/market-paper-phase2-prerequisites.json"
     )
-    assert bases[
-        "python-learner/src/meteora_learner/research_store.py"
-    ] == "c9b9de5838d95a86bddffa6166b4d7a62e91cf16"
-    assert bases[
-        "python-learner/src/meteora_learner/storage.py"
-    ] == "39bcc99413df357b89d261e854861e9e4a3fff23"
+    assert set(prerequisite["deployment_files"]) == {
+        "python-learner/src/meteora_learner/research_store.py",
+        "python-learner/src/meteora_learner/storage.py",
+    }
+    assert set(payload["deployment_files"]).isdisjoint(
+        prerequisite["deployment_files"]
+    )
 
 
 def test_market_paper_manifest_keeps_state_reader_on_dedicated_guard():

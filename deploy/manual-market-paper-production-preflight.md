@@ -7,7 +7,7 @@ action, transaction signing/submission, or real-capital action.
 Reviewed source head for this preflight:
 
 ```text
-bf93b7a5cea8d831c0c5431d5e0a3cc81edec485
+b4f1dce4e7f03423f416fee53f08618292f65d00
 ```
 
 ## 1. Build an isolated reviewed source tree
@@ -18,7 +18,7 @@ production working tree.
 ```bash
 set -euo pipefail
 
-REVIEWED_REF="bf93b7a5cea8d831c0c5431d5e0a3cc81edec485"
+REVIEWED_REF="b4f1dce4e7f03423f416fee53f08618292f65d00"
 SRC="/var/tmp/pio-manual-paper-preflight-${REVIEWED_REF:0:12}"
 
 rm -rf "$SRC"
@@ -60,12 +60,13 @@ The checker only:
 - asks systemd whether the detector/watcher and named PAPER units are active;
 - runs the selective Phase-2 shared-store prerequisite preflight;
 - runs the dedicated state-reader guard with `apply=False`;
-- runs the locked market/PAPER overlay preflight.
+- runs the locked runtime-only market/PAPER overlay preflight.
 
 ## 4. Interpret the report
 
-- `deployment_preflight_clean=true`: all reviewed source/base relationships are
-  conflict-free. This does **not** mean anything was deployed.
+- `deployment_preflight_clean=true`: the shared prerequisite, state reader, and
+  runtime-only layers are all conflict-free against their own reviewed bases.
+  This does **not** mean anything was deployed.
 - `runtime_files_deployed=true`: the exact Phase-2 shared prerequisites, state reader, and
   market/PAPER runtime files are already at their reviewed targets.
 - `manual_mode_safe=true`: the named PAPER service and timer both explicitly

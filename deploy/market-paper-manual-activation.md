@@ -22,7 +22,9 @@ The selective `market-paper-phase2-prerequisites.json` overlay is the only
 Phase-2 file prerequisite for this runtime. It contains `research_store.py` and
 `storage.py` with the exact reviewed Phase-2 base/target lineage, while
 intentionally excluding unrelated production-local surfaces such as `cli.py`.
-The state reader remains on its separate guarded patch path.
+The state reader remains on its separate guarded patch path. The runtime
+overlay itself does not own or redeploy either shared-store file, so a pending
+prerequisite update cannot become a false runtime conflict.
 
 ## Read-only production preflight
 

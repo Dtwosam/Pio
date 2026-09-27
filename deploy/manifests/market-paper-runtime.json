@@ -31,9 +31,7 @@
     "python-learner/src/meteora_learner/paper_candidate_policy.py",
     "python-learner/src/meteora_learner/paper_chain_valuation.py",
     "python-learner/src/meteora_learner/paper_empirical_entry.py",
-    "python-learner/src/meteora_learner/paper_empirical_entry_workflow.py",
-    "python-learner/src/meteora_learner/research_store.py",
-    "python-learner/src/meteora_learner/storage.py"
+    "python-learner/src/meteora_learner/paper_empirical_entry_workflow.py"
   ],
   "deployment_target_file_blobs": {
     "python-learner/src/meteora_learner/jupiter_quotes.py": "7c5721697a6e8f6935ebe8e05ec66b1f97ef7689",
@@ -51,9 +49,7 @@
     "python-learner/src/meteora_learner/paper_candidate_policy.py": "711c011e714e23a8c44395260fd9034512bcda82",
     "python-learner/src/meteora_learner/paper_chain_valuation.py": "7e811062931456142bb09c11e3f8e98132932d74",
     "python-learner/src/meteora_learner/paper_empirical_entry.py": "dbbefa815d9a86f81f7bef2a2ba1f8af79111318",
-    "python-learner/src/meteora_learner/paper_empirical_entry_workflow.py": "1a0153dea2d66db9bb3347aa49487d7417cd5050",
-    "python-learner/src/meteora_learner/research_store.py": "c9b9de5838d95a86bddffa6166b4d7a62e91cf16",
-    "python-learner/src/meteora_learner/storage.py": "39bcc99413df357b89d261e854861e9e4a3fff23"
+    "python-learner/src/meteora_learner/paper_empirical_entry_workflow.py": "1a0153dea2d66db9bb3347aa49487d7417cd5050"
   },
   "deployment_base_file_blobs": {
     "python-learner/src/meteora_learner/jupiter_quotes.py": "cecf55f18dcbc3c7035b56384ce2c11f2834cba6",
@@ -71,9 +67,7 @@
     "python-learner/src/meteora_learner/paper_candidate_policy.py": null,
     "python-learner/src/meteora_learner/paper_chain_valuation.py": "6caf37f7c7a63daa50b9791bdf440bcd164aed15",
     "python-learner/src/meteora_learner/paper_empirical_entry.py": null,
-    "python-learner/src/meteora_learner/paper_empirical_entry_workflow.py": null,
-    "python-learner/src/meteora_learner/research_store.py": "c9b9de5838d95a86bddffa6166b4d7a62e91cf16",
-    "python-learner/src/meteora_learner/storage.py": "39bcc99413df357b89d261e854861e9e4a3fff23"
+    "python-learner/src/meteora_learner/paper_empirical_entry_workflow.py": null
   },
   "deployment_source_tree_required": true,
   "deployment_guard_apply_locked": true,
@@ -82,7 +76,8 @@
     "Do not restart detector or watcher services.",
     "Do not move any Phase-2 cursor.",
     "Do not use git checkout/reset/pull over /opt/pio.",
-    "Run the manifest through the existing collection-stack preflight without --apply.",
+    "Apply the selective Phase-2 shared-store prerequisites before this runtime overlay in any separately reviewed deployment step.",
+    "Run this manifest through the existing collection-stack preflight without --apply.",
     "Create or inspect the virtual PAPER account explicitly before the first manual cycle.",
     "Do not enable a timer until a bounded manual cycle is reviewed."
   ]
