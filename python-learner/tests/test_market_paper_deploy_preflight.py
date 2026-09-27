@@ -81,7 +81,7 @@ def test_market_paper_manifest_has_exact_runtime_scope_and_target_blobs():
 
 def test_market_paper_manifest_enforces_phase2_shared_file_prerequisite():
     payload = _payload()
-    bases = payload["deployment_base_file_blobs"]
+    prerequisite = json.loads(PREREQUISITE.read_text(encoding="utf-8"))
 
     assert payload["prerequisite_collection_target_ref"] == (
         "7b306f05e842bffdcc6144de39d0346b97e2ab67"
@@ -89,12 +89,13 @@ def test_market_paper_manifest_enforces_phase2_shared_file_prerequisite():
     assert payload["prerequisite_collection_manifest"] == (
         "deploy/manifests/market-paper-phase2-prerequisites.json"
     )
-    assert bases[
-        "python-learner/src/meteora_learner/research_store.py"
-    ] == "c9b9de5838d95a86bddffa6166b4d7a62e91cf16"
-    assert bases[
-        "python-learner/src/meteora_learner/storage.py"
-    ] == "39bcc99413df357b89d261e854861e9e4a3fff23"
+    assert set(prerequisite["deployment_files"]) == {
+        "python-learner/src/meteora_learner/research_store.py",
+        "python-learner/src/meteora_learner/storage.py",
+    }
+    assert set(payload["deployment_files"]).isdisjoint(
+        prerequisite["deployment_files"]
+    )
 
 
 def test_market_paper_manifest_keeps_state_reader_on_dedicated_guard():
