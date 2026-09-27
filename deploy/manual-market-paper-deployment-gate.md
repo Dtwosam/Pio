@@ -88,9 +88,14 @@ Even when the gate passes:
 
 Do not interpret a passing gate as permission to mutate /opt/pio.
 
-The next step, if production deployment is explicitly reviewed later, is a
-separate selective executor bound to the exact sealed handoff, plan digest, and
-gate digest. The gate remains point-in-time evidence, so that future executor
-must still re-check every expected-current blob immediately before each
-operation. It must not use broad Git operations and must provide rollback for
-every update or patch.
+The next reviewed step is still read-only: run
+`manual-market-paper-mutation-review.md`. That stage re-runs this gate, requires
+the fresh gate to exactly match this saved sealed report, re-checks every
+expected-current production file blob or required absence, verifies source and
+patch bytes, and emits rollback requirements.
+
+Only after a passing sealed mutation review could a separate selective executor
+be considered for its own review. The gate remains point-in-time evidence, and
+any future executor must still perform an immediate fresh expected-current
+recheck before each operation. Broad Git operations over `/opt/pio` remain
+prohibited.
