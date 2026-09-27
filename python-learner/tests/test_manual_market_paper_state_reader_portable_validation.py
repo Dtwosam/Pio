@@ -88,6 +88,20 @@ def test_apply_patch_reports_failed_check_without_mutation(tmp_path):
     assert target.read_text(encoding="utf-8") == "different\n"
 
 
+def test_patch_input_symlink_is_rejected(tmp_path):
+    target = tmp_path / "candidate.patch"
+    target.write_text("patch\n", encoding="utf-8")
+    link = tmp_path / "candidate-link.patch"
+    link.symlink_to(target)
+
+    try:
+        MODULE._resolve_regular_file(link, label="portable patch")
+    except ValueError as exc:
+        assert "must not be a symlink" in str(exc)
+    else:
+        raise AssertionError("symlink patch input must fail closed")
+
+
 def test_cargo_discovery_accepts_explicit_existing_executable():
     resolved = MODULE._resolve_cargo(sys.executable)
 
