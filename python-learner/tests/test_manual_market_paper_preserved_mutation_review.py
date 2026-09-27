@@ -221,7 +221,7 @@ def test_standard_create_reads_reviewed_source_not_private_bundle(tmp_path):
     reviewed = tmp_path / "reviewed"
     private = tmp_path / "private"
     relative = Path("python-learner/src/meteora_learner/example.py")
-    production.mkdir()
+    (production / relative.parent).mkdir(parents=True)
     for root in (reviewed, private):
         (root / relative.parent).mkdir(parents=True)
 
