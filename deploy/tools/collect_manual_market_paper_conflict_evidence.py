@@ -370,9 +370,9 @@ def _state_reader_evidence(
         "reviewed_target": reviewed_target,
         "patch_sha256": patch_sha256,
         "patch_scope": patch_scope,
-        "patch_matches_reviewed_digest": (
-            patch_sha256 == _sha256(source / STATE_READER_PATCH)
-            if patch_sha256 is not None
+        "patch_matches_reviewed_source_blob": (
+            _git_blob_sha(patch) == REVIEWED_SOURCE_BLOBS[STATE_READER_PATCH]
+            if patch.is_file() and not patch.is_symlink()
             else False
         ),
     }
