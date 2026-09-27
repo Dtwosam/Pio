@@ -18,10 +18,11 @@ manifest is not authorized for production apply yet.
 The preflight source tree must be a clean tree containing the exact target
 blobs from `deploy/manifests/market-paper-runtime.json`.
 
-The existing Phase-2 collection overlay is a prerequisite for
-`research_store.py` and `storage.py`. Their expected base blobs in this
-manifest are the reviewed Phase-2 target blobs, not the older production Git
-baseline.
+The selective `market-paper-phase2-prerequisites.json` overlay is the only
+Phase-2 file prerequisite for this runtime. It contains `research_store.py` and
+`storage.py` with the exact reviewed Phase-2 base/target lineage, while
+intentionally excluding unrelated production-local surfaces such as `cli.py`.
+The state reader remains on its separate guarded patch path.
 
 ## Read-only production preflight
 
