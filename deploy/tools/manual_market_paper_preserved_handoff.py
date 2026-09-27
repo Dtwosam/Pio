@@ -16,6 +16,16 @@ VERIFY_ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_PRESERVED_HANDOFF_VERIFY_V1"
 
 READINESS_TOOL = Path("deploy/tools/check_manual_market_paper_preserved_readiness.py")
 EXPECTED_READINESS_TOOL_BLOB = "aec184548fa3149d42f006cd2b6dcb7d2da014f3"
+EXPECTED_REVIEWED_SOURCE_BLOBS = {
+    "deploy/tools/build_manual_market_paper_preserved_source_bundle.py":
+        "27c2d87bab3e896d84c22cdef8bd95082ca0cad3",
+    "deploy/tools/apply_phase2_collection_stack.py":
+        "a8a76cd4db95867a842de93f8688daa0cd7100c3",
+    "deploy/manifests/market-paper-phase2-prerequisites.json":
+        "dfb1eb62241f6fc3b6351e3b40b524fb68f4a61e",
+    "deploy/manifests/market-paper-manual-cycle.json":
+        "1891afe2c88e267a3dd76fdcdb717a49bc94b15c",
+}
 
 STATE_FIELDS = (
     "private_bundle_sha256",
@@ -219,6 +229,9 @@ def build_handoff_snapshot(
     )
     ready = _handoff_ready(identity)
 
+    if report.get("reviewed_source_blobs") != EXPECTED_REVIEWED_SOURCE_BLOBS:
+        raise ValueError("preserved readiness reviewed-source lineage mismatch")
+
     handoff_identity = {
         "format_version": FORMAT_VERSION,
         "artifact_type": ARTIFACT_TYPE,
@@ -262,13 +275,8 @@ def validate_handoff_snapshot(snapshot: dict[str, Any]) -> None:
         raise ValueError("preserved handoff readiness-tool lineage mismatch")
 
     source_blobs = snapshot.get("reviewed_source_blobs")
-    if not isinstance(source_blobs, dict) or not source_blobs:
-        raise ValueError("preserved handoff reviewed-source lineage is missing")
-    for path, blob in source_blobs.items():
-        if not isinstance(path, str) or not path:
-            raise ValueError("preserved handoff reviewed-source path is invalid")
-        if not _is_hex_digest(blob, 40):
-            raise ValueError("preserved handoff reviewed-source blob is invalid")
+    if source_blobs != EXPECTED_REVIEWED_SOURCE_BLOBS:
+        raise ValueError("preserved handoff reviewed-source lineage mismatch")
 
     if not _is_hex_digest(snapshot.get("capture_readiness_sha256"), 64):
         raise ValueError("preserved handoff readiness digest is invalid")
