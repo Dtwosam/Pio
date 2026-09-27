@@ -15,6 +15,8 @@ from typing import Any, Callable
 TARGET_POOL = "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ"
 DETECTOR_SERVICE = "pio-phase2-add-detector.service"
 WATCHER_SERVICE = "pio-phase2-prestate-watch.service"
+PAPER_SERVICE_TEMPLATE = "pio-paper@{account}.service"
+PAPER_TIMER_TEMPLATE = "pio-paper@{account}.timer"
 DETECTOR_STATE = Path("data/phase2-add-detector-state.json")
 
 PHASE2_MANIFEST = Path("deploy/manifests/phase2-collection-integration.json")
@@ -67,6 +69,10 @@ class ProductionReadinessReport:
     tracked_changes: int | None
     detector_service: str
     watcher_service: str
+    paper_account: str | None
+    paper_service: str
+    paper_timer: str
+    manual_mode_safe: bool
     target_pool: str
     target_pool_cursor: str | None
     phase2: OverlaySummary
@@ -211,6 +217,7 @@ def build_production_readiness(
     repository: str | Path,
     source_tree: str | Path,
     pool: str = TARGET_POOL,
+    paper_account: str | None = None,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> ProductionReadinessReport:
     repo = Path(repository).resolve()
@@ -272,6 +279,24 @@ def build_production_readiness(
         and watcher_service == "active"
     )
 
+    if paper_account is None:
+        paper_service = "not-checked"
+        paper_timer = "not-checked"
+        manual_mode_safe = False
+    else:
+        paper_service = _service_state(
+            PAPER_SERVICE_TEMPLATE.format(account=paper_account),
+            runner=runner,
+        )
+        paper_timer = _service_state(
+            PAPER_TIMER_TEMPLATE.format(account=paper_account),
+            runner=runner,
+        )
+        manual_mode_safe = (
+            paper_service != "active"
+            and paper_timer != "active"
+        )
+
     deployment_preflight_clean = (
         phase2.content_ready
         and state_reader.preflight_ready
@@ -282,7 +307,11 @@ def build_production_readiness(
         and state_reader.deployed
         and market_paper.deployed
     )
-    runtime_ready = service_health and runtime_files_deployed
+    runtime_ready = (
+        service_health
+        and runtime_files_deployed
+        and manual_mode_safe
+    )
 
     return ProductionReadinessReport(
         repository=str(repo),
@@ -291,6 +320,10 @@ def build_production_readiness(
         tracked_changes=_tracked_change_count(repo, runner=runner),
         detector_service=detector_service,
         watcher_service=watcher_service,
+        paper_account=paper_account,
+        paper_service=paper_service,
+        paper_timer=paper_timer,
+        manual_mode_safe=manual_mode_safe,
         target_pool=pool,
         target_pool_cursor=_target_cursor(repo, pool=pool),
         phase2=phase2,
@@ -315,12 +348,20 @@ def main() -> None:
     parser.add_argument("--repo", default="/opt/pio")
     parser.add_argument("--source-tree", required=True)
     parser.add_argument("--pool", default=TARGET_POOL)
+    parser.add_argument(
+        "--paper-account",
+        help=(
+            "Paper account name whose systemd service/timer must be inactive "
+            "before manual PAPER readiness can be true."
+        ),
+    )
     args = parser.parse_args()
 
     report = build_production_readiness(
         repository=args.repo,
         source_tree=args.source_tree,
         pool=args.pool,
+        paper_account=args.paper_account,
     )
     print(json.dumps(report.to_record(), indent=2, sort_keys=True))
 

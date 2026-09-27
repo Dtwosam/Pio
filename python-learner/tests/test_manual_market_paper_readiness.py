@@ -128,6 +128,43 @@ def test_read_only_command_runner_never_requests_mutating_git_or_systemctl():
     assert all(" start " not in f" {value} " for value in flattened)
 
 
+def test_paper_account_units_must_be_inactive_for_manual_mode():
+    seen = []
+
+    def runner(args, **kwargs):
+        seen.append(tuple(args))
+        if args[:2] == ["systemctl", "is-active"]:
+            unit = args[2]
+            value = "inactive\n" if unit.startswith("pio-paper@") else "active\n"
+            return _completed(args, stdout=value)
+        raise AssertionError(f"unexpected command: {args}")
+
+    service = MODULE._service_state(
+        MODULE.PAPER_SERVICE_TEMPLATE.format(account="paper"),
+        runner=runner,
+    )
+    timer = MODULE._service_state(
+        MODULE.PAPER_TIMER_TEMPLATE.format(account="paper"),
+        runner=runner,
+    )
+
+    assert service == "inactive"
+    assert timer == "inactive"
+    assert (
+        MODULE.PAPER_SERVICE_TEMPLATE.format(account="paper"),
+    ) not in seen
+    assert (
+        "systemctl",
+        "is-active",
+        "pio-paper@paper.service",
+    ) in seen
+    assert (
+        "systemctl",
+        "is-active",
+        "pio-paper@paper.timer",
+    ) in seen
+
+
 def test_target_cursor_is_read_only(tmp_path):
     repo = tmp_path / "repo"
     state = repo / MODULE.DETECTOR_STATE
