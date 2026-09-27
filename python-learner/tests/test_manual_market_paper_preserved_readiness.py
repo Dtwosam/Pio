@@ -216,38 +216,63 @@ def test_layer_summary_record_is_json_native():
     json.loads(json.dumps(record))
 
 
-def _layer_record(*, ready=True, deployed=False):
-    status = (
-        "ALREADY_TARGET"
-        if deployed
-        else ("READY_UPDATE" if ready else "CONFLICT_MODIFIED")
-    )
-    return {
-        "content_ready": ready,
-        "deployed": deployed,
-        "apply_authorized": False,
-        "files_changed": 0 if deployed else 1,
-        "status_counts": {status: 1},
-        "pending": (
-            []
-            if deployed or not ready
-            else [{"path": "x", "status": "READY_UPDATE"}]
-        ),
-        "nonready": (
-            []
-            if ready
-            else [{"path": "x", "status": "CONFLICT_MODIFIED"}]
-        ),
-        "files": [
+def _layer_record(contract, *, ready=True, deployed=False):
+    files = []
+    for path, expected_current_blob, target_blob in contract:
+        if deployed:
+            status = "ALREADY_TARGET"
+            current_blob = target_blob
+        elif ready:
+            status = (
+                "READY_CREATE"
+                if expected_current_blob is None
+                else "READY_UPDATE"
+            )
+            current_blob = expected_current_blob
+        else:
+            status = "CONFLICT_MODIFIED"
+            current_blob = "f" * 40
+
+        files.append(
             {
-                "path": "x",
-                "expected_current_blob": "1" * 40,
-                "target_blob": "2" * 40,
-                "source_blob": "2" * 40,
-                "current_blob": "1" * 40,
+                "path": path,
+                "expected_current_blob": expected_current_blob,
+                "target_blob": target_blob,
+                "source_blob": target_blob,
+                "current_blob": current_blob,
                 "status": status,
             }
-        ],
+        )
+
+    statuses = [item["status"] for item in files]
+    counts = {}
+    for status in statuses:
+        counts[status] = counts.get(status, 0) + 1
+    pending = [
+        {"path": item["path"], "status": item["status"]}
+        for item in files
+        if item["status"] in {"READY_CREATE", "READY_UPDATE"}
+    ]
+    nonready = [
+        {"path": item["path"], "status": item["status"]}
+        for item in files
+        if item["status"] not in MODULE.READY_STATUSES
+    ]
+    return {
+        "content_ready": not nonready,
+        "deployed": all(
+            item["status"] == "ALREADY_TARGET"
+            for item in files
+        ),
+        "apply_authorized": False,
+        "files_changed": sum(
+            item["status"] in {"READY_CREATE", "READY_UPDATE"}
+            for item in files
+        ),
+        "status_counts": dict(sorted(counts.items())),
+        "pending": pending,
+        "nonready": nonready,
+        "files": files,
     }
 
 
@@ -277,8 +302,26 @@ def _synthetic_report(
     deployed=False,
     head=MODULE.EXPECTED_PRODUCTION_HEAD,
 ):
-    phase2 = _layer_record(ready=preflight_ready, deployed=deployed)
-    runtime = _layer_record(ready=preflight_ready, deployed=deployed)
+    phase2_contract = MODULE._manifest_contract(
+        MODULE.PHASE2_MANIFEST,
+        preserved_overrides={
+            MODULE.RESEARCH_STORE_PATH: (
+                MODULE.EXPECTED_RESEARCH_STORE_CURRENT_BLOB,
+                MODULE.EXPECTED_RESEARCH_STORE_CANDIDATE_BLOB,
+            ),
+        },
+    )
+    runtime_contract = MODULE._manifest_contract(MODULE.RUNTIME_MANIFEST)
+    phase2 = _layer_record(
+        phase2_contract,
+        ready=preflight_ready,
+        deployed=deployed,
+    )
+    runtime = _layer_record(
+        runtime_contract,
+        ready=preflight_ready,
+        deployed=deployed,
+    )
     state = _state_record(ready=preflight_ready, deployed=deployed)
     head_matches = head == MODULE.EXPECTED_PRODUCTION_HEAD
     operational = True
@@ -367,6 +410,25 @@ def test_production_head_drift_forces_preflight_not_clean():
 
     assert report["production_head_matches_reviewed_baseline"] is False
     assert report["deployment_preflight_clean"] is False
+
+
+def test_rehashed_preserved_readiness_cannot_substitute_runtime_contract():
+    report = _synthetic_report()
+    report["market_paper"]["files"][0]["target_blob"] = "f" * 40
+    identity = {
+        field: report[field]
+        for field in MODULE.REPORT_FIELDS
+    }
+    report["readiness_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+    try:
+        MODULE.validate_preserved_readiness(report)
+    except ValueError as exc:
+        assert "deployment contract mismatch" in str(exc)
+    else:
+        raise AssertionError("rehashed runtime contract substitution must fail closed")
 
 
 def test_rehashed_preserved_readiness_cannot_flip_layer_summary():
