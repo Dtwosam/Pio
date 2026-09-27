@@ -16,6 +16,8 @@ VERIFY_ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_PRESERVED_HANDOFF_VERIFY_V1"
 
 READINESS_TOOL = Path("deploy/tools/check_manual_market_paper_preserved_readiness.py")
 EXPECTED_READINESS_TOOL_BLOB = "aec184548fa3149d42f006cd2b6dcb7d2da014f3"
+EXPECTED_PRODUCTION_HEAD = "ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8"
+EXPECTED_TARGET_POOL = "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ"
 EXPECTED_REVIEWED_SOURCE_BLOBS = {
     "deploy/tools/build_manual_market_paper_preserved_source_bundle.py":
         "27c2d87bab3e896d84c22cdef8bd95082ca0cad3",
@@ -194,6 +196,112 @@ def _state_digest(identity: dict[str, Any]) -> str:
     return hashlib.sha256(_canonical_bytes(identity)).hexdigest()
 
 
+def _validate_state_semantics(state: dict[str, Any]) -> None:
+    production_head = state.get("production_head")
+    if production_head is not None and not _is_hex_digest(production_head, 40):
+        raise ValueError("preserved handoff production HEAD is invalid")
+    expected_head_match = production_head == EXPECTED_PRODUCTION_HEAD
+    if state.get("production_head_matches_reviewed_baseline") is not expected_head_match:
+        raise ValueError("preserved handoff production-head flag mismatch")
+
+    tracked = state.get("tracked_changes")
+    if tracked is not None and (
+        not isinstance(tracked, int)
+        or isinstance(tracked, bool)
+        or tracked < 0
+    ):
+        raise ValueError("preserved handoff tracked-change count is invalid")
+
+    if state.get("target_pool") != EXPECTED_TARGET_POOL:
+        raise ValueError("preserved handoff target pool mismatch")
+    cursor = state.get("target_pool_cursor")
+    if cursor is not None and (not isinstance(cursor, str) or not cursor):
+        raise ValueError("preserved handoff target cursor is invalid")
+
+    paper_account = state.get("paper_account")
+    if paper_account is not None and (
+        not isinstance(paper_account, str) or not paper_account
+    ):
+        raise ValueError("preserved handoff paper account is invalid")
+
+    for field in (
+        "detector_service",
+        "watcher_service",
+        "paper_service",
+        "paper_timer",
+    ):
+        if not isinstance(state.get(field), str) or not state[field]:
+            raise ValueError(f"preserved handoff {field} is invalid")
+
+    expected_manual_safe = bool(
+        paper_account
+        and state["paper_service"] == "inactive"
+        and state["paper_timer"] == "inactive"
+    )
+    if state.get("manual_mode_safe") is not expected_manual_safe:
+        raise ValueError("preserved handoff manual-mode flag mismatch")
+
+    expected_operational = bool(
+        state["detector_service"] == "active"
+        and state["watcher_service"] == "active"
+    )
+    if state.get("operational_services_healthy") is not expected_operational:
+        raise ValueError("preserved handoff service-health flag mismatch")
+
+    for field in ("phase2", "state_reader", "market_paper"):
+        value = state.get(field)
+        if not isinstance(value, dict):
+            raise ValueError(f"preserved handoff {field} is invalid")
+        if not isinstance(value.get("content_ready"), bool):
+            raise ValueError(f"preserved handoff {field} content-ready flag is invalid")
+        if not isinstance(value.get("deployed"), bool):
+            raise ValueError(f"preserved handoff {field} deployed flag is invalid")
+
+    expected_preflight = bool(
+        state.get("private_bundle_verified") is True
+        and expected_head_match
+        and state["phase2"]["content_ready"] is True
+        and state["state_reader"]["content_ready"] is True
+        and state["market_paper"]["content_ready"] is True
+    )
+    if state.get("deployment_preflight_clean") is not expected_preflight:
+        raise ValueError("preserved handoff preflight flag mismatch")
+
+    expected_deployed = bool(
+        state["phase2"]["deployed"] is True
+        and state["state_reader"]["deployed"] is True
+        and state["market_paper"]["deployed"] is True
+    )
+    if state.get("runtime_files_deployed") is not expected_deployed:
+        raise ValueError("preserved handoff deployed flag mismatch")
+
+    expected_runtime_ready = bool(
+        expected_operational
+        and expected_manual_safe
+        and expected_deployed
+    )
+    if state.get("manual_paper_runtime_ready") is not expected_runtime_ready:
+        raise ValueError("preserved handoff runtime-ready flag mismatch")
+
+    for field in (
+        "requires_preservation_aware_plan",
+        "requires_separate_mutation_authorization",
+    ):
+        if state.get(field) is not True:
+            raise ValueError(f"preserved handoff state requires {field}=true")
+
+    for field in (
+        "production_deployment_authorized",
+        "mutation_authorized",
+        "service_restart_authorized",
+        "detector_cursor_movement_authorized",
+        "paper_timer_enable_authorized",
+        "live_capital_authorized",
+    ):
+        if state.get(field) is not False:
+            raise ValueError(f"preserved handoff state requires {field}=false")
+
+
 def _handoff_ready(identity: dict[str, Any]) -> bool:
     return bool(
         identity["paper_account"]
@@ -292,6 +400,7 @@ def validate_handoff_snapshot(snapshot: dict[str, Any]) -> None:
         raise ValueError("preserved handoff private-bundle digest is invalid")
     if not _is_hex_digest(state.get("tracked_diff_sha256"), 64):
         raise ValueError("preserved handoff tracked-diff digest is invalid")
+    _validate_state_semantics(state)
 
     expected_state_digest = _state_digest(state)
     if snapshot["production_state_sha256"] != expected_state_digest:
