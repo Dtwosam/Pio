@@ -60,7 +60,8 @@ The checker only:
 - asks systemd whether the detector/watcher and named PAPER units are active;
 - runs the selective Phase-2 shared-store prerequisite preflight;
 - runs the dedicated state-reader guard with `apply=False`;
-- runs the locked market/PAPER overlay preflight against current production;\n- computes a second in-memory market/PAPER preflight after projecting only exact prerequisites that are already safe to create/update.
+- runs the locked market/PAPER overlay preflight against current production;
+- computes a second in-memory market/PAPER preflight after projecting only exact prerequisites that are already safe to create/update.
 
 ## 4. Interpret the report
 
