@@ -5,8 +5,9 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
-from typing import Any
+from typing import Any, Callable
 
 
 FORMAT_VERSION = 1
@@ -18,6 +19,7 @@ IDENTITY_FIELDS = (
     "repository",
     "production_head",
     "tracked_changes",
+    "tracked_diff_sha256",
     "detector_service",
     "watcher_service",
     "paper_account",
@@ -60,6 +62,34 @@ def _load_readiness_module(source_tree: Path) -> Any:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _tracked_diff_sha256(
+    repository: str | Path,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+) -> str:
+    repo = Path(repository).resolve()
+    proc = runner(
+        [
+            "git",
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            "--no-textconv",
+            "HEAD",
+            "--",
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise ValueError("cannot fingerprint tracked production diff")
+    stdout = proc.stdout
+    if not isinstance(stdout, bytes):
+        stdout = str(stdout).encode("utf-8")
+    return hashlib.sha256(stdout).hexdigest()
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -172,16 +202,27 @@ def _build_current_report(
     pool: str | None,
     paper_account: str,
 ) -> dict[str, Any]:
+    repo = Path(repository).resolve()
+    diff_before = _tracked_diff_sha256(repo)
+
     module = _load_readiness_module(source_tree)
     kwargs: dict[str, Any] = {
-        "repository": repository,
+        "repository": repo,
         "source_tree": source_tree,
         "paper_account": paper_account,
     }
     if pool is not None:
         kwargs["pool"] = pool
     report = module.build_production_readiness(**kwargs)
-    return report.to_record()
+    record = report.to_record()
+
+    diff_after = _tracked_diff_sha256(repo)
+    if diff_before != diff_after:
+        raise ValueError(
+            "tracked production diff changed during read-only preflight"
+        )
+    record["tracked_diff_sha256"] = diff_after
+    return record
 
 
 def _load_snapshot(path: Path) -> dict[str, Any]:
