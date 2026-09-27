@@ -222,6 +222,31 @@ def test_failed_scheduler_blocks_entries_and_redacts_raw_error(tmp_path):
     assert "secret rpc credential detail" not in str(record)
 
 
+def test_partial_market_research_blocks_new_entries(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    def explore(*args, **kwargs):
+        raise AssertionError("partial research must block new entries")
+
+    report = run_manual_market_paper_cycle(
+        storage,
+        account_id="paper",
+        run_id="partial-research",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        observed_at=NOW,
+        research_runner=lambda storage_arg, **kwargs: _research("PARTIAL"),
+        scheduler_runner=lambda storage_arg, **kwargs: _scheduler(),
+        exploration_runner=explore,
+    )
+
+    assert report.status == "PARTIAL"
+    assert report.exploration is None
+    assert report.new_entries_skipped_reason == (
+        "MARKET_RESEARCH_PARTIAL"
+    )
+
+
 def test_failed_market_research_blocks_new_entries_but_keeps_scheduler(tmp_path):
     storage = Storage(tmp_path / "pio.db")
 

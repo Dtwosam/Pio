@@ -210,8 +210,8 @@ def run_manual_market_paper_cycle(
 
     if scheduler.status not in ENTRY_SAFE_SCHEDULER_STATUSES:
         skip_reason = f"SCHEDULER_{scheduler.status}"
-    elif research.status == "FAILED":
-        skip_reason = "MARKET_RESEARCH_FAILED"
+    elif research.status != "COMPLETE":
+        skip_reason = f"MARKET_RESEARCH_{research.status}"
     else:
         exploration = exploration_runner(
             storage,
@@ -249,9 +249,7 @@ def run_manual_market_paper_cycle(
         and exploration.status != "COMPLETE"
     ):
         status = "PARTIAL"
-    elif research.status == "FAILED":
-        status = "PARTIAL"
-    elif research.status == "PARTIAL":
+    elif research.status != "COMPLETE":
         status = "PARTIAL"
     else:
         status = "COMPLETE"
