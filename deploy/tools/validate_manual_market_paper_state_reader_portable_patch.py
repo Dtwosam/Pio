@@ -130,6 +130,16 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _resolve_regular_file(raw: str | Path, *, label: str) -> Path:
+    path = Path(raw).expanduser()
+    if path.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file():
+        raise ValueError(f"{label} is not a regular file")
+    return resolved
+
+
 def _reviewed_source_head(source: Path) -> str:
     proc = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -418,9 +428,10 @@ def validate_portable_patch(
     patch_report = _load_json(Path(patch_report_path))
     exporter.validate_portable_patch_report(patch_report)
 
-    patch_path = Path(patch_file).expanduser().resolve(strict=True)
-    if patch_path.is_symlink() or not patch_path.is_file():
-        raise ValueError("portable patch is not a regular file")
+    patch_path = _resolve_regular_file(
+        patch_file,
+        label="portable patch",
+    )
     patch = patch_path.read_bytes()
     if _sha256_bytes(patch) != patch_report["patch_sha256"]:
         raise ValueError("portable patch SHA-256 no longer matches sealed report")
