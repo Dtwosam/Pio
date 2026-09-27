@@ -13,13 +13,15 @@ The review consumes the same sealed handoff and deterministic plan plus the
 saved sealed deployment-gate report. It then re-runs the fresh deployment gate
 and checks every planned file operation against the current production tree.
 
-This stage is valid only for the exact reviewed-source lineage that produced
-those handoff/plan/gate artifacts. If blocked readiness was resolved through
-preserved production-local candidates, first complete
-`manual-market-paper-preservation-review.md`, perform the separately reviewed
-source/manifests rebase, and then rebuild **all** readiness/handoff/plan/gate
-artifacts from the rebased source. Do not feed preserved candidate evidence into
-an old plan or gate.
+This stage is valid only for the regular, non-preserved reviewed-source lineage
+that produced those handoff/plan/gate artifacts.
+
+If readiness was resolved through the preserved production-local candidates,
+**do not use this tool or these artifacts**. Use
+`manual-market-paper-preserved-production-review.md`, whose preservation-aware
+plan uses `UPDATE_PRESERVED_FILE` for the two private candidate targets and
+whose mutation review verifies those sources only from the sealed private
+bundle.
 
 ## Run the review
 
@@ -107,10 +109,11 @@ Even when the review passes:
 A passing mutation review is evidence for a separate production-change review;
 it is not a deployment command.
 
-A preservation review is not interchangeable with this mutation review. The
-preservation review authorizes neither source rebase nor production mutation;
-it only seals the exact candidate substitutions that a later reviewed-source
-revision must adopt before a fresh mutation review can exist.
+A preservation review is not interchangeable with this regular mutation
+review. Preserved candidates continue through the separate private-bundle
+preservation-aware chain and its own
+`build_manual_market_paper_preserved_mutation_review.py`. Neither review
+authorizes a production mutation.
 
 Any future selective mutation implementation must be separately reviewed and
 must bind the exact handoff state digest, plan digest, gate digest, and mutation
