@@ -1,0 +1,19 @@
+[Unit]
+Description=Pio Phase 2 read-only add detector
+After=network-online.target pio-phase2-prestate-watch.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/python /opt/pio/scripts/phase2-add-detector.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

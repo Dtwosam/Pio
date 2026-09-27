@@ -1,0 +1,39 @@
+{
+  "format_version": 1,
+  "issue": 6,
+  "production_import_ready_requires_snapshot_match": true,
+  "required_sources": [
+    {
+      "label": "detector",
+      "repo_path": "scripts/phase2-add-detector.py"
+    },
+    {
+      "label": "watcher",
+      "repo_path": "scripts/phase2-prestate-watch.py"
+    },
+    {
+      "label": "detector_unit",
+      "repo_path": "deploy/systemd/pio-phase2-add-detector.service"
+    },
+    {
+      "label": "watcher_unit",
+      "repo_path": "deploy/systemd/pio-phase2-prestate-watch.service"
+    }
+  ],
+  "required_regression_tests": [
+    "test_detector_has_resolved_run_wrapper",
+    "test_detector_cursor_is_fail_closed",
+    "test_detector_pagination_reaches_retained_cursor_without_skipping",
+    "test_detector_retries_rpc_failures_with_backoff",
+    "test_detector_supports_1000_signature_pages",
+    "test_watcher_promotes_verified_prestate",
+    "test_detector_failure_does_not_stop_watcher",
+    "test_rpc_url_not_exposed_in_process_arguments"
+  ],
+  "required_test_files": [
+    "python-learner/tests/test_phase2_add_detector.py",
+    "python-learner/tests/test_phase2_prestate_watch.py",
+    "python-learner/tests/test_phase2_detector_watcher_systemd.py"
+  ],
+  "required_runbook": "deploy/phase2-detector-watcher-update.md"
+}
