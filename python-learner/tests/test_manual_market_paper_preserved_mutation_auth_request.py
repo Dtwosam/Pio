@@ -256,95 +256,103 @@ def test_empty_request_is_rejected_even_if_resealed():
         raise AssertionError("empty authorization request must fail closed")
 
 
-def test_physical_backup_material_is_reverified(tmp_path):
-    backup_root = tmp_path / "backup"
-    backup_file = (
-        backup_root
-        / "files"
-        / "rust-executor"
-        / "src"
-        / "state_reader.rs"
-    )
-    backup_file.parent.mkdir(parents=True)
-    payload = b"rollback bytes\n"
-    backup_file.write_bytes(payload)
+def test_physical_backup_material_is_reverified():
+    with tempfile.TemporaryDirectory(
+        prefix="pio-auth-request-backup-test-",
+        dir="/var/tmp",
+    ) as tmp:
+        backup_root = Path(tmp)
+        backup_file = (
+            backup_root
+            / "files"
+            / "rust-executor"
+            / "src"
+            / "state_reader.rs"
+        )
+        backup_file.parent.mkdir(parents=True)
+        payload = b"rollback bytes\n"
+        backup_file.write_bytes(payload)
 
-    blob = MODULE._git_blob_sha_bytes(payload)
-    sha = MODULE._sha256_bytes(payload)
+        blob = MODULE._git_blob_sha_bytes(payload)
+        sha = MODULE._sha256_bytes(payload)
 
-    report = {
-        "backup_dir": str(backup_root),
-        "operation_backups": [
-            {
-                "index": 0,
-                "path": "rust-executor/src/state_reader.rs",
-                "backup_required": True,
-                "backup_relative_path": (
-                    "files/rust-executor/src/state_reader.rs"
-                ),
-                "backup_git_blob": blob,
-                "backup_sha256": sha,
-                "backup_size": len(payload),
-                "expected_current_blob": blob,
-                "rollback_blob": blob,
-            },
-            {
-                "index": 1,
-                "path": "python-learner/new.py",
-                "backup_required": False,
-                "backup_relative_path": None,
-                "backup_git_blob": None,
-                "backup_sha256": None,
-                "backup_size": None,
-                "expected_current_blob": None,
-                "rollback_blob": None,
-            },
-        ],
-    }
+        report = {
+            "backup_dir": str(backup_root),
+            "operation_backups": [
+                {
+                    "index": 0,
+                    "path": "rust-executor/src/state_reader.rs",
+                    "backup_required": True,
+                    "backup_relative_path": (
+                        "files/rust-executor/src/state_reader.rs"
+                    ),
+                    "backup_git_blob": blob,
+                    "backup_sha256": sha,
+                    "backup_size": len(payload),
+                    "expected_current_blob": blob,
+                    "rollback_blob": blob,
+                },
+                {
+                    "index": 1,
+                    "path": "python-learner/new.py",
+                    "backup_required": False,
+                    "backup_relative_path": None,
+                    "backup_git_blob": None,
+                    "backup_sha256": None,
+                    "backup_size": None,
+                    "expected_current_blob": None,
+                    "rollback_blob": None,
+                },
+            ],
+        }
 
-    entries, verified = MODULE._verify_backup_material(
-        backup_module=BACKUP,
-        backup_report=report,
-    )
-
-    assert verified is True
-    assert set(entries) == {0, 1}
-
-
-def test_physical_backup_tampering_fails_closed(tmp_path):
-    backup_root = tmp_path / "backup"
-    backup_file = backup_root / "files" / "x.py"
-    backup_file.parent.mkdir(parents=True)
-    backup_file.write_bytes(b"changed\n")
-
-    expected_payload = b"expected\n"
-    expected_blob = MODULE._git_blob_sha_bytes(expected_payload)
-    report = {
-        "backup_dir": str(backup_root),
-        "operation_backups": [
-            {
-                "index": 0,
-                "path": "x.py",
-                "backup_required": True,
-                "backup_relative_path": "files/x.py",
-                "backup_git_blob": expected_blob,
-                "backup_sha256": MODULE._sha256_bytes(expected_payload),
-                "backup_size": len(expected_payload),
-                "expected_current_blob": expected_blob,
-                "rollback_blob": expected_blob,
-            }
-        ],
-    }
-
-    try:
-        MODULE._verify_backup_material(
+        entries, verified = MODULE._verify_backup_material(
             backup_module=BACKUP,
             backup_report=report,
         )
-    except ValueError as exc:
-        assert "backup material mismatch" in str(exc)
-    else:
-        raise AssertionError("tampered physical backup must fail closed")
+
+        assert verified is True
+        assert set(entries) == {0, 1}
+
+
+def test_physical_backup_tampering_fails_closed():
+    with tempfile.TemporaryDirectory(
+        prefix="pio-auth-request-tamper-test-",
+        dir="/var/tmp",
+    ) as tmp:
+        backup_root = Path(tmp)
+        backup_file = backup_root / "files" / "x.py"
+        backup_file.parent.mkdir(parents=True)
+        backup_file.write_bytes(b"changed\n")
+
+        expected_payload = b"expected\n"
+        expected_blob = MODULE._git_blob_sha_bytes(expected_payload)
+        report = {
+            "backup_dir": str(backup_root),
+            "operation_backups": [
+                {
+                    "index": 0,
+                    "path": "x.py",
+                    "backup_required": True,
+                    "backup_relative_path": "files/x.py",
+                    "backup_git_blob": expected_blob,
+                    "backup_sha256": MODULE._sha256_bytes(expected_payload),
+                    "backup_size": len(expected_payload),
+                    "expected_current_blob": expected_blob,
+                    "rollback_blob": expected_blob,
+                }
+            ],
+        }
+
+        try:
+            MODULE._verify_backup_material(
+                backup_module=BACKUP,
+                backup_report=report,
+            )
+        except ValueError as exc:
+            assert "backup material mismatch" in str(exc)
+        else:
+            raise AssertionError("tampered physical backup must fail closed")
 
 
 def test_authorization_request_tool_has_no_production_or_mutation_primitives():
