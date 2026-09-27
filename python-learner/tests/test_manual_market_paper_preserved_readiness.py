@@ -195,7 +195,11 @@ def test_layer_summary_preserves_pending_and_nonready_evidence():
 
 
 def _layer_record(*, ready=True, deployed=False):
-    status = "READY_UPDATE" if ready else "CONFLICT_MODIFIED"
+    status = (
+        "ALREADY_TARGET"
+        if deployed
+        else ("READY_UPDATE" if ready else "CONFLICT_MODIFIED")
+    )
     return {
         "content_ready": ready,
         "deployed": deployed,
@@ -341,6 +345,48 @@ def test_production_head_drift_forces_preflight_not_clean():
 
     assert report["production_head_matches_reviewed_baseline"] is False
     assert report["deployment_preflight_clean"] is False
+
+
+def test_rehashed_preserved_readiness_cannot_flip_layer_summary():
+    report = _synthetic_report()
+    report["phase2"]["files"][0]["status"] = "CONFLICT_MODIFIED"
+    identity = {
+        field: report[field]
+        for field in MODULE.REPORT_FIELDS
+    }
+    report["readiness_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+    try:
+        MODULE.validate_preserved_readiness(report)
+    except ValueError as exc:
+        assert (
+            "status counts mismatch" in str(exc)
+            or "nonready evidence mismatch" in str(exc)
+            or "content-ready mismatch" in str(exc)
+        )
+    else:
+        raise AssertionError("rehashed layer-summary contradiction must fail closed")
+
+
+def test_rehashed_preserved_readiness_cannot_flip_state_summary():
+    report = _synthetic_report()
+    report["state_reader"]["status"] = "CONFLICT_MODIFIED"
+    identity = {
+        field: report[field]
+        for field in MODULE.REPORT_FIELDS
+    }
+    report["readiness_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+    try:
+        MODULE.validate_preserved_readiness(report)
+    except ValueError as exc:
+        assert "content-ready mismatch" in str(exc)
+    else:
+        raise AssertionError("rehashed state-summary contradiction must fail closed")
 
 
 def test_tampered_preserved_readiness_fails_digest_validation():
