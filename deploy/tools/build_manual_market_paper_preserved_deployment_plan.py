@@ -12,6 +12,7 @@ from typing import Any
 
 FORMAT_VERSION = 1
 ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_PRESERVED_DEPLOYMENT_PLAN_V1"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_HANDOFF_ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_PRESERVED_HANDOFF_V1"
 
 HANDOFF_TOOL = Path("deploy/tools/manual_market_paper_preserved_handoff.py")
@@ -194,6 +195,17 @@ def _bundle_dir(
     return resolved
 
 
+def _has_symlink_parent(root: Path, path: Path) -> bool:
+    current = path.parent
+    while current != root:
+        if current.is_symlink():
+            return True
+        if current == current.parent:
+            return True
+        current = current.parent
+    return root.is_symlink()
+
+
 def _source_blob(source: Path, relative: str) -> str:
     relative = _safe_relative_path(relative)
     path = source / relative
@@ -201,6 +213,8 @@ def _source_blob(source: Path, relative: str) -> str:
         path.resolve(strict=False).relative_to(source.resolve())
     except ValueError as exc:
         raise ValueError(f"source path escapes private bundle: {relative}") from exc
+    if _has_symlink_parent(source, path):
+        raise ValueError(f"source file has a symlinked parent: {relative}")
     if path.is_symlink() or not path.is_file():
         raise ValueError(f"source file is not regular: {relative}")
     blob = _git_blob_sha(path)
@@ -509,6 +523,40 @@ def build_preserved_deployment_plan(
     return plan
 
 
+def _standard_contract_map() -> dict[str, tuple[str, str | None, str]]:
+    for relative, expected_blob in (
+        (PHASE2_MANIFEST, REVIEWED_SOURCE_BLOBS[PHASE2_MANIFEST]),
+        (RUNTIME_MANIFEST, REVIEWED_SOURCE_BLOBS[RUNTIME_MANIFEST]),
+    ):
+        path = REPO_ROOT / relative
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"preserved plan manifest is missing: {relative}")
+        if _git_blob_sha(path) != expected_blob:
+            raise ValueError(f"preserved plan manifest blob mismatch: {relative}")
+
+    phase2 = _load_manifest(REPO_ROOT, PHASE2_MANIFEST)
+    runtime = _load_manifest(REPO_ROOT, RUNTIME_MANIFEST)
+    result: dict[str, tuple[str, str | None, str]] = {}
+
+    for path in phase2["deployment_files"]:
+        if path == RESEARCH_STORE_PATH:
+            continue
+        result[path] = (
+            "PHASE2_SHARED_PREREQUISITES",
+            phase2["deployment_base_file_blobs"][path],
+            phase2["deployment_target_file_blobs"][path],
+        )
+    for path in runtime["deployment_files"]:
+        if path in result:
+            raise ValueError(f"preserved plan standard path collision: {path}")
+        result[path] = (
+            "MARKET_PAPER_RUNTIME",
+            runtime["deployment_base_file_blobs"][path],
+            runtime["deployment_target_file_blobs"][path],
+        )
+    return result
+
+
 def validate_preserved_deployment_plan(plan: dict[str, Any]) -> None:
     if not isinstance(plan, dict):
         raise ValueError("preserved deployment plan must be a JSON object")
@@ -586,6 +634,7 @@ def validate_preserved_deployment_plan(plan: dict[str, Any]) -> None:
             EXPECTED_STATE_READER_CANDIDATE_BLOB,
         ),
     }
+    standard_expected = _standard_contract_map()
 
     for item in operations:
         if not isinstance(item, dict):
@@ -643,6 +692,23 @@ def validate_preserved_deployment_plan(plan: dict[str, Any]) -> None:
             raise ValueError(f"standard operation type is invalid: {path}")
         if path in preserved_expected:
             raise ValueError("preserved path cannot use standard operation")
+        expected_standard = standard_expected.get(path)
+        if expected_standard is None:
+            raise ValueError("standard operation targets unexpected path")
+        expected_layer, expected_current, expected_target = expected_standard
+        if layer != expected_layer:
+            raise ValueError("standard operation layer mismatch")
+        if item.get("expected_current_blob") != expected_current:
+            raise ValueError("standard operation expected-current mismatch")
+        if target_blob != expected_target:
+            raise ValueError("standard operation target mismatch")
+        expected_operation = (
+            "CREATE_FILE"
+            if expected_current is None
+            else "UPDATE_FILE"
+        )
+        if operation != expected_operation:
+            raise ValueError("standard operation type disagrees with manifest base")
         if set(item) != {
             "layer",
             "operation",
