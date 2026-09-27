@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "purpose": "Selective Phase-2 shared-store prerequisites for the manual market/PAPER runtime",
+  "production_deployment_authorized": false,
+  "detector_cursor_movement_authorized": false,
+  "service_restart_authorized": false,
+  "paper_live_capital_authorized": false,
+  "paper_timer_enable_authorized": false,
+  "deployment_guard_apply_locked": true,
+  "deployment_source_tree_required": true,
+  "deployment_scope": "MANUAL_MARKET_PAPER_PHASE2_SHARED_PREREQUISITES",
+  "source_manifest": "deploy/manifests/phase2-collection-integration.json",
+  "source_manifest_target_ref": "7b306f05e842bffdcc6144de39d0346b97e2ab67",
+  "deployment_target_ref": "7b306f05e842bffdcc6144de39d0346b97e2ab67",
+  "dependency_notes": [
+    "This manifest contains only the Phase-2 files required by the manual market/PAPER runtime.",
+    "It intentionally excludes cli.py, composition automation, detector scripts, systemd units, and the Rust executor main binary.",
+    "The state-reader prerequisite remains on its dedicated guarded patch path.",
+    "This manifest authorizes preflight only. It does not authorize apply, service changes, timer enablement, detector cursor movement, signing/submission, or real capital."
+  ],
+  "deployment_files": [
+    "python-learner/src/meteora_learner/research_store.py",
+    "python-learner/src/meteora_learner/storage.py"
+  ],
+  "deployment_target_file_blobs": {
+    "python-learner/src/meteora_learner/research_store.py": "c9b9de5838d95a86bddffa6166b4d7a62e91cf16",
+    "python-learner/src/meteora_learner/storage.py": "39bcc99413df357b89d261e854861e9e4a3fff23"
+  },
+  "deployment_base_file_blobs": {
+    "python-learner/src/meteora_learner/research_store.py": "16a86b63272ad48f4c185b39ecc2e0c14276ff9f",
+    "python-learner/src/meteora_learner/storage.py": "0436cb1cadd073702ae7dad702fc4eb4241845d6"
+  }
+}
