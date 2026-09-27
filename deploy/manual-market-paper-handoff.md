@@ -25,7 +25,7 @@ fails closed when any bound section changes, including:
 - retained target-pool detector cursor;
 - selective Phase-2 shared-store prerequisite status;
 - single-slot state-reader status;
-- manual market/PAPER overlay status;
+- runtime-only manual market/PAPER overlay status;
 - readiness flags.
 
 The tracked-diff fingerprint is computed from `git diff --binary` with external
