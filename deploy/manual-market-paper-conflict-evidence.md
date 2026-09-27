@@ -10,7 +10,7 @@ submit a transaction, or authorize production mutation.
 Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-f73eb7d056de99e9d1ef07131188d2a8018edfc9
+706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
+REVIEWED_REF="706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -292,7 +292,7 @@ because validation was blocked on Cargo. Reuse its sealed candidate report and
 candidate file with a fresh reviewed source checkout, for example:
 
 ~~~bash
-REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
+REVIEWED_REF="706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1"
 SRC="$(mktemp -d /var/tmp/pio-candidate-validation-source.XXXXXX)"
 CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
 VALIDATION_REPORT="/var/tmp/pio-state-reader-candidate-validation.retry.json"
@@ -336,7 +336,7 @@ For the currently sealed candidate, reuse:
 Export only the candidate-vs-reviewed-target delta:
 
 ~~~bash
-REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
+REVIEWED_REF="706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1"
 SRC="$(mktemp -d /var/tmp/pio-portable-patch-source.XXXXXX)"
 CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
 PATCH="/var/tmp/pio-state-reader-preserved-candidate.patch"
@@ -400,7 +400,7 @@ reviewed source and validate the transferred patch:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="f73eb7d056de99e9d1ef07131188d2a8018edfc9"
+REVIEWED_REF="706ca5f29072e7a8d913c5d18f0d1b8718bc2fe1"
 SRC="$(mktemp -d /var/tmp/pio-portable-validation-source.XXXXXX)"
 PATCH="$PWD/pio-state-reader-preserved-candidate.patch"
 PATCH_REPORT="$PWD/pio-state-reader-preserved-candidate.patch.json"
