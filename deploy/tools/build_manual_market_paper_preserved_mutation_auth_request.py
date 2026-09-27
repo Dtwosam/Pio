@@ -346,8 +346,10 @@ def validate_authorization_request(request: dict[str, Any]) -> None:
         raise ValueError("mutation authorization request excluded scopes mismatch")
 
     operations = request.get("operations")
-    if not isinstance(operations, list):
-        raise ValueError("mutation authorization request operations must be a list")
+    if not isinstance(operations, list) or not operations:
+        raise ValueError(
+            "mutation authorization request operations must be a non-empty list"
+        )
     if request.get("operation_count") != len(operations):
         raise ValueError("mutation authorization request operation count mismatch")
 
@@ -525,6 +527,7 @@ def build_authorization_request(
     request_ready = bool(
         lineage_bound
         and backups_verified
+        and bool(operations)
         and len(operations) == review["operation_count"]
     )
     if not request_ready:
