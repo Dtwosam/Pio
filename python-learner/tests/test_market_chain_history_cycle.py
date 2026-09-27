@@ -8,12 +8,23 @@ from meteora_learner.market_chain_history_cycle import (
 from meteora_learner.storage import Storage
 
 
-def _report():
+def _context_report(*, pools_failed=0):
     return SimpleNamespace(
         research_only=True,
         read_only_capture=True,
         policy_actionable=False,
         execution_wired=False,
+        capture=SimpleNamespace(pools_failed=pools_failed),
+    )
+
+
+def _refresh_report(*, pools_failed=0):
+    return SimpleNamespace(
+        research_only=True,
+        read_only_capture=True,
+        policy_actionable=False,
+        execution_wired=False,
+        pools_failed=pools_failed,
     )
 
 
@@ -23,11 +34,11 @@ def test_cycle_runs_seed_then_refresh_with_same_bounds(tmp_path):
 
     def context(storage_arg, **kwargs):
         calls.append(("context", kwargs))
-        return _report()
+        return _context_report()
 
     def refresh(storage_arg, **kwargs):
         calls.append(("refresh", kwargs))
-        return _report()
+        return _refresh_report()
 
     report = run_market_chain_history_cycle(
         storage,
@@ -59,7 +70,7 @@ def test_seed_failure_does_not_suppress_longitudinal_refresh(tmp_path):
 
     def refresh(storage_arg, **kwargs):
         calls.append("refresh")
-        return _report()
+        return _refresh_report()
 
     report = run_market_chain_history_cycle(
         storage,
@@ -73,6 +84,29 @@ def test_seed_failure_does_not_suppress_longitudinal_refresh(tmp_path):
     assert report.refresh is not None
     assert report.stages[0].error_category == "CHAIN_CONTEXT_CAPTURE_FAILED"
     assert "sensitive" not in str(report.to_record())
+
+
+def test_cycle_reports_partial_when_batches_have_pool_failures(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    report = run_market_chain_history_cycle(
+        storage,
+        context_runner=lambda storage_arg, **kwargs: _context_report(
+            pools_failed=1
+        ),
+        refresh_runner=lambda storage_arg, **kwargs: _refresh_report(
+            pools_failed=2
+        ),
+    )
+
+    assert report.status == "PARTIAL"
+    assert [item.status for item in report.stages] == ["PARTIAL", "PARTIAL"]
+    assert report.stages[0].error_category == (
+        "CHAIN_CONTEXT_PARTIAL_FAILURE"
+    )
+    assert report.stages[1].error_category == (
+        "CHAIN_REFRESH_PARTIAL_FAILURE"
+    )
 
 
 def test_cycle_fails_closed_on_boundary_crossing(tmp_path):

@@ -14,12 +14,13 @@ def _discovery():
     )
 
 
-def _history():
+def _history(*, status="COMPLETE"):
     return SimpleNamespace(
         research_only=True,
         read_only_capture=True,
         policy_actionable=False,
         execution_wired=False,
+        status=status,
     )
 
 
@@ -74,6 +75,25 @@ def test_cycle_runs_discovery_history_and_intake_in_order(tmp_path):
     assert report.status == "COMPLETE"
     assert report.paper_only is True
     assert report.execution_wired is False
+
+
+def test_partial_chain_history_propagates_to_cycle_status(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    report = run_market_research_cycle(
+        storage,
+        discovery_runner=lambda storage_arg, **kwargs: _discovery(),
+        history_runner=lambda storage_arg, **kwargs: _history(
+            status="PARTIAL"
+        ),
+        intake_runner=lambda database_path, **kwargs: _intake(),
+    )
+
+    assert report.status == "PARTIAL"
+    assert report.stages[1].status == "PARTIAL"
+    assert report.stages[1].error_category == (
+        "MARKET_CHAIN_HISTORY_PARTIAL"
+    )
 
 
 def test_discovery_failure_does_not_suppress_history_or_intake(tmp_path):

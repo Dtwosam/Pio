@@ -69,6 +69,24 @@ def _check_history(report: MarketChainHistoryCycleReport) -> None:
         raise RuntimeError("market chain history crossed research-only boundary")
 
 
+def _history_stage(report: MarketChainHistoryCycleReport) -> MarketResearchStage:
+    if report.status == "COMPLETE":
+        return MarketResearchStage("COLLECT_CHAIN_HISTORY", "SUCCESS", None)
+    if report.status == "PARTIAL":
+        return MarketResearchStage(
+            "COLLECT_CHAIN_HISTORY",
+            "PARTIAL",
+            "MARKET_CHAIN_HISTORY_PARTIAL",
+        )
+    if report.status == "FAILED":
+        return MarketResearchStage(
+            "COLLECT_CHAIN_HISTORY",
+            "FAILED",
+            "MARKET_CHAIN_HISTORY_FAILED",
+        )
+    raise ValueError(f"unsupported market chain history status: {report.status}")
+
+
 def _check_intake(report: MarketPaperIntakeReport) -> None:
     if (
         not report.research_only
@@ -134,7 +152,7 @@ def run_market_research_cycle(
             observed_at=observed_at,
         )
         _check_history(history)
-        stages.append(MarketResearchStage("COLLECT_CHAIN_HISTORY", "SUCCESS", None))
+        stages.append(_history_stage(history))
     except Exception:
         stages.append(
             MarketResearchStage(
@@ -161,12 +179,12 @@ def run_market_research_cycle(
             )
         )
 
-    successes = sum(item.status == "SUCCESS" for item in stages)
+    statuses = tuple(item.status for item in stages)
     status = (
         "COMPLETE"
-        if successes == len(stages)
+        if all(value == "SUCCESS" for value in statuses)
         else "PARTIAL"
-        if successes
+        if any(value in {"SUCCESS", "PARTIAL"} for value in statuses)
         else "FAILED"
     )
     return MarketResearchCycleReport(
