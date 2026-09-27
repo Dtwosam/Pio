@@ -53,6 +53,31 @@ def _overlay(*statuses, authorized=False):
     )
 
 
+def test_reviewed_readiness_source_artifacts_are_exactly_pinned():
+    MODULE._verify_reviewed_source_artifacts(ROOT)
+
+    for relative, expected in MODULE.REVIEWED_SOURCE_BLOBS.items():
+        assert MODULE._git_blob_sha(ROOT / relative) == expected
+
+
+def test_reviewed_source_artifact_mismatch_fails_closed(tmp_path):
+    source = tmp_path / "source"
+    for relative in MODULE.REVIEWED_SOURCE_BLOBS:
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((ROOT / relative).read_bytes())
+
+    damaged = source / MODULE.MARKET_PAPER_MANIFEST
+    damaged.write_text("{}\n", encoding="utf-8")
+
+    try:
+        MODULE._verify_reviewed_source_artifacts(source)
+    except ValueError as exc:
+        assert "reviewed source artifact mismatch" in str(exc)
+    else:
+        raise AssertionError("modified reviewed manifest must fail closed")
+
+
 def test_overlay_summary_separates_preflight_from_deployed_state():
     ready = MODULE._overlay_summary(
         _overlay("READY_UPDATE", "READY_CREATE")

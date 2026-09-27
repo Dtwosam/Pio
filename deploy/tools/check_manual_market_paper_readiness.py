@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -23,6 +24,15 @@ STATE_READER_TOOL = Path("deploy/tools/apply_phase2_single_slot_stack_patch.py")
 STATE_READER_PATCH = Path(
     "deploy/patches/phase2-single-slot-stack-state-reader.patch"
 )
+
+
+REVIEWED_SOURCE_BLOBS = {
+    COLLECTION_TOOL: "a8a76cd4db95867a842de93f8688daa0cd7100c3",
+    STATE_READER_TOOL: "a2e4e0c0435f15be7126e253d1861955be6c2ecd",
+    PHASE2_MANIFEST: "1467c685a598d8aa91bf45a17d9451e058e7dd48",
+    MARKET_PAPER_MANIFEST: "2c9b249f704306de793291947d1811ab947025f2",
+    STATE_READER_PATCH: "330e2c33956f8a96850a1e072d6a2fa0a4d619af",
+}
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,24 @@ class ProductionReadinessReport:
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _git_blob_sha(path: Path) -> str:
+    payload = path.read_bytes()
+    header = f"blob {len(payload)}\0".encode()
+    return hashlib.sha1(header + payload).hexdigest()
+
+
+def _verify_reviewed_source_artifacts(source: Path) -> None:
+    for relative, expected_blob in REVIEWED_SOURCE_BLOBS.items():
+        path = source / relative
+        if not path.is_file():
+            raise ValueError(f"reviewed source artifact is missing: {relative}")
+        actual = _git_blob_sha(path)
+        if actual != expected_blob:
+            raise ValueError(
+                f"reviewed source artifact mismatch: {relative}"
+            )
 
 
 def _load_module(path: Path, name: str) -> Any:
@@ -191,6 +219,7 @@ def build_production_readiness(
         raise ValueError(f"production repository is not a git tree: {repo}")
     if not source.is_dir():
         raise ValueError(f"reviewed source tree is missing: {source}")
+    _verify_reviewed_source_artifacts(source)
 
     collection_module = _load_module(
         source / COLLECTION_TOOL,
