@@ -112,6 +112,51 @@ def test_exploration_blocks_unhealthy_scheduler_state(tmp_path):
     assert report.items == ()
 
 
+def test_exploration_bounds_quote_refresh_and_pool_consideration(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    for pool, mint in (("A", "mint-a"), ("B", "mint-b"), ("C", "mint-c")):
+        _chain(storage, pool, mint, "2026-09-27T08:00:00+00:00")
+
+    refreshed = []
+    entries = []
+
+    def refresh(storage_arg, *, token_mints, observed_at):
+        refreshed.extend(sorted(token_mints))
+        return ()
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="bounded",
+        per_position_capital_quote=100,
+        network_cost_quote=0,
+        max_new_positions=2,
+        max_pools_considered=1,
+        observed_at="2026-09-27T08:00:00+00:00",
+        intake_runner=lambda database_path, **kwargs: _intake("A", "B", "C"),
+        quote_refresher=refresh,
+        quote_status_loader=lambda *args, **kwargs: SimpleNamespace(
+            fresh=True,
+            quote_per_atomic=1,
+        ),
+        entry_runner=lambda storage_arg, **kwargs: (
+            entries.append(kwargs)
+            or SimpleNamespace(
+                status="OPENED",
+                paper_only=True,
+                live_authorized=False,
+            )
+        ),
+    )
+
+    assert refreshed == ["mint-a"]
+    assert [row["pool_address"] for row in entries] == ["A"]
+    assert report.pools_considered == 1
+    assert report.max_pools_considered == 1
+    assert report.positions_opened == 1
+
+
 def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
     storage = Storage(tmp_path / "pio.db")
     create_paper_account(storage, account_id="paper", starting_cash_quote=1000)

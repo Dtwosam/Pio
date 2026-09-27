@@ -37,6 +37,7 @@ def test_cli_requires_explicit_capital_and_cost(tmp_path: Path, monkeypatch):
             "--capital-per-position", "100",
             "--network-cost-quote", "1",
             "--max-new-positions", "2",
+            "--max-pools-considered", "7",
             "--observed-at", "2026-09-27T08:05:00+00:00",
         ],
         settings=cfg,
@@ -48,5 +49,6 @@ def test_cli_requires_explicit_capital_and_cost(tmp_path: Path, monkeypatch):
     assert seen["per_position_capital_quote"] == 100.0
     assert seen["network_cost_quote"] == 1.0
     assert seen["max_new_positions"] == 2
+    assert seen["max_pools_considered"] == 7
     assert seen["observed_at"] == "2026-09-27T08:05:00+00:00"
     assert result["positions_opened"] == 1
