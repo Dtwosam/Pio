@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--capital-per-position", required=True, type=float)
     parser.add_argument("--network-cost-quote", required=True, type=float)
     parser.add_argument("--max-new-positions", type=int, default=1)
+    parser.add_argument("--max-pools-considered", type=int, default=25)
     parser.add_argument("--minimum-chain-observations", type=int, default=12)
     parser.add_argument("--intake-max-pools", type=int, default=500)
     parser.add_argument("--quote-max-age-seconds", type=int, default=300)
@@ -43,6 +44,7 @@ def run(
         per_position_capital_quote=args.capital_per_position,
         network_cost_quote=args.network_cost_quote,
         max_new_positions=args.max_new_positions,
+        max_pools_considered=args.max_pools_considered,
         minimum_chain_observations=args.minimum_chain_observations,
         intake_max_pools=args.intake_max_pools,
         quote_max_age_seconds=args.quote_max_age_seconds,

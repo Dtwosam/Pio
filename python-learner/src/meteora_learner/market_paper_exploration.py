@@ -60,6 +60,7 @@ class MarketPaperExplorationReport:
     status: str
     pools_ready: int
     pools_considered: int
+    max_pools_considered: int
     positions_opened: int
     positions_already_applied: int
     max_new_positions: int
@@ -184,6 +185,7 @@ def run_market_paper_exploration(
     per_position_capital_quote: float,
     network_cost_quote: float,
     max_new_positions: int = 1,
+    max_pools_considered: int = 25,
     minimum_chain_observations: int = 12,
     intake_max_pools: int = 500,
     quote_max_age_seconds: int = 300,
@@ -207,6 +209,8 @@ def run_market_paper_exploration(
         raise ValueError("run_id is required")
     if max_new_positions < 1:
         raise ValueError("max_new_positions must be positive")
+    if max_pools_considered < 1:
+        raise ValueError("max_pools_considered must be positive")
     if quote_max_age_seconds < 0:
         raise ValueError("quote_max_age_seconds cannot be negative")
     capital = Decimal(str(per_position_capital_quote))
@@ -237,6 +241,7 @@ def run_market_paper_exploration(
             status=scheduler_block,
             pools_ready=0,
             pools_considered=0,
+            max_pools_considered=max_pools_considered,
             positions_opened=0,
             positions_already_applied=0,
             max_new_positions=max_new_positions,
@@ -334,11 +339,30 @@ def run_market_paper_exploration(
             continue
         contexts[pool_address] = (decision_at, token_y_mint)
 
+    remaining_slots = max(0, max_new_positions - already_applied)
+    candidate_contexts: list[tuple[str, str, str]] = []
+    if remaining_slots > 0:
+        for item in ready:
+            if len(candidate_contexts) >= max_pools_considered:
+                break
+            if item.pool_address in open_pools:
+                continue
+            context = contexts.get(item.pool_address)
+            if context is None:
+                continue
+            candidate_contexts.append(
+                (item.pool_address, context[0], context[1])
+            )
+
     quote_refresher(
         storage,
-        token_mints={mint for _, mint in contexts.values()},
+        token_mints={mint for _, _, mint in candidate_contexts},
         observed_at=observed_at,
     )
+    candidate_addresses = {
+        pool_address
+        for pool_address, _, _ in candidate_contexts
+    }
 
     opened = 0
     considered = 0
@@ -347,8 +371,14 @@ def run_market_paper_exploration(
             break
         pool_address = item.pool_address
         context = contexts.get(pool_address)
-        if context is None or pool_address in open_pools:
+        if (
+            context is None
+            or pool_address in open_pools
+            or pool_address not in candidate_addresses
+        ):
             continue
+        if considered >= max_pools_considered:
+            break
         considered += 1
         decision_at, token_y_mint = context
         quote = quote_status_loader(
@@ -460,6 +490,7 @@ def run_market_paper_exploration(
         status="COMPLETE",
         pools_ready=len(ready),
         pools_considered=considered,
+        max_pools_considered=max_pools_considered,
         positions_opened=opened,
         positions_already_applied=already_applied,
         max_new_positions=max_new_positions,
