@@ -396,6 +396,12 @@ def validate_preserved_mutation_review(review: dict[str, Any]) -> None:
         if not isinstance(review.get(field), bool):
             raise ValueError(f"preserved mutation review {field} must be boolean")
 
+    expected_gate_match = (
+        review["saved_gate_sha256"] == review["fresh_gate_sha256"]
+    )
+    if review["fresh_gate_matches_saved"] is not expected_gate_match:
+        raise ValueError("preserved mutation review fresh-gate match flag mismatch")
+
     checks = review.get("operation_checks")
     if not isinstance(checks, list):
         raise ValueError("preserved mutation review operation checks must be a list")
