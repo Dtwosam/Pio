@@ -224,8 +224,6 @@ def build_preserved_gate(
     private_bundle_report_path: str | Path,
     saved_handoff: dict[str, Any],
     saved_plan: dict[str, Any],
-    paper_account: str,
-    pool: str | None = None,
 ) -> dict[str, Any]:
     source = Path(source_tree).resolve()
     if not source.is_dir():
@@ -260,6 +258,16 @@ def build_preserved_gate(
     ]:
         raise ValueError("saved preserved plan private-bundle lineage mismatch")
 
+    saved_state = saved_handoff.get("state")
+    if not isinstance(saved_state, dict):
+        raise ValueError("saved preserved handoff state is missing")
+    paper_account = saved_state.get("paper_account")
+    target_pool = saved_state.get("target_pool")
+    if not isinstance(paper_account, str) or not paper_account:
+        raise ValueError("saved preserved handoff paper account is missing")
+    if not isinstance(target_pool, str) or not target_pool:
+        raise ValueError("saved preserved handoff target pool is missing")
+
     bundle_report = _load_json(Path(private_bundle_report_path))
     rebuilt_plan = plan_module.build_preserved_deployment_plan(
         source_tree=source,
@@ -273,7 +281,7 @@ def build_preserved_gate(
             repository=str(Path(repository).resolve()),
             source_tree=source,
             private_bundle_report=Path(private_bundle_report_path).resolve(),
-            pool=pool,
+            pool=target_pool,
             paper_account=paper_account,
         )
     )
@@ -363,8 +371,6 @@ def main() -> None:
     parser.add_argument("--private-bundle-report", required=True)
     parser.add_argument("--handoff", required=True)
     parser.add_argument("--plan", required=True)
-    parser.add_argument("--paper-account", required=True)
-    parser.add_argument("--pool")
     args = parser.parse_args()
 
     report = build_preserved_gate(
@@ -373,8 +379,6 @@ def main() -> None:
         private_bundle_report_path=args.private_bundle_report,
         saved_handoff=_load_json(Path(args.handoff)),
         saved_plan=_load_json(Path(args.plan)),
-        paper_account=args.paper_account,
-        pool=args.pool,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     if not report["gate_ready"]:
