@@ -340,6 +340,16 @@ def build_deployment_plan(
     runtime_paths = set(manual_runtime["deployment_files"])
     if prerequisite_paths & runtime_paths:
         raise ValueError("shared prerequisite and runtime manifests overlap")
+    if manual_runtime.get("prerequisite_collection_manifest") != str(
+        PREREQUISITE_MANIFEST
+    ):
+        raise ValueError("manual runtime points to an unexpected prerequisite")
+    if runtime.get("phase2_collection_prerequisite_manifest") != str(
+        PREREQUISITE_MANIFEST
+    ):
+        raise ValueError("runtime points to an unexpected prerequisite")
+    if set(runtime.get("phase2_prerequisite_files", ())) != prerequisite_paths:
+        raise ValueError("runtime prerequisite file list disagrees with manifest")
 
     state_module = _load_module(
         source / STATE_READER_TOOL,
@@ -348,7 +358,23 @@ def build_deployment_plan(
     state_path = str(state_module.TARGET_PATH)
     if state_path in prerequisite_paths or state_path in runtime_paths:
         raise ValueError("state-reader path overlaps a copy manifest")
-    patch_sha256 = _sha256(source / STATE_READER_PATCH)
+    if manual_runtime.get("prerequisite_state_reader_target_blob") != str(
+        state_module.STACK_TARGET_BLOB_SHA
+    ):
+        raise ValueError("manual runtime state-reader target lineage disagrees")
+    state_source = source / state_path
+    if not state_source.is_file():
+        raise ValueError("reviewed state-reader target source is missing")
+    if _git_blob_sha(state_source) != str(state_module.STACK_TARGET_BLOB_SHA):
+        raise ValueError("reviewed state-reader source is not the target blob")
+
+    patch_path = source / STATE_READER_PATCH
+    changed_paths = state_module.changed_paths(
+        patch_path.read_text(encoding="utf-8")
+    )
+    if changed_paths != (state_path,):
+        raise ValueError("reviewed state-reader patch scope is unexpected")
+    patch_sha256 = _sha256(patch_path)
 
     phase2_pending = _validate_overlay_summary(
         state.get("phase2"),
