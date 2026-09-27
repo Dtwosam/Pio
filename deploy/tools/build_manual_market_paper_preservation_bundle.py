@@ -13,6 +13,7 @@ FORMAT_VERSION = 1
 ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_PRESERVATION_BUNDLE_V1"
 
 EXPECTED_PRODUCTION_HEAD = "ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8"
+EXPECTED_VALIDATION_SOURCE_HEAD = "3d896cc7f51f3075c2bf46627d53ab5cc5b899eb"
 
 RESEARCH_STORE_PATH = "python-learner/src/meteora_learner/research_store.py"
 STATE_READER_PATH = "rust-executor/src/state_reader.rs"
@@ -127,7 +128,13 @@ def _verify_reviewed_source(source: Path) -> None:
 
 
 def _load_json(path: str | Path) -> dict[str, Any]:
-    value = json.loads(Path(path).read_text(encoding="utf-8"))
+    artifact = Path(path)
+    if artifact.is_symlink():
+        raise ValueError(f"JSON artifact must not be a symlink: {path}")
+    resolved = artifact.resolve(strict=True)
+    if not resolved.is_file():
+        raise ValueError(f"JSON artifact must be a regular file: {path}")
+    value = json.loads(resolved.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError(f"JSON artifact must be an object: {path}")
     return value
@@ -191,6 +198,11 @@ def _build_chain_entry(
         description=f"{expected_path} reviewed target",
     )
 
+    _require_equal(
+        left=validation_report.get("reviewed_source_head"),
+        right=EXPECTED_VALIDATION_SOURCE_HEAD,
+        description=f"{expected_path} validation source HEAD",
+    )
     _require_equal(
         left=validation_report.get("patch_report_sha256"),
         right=patch_report.get("report_sha256"),
@@ -295,6 +307,10 @@ def validate_preservation_bundle(bundle: dict[str, Any]) -> None:
 
         if item["path"] != expected_path:
             raise ValueError("preservation bundle file path mismatch")
+        if item["validation_reviewed_source_head"] != EXPECTED_VALIDATION_SOURCE_HEAD:
+            raise ValueError(
+                f"preservation bundle validation source mismatch: {expected_path}"
+            )
         if item["preserved_candidate_blob"] != expected_blob:
             raise ValueError(
                 f"preservation bundle candidate blob mismatch: {expected_path}"
