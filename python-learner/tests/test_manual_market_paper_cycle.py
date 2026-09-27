@@ -44,6 +44,7 @@ def _exploration(opened=1, status="COMPLETE"):
         positions_opened=opened,
         positions_already_applied=0,
         max_new_positions=1,
+        max_pools_considered=25,
         items=(),
     )
 
@@ -86,6 +87,7 @@ def test_manual_cycle_orders_research_scheduler_then_new_entries(tmp_path):
     assert calls[1][1]["retry_failed"] is True
     assert calls[1][1]["refresh_jupiter_quotes"] is True
     assert calls[2][1]["observed_at"] == NOW
+    assert calls[2][1]["max_pools_considered"] == 25
     assert report.status == "COMPLETE"
     assert report.new_positions_pending_next_tick == 1
     assert report.paper_only is True

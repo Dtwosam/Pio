@@ -84,6 +84,9 @@ class ManualMarketPaperCycleReport:
                     self.exploration.positions_already_applied
                 ),
                 "max_new_positions": self.exploration.max_new_positions,
+                "max_pools_considered": (
+                    self.exploration.max_pools_considered
+                ),
                 "items": [
                     item.to_record()
                     for item in self.exploration.items
@@ -136,6 +139,7 @@ def run_manual_market_paper_cycle(
     per_position_capital_quote: float,
     network_cost_quote: float,
     max_new_positions: int = 1,
+    max_pools_considered: int = 25,
     minimum_chain_observations: int = 12,
     intake_max_pools: int = 500,
     discovery_page_size: int = 1000,
@@ -216,6 +220,7 @@ def run_manual_market_paper_cycle(
             per_position_capital_quote=per_position_capital_quote,
             network_cost_quote=network_cost_quote,
             max_new_positions=max_new_positions,
+            max_pools_considered=max_pools_considered,
             minimum_chain_observations=minimum_chain_observations,
             intake_max_pools=intake_max_pools,
             quote_max_age_seconds=quote_max_age_seconds,

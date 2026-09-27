@@ -41,6 +41,7 @@ def test_cli_requires_explicit_virtual_capital_and_network_cost(
             "--capital-per-position", "100",
             "--network-cost-quote", "1",
             "--max-new-positions", "2",
+            "--max-pools-considered", "7",
         ],
         settings=cfg,
     )
@@ -50,4 +51,5 @@ def test_cli_requires_explicit_virtual_capital_and_network_cost(
     assert seen["per_position_capital_quote"] == 100.0
     assert seen["network_cost_quote"] == 1.0
     assert seen["max_new_positions"] == 2
+    assert seen["max_pools_considered"] == 7
     assert result["status"] == "COMPLETE"
