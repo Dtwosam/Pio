@@ -10,7 +10,7 @@ submit a transaction, or authorize production mutation.
 Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-ea855de0b609f8eb3a75cf7a314a2854ecf91eb6
+affe01eafdf01d7ca8ea098900b2de7890a62ec0
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="ea855de0b609f8eb3a75cf7a314a2854ecf91eb6"
+REVIEWED_REF="affe01eafdf01d7ca8ea098900b2de7890a62ec0"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -252,7 +252,7 @@ because validation was blocked on Cargo. Reuse its sealed candidate report and
 candidate file with a fresh reviewed source checkout, for example:
 
 ~~~bash
-REVIEWED_REF="ea855de0b609f8eb3a75cf7a314a2854ecf91eb6"
+REVIEWED_REF="affe01eafdf01d7ca8ea098900b2de7890a62ec0"
 SRC="$(mktemp -d /var/tmp/pio-candidate-validation-source.XXXXXX)"
 CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
 VALIDATION_REPORT="/var/tmp/pio-state-reader-candidate-validation.retry.json"
@@ -276,6 +276,59 @@ printf 'validation_exit_code: %s\n' "$VALIDATION_RC"
 If the sealed report says `CARGO_NOT_FOUND`, inspect for an existing Cargo
 binary before considering any host change. Do not install a toolchain merely to
 make the gate pass.
+
+## Export the sealed candidate as a bounded portable patch
+
+If the production host has no usable Rust toolchain, the already-sealed
+candidate can be exported as a small unified patch against the reviewed
+state-reader target. This exporter is production-blind: it has no `--repo`
+argument and never reads or writes `/opt/pio`.
+
+For the currently sealed candidate, reuse:
+
+- candidate report:
+  `/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json`;
+- candidate Git blob:
+  `f54a1021cf8f89d285bde957d1f72d81857ec2fa`;
+- candidate SHA-256:
+  `584aed6e7ec92723e2d73220979e83bbe7fbcf7e19d50b52d05854ce80c33826`.
+
+Export only the candidate-vs-reviewed-target delta:
+
+~~~bash
+REVIEWED_REF="affe01eafdf01d7ca8ea098900b2de7890a62ec0"
+SRC="$(mktemp -d /var/tmp/pio-portable-patch-source.XXXXXX)"
+CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
+PATCH="/var/tmp/pio-state-reader-preserved-candidate.patch"
+PATCH_REPORT="/var/tmp/pio-state-reader-preserved-candidate.patch.json"
+
+git clone --quiet https://github.com/Dtwosam/Pio.git "$SRC"
+git -C "$SRC" checkout --quiet --detach "$REVIEWED_REF"
+test "$(git -C "$SRC" rev-parse HEAD)" = "$REVIEWED_REF"
+
+rm -f "$PATCH" "$PATCH_REPORT"
+
+python3 "$SRC/deploy/tools/export_manual_market_paper_state_reader_candidate_patch.py" \
+  --source-tree "$SRC" \
+  --candidate-report "$CANDIDATE_REPORT" \
+  --patch-output "$PATCH" \
+  > "$PATCH_REPORT"
+
+python3 -m json.tool "$PATCH_REPORT"
+~~~
+
+The exporter requires the exact sealed candidate report identity, candidate Git
+blob, candidate SHA-256, candidate size, and reviewed target blob. It refuses
+patches larger than 16 KiB, more than 20 hunks, or more than 256 changed lines.
+It writes only one new patch file under `/var/tmp`.
+
+The expected current delta is seven hunks with 14 additions and 28 removals.
+The exact patch SHA-256 is intentionally learned from the exported artifact
+rather than guessed ahead of time.
+
+This patch is suitable for off-host validation of the exact candidate. Do not
+publish it into normal public repository history solely to obtain CI; it contains
+preserved production-local source changes.
 
 ## Stop boundary
 
