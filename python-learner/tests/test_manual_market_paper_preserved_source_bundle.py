@@ -284,4 +284,5 @@ def test_bundle_tool_has_no_production_repository_path_or_service_mutation():
     assert "pip install" not in source
     assert "cargo install" not in source
     assert "candidate_content_in_report" in source
+    assert "symlinks=True" in source
     assert '"production_repository_accessed": False' in source
