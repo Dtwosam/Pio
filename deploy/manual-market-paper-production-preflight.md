@@ -7,7 +7,7 @@ action, transaction signing/submission, or real-capital action.
 Reviewed source head for this preflight:
 
 ```text
-d0d683d15d786a943d7d6293cb33c80275a918ae
+531d17d7e07111c0ed143c41bee6317448ca0c33
 ```
 
 ## 1. Build an isolated reviewed source tree
@@ -18,7 +18,7 @@ production working tree.
 ```bash
 set -euo pipefail
 
-REVIEWED_REF="d0d683d15d786a943d7d6293cb33c80275a918ae"
+REVIEWED_REF="531d17d7e07111c0ed143c41bee6317448ca0c33"
 SRC="/var/tmp/pio-manual-paper-preflight-${REVIEWED_REF:0:12}"
 
 rm -rf "$SRC"
@@ -86,7 +86,7 @@ If the report is clean, the next reviewed steps are still non-mutating:
 
 1. capture the sealed handoff in `manual-market-paper-handoff.md`;
 2. build the deterministic deployment plan in `manual-market-paper-deployment-plan.md`;
-3. run the fresh production gate in `manual-market-paper-deployment-gate.md`, preserve its sealed `gate_sha256` report, and review it immediately before any future separately authorized mutation.
+3. run the fresh production gate in `manual-market-paper-deployment-gate.md` and preserve its sealed `gate_sha256` report;\n4. run the read-only file-level mutation review in `manual-market-paper-mutation-review.md` and preserve its sealed `review_sha256` report before any future separately authorized mutation.
 
 Do not create a PAPER account, apply an overlay, enable a timer, restart the
 detector/watcher, move a detector cursor, or run the manual market/PAPER cycle
