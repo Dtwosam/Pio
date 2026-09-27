@@ -1,114 +1,130 @@
 # Manual market/PAPER preservation review
 
-Use this stage only after the production-local research_store.py and state_reader.rs candidates have been reconstructed and validated off production.
+Use this stage only after the production-local `research_store.py` and
+`state_reader.rs` candidates have been reconstructed and validated off
+production.
 
-This stage is evidence-only. It does not modify /opt/pio, does not materialize candidate contents into the reviewed source tree, and does not authorize any production mutation.
+This stage is evidence-only. It does not modify the production repository,
+publish candidate contents, or authorize any production mutation.
 
-Reviewed source head for this preservation review:
+Current preservation-aware code chain:
 
 ~~~text
-69c2303da5dd291d9cf249e45c9749aeb3e582f5
+9f9fbdf9ed1e805d055f307e2b78f74872f57fe8
 ~~~
 
 ## Inputs
 
 The review consumes the two sealed portable-validation reports:
 
-- research-store portable validation for candidate blob 31bd88e3d74490f5d0b617ff4b36383e7e12e18f;
-- state-reader portable validation for candidate blob f54a1021cf8f89d285bde957d1f72d81857ec2fa.
+- research-store candidate
+  `31bd88e3d74490f5d0b617ff4b36383e7e12e18f`;
+- state-reader candidate
+  `f54a1021cf8f89d285bde957d1f72d81857ec2fa`.
 
-Both validations must be validation_ready=true, non-authorizing, and produced from the same reviewed source HEAD.
+Both validations must have `validation_ready=true`, remain non-authorizing, and
+be produced from the same reviewed source HEAD.
 
 The review also binds the known production evidence:
 
-- production HEAD ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8;
-- reconciliation evidence 5ff37e0f8ee17b1593ac96cc8a678f05b13234422929a207efb581324bc69d13;
-- state-reader conflict-hunk evidence 805d5e89ecc9d14157a58e5fc40e1cf3b9632b6636fc61580f157890eb4736a7.
+- production HEAD
+  `ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8`;
+- reconciliation evidence
+  `5ff37e0f8ee17b1593ac96cc8a678f05b13234422929a207efb581324bc69d13`;
+- state-reader conflict-hunk evidence
+  `805d5e89ecc9d14157a58e5fc40e1cf3b9632b6636fc61580f157890eb4736a7`.
 
-## Run the review
-
-Use an isolated source checkout at the reviewed head above:
+## Run the preservation review
 
 ~~~bash
 PRESERVATION_REVIEW="/var/tmp/pio-manual-paper-preservation-review.json"
 
 python3 "$SRC/deploy/tools/build_manual_market_paper_preservation_review.py" \
   --source-tree "$SRC" \
-  --research-store-validation /path/to/research-store-portable-validation.json \
-  --state-reader-validation /path/to/state-reader-portable-validation.json \
+  --research-store-validation "$RESEARCH_VALIDATION" \
+  --state-reader-validation "$STATE_VALIDATION" \
   > "$PRESERVATION_REVIEW"
 
 python3 -m json.tool "$PRESERVATION_REVIEW"
 ~~~
 
-The command exits nonzero when either portable validation is not ready or the two validations were not produced from the same reviewed source HEAD.
+The command exits nonzero when either portable validation is not ready or the
+two validations do not share one reviewed source HEAD.
 
-## What a ready review means
+## What a ready preservation review means
 
-preservation_ready=true means the following two substitutions are ready for a **separate reviewed-source rebase**:
+`preservation_ready=true` seals exactly two candidate substitutions:
 
 ### research_store.py
 
-- current production-local blob: f9deb47c10c88a4e1e364dd12d6c7569c3826a98;
-- superseded reviewed target: c9b9de5838d95a86bddffa6166b4d7a62e91cf16;
-- preserved candidate target: 31bd88e3d74490f5d0b617ff4b36383e7e12e18f.
+- production-local base:
+  `f9deb47c10c88a4e1e364dd12d6c7569c3826a98`;
+- superseded public reviewed target:
+  `c9b9de5838d95a86bddffa6166b4d7a62e91cf16`;
+- preserved candidate:
+  `31bd88e3d74490f5d0b617ff4b36383e7e12e18f`.
 
 ### state_reader.rs
 
-- current production-local blob: d1267db6708b91bc8cacabffcd397a380866c79a;
-- superseded reviewed target: 30d1435af1329bca07f73d6639539b43503e84e9;
-- preserved candidate target: f54a1021cf8f89d285bde957d1f72d81857ec2fa.
+- production-local base:
+  `d1267db6708b91bc8cacabffcd397a380866c79a`;
+- superseded public reviewed target:
+  `30d1435af1329bca07f73d6639539b43503e84e9`;
+- preserved candidate:
+  `f54a1021cf8f89d285bde957d1f72d81857ec2fa`.
 
-The review emits no candidate source contents. Each proposed rebase operation is sealed with its own operation SHA-256 and the complete report is sealed as review_sha256.
+The report embeds no candidate source contents. A ready review does **not** mean
+that either candidate should be committed to public repository history or
+copied into production.
 
-## Reviewed-source rebase boundary
+## Private-bundle continuation
 
-A ready preservation review is **not** an instruction to copy either candidate into production.
+The reviewed continuation is now a private preserved-source bundle, not a
+public source/manifests rebase.
 
-The next code-review stage must materialize the two already-validated candidate contents into a new reviewed source revision and update only the metadata that still names their superseded deployment lineage. In particular, that reviewed source rebase must account for:
+`deploy/tools/build_manual_market_paper_preserved_source_bundle.py`:
 
-- the Phase-2 prerequisite manifest base/target for research_store.py;
-- the dedicated state-reader guard base/target and reference patch;
-- the manual runtime prerequisite state-reader target;
-- downstream pinned Git blobs that intentionally bind those reviewed artifacts.
+- requires the exact common source HEAD used by the portable validations;
+- validates the preservation review plus both sealed portable patch reports and
+  patch bytes;
+- materializes the two preserved candidates only under a new directory in
+  `/var/tmp`;
+- verifies the resulting Git blobs, SHA-256 values, and sizes;
+- emits a content-free sealed bundle report;
+- never reads or writes the production repository.
 
-The production-local blobs become the new expected deployment bases for these two preserved files. The preserved candidate blobs become their new reviewed targets.
+After a ready private bundle, continue only through the preservation-aware
+read-only chain documented in
+`manual-market-paper-preserved-production-review.md`:
 
-That source rebase is a repository review operation, not a production deployment operation.
+1. preserved production readiness;
+2. sealed preserved handoff;
+3. deterministic preserved deployment plan;
+4. fresh preserved deployment gate;
+5. preserved file-level mutation review;
+6. stop for separate authorization/review.
 
-## Mandatory reset after the reviewed-source rebase
-
-Any previous readiness, handoff, deployment plan, deployment gate, or mutation review was built against the superseded reviewed target lineage.
-
-After a preservation rebase is merged, discard those old artifacts for deployment purposes and start again from:
-
-1. fresh read-only production readiness against the new reviewed source;
-2. fresh sealed handoff;
-3. fresh deterministic deployment plan;
-4. fresh sealed deployment gate;
-5. fresh read-only file-level mutation review.
-
-Do not splice a new preservation review into an old plan or gate.
+The old regular handoff/plan/gate/mutation-review artifacts are not compatible
+with this preserved candidate lineage.
 
 ## Authorization boundary
 
-Even when preservation_ready=true:
+Even when `preservation_ready=true`:
 
-- candidate_content_included=false;
-- production_file_modified=false;
-- source_tree_modified=false;
-- requires_reviewed_source_rebase=true;
-- requires_manifest_rebase=true;
-- requires_new_readiness_cycle=true;
-- requires_separate_mutation_authorization=true;
-- production_deployment_authorized=false;
-- mutation_authorized=false;
-- service restart, detector cursor movement, PAPER timer enablement, signing, submission, and live capital remain unauthorized.
+- candidate contents remain private;
+- `production_file_modified=false`;
+- `source_tree_modified=false`;
+- `requires_separate_mutation_authorization=true`;
+- `production_deployment_authorized=false`;
+- `mutation_authorized=false`;
+- service restart, detector cursor movement, PAPER timer enablement,
+  signing/submission, and live capital remain unauthorized.
 
 ## Stop boundary
 
-Stop after the sealed preservation review.
+Do not copy candidate files into the production repository, publish the private
+patches/candidate contents, alter detector/watcher services, or move the
+retained cursor.
 
-Do not run the old handoff/plan/gate/mutation-review artifacts against the preserved candidates. Do not copy candidate files into /opt/pio. Do not alter the detector/watcher services or retained cursor.
-
-The next safe engineering step is a separately reviewed **source/manifests rebase** built from the two validated candidate contents.
+The next safe step is the private-bundle and preservation-aware read-only chain
+in `manual-market-paper-preserved-production-review.md`.
