@@ -92,7 +92,11 @@ If the report is clean, the next reviewed steps are still non-mutating:
 1. capture the sealed handoff in `manual-market-paper-handoff.md`;
 2. build the deterministic deployment plan in `manual-market-paper-deployment-plan.md`;
 3. run the fresh production gate in `manual-market-paper-deployment-gate.md` and preserve its sealed `gate_sha256` report;
-4. run the read-only file-level mutation review in `manual-market-paper-mutation-review.md` and preserve its sealed `review_sha256` report before any future separately authorized mutation.
+4. run the read-only file-level mutation review in `manual-market-paper-mutation-review.md` and preserve its sealed `review_sha256` report;
+5. for the preservation-aware chain, seal the complete preserved evidence package, then capture verified rollback bytes through `manual-market-paper-preserved-backup-capture.md`.
+
+Even after step 5, any production mutation still requires a separate reviewed
+authorization and an immediate execution-time expected-current recheck.
 
 Do not create a PAPER account, apply an overlay, enable a timer, restart the
 detector/watcher, move a detector cursor, or run the manual market/PAPER cycle
