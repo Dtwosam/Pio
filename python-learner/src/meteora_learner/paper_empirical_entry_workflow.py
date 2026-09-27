@@ -109,6 +109,8 @@ def run_empirical_paper_entry_workflow(
         max_share_bps=max_share_bps,
         favor_x_in_active_bin=favor_x_in_active_bin,
     )
+    if not entry.paper_only or entry.live_authorized:
+        raise ValueError("empirical entry opener crossed PAPER-only boundary")
     return EmpiricalPaperEntryWorkflowReport(
         account_id=account_id,
         position_id=position_id,

@@ -1,8 +1,12 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from meteora_learner.phase2_evidence_cycle import (
+    PHASE2_EVIDENCE_CYCLE_PROGRESS_TYPE,
+    build_phase2_evidence_cycle_progress,
+    persist_phase2_evidence_cycle_progress,
     run_phase2_read_only_evidence_cycle,
 )
 from meteora_learner.storage import Storage
@@ -347,3 +351,148 @@ def test_evidence_cycle_surfaces_reconciliation_failure_without_leaking_text(
     encoded = str(report.to_record())
     assert secret not in encoded
     assert "internal failure" not in encoded
+
+
+
+def test_evidence_cycle_progress_compacts_technical_counts(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_reconciliation_corpus",
+        lambda *args, **kwargs: Result(
+            positions_seen=4,
+            amount_positions_eligible=3,
+            amount_positions_exact=2,
+            amount_positions_provenance_ineligible=1,
+            amount_bins_checked=12,
+            amount_mismatched_bins=1,
+            fee_intervals_seen=5,
+            fee_intervals_eligible=4,
+            fee_intervals_exact=3,
+            fee_intervals_provenance_ineligible=1,
+            fee_bins_checked=9,
+            fee_mismatched_bins=1,
+            reward_intervals_seen=5,
+            reward_intervals_eligible=2,
+            reward_intervals_exact=1,
+            reward_intervals_provenance_ineligible=1,
+            reward_bins_checked=6,
+            reward_bins_with_checkpoint_growth=2,
+            reward_mismatched_bins=1,
+            strict_math_gate_passed=False,
+        ),
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_phase2_calibration_evidence",
+        lambda *args, **kwargs: Result(
+            add_positions=21,
+            composition_add_events=17,
+            composition_eligible_samples=2,
+            composition_exact_samples=1,
+            composition_mismatched_samples=1,
+            composition_ineligible_samples=15,
+            add_execution_events=19,
+            add_execution_request_decodes=18,
+            add_execution_matched_events=17,
+            add_execution_unmatched_samples=2,
+            add_active_guard_samples=12,
+            rebalance_execution_events=12,
+            rebalance_execution_request_decodes=12,
+            rebalance_execution_matched_events=12,
+            rebalance_active_guard_samples=12,
+            transaction_fee_samples=42,
+            evidence_gaps=("composition", "fee intervals"),
+        ),
+    )
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.build_calibration_work_queue",
+        lambda *args, **kwargs: Result(
+            items=(
+                {"task_type": "VERIFY_PRESTATE"},
+                {"task_type": "VERIFY_PRESTATE"},
+                {"task_type": "INSPECT_TRANSACTION"},
+            )
+        ),
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+    progress = build_phase2_evidence_cycle_progress(report)
+
+    assert progress.overall_status == "PARTIAL"
+    assert progress.reconciliation["positions_seen"] == 4
+    assert progress.reconciliation["fee_intervals_exact"] == 3
+    assert progress.calibration["add_positions"] == 21
+    assert progress.calibration["composition_exact_samples"] == 1
+    assert progress.calibration["evidence_gap_count"] == 2
+    assert progress.work_queue_items == 3
+    assert [
+        (item.task_type, item.count)
+        for item in progress.work_queue_task_counts
+    ] == [
+        ("VERIFY_PRESTATE", 2),
+        ("INSPECT_TRANSACTION", 1),
+    ]
+    assert progress.qualified is False
+    assert progress.promotion_gate_evaluated is False
+
+
+def test_evidence_cycle_progress_persistence_is_non_qualified(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+    evidence_id = persist_phase2_evidence_cycle_progress(
+        storage,
+        report=report,
+    )
+
+    assert evidence_id > 0
+    saved = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE2_EVIDENCE_CYCLE_PROGRESS_TYPE,
+        pool_address="pool",
+    )
+    assert saved is not None
+    assert saved["qualified"] is False
+    assert saved["status"] == "COLLECTION_SUCCESS"
+    assert saved["as_of"] == "2026-09-26T19:00:00+00:00"
+    assert saved["evidence"]["promotion_gate_evaluated"] is False
+    assert saved["evidence"]["phase_promotion_performed"] is False
+
+
+def test_evidence_cycle_progress_rejects_boundary_crossing(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+
+    with pytest.raises(ValueError, match="read-only boundary"):
+        build_phase2_evidence_cycle_progress(
+            replace(report, promotion_gate_evaluated=True)
+        )
