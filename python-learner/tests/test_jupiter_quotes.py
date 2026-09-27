@@ -1,5 +1,6 @@
 from meteora_learner.jupiter_quotes import (
     JupiterTokenUSDQuote,
+    refresh_jupiter_quotes_for_mints,
     refresh_open_paper_jupiter_quotes,
 )
 from meteora_learner.paper_account import create_paper_account, open_paper_position
@@ -132,3 +133,57 @@ def test_jupiter_refresh_includes_external_reward_mint(tmp_path):
         max_age_seconds=60,
         as_of="2026-09-23T10:05:30+00:00",
     ).fresh is True
+
+
+def test_explicit_mint_refresh_is_sorted_deduped_and_persisted(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+
+    def fetch(mint):
+        calls.append(mint)
+        return JupiterTokenUSDQuote(
+            token_mint=mint,
+            symbol=mint,
+            decimals=6,
+            usd_price=2.0,
+            usd_per_atomic=0.000002,
+        )
+
+    items = refresh_jupiter_quotes_for_mints(
+        storage,
+        token_mints={"B", "A", "B"},
+        observed_at="2026-09-27T08:00:00+00:00",
+        fetch_quote=fetch,
+    )
+
+    assert calls == ["A", "B"]
+    assert [item.token_mint for item in items] == ["A", "B"]
+    assert all(item.status == "REFRESHED" for item in items)
+    for mint in ("A", "B"):
+        status = token_quote_status(
+            storage,
+            token_mint=mint,
+            max_age_seconds=0,
+            as_of="2026-09-27T08:00:00+00:00",
+        )
+        assert status.fresh is True
+        assert status.quote_per_atomic == 0.000002
+
+
+def test_explicit_mint_refresh_categorizes_failures_without_raw_error(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    def fetch(mint):
+        raise RuntimeError("secret upstream detail")
+
+    items = refresh_jupiter_quotes_for_mints(
+        storage,
+        token_mints={"A"},
+        observed_at="2026-09-27T08:00:00+00:00",
+        fetch_quote=fetch,
+    )
+
+    assert len(items) == 1
+    assert items[0].status == "FAILED"
+    assert items[0].error == "JUPITER_QUOTE_REFRESH_FAILED"
+    assert "secret upstream detail" not in str(items[0])

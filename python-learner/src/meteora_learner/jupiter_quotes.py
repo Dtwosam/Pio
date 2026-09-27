@@ -139,6 +139,80 @@ class JupiterTokenClient:
         )
 
 
+def refresh_jupiter_quotes_for_mints(
+    storage: Storage,
+    *,
+    token_mints: tuple[str, ...] | list[str] | set[str],
+    observed_at: str | None = None,
+    fetch_quote: Callable[[str], JupiterTokenUSDQuote] | None = None,
+) -> tuple[JupiterQuoteRefreshItem, ...]:
+    """Refresh and persist USD-per-atomic quotes for an explicit mint set."""
+    timestamp = observed_at or utc_now_iso()
+    mints = tuple(sorted({str(value) for value in token_mints if str(value).strip()}))
+    items: list[JupiterQuoteRefreshItem] = []
+
+    def persist(mint: str, quote: JupiterTokenUSDQuote) -> None:
+        if quote.token_mint != mint:
+            raise ValueError("quote mint does not match requested mint")
+        save_token_quote(
+            storage,
+            token_mint=mint,
+            quote_per_atomic=quote.usd_per_atomic,
+            source=JUPITER_SOURCE,
+            observed_at=timestamp,
+            quote_unit=DEFAULT_QUOTE_UNIT,
+            raw=asdict(quote),
+        )
+
+    if fetch_quote is None and mints:
+        with JupiterTokenClient() as client:
+            for mint in mints:
+                try:
+                    quote = client.token_usd_quote(mint)
+                    persist(mint, quote)
+                    items.append(
+                        JupiterQuoteRefreshItem(
+                            token_mint=mint,
+                            status="REFRESHED",
+                            usd_per_atomic=quote.usd_per_atomic,
+                            error=None,
+                        )
+                    )
+                except Exception:
+                    items.append(
+                        JupiterQuoteRefreshItem(
+                            token_mint=mint,
+                            status="FAILED",
+                            usd_per_atomic=None,
+                            error="JUPITER_QUOTE_REFRESH_FAILED",
+                        )
+                    )
+    elif fetch_quote is not None:
+        for mint in mints:
+            try:
+                quote = fetch_quote(mint)
+                persist(mint, quote)
+                items.append(
+                    JupiterQuoteRefreshItem(
+                        token_mint=mint,
+                        status="REFRESHED",
+                        usd_per_atomic=quote.usd_per_atomic,
+                        error=None,
+                    )
+                )
+            except Exception:
+                items.append(
+                    JupiterQuoteRefreshItem(
+                        token_mint=mint,
+                        status="FAILED",
+                        usd_per_atomic=None,
+                        error="JUPITER_QUOTE_REFRESH_FAILED",
+                    )
+                )
+
+    return tuple(items)
+
+
 def refresh_open_paper_jupiter_quotes(
     storage: Storage,
     *,
