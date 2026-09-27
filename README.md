@@ -16,6 +16,9 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - docs/PHASE6_EXECUTION_RUNBOOK.md
 - docs/PHASE7_CONTROLLED_LIVE_RUNBOOK.md
 - docs/PHASE9_RESEARCH_RUNBOOK.md
+- deploy/manual-market-paper-production-preflight.md
+- deploy/manual-market-paper-handoff.md
+- deploy/market-paper-manual-activation.md
 
 ## Current status
 
@@ -31,6 +34,18 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - Phase 9: advanced research implementation complete behind a non-actionable evidence boundary; qualified research-bundle evidence pending
 - Default mode: PAPER
 - Live submit: available only in a non-default `live-submit` build, additionally runtime-disabled by default and gated by Phase 5/6 promotion plus controlled-live authorization
+
+### Current production continuation
+
+The current production continuation is evidence-first and read-only:
+
+- the exact production detector/watcher sources and unit contracts are tracked and regression-tested;
+- never pull, checkout, reset, restore, or clean over `/opt/pio` because production may contain important local changes;
+- the manual market/PAPER readiness path preflights only the exact Phase-2 shared prerequisites (`research_store.py` and `storage.py`), the separately guarded state reader, and the locked PAPER runtime overlay;
+- capture a sealed preflight handoff with `deploy/tools/manual_market_paper_handoff.py` and verify it again immediately before any later separately reviewed mutation;
+- no current manifest or handoff authorizes deployment, service restart, timer enablement, detector cursor movement, transaction signing/submission, or real capital.
+
+The next production step is therefore a fresh read-only readiness check plus sealed handoff from the reviewed source tree. A later selective deployment step must be reviewed separately and must preserve all unrelated production-local files.
 
 Current research paths:
 - `DISCRETE_COMPLETED_BIN_V1`: OHLC inventory/IL studies.

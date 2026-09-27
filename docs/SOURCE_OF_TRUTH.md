@@ -1,7 +1,7 @@
 # Meteora Adaptive LP Bot — Source of Truth
 
-Status: v0.7
-Date: 2026-09-23
+Status: v0.8
+Date: 2026-09-27
 
 ## 1. Mission
 
@@ -245,6 +245,29 @@ These rules override the ML model:
 `LIVE` — Rust executor may sign approved transactions.
 
 Default is `PAPER` until promotion criteria are met.
+
+## 9A. Current production continuation boundary
+
+Production continuation is deliberately separated from implementation completeness.
+
+The exact production Phase-2 detector/watcher sources and systemd unit contracts are tracked in-repo with regression coverage for the repaired subprocess wrapper, fail-closed cursor behavior, retained-cursor pagination, RPC retry/backoff, 1000-signature pages, prestate promotion, detector/watcher lifecycle isolation, and secret-safe RPC handling. This source-control/reliability import is complete; it does not authorize changing live service state.
+
+The production working tree at `/opt/pio` must be treated as carrying potentially important local changes. Do not use blind `git pull`, `git checkout`, `git reset`, `git restore`, or `git clean` over that tree. Do not manually move a detector cursor and do not restart detector/watcher services unless a concrete operational failure or a separately reviewed change requires it.
+
+The current manual market/PAPER production path is read-only and fail-closed:
+
+- reviewed source is isolated outside `/opt/pio`;
+- Phase-2 prerequisite preflight is narrowed to only `research_store.py` and `storage.py` through `deploy/manifests/market-paper-phase2-prerequisites.json`;
+- the single-slot state-reader change remains on its separate guarded patch path;
+- the market/PAPER runtime overlay remains apply-locked and production-deployment unauthorized;
+- the named PAPER service and timer must both be explicitly inactive for manual-mode readiness;
+- the retained target-pool cursor is read, never written;
+- `deploy/tools/manual_market_paper_handoff.py` seals production HEAD, the exact tracked working-tree diff hash, service state, PAPER unit state, target cursor, and all prerequisite/runtime preflight summaries into one deterministic SHA-256 identity;
+- handoff verification must re-run the read-only preflight and reject any bound state drift before any later separately reviewed mutation.
+
+The reviewed preflight sequence is documented in `deploy/manual-market-paper-production-preflight.md` and `deploy/manual-market-paper-handoff.md`. A clean preflight or matching handoff is evidence for review only. It never means deployment is authorized.
+
+The remaining system gates are real evidence rather than missing core implementation: Phase 2 still needs sufficient real reconciliation/calibration coverage for promotion, and Phase 5 still needs long real PAPER endurance/restart validation, multi-observation position evidence, and persisted promotion evidence. No later phase may treat code existence, a clean deployment preflight, or a PAPER handoff as a substitute for those promotion gates.
 
 ## 10. System split
 
