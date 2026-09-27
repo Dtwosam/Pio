@@ -10,7 +10,7 @@ submit a transaction, or authorize production mutation.
 Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-4035842b2a8581b209eaf960088427f6fb08a1d3
+1cd7e778d2239755d5f9f63eb2d952904affa203
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="4035842b2a8581b209eaf960088427f6fb08a1d3"
+REVIEWED_REF="1cd7e778d2239755d5f9f63eb2d952904affa203"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -170,6 +170,72 @@ temporary merge inputs inside a temporary directory; it never writes
 
 Those two conflict blocks are the next evidence required before constructing a
 reviewable preserved-fix candidate for `state_reader.rs`.
+
+## Build the preserved state-reader candidate outside production
+
+The two current overlap blocks have been reviewed:
+
+- conflict 1 is only a production formatting variant of code that the reviewed
+  target removes;
+- conflict 2 contains the same state-record fields and values on the
+  production-local/base sides, while the reviewed target retains those fields
+  with its reviewed formatting/layout.
+
+The reviewed resolution policy is therefore `REVIEWED_TARGET` for both exact
+conflict hashes. All non-overlapping production-local changes remain preserved
+through Git's automatic three-way merge.
+
+Construct the candidate only under `/var/tmp`:
+
+~~~bash
+STAMP="$(date +%Y%m%d%H%M%S)"
+CANDIDATE="/var/tmp/pio-state-reader-preserved-candidate.$STAMP.rs"
+CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.$STAMP.json"
+
+python3 "$SRC/deploy/tools/build_manual_market_paper_state_reader_candidate.py" \
+  --repo /opt/pio \
+  --source-tree "$SRC" \
+  --output "$CANDIDATE" \
+  > "$CANDIDATE_REPORT"
+
+python3 -m json.tool "$CANDIDATE_REPORT"
+~~~
+
+The constructor re-runs and validates the exact sealed hunk evidence
+`805d5e89ecc9d14157a58e5fc40e1cf3b9632b6636fc61580f157890eb4736a7`,
+including production HEAD, production-local state-reader blob, reviewed target,
+both conflict hashes, and every conflict-side hash. It fails closed on any
+drift. It resolves only those two conflicts, writes exactly one candidate file
+under `/var/tmp`, verifies its Git blob, and keeps production mutation
+unauthorized.
+
+## Validate the candidate in an isolated source copy
+
+Validation has no production repository argument and no `/opt/pio` path.
+It verifies the sealed candidate file/report, copies the reviewed source into a
+temporary workspace under `/var/tmp`, installs the candidate only there, and
+runs Rust tests with one Cargo build job:
+
+~~~bash
+VALIDATION_REPORT="/var/tmp/pio-state-reader-candidate-validation.$STAMP.json"
+
+python3 "$SRC/deploy/tools/validate_manual_market_paper_state_reader_candidate.py" \
+  --source-tree "$SRC" \
+  --candidate-report "$CANDIDATE_REPORT" \
+  > "$VALIDATION_REPORT"
+
+python3 -m json.tool "$VALIDATION_REPORT"
+~~~
+
+The isolated validator runs:
+
+1. `cargo test --quiet`;
+2. `cargo test --quiet --features live-submit`.
+
+It records command identities, return codes, and stdout/stderr hashes and sizes,
+not the build logs themselves. `validation_ready=true` requires both commands
+to pass. Even a passing validation remains non-authorizing and requires a
+separate production-mutation review.
 
 ## Stop boundary
 
