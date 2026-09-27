@@ -35,11 +35,14 @@ state-reader patch blobs before loading them.
 This is only a name for checking that the matching systemd PAPER service/timer
 are inactive. The command below does not create the account.
 
+Set the intended virtual account identifier explicitly before running the
+checker:
+
 ```bash
-PAPER_ACCOUNT="pio-paper-v1"
+: "${PAPER_ACCOUNT:?Set PAPER_ACCOUNT to the intended virtual paper account id}"
 ```
 
-Use a different identifier if a different virtual account is intended.
+The runbook intentionally does not choose an account name for production.
 
 ## 3. Run the read-only production checker
 
