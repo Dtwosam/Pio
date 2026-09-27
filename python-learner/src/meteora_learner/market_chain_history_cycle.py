@@ -63,6 +63,35 @@ def _assert_refresh_boundary(report: MarketChainRefreshReport) -> None:
         raise RuntimeError("market chain refresh crossed research-only boundary")
 
 
+def _context_stage(report: MarketChainContextCaptureReport) -> MarketChainHistoryStage:
+    capture = report.capture
+    if capture is not None and int(capture.pools_failed) > 0:
+        return MarketChainHistoryStage(
+            stage="SEED_MISSING_CHAIN_CONTEXT",
+            status="PARTIAL",
+            error_category="CHAIN_CONTEXT_PARTIAL_FAILURE",
+        )
+    return MarketChainHistoryStage(
+        stage="SEED_MISSING_CHAIN_CONTEXT",
+        status="SUCCESS",
+        error_category=None,
+    )
+
+
+def _refresh_stage(report: MarketChainRefreshReport) -> MarketChainHistoryStage:
+    if int(report.pools_failed) > 0:
+        return MarketChainHistoryStage(
+            stage="REFRESH_LONGITUDINAL_CHAIN_CONTEXT",
+            status="PARTIAL",
+            error_category="CHAIN_REFRESH_PARTIAL_FAILURE",
+        )
+    return MarketChainHistoryStage(
+        stage="REFRESH_LONGITUDINAL_CHAIN_CONTEXT",
+        status="SUCCESS",
+        error_category=None,
+    )
+
+
 def run_market_chain_history_cycle(
     storage: Storage,
     *,
@@ -97,13 +126,7 @@ def run_market_chain_history_cycle(
             ingest_observed_at=observed_at,
         )
         _assert_context_boundary(context)
-        stages.append(
-            MarketChainHistoryStage(
-                stage="SEED_MISSING_CHAIN_CONTEXT",
-                status="SUCCESS",
-                error_category=None,
-            )
-        )
+        stages.append(_context_stage(context))
     except Exception:
         stages.append(
             MarketChainHistoryStage(
@@ -122,13 +145,7 @@ def run_market_chain_history_cycle(
             ingest_observed_at=observed_at,
         )
         _assert_refresh_boundary(refresh)
-        stages.append(
-            MarketChainHistoryStage(
-                stage="REFRESH_LONGITUDINAL_CHAIN_CONTEXT",
-                status="SUCCESS",
-                error_category=None,
-            )
-        )
+        stages.append(_refresh_stage(refresh))
     except Exception:
         stages.append(
             MarketChainHistoryStage(
@@ -138,12 +155,12 @@ def run_market_chain_history_cycle(
             )
         )
 
-    successes = sum(item.status == "SUCCESS" for item in stages)
+    statuses = tuple(item.status for item in stages)
     status = (
         "COMPLETE"
-        if successes == len(stages)
+        if all(value == "SUCCESS" for value in statuses)
         else "PARTIAL"
-        if successes
+        if any(value in {"SUCCESS", "PARTIAL"} for value in statuses)
         else "FAILED"
     )
     return MarketChainHistoryCycleReport(
