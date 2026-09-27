@@ -13,8 +13,8 @@ import tempfile
 from typing import Any
 
 
-FORMAT_VERSION = 1
-ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_STATE_READER_CANDIDATE_VALIDATION_V1"
+FORMAT_VERSION = 2
+ARTIFACT_TYPE = "MANUAL_MARKET_PAPER_STATE_READER_CANDIDATE_VALIDATION_V2"
 
 BUILDER_TOOL = Path("deploy/tools/build_manual_market_paper_state_reader_candidate.py")
 REVIEWED_SOURCE_BLOBS = {
@@ -22,11 +22,18 @@ REVIEWED_SOURCE_BLOBS = {
 }
 
 COMMANDS = (
-    ("cargo_test", ("cargo", "test", "--quiet")),
+    ("cargo_test", ("test", "--quiet")),
     (
         "cargo_test_live_submit",
-        ("cargo", "test", "--quiet", "--features", "live-submit"),
+        ("test", "--quiet", "--features", "live-submit"),
     ),
+)
+
+CARGO_COMMON_PATHS = (
+    Path.home() / ".cargo" / "bin" / "cargo",
+    Path("/usr/bin/cargo"),
+    Path("/usr/local/bin/cargo"),
+    Path("/usr/local/cargo/bin/cargo"),
 )
 
 IDENTITY_FIELDS = (
@@ -40,6 +47,9 @@ IDENTITY_FIELDS = (
     "candidate_size",
     "candidate_path",
     "validation_workspace_under_var_tmp",
+    "cargo_executable",
+    "cargo_available",
+    "validation_blocker",
     "validation_commands",
     "all_commands_passed",
     "validation_ready",
@@ -128,6 +138,40 @@ def _reviewed_source_head(source: Path) -> str:
     return head
 
 
+def _resolve_cargo(cargo_bin: str | None) -> str | None:
+    candidates: list[Path] = []
+    if cargo_bin:
+        raw = Path(cargo_bin).expanduser()
+        if raw.is_absolute() or "/" in cargo_bin:
+            candidates.append(raw)
+        else:
+            resolved = shutil.which(cargo_bin)
+            if resolved:
+                candidates.append(Path(resolved))
+    else:
+        resolved = shutil.which("cargo")
+        if resolved:
+            candidates.append(Path(resolved))
+        candidates.extend(CARGO_COMMON_PATHS)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            resolved_path = candidate.resolve(strict=True)
+        except (FileNotFoundError, OSError):
+            continue
+        key = str(resolved_path)
+        if key in seen:
+            continue
+        seen.add(key)
+        if (
+            resolved_path.is_file()
+            and os.access(resolved_path, os.X_OK)
+        ):
+            return key
+    return None
+
+
 def _command_result(
     *,
     name: str,
@@ -135,22 +179,64 @@ def _command_result(
     cwd: Path,
     env: dict[str, str],
 ) -> dict[str, Any]:
-    proc = subprocess.run(
-        list(command),
-        cwd=str(cwd),
-        env=env,
-        capture_output=True,
-        check=False,
-    )
-    stdout = proc.stdout if isinstance(proc.stdout, bytes) else str(proc.stdout).encode()
-    stderr = proc.stderr if isinstance(proc.stderr, bytes) else str(proc.stderr).encode()
+    try:
+        proc = subprocess.run(
+            list(command),
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            check=False,
+        )
+        stdout = (
+            proc.stdout
+            if isinstance(proc.stdout, bytes)
+            else str(proc.stdout).encode()
+        )
+        stderr = (
+            proc.stderr
+            if isinstance(proc.stderr, bytes)
+            else str(proc.stderr).encode()
+        )
+        returncode = int(proc.returncode)
+    except FileNotFoundError:
+        stdout = b""
+        stderr = b"EXECUTABLE_NOT_FOUND\n"
+        returncode = 127
+    except PermissionError:
+        stdout = b""
+        stderr = b"EXECUTABLE_NOT_EXECUTABLE\n"
+        returncode = 126
+    except OSError:
+        stdout = b""
+        stderr = b"EXECUTION_OS_ERROR\n"
+        returncode = 125
+
     return {
         "name": name,
         "argv": list(command),
-        "returncode": int(proc.returncode),
-        "passed": proc.returncode == 0,
+        "returncode": returncode,
+        "passed": returncode == 0,
         "stdout_sha256": _sha256_bytes(stdout),
         "stdout_size": len(stdout),
+        "stderr_sha256": _sha256_bytes(stderr),
+        "stderr_size": len(stderr),
+    }
+
+
+def _missing_cargo_result(
+    *,
+    name: str,
+    command_args: tuple[str, ...],
+) -> dict[str, Any]:
+    stdout = b""
+    stderr = b"CARGO_NOT_FOUND\n"
+    return {
+        "name": name,
+        "argv": ["cargo", *command_args],
+        "returncode": 127,
+        "passed": False,
+        "stdout_sha256": _sha256_bytes(stdout),
+        "stdout_size": 0,
         "stderr_sha256": _sha256_bytes(stderr),
         "stderr_size": len(stderr),
     }
@@ -201,6 +287,25 @@ def validate_validation_report(report: dict[str, Any]) -> None:
     if report.get("validation_workspace_under_var_tmp") is not True:
         raise ValueError("candidate validation workspace scope is invalid")
 
+    cargo_executable = report.get("cargo_executable")
+    cargo_available = report.get("cargo_available")
+    if not isinstance(cargo_available, bool):
+        raise ValueError("candidate validation cargo availability is invalid")
+    if cargo_available:
+        if (
+            not isinstance(cargo_executable, str)
+            or not cargo_executable.startswith("/")
+        ):
+            raise ValueError("candidate validation cargo executable is invalid")
+    elif cargo_executable is not None:
+        raise ValueError(
+            "candidate validation unavailable cargo executable must be null"
+        )
+
+    blocker = report.get("validation_blocker")
+    if blocker not in {None, "CARGO_NOT_FOUND", "COMMAND_FAILED"}:
+        raise ValueError("candidate validation blocker is invalid")
+
     commands = report.get("validation_commands")
     if not isinstance(commands, list) or len(commands) != len(COMMANDS):
         raise ValueError("candidate validation command set is invalid")
@@ -209,7 +314,7 @@ def validate_validation_report(report: dict[str, Any]) -> None:
     if [item.get("name") for item in commands] != expected_names:
         raise ValueError("candidate validation command ordering is invalid")
 
-    for (expected_name, expected_argv), item in zip(COMMANDS, commands, strict=True):
+    for (expected_name, expected_args), item in zip(COMMANDS, commands, strict=True):
         if not isinstance(item, dict):
             raise ValueError("candidate validation command result is invalid")
         if set(item) != {
@@ -223,7 +328,11 @@ def validate_validation_report(report: dict[str, Any]) -> None:
             "stderr_size",
         }:
             raise ValueError("candidate validation command schema mismatch")
-        if item["name"] != expected_name or item["argv"] != list(expected_argv):
+        expected_argv = [
+            cargo_executable if cargo_available else "cargo",
+            *expected_args,
+        ]
+        if item["name"] != expected_name or item["argv"] != expected_argv:
             raise ValueError("candidate validation command identity mismatch")
         if (
             not isinstance(item["returncode"], int)
@@ -248,8 +357,17 @@ def validate_validation_report(report: dict[str, Any]) -> None:
     all_passed = all(item["passed"] for item in commands)
     if report.get("all_commands_passed") is not all_passed:
         raise ValueError("candidate validation aggregate pass flag mismatch")
-    if report.get("validation_ready") is not all_passed:
+    expected_ready = cargo_available and all_passed
+    if report.get("validation_ready") is not expected_ready:
         raise ValueError("candidate validation ready flag mismatch")
+
+    expected_blocker = (
+        None
+        if expected_ready
+        else ("CARGO_NOT_FOUND" if not cargo_available else "COMMAND_FAILED")
+    )
+    if blocker != expected_blocker:
+        raise ValueError("candidate validation blocker mismatch")
     if report.get("production_file_modified") is not False:
         raise ValueError("candidate validation must not modify production")
     if report.get("requires_separate_mutation_authorization") is not True:
@@ -276,6 +394,7 @@ def validate_candidate(
     *,
     source_tree: str | Path,
     candidate_report: dict[str, Any],
+    cargo_bin: str | None = None,
 ) -> dict[str, Any]:
     source = Path(source_tree).resolve()
     if not source.is_dir():
@@ -338,17 +457,34 @@ def validate_candidate(
         env["CARGO_BUILD_JOBS"] = "1"
         env["CARGO_TARGET_DIR"] = str(cargo_target)
 
-        command_results = [
-            _command_result(
-                name=name,
-                command=command,
-                cwd=rust_dir,
-                env=env,
-            )
-            for name, command in COMMANDS
-        ]
+        cargo_executable = _resolve_cargo(cargo_bin)
+        cargo_available = cargo_executable is not None
+        if cargo_available:
+            command_results = [
+                _command_result(
+                    name=name,
+                    command=(cargo_executable, *command_args),
+                    cwd=rust_dir,
+                    env=env,
+                )
+                for name, command_args in COMMANDS
+            ]
+        else:
+            command_results = [
+                _missing_cargo_result(
+                    name=name,
+                    command_args=command_args,
+                )
+                for name, command_args in COMMANDS
+            ]
 
     all_passed = all(item["passed"] for item in command_results)
+    validation_ready = cargo_available and all_passed
+    validation_blocker = (
+        None
+        if validation_ready
+        else ("CARGO_NOT_FOUND" if not cargo_available else "COMMAND_FAILED")
+    )
     identity = {
         "format_version": FORMAT_VERSION,
         "artifact_type": ARTIFACT_TYPE,
@@ -366,9 +502,12 @@ def validate_candidate(
         "candidate_size": candidate_report["candidate_size"],
         "candidate_path": str(candidate_path_resolved),
         "validation_workspace_under_var_tmp": True,
+        "cargo_executable": cargo_executable,
+        "cargo_available": cargo_available,
+        "validation_blocker": validation_blocker,
         "validation_commands": command_results,
         "all_commands_passed": all_passed,
-        "validation_ready": all_passed,
+        "validation_ready": validation_ready,
         "production_file_modified": False,
         "requires_separate_mutation_authorization": True,
         "production_deployment_authorized": False,
@@ -397,11 +536,19 @@ def main() -> None:
     )
     parser.add_argument("--source-tree", required=True)
     parser.add_argument("--candidate-report", required=True)
+    parser.add_argument(
+        "--cargo-bin",
+        help=(
+            "Optional existing Cargo executable path/name. No toolchain is "
+            "installed or modified by this validator."
+        ),
+    )
     args = parser.parse_args()
 
     report = validate_candidate(
         source_tree=args.source_tree,
         candidate_report=_load_json(Path(args.candidate_report)),
+        cargo_bin=args.cargo_bin,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
     if not report["validation_ready"]:
