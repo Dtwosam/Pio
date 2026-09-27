@@ -85,9 +85,17 @@ Do not work around a conflict with `git checkout`, `git reset`, `git
 restore`, `git clean`, a pull over `/opt/pio`, a service restart, or manual
 detector-cursor edits.
 
+If those production-local conflicts are resolved through the reviewed preserved
+`research_store.py` and `state_reader.rs` candidates, do **not** resume the
+regular handoff/plan/gate path below. Continue through
+`manual-market-paper-preserved-production-review.md`, which binds the private
+preserved-source bundle throughout readiness, handoff, planning, gate, and
+file-level review.
+
 ## 5. Continue only through read-only artifacts
 
-If the report is clean, the next reviewed steps are still non-mutating:
+If the regular report is clean without preserved-candidate substitution, the
+next reviewed steps are still non-mutating:
 
 1. capture the sealed handoff in `manual-market-paper-handoff.md`;
 2. build the deterministic deployment plan in `manual-market-paper-deployment-plan.md`;
