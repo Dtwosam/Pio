@@ -77,9 +77,13 @@ class ManualMarketPaperCycleReport:
         exploration_record = None
         if self.exploration is not None:
             exploration_record = {
+                "status": self.exploration.status,
                 "pools_ready": self.exploration.pools_ready,
                 "pools_considered": self.exploration.pools_considered,
                 "positions_opened": self.exploration.positions_opened,
+                "positions_already_applied": (
+                    self.exploration.positions_already_applied
+                ),
                 "max_new_positions": self.exploration.max_new_positions,
                 "items": [
                     item.to_record()
@@ -217,8 +221,11 @@ def run_manual_market_paper_cycle(
             intake_max_pools=intake_max_pools,
             quote_max_age_seconds=quote_max_age_seconds,
             max_share_bps=max_share_bps,
+            observed_at=timestamp,
         )
         _check_exploration(exploration)
+        if exploration.status == "SCHEDULER_BUSY":
+            skip_reason = "EXPLORATION_SCHEDULER_BUSY"
 
     pending = (
         exploration.positions_opened
@@ -226,7 +233,9 @@ def run_manual_market_paper_cycle(
         else 0
     )
 
-    if scheduler.status == "BUSY":
+    if skip_reason == "EXPLORATION_SCHEDULER_BUSY":
+        status = "BUSY"
+    elif scheduler.status == "BUSY":
         status = "BUSY"
     elif scheduler.status in BLOCKING_SCHEDULER_STATUSES:
         status = "PARTIAL" if research.status != "FAILED" else "FAILED"

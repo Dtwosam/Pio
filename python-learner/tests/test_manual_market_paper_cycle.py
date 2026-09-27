@@ -33,14 +33,16 @@ def _scheduler(status="COMPLETE", error=None):
     )
 
 
-def _exploration(opened=1):
+def _exploration(opened=1, status="COMPLETE"):
     return SimpleNamespace(
         paper_only=True,
         policy_actionable=False,
         live_authorized=False,
+        status=status,
         pools_ready=3,
         pools_considered=2,
         positions_opened=opened,
+        positions_already_applied=0,
         max_new_positions=1,
         items=(),
     )
@@ -83,10 +85,36 @@ def test_manual_cycle_orders_research_scheduler_then_new_entries(tmp_path):
     assert calls[1][1]["as_of"] == NOW
     assert calls[1][1]["retry_failed"] is True
     assert calls[1][1]["refresh_jupiter_quotes"] is True
+    assert calls[2][1]["observed_at"] == NOW
     assert report.status == "COMPLETE"
     assert report.new_positions_pending_next_tick == 1
     assert report.paper_only is True
     assert report.live_authorized is False
+
+
+def test_exploration_busy_race_is_fail_closed(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    report = run_manual_market_paper_cycle(
+        storage,
+        account_id="paper",
+        run_id="race",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        observed_at=NOW,
+        research_runner=lambda storage_arg, **kwargs: _research(),
+        scheduler_runner=lambda storage_arg, **kwargs: _scheduler(),
+        exploration_runner=lambda storage_arg, **kwargs: _exploration(
+            opened=0,
+            status="SCHEDULER_BUSY",
+        ),
+    )
+
+    assert report.status == "BUSY"
+    assert report.new_entries_skipped_reason == (
+        "EXPLORATION_SCHEDULER_BUSY"
+    )
+    assert report.new_positions_pending_next_tick == 0
 
 
 def test_busy_scheduler_blocks_new_entries(tmp_path):
