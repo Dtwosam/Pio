@@ -229,10 +229,16 @@ def _three_way_merge(
     merged = stdout if isinstance(stdout, bytes) else str(stdout).encode("utf-8")
     if proc.returncode == 0:
         status = "CLEAN"
-    elif proc.returncode == 1:
+    elif 1 <= proc.returncode <= 127:
+        # git merge-file returns the number of conflicts on conflict,
+        # truncated to 127. Any positive value in that range is therefore a
+        # valid analyzed conflict result rather than an execution failure.
         status = "CONFLICT"
     else:
-        raise ValueError("three-way merge analysis failed")
+        raise ValueError(
+            "three-way merge analysis failed "
+            f"(git merge-file return code {proc.returncode})"
+        )
 
     return {
         "status": status,

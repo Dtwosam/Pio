@@ -84,6 +84,60 @@ def test_overlapping_local_and_reviewed_changes_report_conflict():
     assert result["candidate_content_emitted"] is False
 
 
+def test_merge_file_multiple_conflicts_are_valid_conflict_result():
+    merged = (
+        b"<<<<<<< current\nlocal-a\n||||||| base\nbase-a\n=======\n"
+        b"target-a\n>>>>>>> target\n"
+        b"middle\n"
+        b"<<<<<<< current\nlocal-b\n||||||| base\nbase-b\n=======\n"
+        b"target-b\n>>>>>>> target\n"
+    )
+
+    def runner(args, **kwargs):
+        assert args[:3] == ["git", "merge-file", "-p"]
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=2,
+            stdout=merged,
+            stderr=b"",
+        )
+
+    result = MODULE._three_way_merge(
+        current=b"local\n",
+        base=b"base\n",
+        target=b"target\n",
+        runner=runner,
+    )
+
+    assert result["status"] == "CONFLICT"
+    assert result["conflict_markers"] == 2
+    assert result["candidate_git_blob"] is None
+    assert result["candidate_sha256"] is None
+    assert result["candidate_size"] is None
+
+
+def test_merge_file_execution_failure_still_fails_closed():
+    def runner(args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=128,
+            stdout=b"",
+            stderr=b"fatal: merge-file failed",
+        )
+
+    try:
+        MODULE._three_way_merge(
+            current=b"local\n",
+            base=b"base\n",
+            target=b"target\n",
+            runner=runner,
+        )
+    except ValueError as exc:
+        assert "return code 128" in str(exc)
+    else:
+        raise AssertionError("merge-file execution error must fail closed")
+
+
 def test_base_or_target_blob_mismatch_fails_closed():
     base = b"base\n"
     current = b"current\n"
