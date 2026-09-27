@@ -13,6 +13,7 @@ import subprocess
 
 TARGET_PATH = "rust-executor/src/state_reader.rs"
 STACK_HEAD = "59473ee07190c34f5a3264e4a120e20fd8cec338"
+STACK_BASE_BLOB_SHA = "50b2291d3cdb1b727bc443beaca780e7a6e20e85"
 STACK_TARGET_BLOB_SHA = "30d1435af1329bca07f73d6639539b43503e84e9"
 REFERENCE_PATCH = (
     Path(__file__).resolve().parents[1]
@@ -30,6 +31,8 @@ class PatchResult:
     applied: bool
     stack_head: str
     patch_sha256: str
+    current_blob: str
+    status: str
     backup: str | None
 
     def to_record(self) -> dict[str, object]:
@@ -60,6 +63,12 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def git_blob_sha(path: Path) -> str:
+    payload = path.read_bytes()
+    header = f"blob {len(payload)}\0".encode()
+    return hashlib.sha1(header + payload).hexdigest()
 
 
 def _require_pinned_patch(
@@ -114,6 +123,26 @@ def apply_guarded_patch(
             f"patch must modify only {TARGET_PATH}; found: {', '.join(paths)}"
         )
 
+    current_blob = git_blob_sha(target)
+    if current_blob == STACK_TARGET_BLOB_SHA:
+        return PatchResult(
+            repository=str(repo),
+            patch=str(patch_path),
+            target=TARGET_PATH,
+            ready=True,
+            applied=False,
+            stack_head=STACK_HEAD,
+            patch_sha256=patch_sha256,
+            current_blob=current_blob,
+            status="ALREADY_TARGET",
+            backup=None,
+        )
+    if current_blob != STACK_BASE_BLOB_SHA:
+        raise ValueError(
+            "state-reader bytes do not match reviewed base or target: "
+            f"{current_blob}"
+        )
+
     run_git_apply(repo, patch_path, check_only=True)
     if not apply:
         return PatchResult(
@@ -124,6 +153,8 @@ def apply_guarded_patch(
             applied=False,
             stack_head=STACK_HEAD,
             patch_sha256=patch_sha256,
+            current_blob=current_blob,
+            status="READY_UPDATE",
             backup=None,
         )
 
@@ -139,6 +170,13 @@ def apply_guarded_patch(
         shutil.copy2(backup, target)
         raise
 
+    updated_blob = git_blob_sha(target)
+    if updated_blob != STACK_TARGET_BLOB_SHA:
+        shutil.copy2(backup, target)
+        raise ValueError(
+            "post-apply state-reader blob does not match reviewed target"
+        )
+
     return PatchResult(
         repository=str(repo),
         patch=str(patch_path),
@@ -147,6 +185,8 @@ def apply_guarded_patch(
         applied=True,
         stack_head=STACK_HEAD,
         patch_sha256=patch_sha256,
+        current_blob=updated_blob,
+        status="APPLIED_TARGET",
         backup=str(backup),
     )
 
