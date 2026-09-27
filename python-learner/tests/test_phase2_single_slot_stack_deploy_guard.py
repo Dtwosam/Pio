@@ -50,20 +50,30 @@ def _repo(tmp_path):
 
 def _make_patch(repo, contents, patch_path):
     target = repo / TARGET
+    base_blob = _git(repo, "hash-object", str(TARGET)).stdout.strip()
     target.write_text(contents, encoding="utf-8")
+    target_blob = _git(repo, "hash-object", str(TARGET)).stdout.strip()
     patch_path.write_text(
         _git(repo, "diff", "--", str(TARGET)).stdout,
         encoding="utf-8",
     )
     _git(repo, "checkout", "--", str(TARGET))
+    return base_blob, target_blob
+
+
+def _pin_test_blobs(monkeypatch, base_blob, target_blob):
+    monkeypatch.setattr(MODULE, "STACK_BASE_BLOB_SHA", base_blob)
+    monkeypatch.setattr(MODULE, "STACK_TARGET_BLOB_SHA", target_blob)
 
 
 def test_combined_guard_dry_run_and_apply_preserve_unrelated_local_edits(
     tmp_path,
+    monkeypatch,
 ):
     repo = _repo(tmp_path)
     patch = tmp_path / "combined.patch"
-    _make_patch(repo, "after\n", patch)
+    base_blob, target_blob = _make_patch(repo, "after\n", patch)
+    _pin_test_blobs(monkeypatch, base_blob, target_blob)
     (repo / "keep.txt").write_text("production-local\n", encoding="utf-8")
 
     dry = MODULE.apply_guarded_patch(
@@ -74,6 +84,8 @@ def test_combined_guard_dry_run_and_apply_preserve_unrelated_local_edits(
     assert dry.ready is True
     assert dry.applied is False
     assert dry.stack_head == MODULE.STACK_HEAD
+    assert dry.status == "READY_UPDATE"
+    assert dry.current_blob == base_blob
     assert len(dry.patch_sha256) == 64
     assert (repo / TARGET).read_text(encoding="utf-8") == "before\n"
     assert (repo / "keep.txt").read_text(encoding="utf-8") == (
@@ -89,6 +101,8 @@ def test_combined_guard_dry_run_and_apply_preserve_unrelated_local_edits(
         backup_dir=backup_dir,
     )
     assert applied.applied is True
+    assert applied.status == "APPLIED_TARGET"
+    assert applied.current_blob == target_blob
     assert applied.stack_head == MODULE.STACK_HEAD
     assert applied.patch_sha256 == dry.patch_sha256
     assert (repo / TARGET).read_text(encoding="utf-8") == "after\n"
@@ -122,16 +136,20 @@ def test_combined_guard_rejects_unreviewed_patch_bytes(tmp_path):
     assert (repo / TARGET).read_text(encoding="utf-8") == "before\n"
 
 
-def test_combined_guard_fails_closed_on_target_conflict(tmp_path):
+def test_combined_guard_fails_closed_on_target_conflict(
+    tmp_path,
+    monkeypatch,
+):
     repo = _repo(tmp_path)
     patch = tmp_path / "combined.patch"
-    _make_patch(repo, "approved\n", patch)
+    base_blob, target_blob = _make_patch(repo, "approved\n", patch)
+    _pin_test_blobs(monkeypatch, base_blob, target_blob)
     (repo / TARGET).write_text(
         "production-local-state-reader-fix\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(ValueError, match="reviewed base or target"):
         MODULE.apply_guarded_patch(
             repository=repo,
             patch=patch,
@@ -152,6 +170,9 @@ def test_bundled_combined_patch_is_single_file_and_pinned():
     assert MODULE.STACK_HEAD == (
         "59473ee07190c34f5a3264e4a120e20fd8cec338"
     )
+    assert MODULE.STACK_BASE_BLOB_SHA == (
+        "50b2291d3cdb1b727bc443beaca780e7a6e20e85"
+    )
     assert MODULE.STACK_TARGET_BLOB_SHA == (
         "30d1435af1329bca07f73d6639539b43503e84e9"
     )
@@ -170,7 +191,13 @@ def test_bundled_combined_patch_reconstructs_reviewed_state_reader_blob(
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "main state reader")
 
-    _git(repo, "apply", str(MODULE.REFERENCE_PATCH))
-    blob = _git(repo, "hash-object", str(TARGET)).stdout.strip()
+    target_blob = _git(repo, "hash-object", str(TARGET)).stdout.strip()
+    assert target_blob == MODULE.STACK_TARGET_BLOB_SHA
 
-    assert blob == MODULE.STACK_TARGET_BLOB_SHA
+    _git(repo, "apply", "-R", str(MODULE.REFERENCE_PATCH))
+    base_blob = _git(repo, "hash-object", str(TARGET)).stdout.strip()
+    assert base_blob == MODULE.STACK_BASE_BLOB_SHA
+
+    _git(repo, "apply", str(MODULE.REFERENCE_PATCH))
+    rebuilt_blob = _git(repo, "hash-object", str(TARGET)).stdout.strip()
+    assert rebuilt_blob == MODULE.STACK_TARGET_BLOB_SHA
