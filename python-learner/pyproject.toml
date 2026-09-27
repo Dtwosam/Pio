@@ -12,10 +12,11 @@ dependencies = [
 [project.scripts]
 pio = "meteora_learner.cli:main"
 pio-market-universe-discover = "meteora_learner.market_pool_universe_cli:main"
-pio-market-chain-history = "meteora_learner.market_chain_history_cli:main"
-pio-market-research-cycle = "meteora_learner.market_research_cycle_cli:main"
 pio-market-paper-intake = "meteora_learner.market_paper_intake_cli:main"
 pio-paper-candidate-cycle = "meteora_learner.paper_candidate_cycle_cli:main"
+pio-paper-empirical-entry = "meteora_learner.paper_empirical_entry_cli:main"
+pio-market-paper-explore = "meteora_learner.market_paper_exploration_cli:main"
+pio-manual-market-paper-cycle = "meteora_learner.manual_market_paper_cycle_cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
