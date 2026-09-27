@@ -115,6 +115,11 @@ def test_authorized_apply_backs_up_updates_and_preserves_unrelated_files(
     )
 
     monkeypatch.setattr(MODULE, "DEFAULT_MANIFEST", manifest)
+    monkeypatch.setattr(
+        MODULE,
+        "REVIEWED_DEFAULT_MANIFEST_BLOB",
+        MODULE.git_blob_sha(manifest),
+    )
     report = MODULE.apply_guarded_collection_stack(
         repository=repo,
         source_tree=source,
@@ -257,6 +262,26 @@ def test_apply_rejects_authorized_nondefault_manifest(tmp_path):
     )
 
     with pytest.raises(ValueError, match="reviewed default manifest"):
+        MODULE.apply_guarded_collection_stack(
+            repository=repo,
+            source_tree=source,
+            manifest=manifest,
+            apply=True,
+            backup_dir=tmp_path / "backups",
+        )
+
+
+def test_apply_rejects_modified_default_manifest_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    repo, source, manifest, _, _ = fixture_tree(
+        tmp_path,
+        authorized=True,
+    )
+    monkeypatch.setattr(MODULE, "DEFAULT_MANIFEST", manifest)
+
+    with pytest.raises(ValueError, match="bytes do not match pinned blob"):
         MODULE.apply_guarded_collection_stack(
             repository=repo,
             source_tree=source,

@@ -17,6 +17,7 @@ DEFAULT_MANIFEST = (
     / "manifests"
     / "phase2-collection-integration.json"
 )
+REVIEWED_DEFAULT_MANIFEST_BLOB = "3c1c1b2031ec77783593e59b73cd33ca76886e1d"
 
 READY_STATUSES = {
     "ALREADY_TARGET",
@@ -234,6 +235,10 @@ def apply_guarded_collection_stack(
     if Path(manifest).resolve() != DEFAULT_MANIFEST.resolve():
         raise ValueError(
             "collection stack apply requires the reviewed default manifest"
+        )
+    if git_blob_sha(DEFAULT_MANIFEST) != REVIEWED_DEFAULT_MANIFEST_BLOB:
+        raise ValueError(
+            "reviewed default manifest bytes do not match pinned blob"
         )
     if not report.content_ready:
         raise ValueError(
