@@ -153,7 +153,7 @@ def _synthetic_report(
         "patch_report_sha256": "2" * 64,
         "patch_sha256": "3" * 64,
         "patch_size": 123,
-        "candidate_git_blob": "4" * 40,
+        "candidate_git_blob": MODULE.EXPECTED_CANDIDATE_BLOB,
         "candidate_sha256": "5" * 64,
         "candidate_size": 456,
         "patch_file": "/private/tmp/candidate.patch",
@@ -215,6 +215,25 @@ def test_portable_validation_accepts_patch_apply_blocker():
 
     assert report["validation_ready"] is False
     assert report["validation_blocker"] == "PATCH_APPLY_FAILED"
+
+
+def test_rehashed_portable_validation_cannot_claim_other_candidate_blob():
+    report = _synthetic_report()
+    report["candidate_git_blob"] = "4" * 40
+    identity = {
+        field: report[field]
+        for field in MODULE.IDENTITY_FIELDS
+    }
+    report["report_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+    try:
+        MODULE.validate_portable_validation_report(report)
+    except ValueError as exc:
+        assert "candidate blob mismatch" in str(exc)
+    else:
+        raise AssertionError("rehashed candidate substitution must fail closed")
 
 
 def test_rehashed_portable_validation_cannot_authorize_mutation():
