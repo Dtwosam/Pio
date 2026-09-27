@@ -23,6 +23,30 @@ REVIEWED_SOURCE_BLOBS = {
     HANDOFF_TOOL: "506e5b92cad25ef3990fc2e123221458159d3546",
 }
 
+GATE_IDENTITY_FIELDS = (
+    "format_version",
+    "artifact_type",
+    "plan_sha256",
+    "saved_handoff_state_sha256",
+    "current_handoff_state_sha256",
+    "state_matches",
+    "changed_sections",
+    "saved_handoff_ready",
+    "current_handoff_ready",
+    "plan_matches_saved_handoff",
+    "plan_matches_reviewed_source",
+    "operation_count",
+    "deployment_needed",
+    "gate_ready",
+    "requires_separate_mutation_authorization",
+    "production_deployment_authorized",
+    "mutation_authorized",
+    "service_restart_authorized",
+    "detector_cursor_movement_authorized",
+    "paper_timer_enable_authorized",
+    "live_capital_authorized",
+)
+
 
 @dataclass(frozen=True)
 class DeploymentGateReport:
@@ -47,6 +71,7 @@ class DeploymentGateReport:
     detector_cursor_movement_authorized: bool
     paper_timer_enable_authorized: bool
     live_capital_authorized: bool
+    gate_sha256: str
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -56,6 +81,23 @@ def _git_blob_sha(path: Path) -> str:
     payload = path.read_bytes()
     header = f"blob {len(payload)}\0".encode()
     return hashlib.sha1(header + payload).hexdigest()
+
+
+def _canonical_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+
+def _is_hex_digest(value: Any, length: int) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == length
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
 
 
 def _verify_reviewed_source(source: Path) -> None:
@@ -97,6 +139,102 @@ def _load_reviewed_modules(source: Path) -> tuple[Any, Any]:
         "manual_market_paper_deployment_gate_handoff",
     )
     return plan_module, handoff_module
+
+
+def validate_deployment_gate_report(report: dict[str, Any]) -> None:
+    if not isinstance(report, dict):
+        raise ValueError("deployment gate report must be a JSON object")
+
+    expected_keys = set(GATE_IDENTITY_FIELDS) | {"gate_sha256"}
+    if set(report) != expected_keys:
+        raise ValueError("deployment gate report fields do not match reviewed schema")
+    if report.get("format_version") != FORMAT_VERSION:
+        raise ValueError("unsupported deployment gate report format")
+    if report.get("artifact_type") != ARTIFACT_TYPE:
+        raise ValueError("unexpected deployment gate report artifact type")
+
+    for field in (
+        "plan_sha256",
+        "saved_handoff_state_sha256",
+        "current_handoff_state_sha256",
+        "gate_sha256",
+    ):
+        if not _is_hex_digest(report.get(field), 64):
+            raise ValueError(f"deployment gate report {field} is invalid")
+
+    changed_sections = report.get("changed_sections")
+    if not isinstance(changed_sections, (list, tuple)):
+        raise ValueError("deployment gate changed_sections must be a sequence")
+    if any(not isinstance(section, str) or not section for section in changed_sections):
+        raise ValueError("deployment gate changed_sections contains an invalid section")
+    if len(changed_sections) != len(set(changed_sections)):
+        raise ValueError("deployment gate changed_sections contains duplicates")
+
+    bool_fields = (
+        "state_matches",
+        "saved_handoff_ready",
+        "current_handoff_ready",
+        "plan_matches_saved_handoff",
+        "plan_matches_reviewed_source",
+        "deployment_needed",
+        "gate_ready",
+        "requires_separate_mutation_authorization",
+        "production_deployment_authorized",
+        "mutation_authorized",
+        "service_restart_authorized",
+        "detector_cursor_movement_authorized",
+        "paper_timer_enable_authorized",
+        "live_capital_authorized",
+    )
+    for field in bool_fields:
+        if not isinstance(report.get(field), bool):
+            raise ValueError(f"deployment gate report {field} must be boolean")
+
+    operation_count = report.get("operation_count")
+    if (
+        not isinstance(operation_count, int)
+        or isinstance(operation_count, bool)
+        or operation_count < 0
+    ):
+        raise ValueError("deployment gate operation_count must be a non-negative integer")
+    if report["deployment_needed"] is not (operation_count > 0):
+        raise ValueError("deployment gate deployment-needed flag mismatch")
+
+    if report["state_matches"] and changed_sections:
+        raise ValueError("matching deployment gate state cannot report changed sections")
+    if not report["state_matches"] and not changed_sections:
+        raise ValueError("drifted deployment gate state must identify changed sections")
+
+    expected_gate_ready = bool(
+        report["plan_matches_reviewed_source"]
+        and report["plan_matches_saved_handoff"]
+        and report["saved_handoff_ready"]
+        and report["current_handoff_ready"]
+        and report["state_matches"]
+    )
+    if report["gate_ready"] is not expected_gate_ready:
+        raise ValueError("deployment gate ready flag is inconsistent with its evidence")
+
+    if report["requires_separate_mutation_authorization"] is not True:
+        raise ValueError("deployment gate must require separate mutation authorization")
+    for field in (
+        "production_deployment_authorized",
+        "mutation_authorized",
+        "service_restart_authorized",
+        "detector_cursor_movement_authorized",
+        "paper_timer_enable_authorized",
+        "live_capital_authorized",
+    ):
+        if report[field] is not False:
+            raise ValueError(f"deployment gate requires {field}=false")
+
+    identity = {
+        field: report[field]
+        for field in GATE_IDENTITY_FIELDS
+    }
+    expected_digest = hashlib.sha256(_canonical_bytes(identity)).hexdigest()
+    if report["gate_sha256"] != expected_digest:
+        raise ValueError("deployment gate report digest mismatch")
 
 
 def evaluate_deployment_gate(
@@ -154,29 +292,35 @@ def evaluate_deployment_gate(
         and comparison["state_matches"]
     )
 
-    return DeploymentGateReport(
-        format_version=FORMAT_VERSION,
-        artifact_type=ARTIFACT_TYPE,
-        plan_sha256=str(saved_plan["plan_sha256"]),
-        saved_handoff_state_sha256=saved_state_sha,
-        current_handoff_state_sha256=current_state_sha,
-        state_matches=bool(comparison["state_matches"]),
-        changed_sections=tuple(comparison["changed_sections"]),
-        saved_handoff_ready=bool(comparison["snapshot_handoff_ready"]),
-        current_handoff_ready=bool(comparison["current_handoff_ready"]),
-        plan_matches_saved_handoff=plan_matches_saved_handoff,
-        plan_matches_reviewed_source=plan_matches_reviewed_source,
-        operation_count=int(saved_plan["operation_count"]),
-        deployment_needed=bool(saved_plan["deployment_needed"]),
-        gate_ready=gate_ready,
-        requires_separate_mutation_authorization=True,
-        production_deployment_authorized=False,
-        mutation_authorized=False,
-        service_restart_authorized=False,
-        detector_cursor_movement_authorized=False,
-        paper_timer_enable_authorized=False,
-        live_capital_authorized=False,
+    identity = {
+        "format_version": FORMAT_VERSION,
+        "artifact_type": ARTIFACT_TYPE,
+        "plan_sha256": str(saved_plan["plan_sha256"]),
+        "saved_handoff_state_sha256": saved_state_sha,
+        "current_handoff_state_sha256": current_state_sha,
+        "state_matches": bool(comparison["state_matches"]),
+        "changed_sections": tuple(comparison["changed_sections"]),
+        "saved_handoff_ready": bool(comparison["snapshot_handoff_ready"]),
+        "current_handoff_ready": bool(comparison["current_handoff_ready"]),
+        "plan_matches_saved_handoff": plan_matches_saved_handoff,
+        "plan_matches_reviewed_source": plan_matches_reviewed_source,
+        "operation_count": int(saved_plan["operation_count"]),
+        "deployment_needed": bool(saved_plan["deployment_needed"]),
+        "gate_ready": gate_ready,
+        "requires_separate_mutation_authorization": True,
+        "production_deployment_authorized": False,
+        "mutation_authorized": False,
+        "service_restart_authorized": False,
+        "detector_cursor_movement_authorized": False,
+        "paper_timer_enable_authorized": False,
+        "live_capital_authorized": False,
+    }
+    report = DeploymentGateReport(
+        **identity,
+        gate_sha256=hashlib.sha256(_canonical_bytes(identity)).hexdigest(),
     )
+    validate_deployment_gate_report(report.to_record())
+    return report
 
 
 def build_live_deployment_gate(
