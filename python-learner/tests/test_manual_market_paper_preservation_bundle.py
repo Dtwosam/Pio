@@ -89,7 +89,7 @@ def _chain_reports(
         "candidate_sha256": candidate_sha,
         "candidate_size": candidate["candidate_size"],
         "report_sha256": validation_report_sha,
-        "reviewed_source_head": "a" * 40,
+        "reviewed_source_head": MODULE.EXPECTED_VALIDATION_SOURCE_HEAD,
         "validation_ready": ready,
         "validation_blocker": blocker,
     }
@@ -182,6 +182,48 @@ def test_nonready_candidate_is_sealed_as_bundle_blocker(tmp_path, monkeypatch):
     assert bundle["blockers"] == [
         f"{MODULE.STATE_READER_PATH}:CARGO_NOT_FOUND"
     ]
+
+
+def test_validation_source_head_mismatch_fails_closed():
+    candidate, patch, validation = _chain_reports(
+        path=MODULE.STATE_READER_PATH,
+        candidate_blob=MODULE.EXPECTED_STATE_READER_CANDIDATE_BLOB,
+        current_blob="3" * 40,
+        target_blob="4" * 40,
+        seed=5,
+    )
+    validation["reviewed_source_head"] = "f" * 40
+    fake = _fake_module()
+
+    try:
+        MODULE._build_chain_entry(
+            candidate_module=fake,
+            patch_module=fake,
+            validation_module=fake,
+            candidate_report=candidate,
+            patch_report=patch,
+            validation_report=validation,
+            expected_path=MODULE.STATE_READER_PATH,
+            expected_candidate_blob=MODULE.EXPECTED_STATE_READER_CANDIDATE_BLOB,
+        )
+    except ValueError as exc:
+        assert "validation source HEAD" in str(exc)
+    else:
+        raise AssertionError("validation source drift must fail closed")
+
+
+def test_json_artifact_symlink_is_rejected(tmp_path):
+    target = tmp_path / "report.json"
+    target.write_text("{}", encoding="utf-8")
+    link = tmp_path / "report-link.json"
+    link.symlink_to(target)
+
+    try:
+        MODULE._load_json(link)
+    except ValueError as exc:
+        assert "must not be a symlink" in str(exc)
+    else:
+        raise AssertionError("symlink JSON artifact must fail closed")
 
 
 def test_candidate_to_patch_digest_mismatch_fails_closed():
