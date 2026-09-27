@@ -194,6 +194,28 @@ def test_layer_summary_preserves_pending_and_nonready_evidence():
     )
 
 
+def test_layer_summary_record_is_json_native():
+    summary = MODULE._layer_summary(
+        [
+            MODULE.FileStatus(
+                path="a",
+                expected_current_blob="1" * 40,
+                target_blob="2" * 40,
+                source_blob="2" * 40,
+                current_blob="1" * 40,
+                status="READY_UPDATE",
+            )
+        ]
+    )
+
+    record = summary.to_record()
+
+    assert isinstance(record["pending"], list)
+    assert isinstance(record["nonready"], list)
+    assert isinstance(record["files"], list)
+    json.loads(json.dumps(record))
+
+
 def _layer_record(*, ready=True, deployed=False):
     status = (
         "ALREADY_TARGET"
