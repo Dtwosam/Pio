@@ -164,6 +164,30 @@ def _load_reviewed_modules(source: Path) -> tuple[Any, Any, Any]:
     return modules[0], modules[1], modules[2]
 
 
+def _safe_relative_path(raw: Any) -> str:
+    if not isinstance(raw, str) or not raw or "\\" in raw:
+        raise ValueError("mutation authorization request path is invalid")
+    pure = PurePosixPath(raw)
+    if pure.is_absolute():
+        raise ValueError("mutation authorization request path must be relative")
+    if any(part in {"", ".", ".."} for part in pure.parts):
+        raise ValueError("mutation authorization request path is unsafe")
+    normalized = "/".join(pure.parts)
+    if normalized != raw:
+        raise ValueError("mutation authorization request path is not normalized")
+    return normalized
+
+
+def _safe_backup_relative_path(raw: Any) -> str:
+    value = _safe_relative_path(raw)
+    parts = PurePosixPath(value).parts
+    if not parts or parts[0] != "files":
+        raise ValueError(
+            "mutation authorization request backup path must be under files/"
+        )
+    return value
+
+
 def _safe_backup_root(report: dict[str, Any]) -> Path:
     raw = report.get("backup_dir")
     if not isinstance(raw, str) or not raw.startswith("/var/tmp/"):
@@ -333,9 +357,9 @@ def validate_authorization_request(request: dict[str, Any]) -> None:
             raise ValueError("mutation authorization request operation schema mismatch")
         if item.get("index") != expected_index:
             raise ValueError("mutation authorization request indexes are not contiguous")
-        path = item.get("path")
-        if not isinstance(path, str) or not path or path in seen:
-            raise ValueError("mutation authorization request path is invalid")
+        path = _safe_relative_path(item.get("path"))
+        if path in seen:
+            raise ValueError("mutation authorization request path is duplicated")
         seen.add(path)
         if not _is_hex_digest(item.get("plan_operation_sha256"), 64):
             raise ValueError("mutation authorization request operation digest is invalid")
@@ -346,11 +370,36 @@ def validate_authorization_request(request: dict[str, Any]) -> None:
         if expected_current is not None and not _is_hex_digest(expected_current, 40):
             raise ValueError("mutation authorization request expected-current blob is invalid")
 
+        source_origin = item.get("source_origin")
+        private_bundle_sha = item.get("private_bundle_sha256")
+        operation = item.get("operation")
+        if operation == "UPDATE_PRESERVED_FILE":
+            if source_origin != "PRIVATE_BUNDLE":
+                raise ValueError(
+                    "mutation authorization request preserved source origin mismatch"
+                )
+            if private_bundle_sha != request["private_bundle_sha256"]:
+                raise ValueError(
+                    "mutation authorization request preserved bundle mismatch"
+                )
+        elif operation in {"CREATE_FILE", "UPDATE_FILE"}:
+            if source_origin != "REVIEWED_SOURCE":
+                raise ValueError(
+                    "mutation authorization request standard source origin mismatch"
+                )
+            if private_bundle_sha is not None:
+                raise ValueError(
+                    "mutation authorization request standard private bundle must be null"
+                )
+        else:
+            raise ValueError(
+                "mutation authorization request operation type is invalid"
+            )
+
         if item.get("backup_required") is True:
             if not _is_hex_digest(expected_current, 40):
                 raise ValueError("mutation authorization request update base is invalid")
-            if not isinstance(item.get("backup_relative_path"), str):
-                raise ValueError("mutation authorization request backup path is invalid")
+            _safe_backup_relative_path(item.get("backup_relative_path"))
             for field, length in (
                 ("backup_git_blob", 40),
                 ("backup_sha256", 64),
