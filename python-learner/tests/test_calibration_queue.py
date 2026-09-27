@@ -1,4 +1,9 @@
-from meteora_learner.calibration_queue import build_calibration_work_queue
+from meteora_learner.calibration_queue import (
+    _inspect_command,
+    _needs_future_prestate,
+    _verify_command,
+    build_calibration_work_queue,
+)
 from meteora_learner.storage import Storage
 
 
@@ -35,8 +40,9 @@ def test_queue_requests_missing_transaction_decode(tmp_path):
     assert queue.inspect_transaction_tasks == 1
     item = queue.items[0]
     assert item.task_type == "INSPECT_TRANSACTION"
-    assert "inspect-transaction-events" in str(item.shell_command)
-    assert '"$RPC_URL"' in str(item.shell_command)
+    assert "inspect-transaction-events-env" in str(item.shell_command)
+    assert "$RPC_URL" not in str(item.shell_command)
+    assert "$SOLANA_RPC_URL" not in str(item.shell_command)
 
 
 def test_queue_marks_missing_historical_prestate_as_future_sample(tmp_path):
@@ -95,3 +101,36 @@ def test_queue_marks_missing_historical_prestate_as_future_sample(tmp_path):
     )
     assert item.shell_command is None
     assert "cannot be reconstructed safely" in item.reason
+
+
+
+def test_future_prestate_classifier_includes_single_context_gap():
+    assert _needs_future_prestate(
+        "no slot-bounded pre-add pool capture with matching active bin"
+    )
+    assert _needs_future_prestate(
+        "no single-context strict-prior pre-add pool capture "
+        "with matching active bin"
+    )
+    assert not _needs_future_prestate(
+        "add-liquidity request decode missing"
+    )
+
+
+
+def test_phase2_work_queue_commands_keep_rpc_url_out_of_argv():
+    inspect = _inspect_command("sig")
+    verify = _verify_command(
+        signature="sig",
+        capture_slot_start=100,
+        capture_slot_end=101,
+        addresses=("pool", "array"),
+        snapshot_observed_at="2026-09-23T00:00:00+00:00",
+        pool_address="pool",
+    )
+
+    assert "inspect-transaction-events-env sig" in inspect
+    assert "verify-prestate-env sig 100 101 pool array" in verify
+    for command in (inspect, verify):
+        assert '"$RPC_URL"' not in command
+        assert '"$SOLANA_RPC_URL"' not in command

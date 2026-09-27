@@ -32,6 +32,7 @@ class PositionAmountBinCheck:
 class PositionAmountReconciliation:
     position_address: str
     observed_at: str
+    capture_slot: int
     bins_checked: int
     mismatched_bins: int
     total_abs_error_x: int
@@ -62,6 +63,8 @@ class PositionFeeReconciliation:
     position_address: str
     start_observed_at: str
     end_observed_at: str
+    start_capture_slot: int
+    end_capture_slot: int
     bins_checked: int
     mismatched_bins: int
     predicted_fee_x_delta: int
@@ -96,6 +99,8 @@ class PositionRewardReconciliation:
     position_address: str
     start_observed_at: str
     end_observed_at: str
+    start_capture_slot: int
+    end_capture_slot: int
     reward_mint_0: str
     reward_mint_1: str
     bins_checked: int
@@ -129,6 +134,31 @@ def _int(row: dict[str, Any], key: str) -> int:
     return int(str(row[key]))
 
 
+def _single_context_capture_slot(
+    snapshot: dict[str, Any],
+    *,
+    label: str,
+) -> int:
+    start_raw = snapshot.get("capture_slot_start")
+    end_raw = snapshot.get("capture_slot_end")
+    if start_raw is None or end_raw is None:
+        raise ValueError(
+            f"{label} position snapshot is missing capture-slot provenance"
+        )
+    start = int(start_raw)
+    end = int(end_raw)
+    if start < 0 or end < 0:
+        raise ValueError(
+            f"{label} position snapshot has negative capture slot"
+        )
+    if start != end:
+        raise ValueError(
+            f"{label} position snapshot is not single-context: "
+            f"{start}..{end}"
+        )
+    return start
+
+
 def _position_interval(
     store: ResearchStore,
     *,
@@ -148,6 +178,18 @@ def _position_interval(
     end = store.position_snapshot_at(position_address, end_observed_at)
     if start is None or end is None:
         raise ValueError("missing position snapshot")
+    start_capture_slot = _single_context_capture_slot(
+        start,
+        label="start",
+    )
+    end_capture_slot = _single_context_capture_slot(
+        end,
+        label="end",
+    )
+    if end_capture_slot <= start_capture_slot:
+        raise ValueError(
+            "reconciliation interval capture slot must move forward"
+        )
     if str(start["pool_address"]) != str(end["pool_address"]):
         raise ValueError("position pool changed across reconciliation interval")
     if (
@@ -220,10 +262,16 @@ def reconcile_position_amounts(
         if snapshot is None:
             raise ValueError(f"no stored position snapshot for {position_address}")
         observed_at = str(snapshot["observed_at"])
-    elif store.position_snapshot_at(position_address, observed_at) is None:
-        raise ValueError(
-            f"no stored position snapshot for {position_address} at {observed_at}"
-        )
+    else:
+        snapshot = store.position_snapshot_at(position_address, observed_at)
+        if snapshot is None:
+            raise ValueError(
+                f"no stored position snapshot for {position_address} at {observed_at}"
+            )
+    capture_slot = _single_context_capture_slot(
+        snapshot,
+        label="amount",
+    )
 
     rows = store.load_position_bins(position_address, observed_at=observed_at)
     if not rows:
@@ -259,6 +307,7 @@ def reconcile_position_amounts(
     return PositionAmountReconciliation(
         position_address=position_address,
         observed_at=observed_at,
+        capture_slot=capture_slot,
         bins_checked=len(checks),
         mismatched_bins=mismatched,
         total_abs_error_x=sum(abs(item.error_x) for item in checks),
@@ -338,6 +387,8 @@ def reconcile_position_fee_interval(
         position_address=position_address,
         start_observed_at=start_observed_at,
         end_observed_at=end_observed_at,
+        start_capture_slot=_single_context_capture_slot(start, label="start"),
+        end_capture_slot=_single_context_capture_slot(end, label="end"),
         bins_checked=len(checks),
         mismatched_bins=mismatched,
         predicted_fee_x_delta=sum(item.predicted_fee_x_delta for item in checks),
@@ -452,6 +503,8 @@ def reconcile_position_reward_interval(
         position_address=position_address,
         start_observed_at=start_observed_at,
         end_observed_at=end_observed_at,
+        start_capture_slot=_single_context_capture_slot(start, label="start"),
+        end_capture_slot=_single_context_capture_slot(end, label="end"),
         reward_mint_0=start_mints[0],
         reward_mint_1=start_mints[1],
         bins_checked=len(checks),

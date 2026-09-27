@@ -40,9 +40,18 @@ def _q(value: object) -> str:
 
 def _inspect_command(signature: str) -> str:
     return (
-        '(cd rust-executor && cargo run -- inspect-transaction-events '
-        f'"$RPC_URL" {_q(signature)}) '
+        '(cd rust-executor && cargo run -- inspect-transaction-events-env '
+        f'{_q(signature)}) '
         "| python-learner/.venv/bin/pio ingest-transaction-events"
+    )
+
+
+def _needs_future_prestate(reason: str | None) -> bool:
+    if not reason:
+        return False
+    return (
+        "no slot-bounded pre-add pool capture" in reason
+        or "no single-context strict-prior pre-add pool capture" in reason
     )
 
 
@@ -57,8 +66,8 @@ def _verify_command(
 ) -> str:
     address_args = " ".join(_q(value) for value in addresses)
     return (
-        '(cd rust-executor && cargo run -- verify-prestate '
-        f'"$RPC_URL" {_q(signature)} {capture_slot_start} {capture_slot_end} '
+        '(cd rust-executor && cargo run -- verify-prestate-env '
+        f'{_q(signature)} {capture_slot_start} {capture_slot_end} '
         f"{address_args}) | python-learner/.venv/bin/pio "
         "ingest-prestate-verification "
         f"--snapshot-observed-at {_q(snapshot_observed_at)} "
@@ -158,9 +167,8 @@ def build_calibration_work_queue(database_path: str) -> CalibrationWorkQueue:
 
         for candidate in candidates.candidates:
             if not candidate.eligible_for_verification:
-                if candidate.ineligibility_reason and (
-                    "no slot-bounded pre-add pool capture"
-                    in candidate.ineligibility_reason
+                if _needs_future_prestate(
+                    candidate.ineligibility_reason
                 ):
                     add_item(
                         CalibrationWorkItem(
