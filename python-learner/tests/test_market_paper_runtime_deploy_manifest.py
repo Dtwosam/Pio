@@ -58,6 +58,9 @@ def test_market_paper_manifest_is_locked_and_runtime_only():
     assert payload["live_capital_authorized"] is False
     assert payload["paper_only"] is True
     assert payload["activation_mode"] == "MANUAL_ONLY"
+    assert payload["phase2_collection_prerequisite_manifest"] == (
+        "deploy/manifests/market-paper-phase2-prerequisites.json"
+    )
 
     paths = set(payload["deployment_files"])
     assert paths == EXPECTED_RUNTIME
