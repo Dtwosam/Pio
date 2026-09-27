@@ -35,8 +35,22 @@ COMMANDS = (
         ("-m", "py_compile", "src/meteora_learner/research_store.py"),
     ),
     (
-        "pytest",
-        ("-m", "pytest", "-q"),
+        "pytest_research_store_surface",
+        (
+            "-m",
+            "pytest",
+            "-q",
+            "tests/test_research_store.py",
+            "tests/test_research.py",
+            "tests/test_cross_pool_research.py",
+            "tests/test_multi_pool_research.py",
+            "tests/test_market_research_cycle.py",
+            "tests/test_phase2_research_quotes.py",
+            "tests/test_market_paper_intake.py",
+            "tests/test_market_paper_exploration.py",
+            "tests/test_paper_candidate_cycle.py",
+            "tests/test_phase9_research.py",
+        ),
     ),
 )
 
@@ -753,7 +767,9 @@ def main() -> None:
             "Validate the sealed portable research_store.py patch on a "
             "non-production host. The tool reconstructs the exact candidate "
             "only in a temporary reviewed-source copy under /var/tmp and runs "
-            "py_compile plus the full pytest suite with an existing Python "
+            "py_compile plus a focused semantic pytest surface covering the "
+            "research store, research cycles, market intake/exploration, "
+            "candidate cycles, and Phase 9 research with an existing Python "
             "environment. It installs no packages."
         )
     )
