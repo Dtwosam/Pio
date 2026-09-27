@@ -1,0 +1,388 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from meteora_learner.chain_replay import STANDARD_SPL_TOKEN_PROGRAM
+from meteora_learner.market_paper_exploration import run_market_paper_exploration
+from meteora_learner.quote_registry import save_token_quote
+from meteora_learner.paper_account import (
+    create_paper_account,
+    open_paper_position,
+)
+from meteora_learner.storage import Storage
+
+
+def _chain(storage, pool, token_y, observed_at):
+    storage.save_chain_pool_snapshot(
+        {
+            "pool_address": pool,
+            "active_bin_id": 0,
+            "bin_step": 25,
+            "token_x_mint": f"{pool}-x",
+            "token_y_mint": token_y,
+            "token_x_program": STANDARD_SPL_TOKEN_PROGRAM,
+            "token_y_program": STANDARD_SPL_TOKEN_PROGRAM,
+            "base_fee_rate": "0",
+            "variable_fee_rate": "0",
+            "total_fee_rate": "0",
+            "deposit_total_fee_rate": "0",
+            "protocol_share_bps": 0,
+            "collect_fee_mode": 0,
+            "supports_limit_order": False,
+            "reward_mint_0": None,
+            "reward_mint_1": None,
+            "bin_arrays": [],
+        },
+        observed_at=observed_at,
+    )
+
+
+def _intake(*pools):
+    return SimpleNamespace(
+        research_only=True,
+        paper_only=True,
+        policy_actionable=False,
+        execution_wired=False,
+        pools=tuple(
+            SimpleNamespace(
+                pool_address=pool,
+                ready_for_candidate_cycle=True,
+                latest_chain_observed_at="2026-09-27T08:00:00+00:00",
+            )
+            for pool in pools
+        ),
+    )
+
+
+def test_exploration_refuses_to_race_active_paper_scheduler(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+
+    def should_not_run(*args, **kwargs):
+        raise AssertionError("market exploration must stop while scheduler is busy")
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="busy",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        intake_runner=should_not_run,
+        quote_refresher=should_not_run,
+        entry_runner=should_not_run,
+        scheduler_state_loader=lambda storage_arg, **kwargs: SimpleNamespace(
+            owner_id="worker",
+            lease_until="2099-01-01T00:00:00+00:00",
+        ),
+    )
+
+    assert report.status == "SCHEDULER_BUSY"
+    assert report.positions_opened == 0
+    assert report.items == ()
+
+
+def test_exploration_blocks_unhealthy_scheduler_state(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+
+    def should_not_run(*args, **kwargs):
+        raise AssertionError("unhealthy scheduler must block exploration")
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="unhealthy",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        observed_at="2026-09-27T08:05:00+00:00",
+        intake_runner=should_not_run,
+        quote_refresher=should_not_run,
+        entry_runner=should_not_run,
+        scheduler_state_loader=lambda storage_arg, **kwargs: SimpleNamespace(
+            owner_id=None,
+            lease_until=None,
+            last_status="WAITING_QUOTES",
+            consecutive_failures=0,
+        ),
+    )
+
+    assert report.status == "SCHEDULER_UNHEALTHY"
+    assert report.positions_opened == 0
+    assert report.positions_already_applied == 0
+    assert report.items == ()
+
+
+def test_exploration_bounds_quote_refresh_and_pool_consideration(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    for pool, mint in (("A", "mint-a"), ("B", "mint-b"), ("C", "mint-c")):
+        _chain(storage, pool, mint, "2026-09-27T08:00:00+00:00")
+
+    refreshed = []
+    entries = []
+
+    def refresh(storage_arg, *, token_mints, observed_at):
+        refreshed.extend(sorted(token_mints))
+        return ()
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="bounded",
+        per_position_capital_quote=100,
+        network_cost_quote=0,
+        max_new_positions=2,
+        max_pools_considered=1,
+        observed_at="2026-09-27T08:00:00+00:00",
+        intake_runner=lambda database_path, **kwargs: _intake("A", "B", "C"),
+        quote_refresher=refresh,
+        quote_status_loader=lambda *args, **kwargs: SimpleNamespace(
+            fresh=True,
+            quote_per_atomic=1,
+        ),
+        entry_runner=lambda storage_arg, **kwargs: (
+            entries.append(kwargs)
+            or SimpleNamespace(
+                status="OPENED",
+                paper_only=True,
+                live_authorized=False,
+            )
+        ),
+    )
+
+    assert refreshed == ["mint-a"]
+    assert [row["pool_address"] for row in entries] == ["A"]
+    assert report.pools_considered == 1
+    assert report.max_pools_considered == 1
+    assert report.positions_opened == 1
+
+
+def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    _chain(storage, "A", "mint-a", "2026-09-27T08:00:00+00:00")
+    _chain(storage, "B", "mint-b", "2026-09-27T08:00:00+00:00")
+    refreshed = []
+    entries = []
+
+    def refresh(storage_arg, *, token_mints, observed_at):
+        refreshed.extend(sorted(token_mints))
+        return ()
+
+    quote_as_of = []
+
+    def status(storage_arg, *, token_mint, **kwargs):
+        quote_as_of.append(kwargs["as_of"])
+        return SimpleNamespace(
+            fresh=True,
+            quote_per_atomic=(0.5 if token_mint == "mint-a" else 0.25),
+        )
+
+    def entry(storage_arg, **kwargs):
+        entries.append(kwargs)
+        return SimpleNamespace(
+            status="OPENED",
+            paper_only=True,
+            live_authorized=False,
+        )
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="r1",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        max_new_positions=2,
+        observed_at="2026-09-27T08:05:00+00:00",
+        intake_runner=lambda database_path, **kwargs: _intake("A", "B"),
+        quote_refresher=refresh,
+        quote_status_loader=status,
+        entry_runner=entry,
+    )
+
+    assert refreshed == ["mint-a", "mint-b"]
+    assert quote_as_of == [
+        "2026-09-27T08:00:00+00:00",
+        "2026-09-27T08:00:00+00:00",
+    ]
+    assert [row["pool_address"] for row in entries] == ["A", "B"]
+    assert entries[0]["amount_y"] == 200
+    assert entries[0]["network_cost_y_atomic"] == 2
+    assert entries[0]["as_of"] == "2026-09-27T08:00:00+00:00"
+    assert entries[1]["amount_y"] == 400
+    assert entries[1]["network_cost_y_atomic"] == 4
+    assert report.observed_at == "2026-09-27T08:05:00+00:00"
+    assert report.positions_opened == 2
+    assert report.status == "COMPLETE"
+    assert report.paper_only is True
+    assert report.live_authorized is False
+
+
+def test_future_quote_is_not_used_for_older_decision_snapshot(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    _chain(storage, "A", "mint-a", "2026-09-27T08:00:00+00:00")
+    save_token_quote(
+        storage,
+        token_mint="mint-a",
+        quote_per_atomic=0.5,
+        source="test",
+        observed_at="2026-09-27T08:05:00+00:00",
+    )
+    entries = []
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="future-quote",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        max_new_positions=1,
+        observed_at="2026-09-27T08:05:00+00:00",
+        intake_runner=lambda database_path, **kwargs: _intake("A"),
+        quote_refresher=lambda *args, **kwargs: (),
+        entry_runner=lambda storage_arg, **kwargs: entries.append(kwargs),
+    )
+
+    assert entries == []
+    assert report.positions_opened == 0
+    assert any(
+        item.pool_address == "A"
+        and item.status == "TOKEN_Y_QUOTE_UNAVAILABLE"
+        for item in report.items
+    )
+
+
+def test_run_id_cap_counts_already_applied_positions_across_retries(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    _chain(storage, "A", "mint-a", "2026-09-27T08:00:00+00:00")
+    _chain(storage, "B", "mint-b", "2026-09-27T08:00:00+00:00")
+    open_paper_position(
+        storage,
+        event_key="existing-r1-a",
+        account_id="paper",
+        position_id="empirical:paper:r1:A",
+        pool_address="A",
+        policy_source="DETERMINISTIC",
+        strategy="SPOT",
+        min_bin_id=0,
+        max_bin_id=0,
+        capital_quote=100,
+    )
+
+    entries = []
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="r1",
+        per_position_capital_quote=100,
+        network_cost_quote=0,
+        max_new_positions=1,
+        intake_runner=lambda database_path, **kwargs: _intake("A", "B"),
+        quote_refresher=lambda *args, **kwargs: (),
+        quote_status_loader=lambda *args, **kwargs: SimpleNamespace(
+            fresh=True,
+            quote_per_atomic=1,
+        ),
+        entry_runner=lambda storage_arg, **kwargs: entries.append(kwargs),
+        scheduler_state_loader=lambda storage_arg, **kwargs: SimpleNamespace(
+            owner_id=None,
+            lease_until=None,
+        ),
+    )
+
+    assert entries == []
+    assert report.positions_opened == 0
+    assert report.positions_already_applied == 1
+
+
+def test_exploration_skips_pool_already_open_in_account(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    open_paper_position(
+        storage,
+        event_key="existing",
+        account_id="paper",
+        position_id="existing-pos",
+        pool_address="A",
+        policy_source="DETERMINISTIC",
+        strategy="SPOT",
+        min_bin_id=0,
+        max_bin_id=0,
+        capital_quote=100,
+    )
+    _chain(storage, "A", "mint-a", "2026-09-27T08:00:00+00:00")
+    _chain(storage, "B", "mint-b", "2026-09-27T08:00:00+00:00")
+    entries = []
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="r2",
+        per_position_capital_quote=100,
+        network_cost_quote=0,
+        max_new_positions=1,
+        intake_runner=lambda database_path, **kwargs: _intake("A", "B"),
+        quote_refresher=lambda *args, **kwargs: (),
+        quote_status_loader=lambda *args, **kwargs: SimpleNamespace(
+            fresh=True,
+            quote_per_atomic=1,
+        ),
+        entry_runner=lambda storage_arg, **kwargs: (
+            entries.append(kwargs)
+            or SimpleNamespace(
+                status="OPENED",
+                paper_only=True,
+                live_authorized=False,
+            )
+        ),
+    )
+
+    assert [row["pool_address"] for row in entries] == ["B"]
+    assert any(
+        item.pool_address == "A" and item.status == "ALREADY_OPEN"
+        for item in report.items
+    )
+    assert report.positions_opened == 1
+
+
+def test_quote_failure_does_not_expose_raw_error_or_stop_next_pool(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    _chain(storage, "A", "mint-a", "2026-09-27T08:00:00+00:00")
+    _chain(storage, "B", "mint-b", "2026-09-27T08:00:00+00:00")
+
+    def status(storage_arg, *, token_mint, **kwargs):
+        if token_mint == "mint-a":
+            return SimpleNamespace(fresh=False, quote_per_atomic=None)
+        return SimpleNamespace(fresh=True, quote_per_atomic=1)
+
+    entries = []
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="r3",
+        per_position_capital_quote=50,
+        network_cost_quote=0,
+        max_new_positions=1,
+        intake_runner=lambda database_path, **kwargs: _intake("A", "B"),
+        quote_refresher=lambda *args, **kwargs: (),
+        quote_status_loader=status,
+        entry_runner=lambda storage_arg, **kwargs: (
+            entries.append(kwargs)
+            or SimpleNamespace(
+                status="OPENED",
+                paper_only=True,
+                live_authorized=False,
+            )
+        ),
+    )
+
+    assert [row["pool_address"] for row in entries] == ["B"]
+    assert any(
+        item.pool_address == "A"
+        and item.status == "TOKEN_Y_QUOTE_UNAVAILABLE"
+        for item in report.items
+    )
+    assert report.positions_opened == 1
