@@ -164,7 +164,7 @@ def _load_reviewed_modules(source: Path) -> tuple[Any, Any, Any]:
 def _safe_relative_path(raw: Any) -> Path:
     if not isinstance(raw, str) or not raw:
         raise ValueError("preserved mutation-review path is invalid")
-    if "\" in raw:
+    if "\\" in raw:
         raise ValueError(f"preserved mutation-review path contains a backslash: {raw}")
     pure = PurePosixPath(raw)
     if pure.is_absolute():
