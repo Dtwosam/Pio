@@ -19,7 +19,7 @@ PAPER_SERVICE_TEMPLATE = "pio-paper@{account}.service"
 PAPER_TIMER_TEMPLATE = "pio-paper@{account}.timer"
 DETECTOR_STATE = Path("data/phase2-add-detector-state.json")
 
-PHASE2_MANIFEST = Path("deploy/manifests/phase2-collection-integration.json")
+PHASE2_PREREQUISITES_MANIFEST = Path("deploy/manifests/market-paper-phase2-prerequisites.json")
 MARKET_PAPER_MANIFEST = Path("deploy/manifests/market-paper-manual-cycle.json")
 COLLECTION_TOOL = Path("deploy/tools/apply_phase2_collection_stack.py")
 STATE_READER_TOOL = Path("deploy/tools/apply_phase2_single_slot_stack_patch.py")
@@ -31,7 +31,7 @@ STATE_READER_PATCH = Path(
 REVIEWED_SOURCE_BLOBS = {
     COLLECTION_TOOL: "a8a76cd4db95867a842de93f8688daa0cd7100c3",
     STATE_READER_TOOL: "a2e4e0c0435f15be7126e253d1861955be6c2ecd",
-    PHASE2_MANIFEST: "1467c685a598d8aa91bf45a17d9451e058e7dd48",
+    PHASE2_PREREQUISITES_MANIFEST: "dfb1eb62241f6fc3b6351e3b40b524fb68f4a61e",
     MARKET_PAPER_MANIFEST: "2c9b249f704306de793291947d1811ab947025f2",
     STATE_READER_PATCH: "330e2c33956f8a96850a1e072d6a2fa0a4d619af",
 }
@@ -255,7 +255,7 @@ def build_production_readiness(
     phase2_report = collection_module.preflight_collection_stack(
         repository=repo,
         source_tree=source,
-        manifest=source / PHASE2_MANIFEST,
+        manifest=source / PHASE2_PREREQUISITES_MANIFEST,
     )
     phase2 = _overlay_summary(phase2_report)
 
