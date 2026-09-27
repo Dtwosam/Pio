@@ -195,7 +195,7 @@ def _copy_base_source(source: Path, output: Path) -> None:
     shutil.copytree(
         source,
         output,
-        symlinks=False,
+        symlinks=True,
         ignore=shutil.ignore_patterns(
             ".git",
             "target",
