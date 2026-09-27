@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--intake-max-pools", type=int, default=500)
     parser.add_argument("--quote-max-age-seconds", type=int, default=300)
     parser.add_argument("--max-share-bps", type=int, default=500)
+    parser.add_argument("--observed-at")
     return parser
 
 
@@ -46,6 +47,7 @@ def run(
         intake_max_pools=args.intake_max_pools,
         quote_max_age_seconds=args.quote_max_age_seconds,
         max_share_bps=args.max_share_bps,
+        observed_at=args.observed_at,
     )
     record = report.to_record()
     if (
