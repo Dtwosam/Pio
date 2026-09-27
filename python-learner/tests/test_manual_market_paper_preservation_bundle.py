@@ -27,6 +27,19 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
+def test_preservation_bundle_v2_identity_has_no_stale_v1_source_pin():
+    assert MODULE.FORMAT_VERSION == 2
+    assert (
+        MODULE.ARTIFACT_TYPE
+        == "MANUAL_MARKET_PAPER_PRESERVATION_BUNDLE_V2"
+    )
+
+    source = TOOL.read_text(encoding="utf-8")
+    assert "EXPECTED_VALIDATION_SOURCE_HEAD" not in source
+    assert "bundle_ready_for_mutation_review" not in source
+    assert "requires_fresh_production_recheck" not in source
+
+
 def test_reviewed_preservation_bundle_dependencies_are_exactly_pinned():
     MODULE._verify_reviewed_source(ROOT)
 
