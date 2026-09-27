@@ -52,7 +52,7 @@ def _report(
         "private_bundle_dir": private_bundle_dir,
         "private_bundle_sha256": "2" * 64,
         "private_bundle_verified": True,
-        "production_head": "3" * 40,
+        "production_head": MODULE.EXPECTED_PRODUCTION_HEAD,
         "production_head_matches_reviewed_baseline": True,
         "tracked_changes": 46,
         "detector_service": "active",
@@ -61,7 +61,7 @@ def _report(
         "paper_service": "inactive",
         "paper_timer": "inactive",
         "manual_mode_safe": True,
-        "target_pool": "pool",
+        "target_pool": MODULE.EXPECTED_TARGET_POOL,
         "target_pool_cursor": cursor,
         "phase2": {"content_ready": True, "deployed": runtime_files_deployed},
         "state_reader": {
@@ -251,6 +251,35 @@ def test_compare_surfaces_tracked_diff_drift():
 
     assert result["state_matches"] is False
     assert result["changed_sections"] == ["tracked_diff_sha256"]
+
+
+def test_rehashed_handoff_cannot_claim_clean_preflight_on_head_drift():
+    snapshot = MODULE.build_handoff_snapshot(
+        _report(),
+        tracked_diff_sha256="4" * 64,
+        readiness_module=_fake_readiness_module(),
+    )
+    snapshot["state"]["production_head"] = "f" * 40
+    snapshot["state"]["production_head_matches_reviewed_baseline"] = True
+    snapshot["state"]["deployment_preflight_clean"] = True
+    snapshot["production_state_sha256"] = MODULE._state_digest(
+        snapshot["state"]
+    )
+    snapshot["handoff_ready"] = True
+    identity = {
+        field: snapshot[field]
+        for field in MODULE.HANDOFF_FIELDS
+    }
+    snapshot["handoff_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+    try:
+        MODULE.validate_handoff_snapshot(snapshot)
+    except ValueError as exc:
+        assert "production-head flag mismatch" in str(exc)
+    else:
+        raise AssertionError("rehashed production-head contradiction must fail closed")
 
 
 def test_rehashed_handoff_cannot_authorize_mutation():
