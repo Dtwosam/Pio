@@ -10,7 +10,7 @@ submit a transaction, or authorize production mutation.
 Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-641f6140d32ec6bb661fbf05cdd2ef71223f816f
+4035842b2a8581b209eaf960088427f6fb08a1d3
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="641f6140d32ec6bb661fbf05cdd2ef71223f816f"
+REVIEWED_REF="4035842b2a8581b209eaf960088427f6fb08a1d3"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -119,6 +119,57 @@ no candidate source contents and never writes a merged candidate to
 
 Even `all_merge_clean=true` requires manual candidate review before any
 production change.
+
+## Current live reconciliation branch
+
+The sealed production reconciliation evidence captured on the current live
+baseline established:
+
+- `research_store.py` merges cleanly while preserving the production-local
+  51-line addition. Its merged candidate Git blob is
+  `31bd88e3d74490f5d0b617ff4b36383e7e12e18f`. This is evidence only; the
+  candidate has not been written to production.
+- `state_reader.rs` has exactly two overlapping diff3 conflict regions between
+  the production-local blob
+  `d1267db6708b91bc8cacabffcd397a380866c79a` and reviewed target
+  `30d1435af1329bca07f73d6639539b43503e84e9`.
+
+Only the Rust overlap regions need further content-level review.
+
+## Collect only the two state-reader conflict hunks
+
+Use a fresh isolated source at the reviewed commit above:
+
+~~~bash
+HUNKS="/var/tmp/pio-manual-paper-state-reader-conflict-hunks.json"
+
+python3 "$SRC/deploy/tools/collect_manual_market_paper_state_reader_conflict_hunks.py" \
+  --repo /opt/pio \
+  --source-tree "$SRC" \
+  > "$HUNKS"
+
+python3 -m json.tool "$HUNKS"
+~~~
+
+The collector fails closed unless all of these still match the sealed live
+evidence:
+
+- production HEAD
+  `ebc0b3c8405da30d88a5ee156f31bf041ffb1ad8`;
+- production-local state-reader blob
+  `d1267db6708b91bc8cacabffcd397a380866c79a`;
+- the reviewed state-reader base and target blobs;
+- exactly two diff3 conflict blocks.
+
+It emits only those two conflict blocks, separated into
+`production_local`, `reviewed_base`, and `reviewed_target` sections with
+exact source line ranges and SHA-256 identities. Output is bounded and the
+collector refuses to emit broad file contents. Its only file writes are three
+temporary merge inputs inside a temporary directory; it never writes
+`/opt/pio`.
+
+Those two conflict blocks are the next evidence required before constructing a
+reviewable preserved-fix candidate for `state_reader.rs`.
 
 ## Stop boundary
 
