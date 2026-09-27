@@ -84,6 +84,7 @@ def _report() -> dict:
         },
         "preservation_review_sha256": "9" * 64,
         "base_source_head": "a" * 40,
+        "base_source_clean": True,
         "validation_source_head": "a" * 40,
         "base_source_matches_validation_head": True,
         "bundle_dir": "/var/tmp/pio-preserved-source.unit",
@@ -135,6 +136,25 @@ def test_bundle_report_accepts_ready_private_bundle():
     assert report["candidate_content_materialized_in_private_bundle"] is True
     assert report["production_repository_accessed"] is False
     assert report["mutation_authorized"] is False
+
+
+def test_bundle_report_rejects_dirty_base_even_if_resealed():
+    report = _report()
+    report["base_source_clean"] = False
+    identity = {
+        field: report[field]
+        for field in MODULE.REPORT_FIELDS
+    }
+    report["bundle_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+    try:
+        MODULE.validate_bundle_report(report)
+    except ValueError as exc:
+        assert "clean base source tree" in str(exc)
+    else:
+        raise AssertionError("dirty base source must fail closed")
 
 
 def test_bundle_report_rejects_source_head_drift_even_if_resealed():
