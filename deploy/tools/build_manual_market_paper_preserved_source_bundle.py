@@ -690,7 +690,7 @@ def main() -> None:
             "exact portable-validation source revision plus the two sealed private "
             "candidate patches. Candidate contents are materialized only in the "
             "private bundle; the report contains hashes/metadata only. This tool "
-            "never reads or writes /opt/pio and does not authorize mutation."
+            "never reads or writes the production repository and does not authorize mutation."
         )
     )
     parser.add_argument("--base-source-tree", required=True)
