@@ -165,6 +165,25 @@ def test_paper_account_units_must_be_inactive_for_manual_mode():
     ) in seen
 
 
+def test_manual_mode_safety_fails_closed_on_unknown_or_failed_units():
+    assert MODULE._manual_mode_safe(
+        paper_service="inactive",
+        paper_timer="inactive",
+    ) is True
+    assert MODULE._manual_mode_safe(
+        paper_service="unknown",
+        paper_timer="inactive",
+    ) is False
+    assert MODULE._manual_mode_safe(
+        paper_service="inactive",
+        paper_timer="unknown",
+    ) is False
+    assert MODULE._manual_mode_safe(
+        paper_service="failed",
+        paper_timer="inactive",
+    ) is False
+
+
 def test_target_cursor_is_read_only(tmp_path):
     repo = tmp_path / "repo"
     state = repo / MODULE.DETECTOR_STATE

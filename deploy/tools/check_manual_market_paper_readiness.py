@@ -144,6 +144,14 @@ def _service_state(
     return value if value else "unknown"
 
 
+def _manual_mode_safe(
+    *,
+    paper_service: str,
+    paper_timer: str,
+) -> bool:
+    return paper_service == "inactive" and paper_timer == "inactive"
+
+
 def _git_head(
     repo: Path,
     *,
@@ -292,9 +300,9 @@ def build_production_readiness(
             PAPER_TIMER_TEMPLATE.format(account=paper_account),
             runner=runner,
         )
-        manual_mode_safe = (
-            paper_service != "active"
-            and paper_timer != "active"
+        manual_mode_safe = _manual_mode_safe(
+            paper_service=paper_service,
+            paper_timer=paper_timer,
         )
 
     deployment_preflight_clean = (
