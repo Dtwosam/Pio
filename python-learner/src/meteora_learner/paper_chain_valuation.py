@@ -149,33 +149,47 @@ def _state_row(
     }
 
 
-def prepare_counterfactual_plan(
+def prepare_counterfactual_candidate(
     storage: Storage,
     *,
-    plan: Phase3ResearchPlan,
+    pool_address: str,
+    decision_observed_at: str,
+    amount_x: int,
+    amount_y: int,
+    strategy: str,
+    min_bin_id: int,
+    max_bin_id: int,
+    max_share_bps: int = 500,
+    favor_x_in_active_bin: bool = False,
 ) -> CounterfactualPlanPreview:
-    if plan.entry_gate is None or plan.entry_gate.proposal is None:
-        raise ValueError("Phase 3 plan has no proposal")
-    if plan.decision_observed_at is None:
-        raise ValueError("Phase 3 plan has no decision_observed_at")
-    if plan.amount_x < 0 or plan.amount_y < 0:
-        raise ValueError("Phase 3 plan token amounts cannot be negative")
-    if plan.amount_x == 0 and plan.amount_y == 0:
-        raise ValueError("Phase 3 plan has no atomic entry amount")
+    """Build a chain-bound PAPER preview for one explicit candidate."""
+    if not pool_address.strip():
+        raise ValueError("pool_address is required")
+    if not decision_observed_at.strip():
+        raise ValueError("decision_observed_at is required")
+    if amount_x < 0 or amount_y < 0:
+        raise ValueError("candidate token amounts cannot be negative")
+    if amount_x == 0 and amount_y == 0:
+        raise ValueError("candidate has no atomic entry amount")
+    if min_bin_id > max_bin_id:
+        raise ValueError("candidate min_bin_id cannot exceed max_bin_id")
+    if max_share_bps <= 0:
+        raise ValueError("max_share_bps must be positive")
+    if not str(strategy).strip():
+        raise ValueError("candidate strategy is required")
 
-    proposal = plan.entry_gate.proposal
     store = ResearchStore(storage.path)
     pool = store.chain_pool_snapshot_at(
-        plan.pool_address,
-        plan.decision_observed_at,
+        pool_address,
+        decision_observed_at,
     )
     if pool is None:
         raise ValueError("decision-time chain pool snapshot is missing")
     _validate_pool(pool)
 
     rows = store.load_bin_liquidity(
-        plan.pool_address,
-        observed_at=plan.decision_observed_at,
+        pool_address,
+        observed_at=decision_observed_at,
     )
     if not rows:
         raise ValueError("decision-time bin state is missing")
@@ -193,17 +207,17 @@ def prepare_counterfactual_plan(
     }
     deposit = distribute_standard_spl_deposit(
         active_id=active_id,
-        min_bin_id=proposal.min_bin_id,
-        max_bin_id=proposal.max_bin_id,
-        amount_x=plan.amount_x,
-        amount_y=plan.amount_y,
-        strategy=proposal.strategy,
+        min_bin_id=min_bin_id,
+        max_bin_id=max_bin_id,
+        amount_x=amount_x,
+        amount_y=amount_y,
+        strategy=strategy,
         prices_q64=prices,
-        favor_x_in_active_bin=plan.favor_x_in_active_bin,
+        favor_x_in_active_bin=favor_x_in_active_bin,
     )
     projected = project_deposit_shares(deposit, rows)
     if not projected.bins:
-        raise ValueError("Phase 3 proposal creates no paper liquidity")
+        raise ValueError("candidate creates no paper liquidity")
 
     state_bins: list[dict[str, Any]] = []
     max_share = 0
@@ -216,10 +230,10 @@ def prepare_counterfactual_plan(
             )
         share_bps = _share_bps(item.liquidity_share_minted, supply)
         max_share = max(max_share, share_bps)
-        if share_bps > plan.max_share_bps:
+        if share_bps > max_share_bps:
             raise ValueError(
                 f"counterfactual share {share_bps} bps exceeds "
-                f"{plan.max_share_bps} bps limit"
+                f"{max_share_bps} bps limit"
             )
         state_bins.append(
             _state_row(
@@ -229,8 +243,8 @@ def prepare_counterfactual_plan(
         )
 
     entry_value = q64_value_in_y_atomic(
-        amount_x=plan.amount_x,
-        amount_y=plan.amount_y,
+        amount_x=amount_x,
+        amount_y=amount_y,
         price_q64=entry_price_q64,
     )
     if entry_value <= 0:
@@ -243,16 +257,16 @@ def prepare_counterfactual_plan(
         "max_observed_share_bps": max_share,
     }
     return CounterfactualPlanPreview(
-        pool_address=plan.pool_address,
-        entry_observed_at=plan.decision_observed_at,
-        amount_x_atomic=plan.amount_x,
-        amount_y_atomic=plan.amount_y,
+        pool_address=pool_address,
+        entry_observed_at=decision_observed_at,
+        amount_x_atomic=amount_x,
+        amount_y_atomic=amount_y,
         idle_x_atomic=deposit.idle_x,
         idle_y_atomic=deposit.idle_y,
         entry_price_q64=entry_price_q64,
         entry_value_y_atomic=entry_value,
-        max_share_bps=plan.max_share_bps,
-        favor_x_active=plan.favor_x_in_active_bin,
+        max_share_bps=max_share_bps,
+        favor_x_active=favor_x_in_active_bin,
         token_x_mint=str(pool["token_x_mint"]),
         token_y_mint=str(pool["token_y_mint"]),
         reward_mint_0=(
@@ -265,13 +279,41 @@ def prepare_counterfactual_plan(
             if pool.get("reward_mint_1") is not None
             else None
         ),
-        strategy=proposal.strategy,
-        min_bin_id=proposal.min_bin_id,
-        max_bin_id=proposal.max_bin_id,
+        strategy=str(strategy),
+        min_bin_id=min_bin_id,
+        max_bin_id=max_bin_id,
         bins=len(state_bins),
         initial_state_json=json.dumps(payload, separators=(",", ":")),
     )
 
+
+def prepare_counterfactual_plan(
+    storage: Storage,
+    *,
+    plan: Phase3ResearchPlan,
+) -> CounterfactualPlanPreview:
+    if plan.entry_gate is None or plan.entry_gate.proposal is None:
+        raise ValueError("Phase 3 plan has no proposal")
+    if plan.decision_observed_at is None:
+        raise ValueError("Phase 3 plan has no decision_observed_at")
+    if plan.amount_x < 0 or plan.amount_y < 0:
+        raise ValueError("Phase 3 plan token amounts cannot be negative")
+    if plan.amount_x == 0 and plan.amount_y == 0:
+        raise ValueError("Phase 3 plan has no atomic entry amount")
+
+    proposal = plan.entry_gate.proposal
+    return prepare_counterfactual_candidate(
+        storage,
+        pool_address=plan.pool_address,
+        decision_observed_at=plan.decision_observed_at,
+        amount_x=plan.amount_x,
+        amount_y=plan.amount_y,
+        strategy=proposal.strategy,
+        min_bin_id=proposal.min_bin_id,
+        max_bin_id=proposal.max_bin_id,
+        max_share_bps=plan.max_share_bps,
+        favor_x_in_active_bin=plan.favor_x_in_active_bin,
+    )
 
 def _insert_counterfactual_preview(
     conn: Any,
