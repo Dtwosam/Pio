@@ -23,6 +23,8 @@ REVIEWED_SOURCE_BLOBS = {
     EXPORTER_TOOL: "c3d18d14b0b8ba983c9b26f8d3f6ade7da88d852",
 }
 
+EXPECTED_CANDIDATE_BLOB = "f54a1021cf8f89d285bde957d1f72d81857ec2fa"
+
 COMMANDS = (
     ("cargo_test", ("test", "--quiet")),
     (
@@ -126,6 +128,16 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"JSON artifact must be an object: {path}")
     return value
+
+
+def _resolve_regular_file(raw: str | Path, *, label: str) -> Path:
+    path = Path(raw).expanduser()
+    if path.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file():
+        raise ValueError(f"{label} is not a regular file")
+    return resolved
 
 
 def _reviewed_source_head(source: Path) -> str:
@@ -274,6 +286,9 @@ def validate_portable_validation_report(report: dict[str, Any]) -> None:
         if not _is_hex_digest(report.get(field), length):
             raise ValueError(f"portable validation {field} is invalid")
 
+    if report.get("candidate_git_blob") != EXPECTED_CANDIDATE_BLOB:
+        raise ValueError("portable validation candidate blob mismatch")
+
     for field in ("patch_size", "candidate_size"):
         value = report.get(field)
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
@@ -413,9 +428,10 @@ def validate_portable_patch(
     patch_report = _load_json(Path(patch_report_path))
     exporter.validate_portable_patch_report(patch_report)
 
-    patch_path = Path(patch_file).expanduser().resolve(strict=True)
-    if patch_path.is_symlink() or not patch_path.is_file():
-        raise ValueError("portable patch is not a regular file")
+    patch_path = _resolve_regular_file(
+        patch_file,
+        label="portable patch",
+    )
     patch = patch_path.read_bytes()
     if _sha256_bytes(patch) != patch_report["patch_sha256"]:
         raise ValueError("portable patch SHA-256 no longer matches sealed report")
