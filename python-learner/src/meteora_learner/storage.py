@@ -178,6 +178,8 @@ CREATE TABLE IF NOT EXISTS chain_position_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     observed_at TEXT NOT NULL,
     position_address TEXT NOT NULL,
+    capture_slot_start INTEGER,
+    capture_slot_end INTEGER,
     pool_address TEXT NOT NULL,
     owner TEXT NOT NULL,
     fee_owner TEXT NOT NULL,
@@ -200,6 +202,21 @@ CREATE TABLE IF NOT EXISTS chain_position_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_chain_position_time
 ON chain_position_snapshots(position_address, observed_at);
+
+CREATE TABLE IF NOT EXISTS phase2_position_observation_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempted_at TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    position_address TEXT NOT NULL,
+    succeeded INTEGER NOT NULL,
+    failure_category TEXT,
+    capture_slot INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase2_position_attempt_pool_time
+ON phase2_position_observation_attempts(
+    pool_address, position_address, attempted_at, id
+);
 
 CREATE TABLE IF NOT EXISTS position_bin_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -256,6 +273,18 @@ ON position_event_history(position_address, block_time, ix_index);
 CREATE INDEX IF NOT EXISTS idx_position_event_history_signature
 ON position_event_history(signature, ix_index);
 
+CREATE TABLE IF NOT EXISTS phase2_collection_task_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempted_at TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    task_key TEXT NOT NULL,
+    succeeded INTEGER NOT NULL,
+    outcome_category TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_phase2_collection_task_attempts
+ON phase2_collection_task_attempts(stage, task_key, attempted_at, id);
+
 CREATE TRIGGER IF NOT EXISTS chain_pool_snapshots_no_update
 BEFORE UPDATE ON chain_pool_snapshots
 BEGIN
@@ -290,6 +319,30 @@ CREATE TRIGGER IF NOT EXISTS bin_liquidity_snapshots_no_delete
 BEFORE DELETE ON bin_liquidity_snapshots
 BEGIN
     SELECT RAISE(ABORT, 'bin_liquidity_snapshots is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase2_position_observation_attempts_no_update
+BEFORE UPDATE ON phase2_position_observation_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_position_observation_attempts is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase2_position_observation_attempts_no_delete
+BEFORE DELETE ON phase2_position_observation_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_position_observation_attempts is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase2_collection_task_attempts_no_update
+BEFORE UPDATE ON phase2_collection_task_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_collection_task_attempts is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS phase2_collection_task_attempts_no_delete
+BEFORE DELETE ON phase2_collection_task_attempts
+BEGIN
+    SELECT RAISE(ABORT, 'phase2_collection_task_attempts is immutable');
 END;
 
 CREATE TRIGGER IF NOT EXISTS position_event_history_no_update
@@ -1466,6 +1519,8 @@ CHAIN_TX_EVENT_EXTRA_COLUMNS = {
 }
 
 CHAIN_POSITION_EXTRA_COLUMNS = {
+    "capture_slot_start": "INTEGER",
+    "capture_slot_end": "INTEGER",
     "supports_limit_order": "INTEGER",
     "reward_mint_0": "TEXT",
     "reward_mint_1": "TEXT",
@@ -2110,6 +2165,80 @@ class Storage:
 
         return arrays_seen, len(bin_rows)
 
+    def save_phase2_position_observation_attempt(
+        self,
+        *,
+        pool_address: str,
+        position_address: str,
+        attempted_at: str,
+        succeeded: bool,
+        failure_category: str | None = None,
+        capture_slot: int | None = None,
+    ) -> int:
+        if not pool_address.strip():
+            raise ValueError("pool_address is required")
+        if not position_address.strip():
+            raise ValueError("position_address is required")
+        if succeeded:
+            if failure_category is not None:
+                raise ValueError(
+                    "successful observation attempt cannot have failure_category"
+                )
+            if capture_slot is None or int(capture_slot) < 0:
+                raise ValueError(
+                    "successful observation attempt requires non-negative capture_slot"
+                )
+        else:
+            if not failure_category:
+                raise ValueError(
+                    "failed observation attempt requires failure_category"
+                )
+            if capture_slot is not None:
+                raise ValueError(
+                    "failed observation attempt cannot have capture_slot"
+                )
+
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO phase2_position_observation_attempts(
+                    attempted_at, pool_address, position_address,
+                    succeeded, failure_category, capture_slot
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    attempted_at,
+                    pool_address,
+                    position_address,
+                    int(succeeded),
+                    failure_category,
+                    int(capture_slot) if capture_slot is not None else None,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def latest_phase2_position_observation_attempts(
+        self,
+        *,
+        pool_address: str,
+    ) -> dict[str, float]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT position_address,
+                       MAX(julianday(attempted_at)) AS attempted_jd
+                FROM phase2_position_observation_attempts
+                WHERE pool_address = ?
+                GROUP BY position_address
+                """,
+                (pool_address,),
+            ).fetchall()
+        return {
+            str(row[0]): float(row[1])
+            for row in rows
+            if row[1] is not None
+        }
+
     def save_chain_position_snapshot(
         self,
         snapshot: dict[str, Any],
@@ -2165,16 +2294,30 @@ class Storage:
             conn.execute(
                 """
                 INSERT INTO chain_position_snapshots(
-                    observed_at, position_address, pool_address, owner, fee_owner,
+                    observed_at, position_address,
+                    capture_slot_start, capture_slot_end,
+                    pool_address, owner, fee_owner,
                     lower_bin_id, upper_bin_id, total_x_amount, total_y_amount,
                     fee_x, fee_y, reward_one, reward_two, last_updated_at,
                     total_claimed_fee_x_amount, total_claimed_fee_y_amount,
                     supports_limit_order, reward_mint_0, reward_mint_1, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
                 """,
                 (
                     observed_at,
                     position_address,
+                    (
+                        int(snapshot["capture_slot_start"])
+                        if snapshot.get("capture_slot_start") is not None
+                        else None
+                    ),
+                    (
+                        int(snapshot["capture_slot_end"])
+                        if snapshot.get("capture_slot_end") is not None
+                        else None
+                    ),
                     str(snapshot["pool_address"]),
                     str(snapshot["owner"]),
                     str(snapshot["fee_owner"]),
@@ -2306,6 +2449,64 @@ class Storage:
                         "immutable position event key already exists with different payload"
                     )
         return len(rows)
+
+    def save_phase2_collection_task_attempt(
+        self,
+        *,
+        stage: str,
+        task_key: str,
+        attempted_at: str,
+        succeeded: bool,
+        outcome_category: str,
+    ) -> int:
+        if not stage.strip():
+            raise ValueError("stage is required")
+        if not task_key.strip():
+            raise ValueError("task_key is required")
+        if not outcome_category.strip():
+            raise ValueError("outcome_category is required")
+
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO phase2_collection_task_attempts(
+                    attempted_at, stage, task_key,
+                    succeeded, outcome_category
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    attempted_at,
+                    stage,
+                    task_key,
+                    int(succeeded),
+                    outcome_category,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def latest_phase2_collection_task_attempts(
+        self,
+        *,
+        stage: str,
+    ) -> dict[str, float]:
+        if not stage.strip():
+            raise ValueError("stage is required")
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT task_key,
+                       MAX(julianday(attempted_at)) AS attempted_jd
+                FROM phase2_collection_task_attempts
+                WHERE stage = ?
+                GROUP BY task_key
+                """,
+                (stage,),
+            ).fetchall()
+        return {
+            str(row[0]): float(row[1])
+            for row in rows
+            if row[1] is not None
+        }
 
     def save_chain_transaction_events(
         self,
@@ -3431,6 +3632,24 @@ class Storage:
             position_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT position_address) FROM position_event_history"
             ).fetchone()
+            position_attempts = conn.execute(
+                """
+                SELECT COUNT(*),
+                       SUM(CASE WHEN succeeded = 1 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN succeeded = 0 THEN 1 ELSE 0 END),
+                       MAX(attempted_at)
+                FROM phase2_position_observation_attempts
+                """
+            ).fetchone()
+            phase2_task_attempts = conn.execute(
+                """
+                SELECT COUNT(*),
+                       SUM(CASE WHEN succeeded = 1 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN succeeded = 0 THEN 1 ELSE 0 END),
+                       MAX(attempted_at)
+                FROM phase2_collection_task_attempts
+                """
+            ).fetchone()
             chain_tx_events = conn.execute(
                 "SELECT COUNT(*), COUNT(DISTINCT signature) FROM chain_transaction_events"
             ).fetchone()
@@ -3471,6 +3690,14 @@ class Storage:
             "position_bin_snapshots": position_bins,
             "position_event_history": position_events[0],
             "position_event_position_count": position_events[1],
+            "phase2_position_observation_attempts": position_attempts[0],
+            "phase2_position_observation_successes": position_attempts[1] or 0,
+            "phase2_position_observation_failures": position_attempts[2] or 0,
+            "latest_phase2_position_observation_attempt": position_attempts[3],
+            "phase2_collection_task_attempts": phase2_task_attempts[0],
+            "phase2_collection_task_successes": phase2_task_attempts[1] or 0,
+            "phase2_collection_task_failures": phase2_task_attempts[2] or 0,
+            "latest_phase2_collection_task_attempt": phase2_task_attempts[3],
             "chain_transaction_events": chain_tx_events[0],
             "chain_transaction_count": chain_tx_events[1],
             "chain_transaction_snapshots": chain_tx_snapshots[0],

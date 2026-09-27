@@ -1,0 +1,18 @@
+[Unit]
+Description=Pio Phase 2 neutral position observation collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/python -m meteora_learner.phase2_position_observation --pool ${PIO_PHASE2_POSITION_POOL} --executor /opt/pio/rust-executor/target/release/meteora-executor
+TimeoutStartSec=15min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pio/data

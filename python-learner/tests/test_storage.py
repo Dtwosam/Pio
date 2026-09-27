@@ -235,3 +235,202 @@ def test_phase9_source_tables_are_append_only(tmp_path):
                     f"DELETE FROM {table} WHERE id = "
                     f"(SELECT MIN(id) FROM {table})"
                 )
+
+
+
+def test_existing_position_table_is_migrated_with_capture_slots(tmp_path):
+    db = tmp_path / "old-position.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE chain_position_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            observed_at TEXT NOT NULL,
+            position_address TEXT NOT NULL,
+            pool_address TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            fee_owner TEXT NOT NULL,
+            lower_bin_id INTEGER NOT NULL,
+            upper_bin_id INTEGER NOT NULL,
+            total_x_amount TEXT NOT NULL,
+            total_y_amount TEXT NOT NULL,
+            fee_x TEXT NOT NULL,
+            fee_y TEXT NOT NULL,
+            reward_one TEXT NOT NULL,
+            reward_two TEXT NOT NULL,
+            last_updated_at INTEGER NOT NULL,
+            total_claimed_fee_x_amount TEXT NOT NULL,
+            total_claimed_fee_y_amount TEXT NOT NULL,
+            raw_json TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    Storage(db)
+
+    conn = sqlite3.connect(db)
+    try:
+        columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(chain_position_snapshots)"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert {
+        "capture_slot_start",
+        "capture_slot_end",
+        "supports_limit_order",
+        "reward_mint_0",
+        "reward_mint_1",
+    } <= columns
+
+
+def test_phase2_position_observation_attempt_ledger_is_append_only(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    row_id = storage.save_phase2_position_observation_attempt(
+        pool_address="pool",
+        position_address="position",
+        attempted_at="2026-09-26T15:00:00+00:00",
+        succeeded=False,
+        failure_category="EXECUTOR_FAILED",
+    )
+    assert row_id > 0
+
+    with storage.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT pool_address, position_address, succeeded,
+                   failure_category, capture_slot
+            FROM phase2_position_observation_attempts
+            WHERE id = ?
+            """,
+            (row_id,),
+        ).fetchone()
+    assert row == (
+        "pool",
+        "position",
+        0,
+        "EXECUTOR_FAILED",
+        None,
+    )
+
+    status = storage.data_status()
+    assert status["phase2_position_observation_attempts"] == 1
+    assert status["phase2_position_observation_successes"] == 0
+    assert status["phase2_position_observation_failures"] == 1
+    assert status["latest_phase2_position_observation_attempt"] == (
+        "2026-09-26T15:00:00+00:00"
+    )
+
+    import sqlite3
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                UPDATE phase2_position_observation_attempts
+                SET failure_category = 'OTHER'
+                WHERE id = ?
+                """,
+                (row_id,),
+            )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM phase2_position_observation_attempts
+                WHERE id = ?
+                """,
+                (row_id,),
+            )
+
+
+def test_phase2_position_attempt_validation_is_fail_closed(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    with pytest.raises(ValueError, match="requires non-negative capture_slot"):
+        storage.save_phase2_position_observation_attempt(
+            pool_address="pool",
+            position_address="position",
+            attempted_at="2026-09-26T15:00:00+00:00",
+            succeeded=True,
+        )
+
+    with pytest.raises(ValueError, match="requires failure_category"):
+        storage.save_phase2_position_observation_attempt(
+            pool_address="pool",
+            position_address="position",
+            attempted_at="2026-09-26T15:00:00+00:00",
+            succeeded=False,
+        )
+
+
+def test_phase2_collection_task_attempt_ledger_is_append_only(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    attempt_id = storage.save_phase2_collection_task_attempt(
+        stage="TRANSACTION_REINSPECTION",
+        task_key="sig",
+        attempted_at="2026-09-26T18:00:00+00:00",
+        succeeded=False,
+        outcome_category="EXECUTOR_FAILED",
+    )
+    assert attempt_id > 0
+
+    latest = storage.latest_phase2_collection_task_attempts(
+        stage="TRANSACTION_REINSPECTION",
+    )
+    assert set(latest) == {"sig"}
+
+    status = storage.data_status()
+    assert status["phase2_collection_task_attempts"] == 1
+    assert status["phase2_collection_task_successes"] == 0
+    assert status["phase2_collection_task_failures"] == 1
+    assert status["latest_phase2_collection_task_attempt"] == (
+        "2026-09-26T18:00:00+00:00"
+    )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with storage.connect() as conn:
+            conn.execute(
+                """
+                UPDATE phase2_collection_task_attempts
+                SET outcome_category = 'OTHER'
+                WHERE id = ?
+                """,
+                (attempt_id,),
+            )
+
+    with pytest.raises(sqlite3.IntegrityError):
+        with storage.connect() as conn:
+            conn.execute(
+                "DELETE FROM phase2_collection_task_attempts WHERE id = ?",
+                (attempt_id,),
+            )
+
+
+def test_phase2_collection_task_attempt_validation(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+
+    with pytest.raises(ValueError, match="stage is required"):
+        storage.save_phase2_collection_task_attempt(
+            stage="",
+            task_key="sig",
+            attempted_at="2026-09-26T18:00:00+00:00",
+            succeeded=False,
+            outcome_category="EXECUTOR_FAILED",
+        )
+
+    with pytest.raises(ValueError, match="task_key is required"):
+        storage.save_phase2_collection_task_attempt(
+            stage="TRANSACTION_REINSPECTION",
+            task_key="",
+            attempted_at="2026-09-26T18:00:00+00:00",
+            succeeded=False,
+            outcome_category="EXECUTOR_FAILED",
+        )

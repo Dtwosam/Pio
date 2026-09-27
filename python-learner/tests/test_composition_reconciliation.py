@@ -15,7 +15,7 @@ def seed(storage):
         {
             "pool_address": "pool",
             "capture_slot_start": 100,
-            "capture_slot_end": 101,
+            "capture_slot_end": 100,
             "clock_unix_timestamp": 1700000000,
             "active_bin_id": 5,
             "bin_step": 25,
@@ -187,7 +187,7 @@ def seed(storage):
             "signature": "sig",
             "transaction_slot": 120,
             "capture_slot_start": 100,
-            "capture_slot_end": 101,
+            "capture_slot_end": 100,
             "eligible": True,
             "reasons": [],
             "account_checks": [
