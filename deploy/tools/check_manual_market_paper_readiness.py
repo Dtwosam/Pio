@@ -44,6 +44,7 @@ class OverlaySummary:
     apply_authorized: bool
     files_changed: int
     status_counts: dict[str, int]
+    pending: tuple[dict[str, str], ...]
     nonready: tuple[dict[str, str], ...]
 
     def to_record(self) -> dict[str, Any]:
@@ -197,6 +198,11 @@ def _target_cursor(repo: Path, *, pool: str) -> str | None:
 
 def _overlay_summary(report: Any) -> OverlaySummary:
     statuses = Counter(item.status for item in report.files)
+    pending = tuple(
+        {"path": item.path, "status": item.status}
+        for item in report.files
+        if item.status in {"READY_CREATE", "READY_UPDATE"}
+    )
     nonready = tuple(
         {"path": item.path, "status": item.status}
         for item in report.files
@@ -216,6 +222,7 @@ def _overlay_summary(report: Any) -> OverlaySummary:
         apply_authorized=bool(report.apply_authorized),
         files_changed=int(report.files_changed),
         status_counts=dict(sorted(statuses.items())),
+        pending=pending,
         nonready=nonready,
     )
 
