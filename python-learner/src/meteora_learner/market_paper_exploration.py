@@ -355,7 +355,7 @@ def run_market_paper_exploration(
             storage,
             token_mint=token_y_mint,
             max_age_seconds=quote_max_age_seconds,
-            as_of=observed_at,
+            as_of=decision_at,
         )
         if not quote.fresh or quote.quote_per_atomic is None:
             items.append(

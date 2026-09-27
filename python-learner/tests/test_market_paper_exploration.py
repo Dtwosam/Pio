@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from meteora_learner.chain_replay import STANDARD_SPL_TOKEN_PROGRAM
 from meteora_learner.market_paper_exploration import run_market_paper_exploration
+from meteora_learner.quote_registry import save_token_quote
 from meteora_learner.paper_account import (
     create_paper_account,
     open_paper_position,
@@ -123,7 +124,10 @@ def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
         refreshed.extend(sorted(token_mints))
         return ()
 
+    quote_as_of = []
+
     def status(storage_arg, *, token_mint, **kwargs):
+        quote_as_of.append(kwargs["as_of"])
         return SimpleNamespace(
             fresh=True,
             quote_per_atomic=(0.5 if token_mint == "mint-a" else 0.25),
@@ -152,6 +156,10 @@ def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
     )
 
     assert refreshed == ["mint-a", "mint-b"]
+    assert quote_as_of == [
+        "2026-09-27T08:00:00+00:00",
+        "2026-09-27T08:00:00+00:00",
+    ]
     assert [row["pool_address"] for row in entries] == ["A", "B"]
     assert entries[0]["amount_y"] == 200
     assert entries[0]["network_cost_y_atomic"] == 2
@@ -163,6 +171,41 @@ def test_exploration_uses_neutral_order_and_quote_normalized_amounts(tmp_path):
     assert report.status == "COMPLETE"
     assert report.paper_only is True
     assert report.live_authorized is False
+
+
+def test_future_quote_is_not_used_for_older_decision_snapshot(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    create_paper_account(storage, account_id="paper", starting_cash_quote=1000)
+    _chain(storage, "A", "mint-a", "2026-09-27T08:00:00+00:00")
+    save_token_quote(
+        storage,
+        token_mint="mint-a",
+        quote_per_atomic=0.5,
+        source="test",
+        observed_at="2026-09-27T08:05:00+00:00",
+    )
+    entries = []
+
+    report = run_market_paper_exploration(
+        storage,
+        account_id="paper",
+        run_id="future-quote",
+        per_position_capital_quote=100,
+        network_cost_quote=1,
+        max_new_positions=1,
+        observed_at="2026-09-27T08:05:00+00:00",
+        intake_runner=lambda database_path, **kwargs: _intake("A"),
+        quote_refresher=lambda *args, **kwargs: (),
+        entry_runner=lambda storage_arg, **kwargs: entries.append(kwargs),
+    )
+
+    assert entries == []
+    assert report.positions_opened == 0
+    assert any(
+        item.pool_address == "A"
+        and item.status == "TOKEN_Y_QUOTE_UNAVAILABLE"
+        for item in report.items
+    )
 
 
 def test_run_id_cap_counts_already_applied_positions_across_retries(tmp_path):
