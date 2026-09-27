@@ -344,3 +344,113 @@ def test_plan_source_has_no_production_mutation_primitive():
     assert "systemctl" not in source
     assert "write_text(" not in source
     assert "write_bytes(" not in source
+
+
+def _rehash_plan(plan):
+    identity = {
+        field: plan[field]
+        for field in MODULE.PLAN_IDENTITY_FIELDS
+    }
+    plan["plan_sha256"] = __import__("hashlib").sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+
+def test_saved_plan_validator_accepts_exact_built_plan():
+    snapshot = _handoff(
+        phase2=_overlay(
+            PREREQUISITE,
+            {
+                "python-learner/src/meteora_learner/storage.py": (
+                    "READY_UPDATE"
+                )
+            },
+        )
+    )
+    plan = MODULE.build_deployment_plan(
+        source_tree=ROOT,
+        handoff_snapshot=snapshot,
+    )
+
+    MODULE.validate_deployment_plan(plan)
+
+
+def test_saved_plan_validator_rejects_digest_tamper():
+    plan = MODULE.build_deployment_plan(
+        source_tree=ROOT,
+        handoff_snapshot=_handoff(),
+    )
+    plan["handoff_state_sha256"] = "f" * 64
+
+    try:
+        MODULE.validate_deployment_plan(plan)
+    except ValueError as exc:
+        assert "digest mismatch" in str(exc)
+    else:
+        raise AssertionError("tampered saved plan must fail closed")
+
+
+def test_saved_plan_validator_rejects_authorization_flip_even_if_rehashed():
+    plan = MODULE.build_deployment_plan(
+        source_tree=ROOT,
+        handoff_snapshot=_handoff(),
+    )
+    plan["mutation_authorized"] = True
+    _rehash_plan(plan)
+
+    try:
+        MODULE.validate_deployment_plan(plan)
+    except ValueError as exc:
+        assert "mutation_authorized=false" in str(exc)
+    else:
+        raise AssertionError("saved plan must never authorize mutation")
+
+
+def test_saved_plan_validator_rejects_reordered_layers_even_if_rehashed():
+    phase2 = _overlay(
+        PREREQUISITE,
+        {
+            "python-learner/src/meteora_learner/research_store.py": (
+                "READY_UPDATE"
+            )
+        },
+    )
+    market = _overlay(
+        RUNTIME,
+        {
+            "python-learner/src/meteora_learner/jupiter_quotes.py": (
+                "READY_UPDATE"
+            )
+        },
+    )
+    plan = MODULE.build_deployment_plan(
+        source_tree=ROOT,
+        handoff_snapshot=_handoff(
+            phase2=phase2,
+            market_paper=market,
+        ),
+    )
+    plan["operations"] = list(reversed(plan["operations"]))
+    _rehash_plan(plan)
+
+    try:
+        MODULE.validate_deployment_plan(plan)
+    except ValueError as exc:
+        assert "out of layer order" in str(exc)
+    else:
+        raise AssertionError("reordered deployment layers must fail closed")
+
+
+def test_saved_plan_validator_rejects_unknown_fields():
+    plan = MODULE.build_deployment_plan(
+        source_tree=ROOT,
+        handoff_snapshot=_handoff(),
+    )
+    plan["apply_now"] = True
+
+    try:
+        MODULE.validate_deployment_plan(plan)
+    except ValueError as exc:
+        assert "fields do not match" in str(exc)
+    else:
+        raise AssertionError("unknown saved-plan fields must fail closed")
