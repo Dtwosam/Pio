@@ -67,12 +67,12 @@ def test_command_result_records_only_exit_and_output_hash_metadata():
     assert '"warn"' not in serialized
 
 
-def _validation_command(name, argv, *, returncode=0):
+def _validation_command(name, command_args, *, returncode=0, cargo="/usr/bin/cargo"):
     stdout = b"ok\n"
     stderr = b""
     return {
         "name": name,
-        "argv": list(argv),
+        "argv": [cargo, *command_args],
         "returncode": returncode,
         "passed": returncode == 0,
         "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
@@ -113,6 +113,9 @@ def _synthetic_validation_report(*, second_returncode=0):
         "candidate_size": 123,
         "candidate_path": "/var/tmp/pio-state-reader-candidate.rs",
         "validation_workspace_under_var_tmp": True,
+        "cargo_executable": "/usr/bin/cargo",
+        "cargo_available": True,
+        "validation_blocker": None if all_passed else "COMMAND_FAILED",
         "validation_commands": commands,
         "all_commands_passed": all_passed,
         "validation_ready": all_passed,
@@ -131,6 +134,60 @@ def _synthetic_validation_report(*, second_returncode=0):
             MODULE._canonical_bytes(identity)
         ).hexdigest(),
     }
+
+
+def test_missing_executable_is_sealed_command_failure(tmp_path):
+    result = MODULE._command_result(
+        name="missing",
+        command=("/definitely/not/a/real/executable", "test"),
+        cwd=tmp_path,
+        env={},
+    )
+
+    assert result["returncode"] == 127
+    assert result["passed"] is False
+    assert result["stdout_size"] == 0
+    assert result["stderr_size"] > 0
+
+
+def test_cargo_discovery_accepts_explicit_existing_executable():
+    resolved = MODULE._resolve_cargo(sys.executable)
+
+    assert resolved == str(Path(sys.executable).resolve())
+
+
+def test_cargo_discovery_missing_explicit_path_returns_none():
+    resolved = MODULE._resolve_cargo("/definitely/not/a/cargo")
+
+    assert resolved is None
+
+
+def test_missing_cargo_report_is_valid_and_blocked():
+    report = _synthetic_validation_report()
+    report["cargo_executable"] = None
+    report["cargo_available"] = False
+    report["validation_blocker"] = "CARGO_NOT_FOUND"
+    report["validation_commands"] = [
+        MODULE._missing_cargo_result(
+            name=name,
+            command_args=args,
+        )
+        for name, args in MODULE.COMMANDS
+    ]
+    report["all_commands_passed"] = False
+    report["validation_ready"] = False
+    identity = {
+        field: report[field]
+        for field in MODULE.IDENTITY_FIELDS
+    }
+    report["report_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(identity)
+    ).hexdigest()
+
+    MODULE.validate_validation_report(report)
+
+    assert report["validation_blocker"] == "CARGO_NOT_FOUND"
+    assert report["validation_ready"] is False
 
 
 def test_validation_report_accepts_successful_sealed_result():
@@ -212,6 +269,9 @@ def test_validator_has_no_production_repository_argument_or_mutation_path():
 
     assert 'parser.add_argument("--repo"' not in source
     assert "/opt/pio" not in source
+    assert '"--cargo-bin"' in source
+    assert "shutil.which" in source
+    assert "CARGO_NOT_FOUND" in source
     assert "TemporaryDirectory" in source
     assert 'dir="/var/tmp"' in source
     assert "CARGO_BUILD_JOBS" in source
