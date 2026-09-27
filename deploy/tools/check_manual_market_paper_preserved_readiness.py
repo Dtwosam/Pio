@@ -113,8 +113,16 @@ class LayerSummary:
     files: tuple[FileStatus, ...]
 
     def to_record(self) -> dict[str, Any]:
-        value = asdict(self)
-        return value
+        return {
+            "content_ready": self.content_ready,
+            "deployed": self.deployed,
+            "apply_authorized": self.apply_authorized,
+            "files_changed": self.files_changed,
+            "status_counts": dict(self.status_counts),
+            "pending": [dict(item) for item in self.pending],
+            "nonready": [dict(item) for item in self.nonready],
+            "files": [item.to_record() for item in self.files],
+        }
 
 
 @dataclass(frozen=True)
