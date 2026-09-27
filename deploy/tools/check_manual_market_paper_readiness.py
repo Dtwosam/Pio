@@ -52,6 +52,20 @@ class OverlaySummary:
 
 
 @dataclass(frozen=True)
+class ProjectedOverlaySummary:
+    content_ready: bool
+    files_changed: int
+    status_counts: dict[str, int]
+    pending: tuple[dict[str, str], ...]
+    nonready: tuple[dict[str, str], ...]
+    projected_prerequisite_paths: tuple[str, ...]
+    mutation_authorized: bool
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class StateReaderSummary:
     preflight_ready: bool
     deployed: bool
@@ -79,6 +93,7 @@ class ProductionReadinessReport:
     phase2: OverlaySummary
     state_reader: StateReaderSummary
     market_paper: OverlaySummary
+    market_paper_after_prerequisites: ProjectedOverlaySummary
     deployment_preflight_clean: bool
     runtime_files_deployed: bool
     operational_services_healthy: bool
@@ -227,6 +242,82 @@ def _overlay_summary(report: Any) -> OverlaySummary:
     )
 
 
+def _projected_market_overlay_summary(
+    market_report: Any,
+    prerequisite_report: Any,
+) -> ProjectedOverlaySummary:
+    ready_statuses = {"ALREADY_TARGET", "READY_CREATE", "READY_UPDATE"}
+    structural_failures = {
+        "SOURCE_OUTSIDE_TREE",
+        "SOURCE_SYMLINK",
+        "SOURCE_MISSING",
+        "SOURCE_NOT_REGULAR_FILE",
+        "TARGET_OUTSIDE_REPOSITORY",
+        "CONFLICT_SYMLINK",
+        "CONFLICT_NON_FILE",
+        "SOURCE_MISMATCH",
+    }
+
+    projected_blobs = {
+        item.path: item.target_blob
+        for item in prerequisite_report.files
+        if item.status in ready_statuses
+    }
+
+    projected: list[tuple[str, str]] = []
+    projected_paths: list[str] = []
+    for item in market_report.files:
+        if item.status in structural_failures:
+            status = item.status
+        else:
+            current_blob = item.current_blob
+            if item.path in projected_blobs:
+                current_blob = projected_blobs[item.path]
+                if current_blob != item.current_blob:
+                    projected_paths.append(item.path)
+
+            if item.source_blob != item.target_blob:
+                status = "SOURCE_MISMATCH"
+            elif current_blob == item.target_blob:
+                status = "ALREADY_TARGET"
+            elif current_blob is None and item.expected_base_blob is None:
+                status = "READY_CREATE"
+            elif current_blob == item.expected_base_blob:
+                status = "READY_UPDATE"
+            elif current_blob is None:
+                status = "CONFLICT_MISSING"
+            elif item.expected_base_blob is None:
+                status = "CONFLICT_UNEXPECTED_EXISTING"
+            else:
+                status = "CONFLICT_MODIFIED"
+
+        projected.append((item.path, status))
+
+    statuses = Counter(status for _, status in projected)
+    pending = tuple(
+        {"path": path, "status": status}
+        for path, status in projected
+        if status in {"READY_CREATE", "READY_UPDATE"}
+    )
+    nonready = tuple(
+        {"path": path, "status": status}
+        for path, status in projected
+        if status not in ready_statuses
+    )
+    return ProjectedOverlaySummary(
+        content_ready=all(status in ready_statuses for _, status in projected),
+        files_changed=sum(
+            status in {"READY_CREATE", "READY_UPDATE"}
+            for _, status in projected
+        ),
+        status_counts=dict(sorted(statuses.items())),
+        pending=pending,
+        nonready=nonready,
+        projected_prerequisite_paths=tuple(sorted(set(projected_paths))),
+        mutation_authorized=False,
+    )
+
+
 def build_production_readiness(
     *,
     repository: str | Path,
@@ -265,6 +356,10 @@ def build_production_readiness(
         manifest=source / MARKET_PAPER_MANIFEST,
     )
     market_paper = _overlay_summary(market_report)
+    market_paper_after_prerequisites = _projected_market_overlay_summary(
+        market_report,
+        phase2_report,
+    )
 
     try:
         state_result = state_module.apply_guarded_patch(
@@ -315,7 +410,7 @@ def build_production_readiness(
     deployment_preflight_clean = (
         phase2.content_ready
         and state_reader.preflight_ready
-        and market_paper.content_ready
+        and market_paper_after_prerequisites.content_ready
     )
     runtime_files_deployed = (
         phase2.deployed
@@ -344,6 +439,7 @@ def build_production_readiness(
         phase2=phase2,
         state_reader=state_reader,
         market_paper=market_paper,
+        market_paper_after_prerequisites=market_paper_after_prerequisites,
         deployment_preflight_clean=deployment_preflight_clean,
         runtime_files_deployed=runtime_files_deployed,
         operational_services_healthy=service_health,
