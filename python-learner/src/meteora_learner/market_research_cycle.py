@@ -47,7 +47,29 @@ class MarketResearchCycleReport:
     stages: tuple[MarketResearchStage, ...]
 
     def to_record(self) -> dict[str, Any]:
-        return asdict(self)
+        return {
+            "research_only": self.research_only,
+            "paper_only": self.paper_only,
+            "policy_actionable": self.policy_actionable,
+            "execution_wired": self.execution_wired,
+            "status": self.status,
+            "discovery": (
+                self.discovery.to_record()
+                if self.discovery is not None
+                else None
+            ),
+            "chain_history": (
+                self.chain_history.to_record()
+                if self.chain_history is not None
+                else None
+            ),
+            "intake": (
+                self.intake.to_record()
+                if self.intake is not None
+                else None
+            ),
+            "stages": [item.to_record() for item in self.stages],
+        }
 
 
 def _check_discovery(report: PoolUniverseDiscoveryReport) -> None:

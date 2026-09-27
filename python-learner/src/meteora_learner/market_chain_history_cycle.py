@@ -40,7 +40,81 @@ class MarketChainHistoryCycleReport:
     stages: tuple[MarketChainHistoryStage, ...]
 
     def to_record(self) -> dict[str, Any]:
-        return asdict(self)
+        context = None
+        if self.context is not None:
+            capture = self.context.capture
+            context = {
+                "queue_before": {
+                    "discovered_pools": self.context.queue_before.discovered_pools,
+                    "chain_observed_pools": (
+                        self.context.queue_before.chain_observed_pools
+                    ),
+                    "missing_chain_pools": (
+                        self.context.queue_before.missing_chain_pools
+                    ),
+                    "batch_limit": self.context.queue_before.batch_limit,
+                },
+                "capture": (
+                    None
+                    if capture is None
+                    else {
+                        "pools_attempted": capture.pools_attempted,
+                        "pools_captured": capture.pools_captured,
+                        "pools_failed": capture.pools_failed,
+                        "target_met": capture.target_met,
+                        "preferred_target_met": capture.preferred_target_met,
+                    }
+                ),
+                "queue_after": {
+                    "discovered_pools": self.context.queue_after.discovered_pools,
+                    "chain_observed_pools": (
+                        self.context.queue_after.chain_observed_pools
+                    ),
+                    "missing_chain_pools": (
+                        self.context.queue_after.missing_chain_pools
+                    ),
+                    "batch_limit": self.context.queue_after.batch_limit,
+                },
+            }
+
+        refresh = None
+        if self.refresh is not None:
+            refresh = {
+                "queue_before": {
+                    "discovered_pools": self.refresh.queue_before.discovered_pools,
+                    "chain_observed_pools": (
+                        self.refresh.queue_before.chain_observed_pools
+                    ),
+                    "refreshable_pools": (
+                        self.refresh.queue_before.refreshable_pools
+                    ),
+                    "batch_limit": self.refresh.queue_before.batch_limit,
+                },
+                "pools_attempted": self.refresh.pools_attempted,
+                "pools_refreshed": self.refresh.pools_refreshed,
+                "pools_failed": self.refresh.pools_failed,
+                "queue_after": {
+                    "discovered_pools": self.refresh.queue_after.discovered_pools,
+                    "chain_observed_pools": (
+                        self.refresh.queue_after.chain_observed_pools
+                    ),
+                    "refreshable_pools": (
+                        self.refresh.queue_after.refreshable_pools
+                    ),
+                    "batch_limit": self.refresh.queue_after.batch_limit,
+                },
+            }
+
+        return {
+            "research_only": self.research_only,
+            "read_only_capture": self.read_only_capture,
+            "policy_actionable": self.policy_actionable,
+            "execution_wired": self.execution_wired,
+            "status": self.status,
+            "context": context,
+            "refresh": refresh,
+            "stages": [item.to_record() for item in self.stages],
+        }
 
 
 def _assert_context_boundary(report: MarketChainContextCaptureReport) -> None:
