@@ -477,6 +477,138 @@ def _state_summary(
     )
 
 
+def _validate_layer_record(value: Any, *, label: str) -> None:
+    if not isinstance(value, dict):
+        raise ValueError(f"preserved readiness {label} must be an object")
+    if set(value) != {
+        "content_ready",
+        "deployed",
+        "apply_authorized",
+        "files_changed",
+        "status_counts",
+        "pending",
+        "nonready",
+        "files",
+    }:
+        raise ValueError(f"preserved readiness {label} schema mismatch")
+
+    files = value.get("files")
+    if not isinstance(files, list) or not files:
+        raise ValueError(f"preserved readiness {label} files are invalid")
+
+    statuses: list[str] = []
+    for item in files:
+        if not isinstance(item, dict) or set(item) != {
+            "path",
+            "expected_current_blob",
+            "target_blob",
+            "source_blob",
+            "current_blob",
+            "status",
+        }:
+            raise ValueError(f"preserved readiness {label} file schema mismatch")
+        if not isinstance(item["path"], str) or not item["path"]:
+            raise ValueError(f"preserved readiness {label} file path is invalid")
+        if not _is_hex_digest(item["target_blob"], 40):
+            raise ValueError(f"preserved readiness {label} target blob is invalid")
+        for digest_field in (
+            "expected_current_blob",
+            "source_blob",
+            "current_blob",
+        ):
+            digest = item[digest_field]
+            if digest is not None and not _is_hex_digest(digest, 40):
+                raise ValueError(
+                    f"preserved readiness {label} {digest_field} is invalid"
+                )
+        status = item["status"]
+        if not isinstance(status, str) or not status:
+            raise ValueError(f"preserved readiness {label} status is invalid")
+        statuses.append(status)
+
+    expected_counts = dict(sorted(Counter(statuses).items()))
+    if value.get("status_counts") != expected_counts:
+        raise ValueError(f"preserved readiness {label} status counts mismatch")
+
+    expected_pending = [
+        {"path": item["path"], "status": item["status"]}
+        for item in files
+        if item["status"] in {"READY_CREATE", "READY_UPDATE"}
+    ]
+    expected_nonready = [
+        {"path": item["path"], "status": item["status"]}
+        for item in files
+        if item["status"] not in READY_STATUSES
+    ]
+    if value.get("pending") != expected_pending:
+        raise ValueError(f"preserved readiness {label} pending evidence mismatch")
+    if value.get("nonready") != expected_nonready:
+        raise ValueError(f"preserved readiness {label} nonready evidence mismatch")
+
+    expected_content_ready = not expected_nonready
+    expected_deployed = all(status == "ALREADY_TARGET" for status in statuses)
+    expected_changed = sum(
+        status in {"READY_CREATE", "READY_UPDATE"}
+        for status in statuses
+    )
+    if value.get("content_ready") is not expected_content_ready:
+        raise ValueError(f"preserved readiness {label} content-ready mismatch")
+    if value.get("deployed") is not expected_deployed:
+        raise ValueError(f"preserved readiness {label} deployed mismatch")
+    if value.get("files_changed") != expected_changed:
+        raise ValueError(f"preserved readiness {label} files-changed mismatch")
+    if value.get("apply_authorized") is not False:
+        raise ValueError(f"preserved readiness {label} must not authorize apply")
+
+
+def _validate_state_record(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("preserved readiness state_reader must be an object")
+    if set(value) != {
+        "content_ready",
+        "deployed",
+        "status",
+        "expected_current_blob",
+        "target_blob",
+        "source_blob",
+        "current_blob",
+    }:
+        raise ValueError("preserved readiness state_reader schema mismatch")
+    if value.get("expected_current_blob") != EXPECTED_STATE_READER_CURRENT_BLOB:
+        raise ValueError("preserved readiness state-reader current binding mismatch")
+    if value.get("target_blob") != EXPECTED_STATE_READER_CANDIDATE_BLOB:
+        raise ValueError("preserved readiness state-reader target binding mismatch")
+
+    for field in ("expected_current_blob", "target_blob"):
+        if not _is_hex_digest(value.get(field), 40):
+            raise ValueError(f"preserved readiness state-reader {field} is invalid")
+    for field in ("source_blob", "current_blob"):
+        digest = value.get(field)
+        if digest is not None and not _is_hex_digest(digest, 40):
+            raise ValueError(f"preserved readiness state-reader {field} is invalid")
+
+    status = value.get("status")
+    if not isinstance(status, str) or not status:
+        raise ValueError("preserved readiness state-reader status is invalid")
+    expected_content_ready = status in READY_STATUSES
+    expected_deployed = status == "ALREADY_TARGET"
+    if value.get("content_ready") is not expected_content_ready:
+        raise ValueError("preserved readiness state-reader content-ready mismatch")
+    if value.get("deployed") is not expected_deployed:
+        raise ValueError("preserved readiness state-reader deployed mismatch")
+
+    if status in READY_STATUSES and value.get("source_blob") != value["target_blob"]:
+        raise ValueError("preserved readiness state-reader ready source mismatch")
+    if status == "READY_UPDATE" and value.get("current_blob") != value[
+        "expected_current_blob"
+    ]:
+        raise ValueError("preserved readiness state-reader update current mismatch")
+    if status == "ALREADY_TARGET" and value.get("current_blob") != value[
+        "target_blob"
+    ]:
+        raise ValueError("preserved readiness state-reader deployed current mismatch")
+
+
 def validate_preserved_readiness(report: dict[str, Any]) -> None:
     if not isinstance(report, dict):
         raise ValueError("preserved readiness must be a JSON object")
@@ -535,9 +667,9 @@ def validate_preserved_readiness(report: dict[str, Any]) -> None:
     if report.get("target_pool") != TARGET_POOL:
         raise ValueError("preserved readiness target pool mismatch")
 
-    for field in ("phase2", "state_reader", "market_paper"):
-        if not isinstance(report.get(field), dict):
-            raise ValueError(f"preserved readiness {field} is invalid")
+    _validate_layer_record(report.get("phase2"), label="phase2")
+    _validate_state_record(report.get("state_reader"))
+    _validate_layer_record(report.get("market_paper"), label="market_paper")
 
     expected_operational = (
         report["detector_service"] == "active"
