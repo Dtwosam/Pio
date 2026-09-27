@@ -40,6 +40,7 @@ REPORT_FIELDS = (
     "reviewed_tool_blobs",
     "preservation_review_sha256",
     "base_source_head",
+    "base_source_clean",
     "validation_source_head",
     "base_source_matches_validation_head",
     "bundle_dir",
@@ -161,6 +162,24 @@ def _git_head(source: Path) -> str:
     if not _is_hex_digest(head, 40):
         raise ValueError("base source HEAD is invalid")
     return head
+
+
+def _git_clean(source: Path) -> bool:
+    proc = subprocess.run(
+        [
+            "git",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ],
+        cwd=str(source),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise ValueError("base source tree Git status is unreadable")
+    return not any(line.strip() for line in proc.stdout.splitlines())
 
 
 def _resolve_regular_file(raw: str | Path, *, label: str) -> Path:
@@ -428,6 +447,8 @@ def validate_bundle_report(report: dict[str, Any]) -> None:
         raise ValueError("preserved-source bundle path is invalid")
     if report.get("bundle_under_var_tmp") is not True:
         raise ValueError("preserved-source bundle scope is invalid")
+    if report.get("base_source_clean") is not True:
+        raise ValueError("preserved-source bundle requires a clean base source tree")
     if report.get("base_source_matches_validation_head") is not (
         report["base_source_head"] == report["validation_source_head"]
     ):
@@ -577,6 +598,11 @@ def build_preserved_source_bundle(
     if not base_source.is_dir():
         raise ValueError(f"base source tree is missing: {base_source}")
     base_head = _git_head(base_source)
+    base_clean = _git_clean(base_source)
+    if not base_clean:
+        raise ValueError(
+            "base source tree must be clean, including no untracked files"
+        )
 
     entries_by_kind = {
         entry["kind"]: entry
@@ -648,6 +674,7 @@ def build_preserved_source_bundle(
         },
         "preservation_review_sha256": preservation_review["review_sha256"],
         "base_source_head": base_head,
+        "base_source_clean": base_clean,
         "validation_source_head": validation_head,
         "base_source_matches_validation_head": base_head == validation_head,
         "bundle_dir": str(output),
