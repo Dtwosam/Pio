@@ -1,0 +1,19 @@
+[Unit]
+Description=Pio Phase 2 read-only prestate watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio
+EnvironmentFile=/etc/pio/pio.env
+ExecStart=/opt/pio/python-learner/.venv/bin/python /opt/pio/scripts/phase2-prestate-watch.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
