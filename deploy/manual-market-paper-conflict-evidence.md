@@ -10,7 +10,7 @@ submit a transaction, or authorize production mutation.
 Reviewed source head for the current conflict/reconciliation diagnostics:
 
 ```text
-1cd7e778d2239755d5f9f63eb2d952904affa203
+ea855de0b609f8eb3a75cf7a314a2854ecf91eb6
 ```
 
 ## Why this exists
@@ -35,7 +35,7 @@ Build an isolated reviewed source outside `/opt/pio`:
 ~~~bash
 set -euo pipefail
 
-REVIEWED_REF="1cd7e778d2239755d5f9f63eb2d952904affa203"
+REVIEWED_REF="ea855de0b609f8eb3a75cf7a314a2854ecf91eb6"
 SRC="$(mktemp -d /var/tmp/pio-conflict-source.XXXXXX)"
 EVIDENCE="/var/tmp/pio-manual-paper-conflict-evidence.json"
 
@@ -236,6 +236,46 @@ It records command identities, return codes, and stdout/stderr hashes and sizes,
 not the build logs themselves. `validation_ready=true` requires both commands
 to pass. Even a passing validation remains non-authorizing and requires a
 separate production-mutation review.
+
+If Cargo is not available in PATH, the validator also checks the existing
+read-only locations `~/.cargo/bin/cargo`, `/usr/bin/cargo`,
+`/usr/local/bin/cargo`, and `/usr/local/cargo/bin/cargo`. Missing Cargo is
+sealed as `validation_blocker=CARGO_NOT_FOUND` rather than raising a traceback.
+No Rust toolchain is installed or modified.
+
+An already-installed executable outside those locations may be selected
+explicitly with `--cargo-bin /absolute/path/to/cargo`. The executable is used
+only inside the temporary validation workspace.
+
+If a candidate was already constructed successfully, do **not** rebuild it just
+because validation was blocked on Cargo. Reuse its sealed candidate report and
+candidate file with a fresh reviewed source checkout, for example:
+
+~~~bash
+REVIEWED_REF="ea855de0b609f8eb3a75cf7a314a2854ecf91eb6"
+SRC="$(mktemp -d /var/tmp/pio-candidate-validation-source.XXXXXX)"
+CANDIDATE_REPORT="/var/tmp/pio-state-reader-preserved-candidate.20260927184020.json"
+VALIDATION_REPORT="/var/tmp/pio-state-reader-candidate-validation.retry.json"
+
+git clone --quiet https://github.com/Dtwosam/Pio.git "$SRC"
+git -C "$SRC" checkout --quiet --detach "$REVIEWED_REF"
+test "$(git -C "$SRC" rev-parse HEAD)" = "$REVIEWED_REF"
+
+set +e
+python3 "$SRC/deploy/tools/validate_manual_market_paper_state_reader_candidate.py" \
+  --source-tree "$SRC" \
+  --candidate-report "$CANDIDATE_REPORT" \
+  > "$VALIDATION_REPORT"
+VALIDATION_RC=$?
+set -e
+
+python3 -m json.tool "$VALIDATION_REPORT"
+printf 'validation_exit_code: %s\n' "$VALIDATION_RC"
+~~~
+
+If the sealed report says `CARGO_NOT_FOUND`, inspect for an existing Cargo
+binary before considering any host change. Do not install a toolchain merely to
+make the gate pass.
 
 ## Stop boundary
 
