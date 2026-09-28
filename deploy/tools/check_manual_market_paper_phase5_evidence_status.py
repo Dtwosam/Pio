@@ -74,12 +74,16 @@ from meteora_learner.storage import Storage
 
 database = Path(sys.argv[1])
 account = sys.argv[2]
+wal = Path(str(database) + "-wal")
+source_uri = f"file:{database}?mode=ro"
+if not wal.exists():
+    source_uri += "&immutable=1"
 
 with tempfile.TemporaryDirectory(prefix="pio-phase5-evidence.") as tmp:
     snapshot = Path(tmp) / "pio.db"
 
     source = sqlite3.connect(
-        f"file:{database}?mode=ro",
+        source_uri,
         uri=True,
     )
     try:
