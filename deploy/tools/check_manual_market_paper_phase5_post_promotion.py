@@ -439,6 +439,44 @@ def validate_post_promotion_audit(report: dict[str, Any]) -> None:
     if report["shm_sha256_before"] != report["shm_sha256_after"]:
         raise ValueError("Phase 5 post-promotion SHM changed during audit")
 
+    current = report["current_record"]
+    history = report["history_record"]
+    phase3 = report["phase3_current_record"]
+    if (
+        current.get("phase_name") != PHASE5
+        or current.get("promoted_at") != report["promoted_at"]
+        or current.get("evidence_type") != PHASE5_EVIDENCE_TYPE
+        or current.get("qualified") is not True
+    ):
+        raise ValueError("Phase 5 post-promotion current record is inconsistent")
+    evidence = current.get("evidence")
+    if not isinstance(evidence, dict):
+        raise ValueError("Phase 5 post-promotion current evidence is invalid")
+    if _sha256_bytes(_canonical_bytes(evidence)) != report["evidence_sha256"]:
+        raise ValueError("Phase 5 post-promotion evidence digest mismatch")
+    if (
+        history.get("id") != report["history_id"]
+        or {key: value for key, value in history.items() if key != "id"} != current
+    ):
+        raise ValueError("Phase 5 post-promotion history/current mismatch")
+    if (
+        phase3.get("phase_name") != PHASE3
+        or phase3.get("evidence_type") != PHASE3_EVIDENCE_TYPE
+        or phase3.get("qualified") is not True
+    ):
+        raise ValueError("Phase 5 post-promotion Phase 3 record is inconsistent")
+
+    for unit_field in ("service_unit", "timer_unit"):
+        unit = report[unit_field]
+        if unit.get("fragment_matches_reviewed") is not True:
+            raise ValueError(
+                f"Phase 5 post-promotion {unit_field} fragment drifted"
+            )
+        if unit.get("no_drop_ins") is not True:
+            raise ValueError(
+                f"Phase 5 post-promotion {unit_field} has drop-ins"
+            )
+
     if report["service_unit"].get("active_state") != "inactive":
         raise ValueError("Phase 5 post-promotion PAPER service is active")
     if report["timer_unit"].get("active_state") != "inactive":
