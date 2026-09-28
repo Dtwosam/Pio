@@ -344,6 +344,9 @@ def test_phase5_status_tool_has_no_promotion_or_activation_primitive():
     assert "persist_phase5_promotion" not in source
     assert "--persist-ready" not in source
     assert "systemctl" not in source
+    assert "mode=ro" in source
+    assert "immutable=1" in source
+    assert "source.backup(destination)" in source
     assert 'git", "pull' not in source
     assert 'git", "checkout' not in source
     assert 'git", "reset' not in source
