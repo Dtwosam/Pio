@@ -308,6 +308,63 @@ def validate_execution_precheck(report: dict[str, Any]) -> None:
         if rollback_blob is not None and not _is_hex_digest(rollback_blob, 40):
             raise ValueError("execution precheck rollback blob is invalid")
 
+        layer = entry.get("layer")
+        operation = entry.get("operation")
+        rollback_operation = entry.get("rollback_operation")
+        if not isinstance(layer, str) or not layer:
+            raise ValueError("execution precheck operation layer is invalid")
+        if operation not in {"UPDATE_PRESERVED_FILE", "UPDATE_FILE", "CREATE_FILE"}:
+            raise ValueError("execution precheck operation type is invalid")
+        if not isinstance(entry.get("backup_required"), bool):
+            raise ValueError("execution precheck backup_required must be boolean")
+
+        if entry["backup_required"]:
+            backup_relative_path = entry.get("backup_relative_path")
+            if not isinstance(backup_relative_path, str) or not backup_relative_path.startswith(
+                "files/"
+            ):
+                raise ValueError("execution precheck backup path is invalid")
+            if not _is_hex_digest(entry.get("backup_git_blob"), 40):
+                raise ValueError("execution precheck backup Git blob is invalid")
+            if not _is_hex_digest(entry.get("backup_sha256"), 64):
+                raise ValueError("execution precheck backup SHA-256 is invalid")
+            for field in ("backup_size", "backup_mode"):
+                value = entry.get(field)
+                if (
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value < 0
+                ):
+                    raise ValueError(f"execution precheck {field} is invalid")
+            if expected_current is None:
+                raise ValueError("execution precheck backup update base is missing")
+            if entry["backup_git_blob"] != expected_current:
+                raise ValueError("execution precheck backup blob mismatch")
+            if rollback_operation != "RESTORE_EXPECTED_BLOB":
+                raise ValueError("execution precheck rollback action mismatch")
+            if rollback_blob != expected_current:
+                raise ValueError("execution precheck rollback blob mismatch")
+        else:
+            if operation != "CREATE_FILE":
+                raise ValueError("execution precheck non-backup operation mismatch")
+            if expected_current is not None:
+                raise ValueError("execution precheck create expected state must be absent")
+            for field in (
+                "backup_relative_path",
+                "backup_git_blob",
+                "backup_sha256",
+                "backup_size",
+                "backup_mode",
+            ):
+                if entry.get(field) is not None:
+                    raise ValueError(
+                        f"execution precheck non-backup {field} must be null"
+                    )
+            if rollback_operation != "DELETE_CREATED_FILE":
+                raise ValueError("execution precheck create rollback mismatch")
+            if rollback_blob is not None:
+                raise ValueError("execution precheck create rollback blob must be null")
+
         for field in (
             "authorization_review_operation_ready",
             "backup_integrity_matches",
