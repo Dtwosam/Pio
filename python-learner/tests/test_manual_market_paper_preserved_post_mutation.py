@@ -312,6 +312,21 @@ def test_ready_post_mutation_audit_verifies_files_backups_and_no_activation(
         fixture["temp"].cleanup()
 
 
+def test_receipt_mode_drift_from_precheck_fails_closed(monkeypatch):
+    fixture = _fixture()
+    fixture["receipt"]["operation_results"][0]["target_mode"] = 0o644
+    fixture["paths"]["receipt.json"].write_text(
+        json.dumps(fixture["receipt"]),
+        encoding="utf-8",
+    )
+    _install_fakes(monkeypatch, fixture)
+    try:
+        with pytest.raises(ValueError, match="target-mode binding mismatch"):
+            _run(fixture)
+    finally:
+        fixture["temp"].cleanup()
+
+
 def test_target_drift_after_writer_fails_closed(monkeypatch):
     fixture = _fixture()
     _install_fakes(monkeypatch, fixture)
