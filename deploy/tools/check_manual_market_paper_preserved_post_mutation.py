@@ -27,6 +27,8 @@ BACKUP_CAPTURE_TOOL = Path(
     "deploy/tools/capture_manual_market_paper_preserved_backups.py"
 )
 
+CREATE_FILE_MODE = 0o644
+
 REVIEWED_SOURCE_BLOBS = {
     WRITER_TOOL: "04ab89cb673609daec60336b52bfdfe3f57239be",
     EXECUTION_PRECHECK_TOOL: "0e30043609b960e1fea9a2289bff777ce1d8290d",
@@ -197,6 +199,24 @@ def _target_audit(
             raise ValueError(
                 f"post-mutation receipt/precheck binding mismatch: {field}"
             )
+    if result.get("expected_current_blob") != precheck_operation.get(
+        "expected_current_blob"
+    ):
+        raise ValueError(
+            "post-mutation receipt/precheck expected-current mismatch"
+        )
+    if result.get("before_blob") != precheck_operation.get(
+        "expected_current_blob"
+    ):
+        raise ValueError("post-mutation receipt before-state mismatch")
+
+    expected_target_mode = (
+        precheck_operation["backup_mode"]
+        if precheck_operation["backup_required"]
+        else CREATE_FILE_MODE
+    )
+    if result.get("target_mode") != expected_target_mode:
+        raise ValueError("post-mutation receipt target-mode binding mismatch")
 
     relative = backup_module._safe_relative_path(result["path"])
     state, payload, mode = backup_module._read_regular_no_follow(
