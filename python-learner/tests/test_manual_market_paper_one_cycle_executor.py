@@ -333,6 +333,50 @@ def test_executor_rejects_paper_database_symlink(monkeypatch):
             )
 
 
+def test_executor_rejects_symlink_lock_path(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        production = _production(root)
+        gate = _gate(production)
+        gate_path = _write(root, "gate.json", gate)
+
+        class FakeGateModule:
+            @staticmethod
+            def validate_execution_gate(value):
+                assert isinstance(value, dict)
+
+        monkeypatch.setattr(
+            MODULE,
+            "_load_gate_module",
+            lambda source: FakeGateModule,
+        )
+        lock_target = root / "lock-target"
+        lock_target.write_text("x", encoding="utf-8")
+        lock_link = root / "one-cycle.lock"
+        lock_link.symlink_to(lock_target)
+        monkeypatch.setattr(MODULE, "LOCK_PATH", lock_link)
+
+        with pytest.raises(ValueError, match="lock path is unsafe"):
+            MODULE.execute_one_cycle(
+                repository=production,
+                source_tree=ROOT,
+                expected_execution_gate_sha256=gate["execution_gate_sha256"],
+                execution_gate_path=gate_path,
+                private_bundle_report_path=root / "bundle.json",
+                pre_mutation_handoff_path=root / "handoff.json",
+                execution_precheck_path=root / "precheck.json",
+                mutation_receipt_path=root / "mutation-receipt.json",
+                post_mutation_audit_path=root / "audit.json",
+                manual_cycle_readiness_path=root / "readiness.json",
+                authorization_request_path=root / "request.json",
+                signed_authorization_verification_path=root / "signed.json",
+                signed_payload_path=root / "payload.json",
+                signature_path=root / "payload.sig",
+                allowed_signers_path=root / "allowed_signers",
+                expected_allowed_signers_sha256="8" * 64,
+            )
+
+
 def test_resealed_receipt_cannot_claim_timer_action():
     report = _cycle_report()
     identity = {
@@ -402,6 +446,7 @@ def test_executor_has_no_service_git_or_live_submit_primitive():
     assert 'git", "checkout' not in source
     assert 'git", "reset' not in source
     assert "live-submit" not in source
+    assert "O_NOFOLLOW" in source
     assert "paper_timer_action_performed\": False" in source
     assert "transaction_signing_performed\": False" in source
     assert "transaction_submission_performed\": False" in source
