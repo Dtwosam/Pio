@@ -174,6 +174,7 @@ def test_stop_guard_is_scheduled_before_timer_start(monkeypatch):
     assert schedule_index < start_index
 
     MODULE.validate_activation_receipt(receipt)
+    assert receipt["production_repository"].endswith("/production")
     assert receipt["target_timer_unit"] == "pio-paper@pio-proof-1.timer"
     assert receipt["target_service_unit"] == "pio-paper@pio-proof-1.service"
     assert receipt["paper_timer_start_authorized"] is True
@@ -312,6 +313,20 @@ def test_schedule_guard_uses_transient_timer_and_stop_only(monkeypatch):
 
 
 
+
+
+def test_resealed_receipt_cannot_use_relative_repository(monkeypatch):
+    temp, _, execute = _run_with_fakes(monkeypatch)
+    try:
+        receipt = execute()
+    finally:
+        temp.cleanup()
+
+    receipt["production_repository"] = "relative/path"
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="repository binding invalid"):
+        MODULE.validate_activation_receipt(receipt)
 
 
 def test_resealed_receipt_cannot_redirect_guard_service(monkeypatch):
