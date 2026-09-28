@@ -68,6 +68,7 @@ REPORT_FIELDS = (
     "approval_id",
     "material_post_collection_state_matches",
     "material_phase5_evidence_matches",
+    "promotion_request_matches_evidence",
     "fresh_signature_matches_saved",
     "approval_not_expired",
     "phase5_current_record_present",
@@ -363,6 +364,7 @@ def validate_phase5_promotion_readiness(report: dict[str, Any]) -> None:
     for field in (
         "material_post_collection_state_matches",
         "material_phase5_evidence_matches",
+        "promotion_request_matches_evidence",
         "fresh_signature_matches_saved",
         "approval_not_expired",
         "phase5_promotion_absent",
@@ -511,6 +513,28 @@ def build_phase5_promotion_readiness(
         "phase5_evidence_status_sha256"
     ):
         raise ValueError("signed Phase 5 promotion request status binding mismatch")
+    if Path(str(request["production_repository"])).resolve() != production:
+        raise ValueError("Phase 5 promotion request repository binding mismatch")
+    if request.get("account") != saved_status.get("account"):
+        raise ValueError("Phase 5 promotion request account binding mismatch")
+    if request.get("run_id") != saved_status.get("run_id"):
+        raise ValueError("Phase 5 promotion request run-id binding mismatch")
+    if request.get("phase5_criteria_sha256") != saved_status.get(
+        "phase5_criteria_sha256"
+    ):
+        raise ValueError("Phase 5 promotion request criteria binding mismatch")
+    if request.get("endurance_sha256") != saved_status.get("endurance_sha256"):
+        raise ValueError("Phase 5 promotion request endurance binding mismatch")
+    if request.get("ledger_audit_sha256") != saved_status.get(
+        "ledger_audit_sha256"
+    ):
+        raise ValueError("Phase 5 promotion request ledger binding mismatch")
+    if request.get("closed_positions") != saved_status.get("closed_positions"):
+        raise ValueError("Phase 5 promotion request closed-position binding mismatch")
+    if request.get("distinct_valued_pools") != saved_status.get(
+        "distinct_valued_pools"
+    ):
+        raise ValueError("Phase 5 promotion request pool-diversity binding mismatch")
     if fresh_status.get("phase5_promotion_ready") is not True:
         raise ValueError("fresh Phase 5 evidence is no longer promotion-ready")
     if fresh_status.get("phase5_reasons") != []:
@@ -579,6 +603,7 @@ def build_phase5_promotion_readiness(
         "approval_id": fresh_verification["approval_id"],
         "material_post_collection_state_matches": True,
         "material_phase5_evidence_matches": True,
+        "promotion_request_matches_evidence": True,
         "fresh_signature_matches_saved": True,
         "approval_not_expired": True,
         "phase5_current_record_present": False,
