@@ -274,7 +274,7 @@ def test_builder_binds_phase6_terminal_audit_and_source_hashes(monkeypatch):
         production = root / "production"
         (production / "data").mkdir(parents=True)
         database = production / "data" / "pio.db"
-        database.write_bytes(b"phase7-source")
+        Storage(database)
 
         audit = {
             "post_promotion_audit_sha256": "1" * 64,
@@ -328,7 +328,7 @@ def test_phase7_status_tool_has_no_live_or_promotion_executor():
     assert "persist_phase7_promotion" not in source
     assert "save_phase_promotion_evidence(" not in source
     assert "controlled-live-check" not in source
-    assert "live-submit" not in source
+    assert "PIO_LIVE_SUBMIT_ENABLED" not in source
     assert "systemctl" not in source
     assert 'git", "pull' not in source
     assert 'git", "checkout' not in source
