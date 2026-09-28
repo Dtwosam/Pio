@@ -128,6 +128,9 @@ def _fixture():
         "execution_precheck_sha256": "3" * 64,
         "production_repository": str(production),
         "backup_dir": str(backup_root),
+        "approver_principal": "wyck@example.com",
+        "approval_id": "01234567-89ab-4def-8123-456789abcdef",
+        "approval_expires_at": "2026-09-28T12:30:00Z",
         "operation_prechecks": [update_precheck, create_precheck],
     }
 
@@ -169,6 +172,7 @@ def _fixture():
         "production_repository": str(production),
         "approver_principal": "wyck@example.com",
         "approval_id": "01234567-89ab-4def-8123-456789abcdef",
+        "approval_expires_at": "2026-09-28T12:30:00Z",
         "operation_results": [update_result, create_result],
         "file_mutation_completed": True,
     }
