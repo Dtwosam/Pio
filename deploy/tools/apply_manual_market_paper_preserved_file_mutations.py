@@ -700,9 +700,15 @@ def validate_mutation_receipt(receipt: dict[str, Any]) -> None:
                 raise ValueError(
                     f"preserved mutation receipt requires {field}=true"
                 )
-        if not isinstance(item.get("rollback_material_reverified"), bool):
+        rollback_reverified = item.get("rollback_material_reverified")
+        if not isinstance(rollback_reverified, bool):
             raise ValueError(
                 "preserved mutation receipt rollback-material flag is invalid"
+            )
+        expected_rollback_reverified = item["operation"] != "CREATE_FILE"
+        if rollback_reverified is not expected_rollback_reverified:
+            raise ValueError(
+                "preserved mutation receipt rollback-material semantics mismatch"
             )
 
     for field in (
