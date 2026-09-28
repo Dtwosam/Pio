@@ -56,6 +56,7 @@ def _report() -> dict:
         "approval_id": "fedcba98-7654-4cba-8123-456789abcdef",
         "material_post_collection_state_matches": True,
         "material_phase5_evidence_matches": True,
+        "promotion_request_matches_evidence": True,
         "fresh_signature_matches_saved": True,
         "approval_not_expired": True,
         "phase5_current_record_present": False,
@@ -157,6 +158,8 @@ def _status(
         "phase5_criteria": {
             "min_runtime_hours": 72.0,
         },
+        "phase5_criteria_sha256": "a" * 64,
+        "ledger_audit_sha256": "b" * 64,
     }
 
 
@@ -372,8 +375,14 @@ def test_builder_accepts_only_time_drift_and_reverifies_signature(monkeypatch):
                 "phase5_evidence_status_sha256"
             ],
             "request_sha256": "7" * 64,
+            "production_repository": str(production),
             "account": "pio-proof-1",
             "run_id": "phase5-collection-1",
+            "phase5_criteria_sha256": saved_status["phase5_criteria_sha256"],
+            "endurance_sha256": saved_status["endurance_sha256"],
+            "ledger_audit_sha256": saved_status["ledger_audit_sha256"],
+            "closed_positions": saved_status["closed_positions"],
+            "distinct_valued_pools": saved_status["distinct_valued_pools"],
         }
         verification = {
             "request_sha256": request["request_sha256"],
@@ -492,8 +501,14 @@ def test_builder_rejects_material_evidence_drift(monkeypatch):
             "post_collection_audit_sha256": "5" * 64,
             "phase5_evidence_status_sha256": "1" * 64,
             "request_sha256": "7" * 64,
+            "production_repository": str(production),
             "account": "pio-proof-1",
             "run_id": "phase5-collection-1",
+            "phase5_criteria_sha256": saved_status["phase5_criteria_sha256"],
+            "endurance_sha256": saved_status["endurance_sha256"],
+            "ledger_audit_sha256": saved_status["ledger_audit_sha256"],
+            "closed_positions": saved_status["closed_positions"],
+            "distinct_valued_pools": saved_status["distinct_valued_pools"],
         }
         verification = {
             "request_sha256": "7" * 64,
@@ -552,6 +567,95 @@ def test_builder_rejects_material_evidence_drift(monkeypatch):
             )
 
 
+def test_builder_rejects_signed_request_account_mismatch(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        production = root / "production"
+        database = production / "data" / "pio.db"
+        database.parent.mkdir(parents=True)
+        database.write_bytes(b"x")
+
+        status = _status(
+            database=database,
+            digest="1" * 64,
+            endurance_digest="2" * 64,
+            checked_at="2026-09-28T14:00:00Z",
+        )
+        post = _post(
+            status=status,
+            audit_digest="5" * 64,
+            checked_at="2026-09-28T14:00:01Z",
+        )
+        request = {
+            "post_collection_audit_sha256": "5" * 64,
+            "phase5_evidence_status_sha256": "1" * 64,
+            "request_sha256": "7" * 64,
+            "production_repository": str(production),
+            "account": "different-account",
+            "run_id": "phase5-collection-1",
+            "phase5_criteria_sha256": status["phase5_criteria_sha256"],
+            "endurance_sha256": status["endurance_sha256"],
+            "ledger_audit_sha256": status["ledger_audit_sha256"],
+            "closed_positions": status["closed_positions"],
+            "distinct_valued_pools": status["distinct_valued_pools"],
+        }
+        verification = {
+            "request_sha256": "7" * 64,
+            "verification_sha256": "8" * 64,
+        }
+
+        class FakePost:
+            @staticmethod
+            def validate_post_collection_audit(value):
+                pass
+
+            @staticmethod
+            def build_post_collection_audit(**kwargs):
+                return copy.deepcopy(post)
+
+        class FakeRequest:
+            @staticmethod
+            def validate_phase5_promotion_request(value):
+                pass
+
+        class FakeSigner:
+            @staticmethod
+            def validate_verification(value):
+                pass
+
+        class FakeStatus:
+            @staticmethod
+            def validate_phase5_evidence_status(value):
+                pass
+
+        monkeypatch.setattr(
+            MODULE,
+            "_load_reviewed_modules",
+            lambda source: (FakePost, FakeRequest, FakeSigner, FakeStatus),
+        )
+
+        with pytest.raises(ValueError, match="account binding mismatch"):
+            MODULE.build_phase5_promotion_readiness(
+                repository=production,
+                source_tree=ROOT,
+                post_cycle_audit_path=root / "post-cycle.json",
+                pre_collection_phase5_evidence_status_path=root / "pre-status.json",
+                activation_receipt_path=root / "activation.json",
+                saved_post_collection_audit_path=_write(
+                    root, "saved-post.json", post
+                ),
+                promotion_request_path=_write(root, "request.json", request),
+                saved_signed_verification_path=_write(
+                    root, "verification.json", verification
+                ),
+                signed_payload_path=root / "payload.json",
+                signature_path=root / "payload.sig",
+                allowed_signers_path=root / "allowed_signers",
+                expected_allowed_signers_sha256="a" * 64,
+                now="2026-09-28T14:00:01Z",
+            )
+
+
 def test_builder_rejects_existing_phase5_history(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -575,8 +679,14 @@ def test_builder_rejects_existing_phase5_history(monkeypatch):
             "post_collection_audit_sha256": "5" * 64,
             "phase5_evidence_status_sha256": "1" * 64,
             "request_sha256": "7" * 64,
+            "production_repository": str(production),
             "account": "pio-proof-1",
             "run_id": "phase5-collection-1",
+            "phase5_criteria_sha256": status["phase5_criteria_sha256"],
+            "endurance_sha256": status["endurance_sha256"],
+            "ledger_audit_sha256": status["ledger_audit_sha256"],
+            "closed_positions": status["closed_positions"],
+            "distinct_valued_pools": status["distinct_valued_pools"],
         }
         verification = {
             "request_sha256": "7" * 64,
