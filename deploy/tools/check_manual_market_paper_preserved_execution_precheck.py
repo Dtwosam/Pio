@@ -446,11 +446,17 @@ def build_execution_precheck(
     allowed_signers_path: str | Path,
     expected_allowed_signers_sha256: str,
 ) -> dict[str, Any]:
-    source = Path(source_tree).resolve()
-    production = Path(repository).resolve()
+    source_candidate = Path(source_tree).expanduser()
+    production_candidate = Path(repository).expanduser()
+    if source_candidate.is_symlink():
+        raise ValueError("reviewed source tree must not be a symlink")
+    if production_candidate.is_symlink():
+        raise ValueError("production repository root must not be a symlink")
+    source = source_candidate.resolve()
+    production = production_candidate.resolve()
     if not source.is_dir():
         raise ValueError("reviewed source tree is missing")
-    if production.is_symlink() or not production.is_dir():
+    if not production.is_dir():
         raise ValueError("production repository root is invalid")
 
     authorization_module, request_module, signed_module = _load_reviewed_modules(
