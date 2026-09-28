@@ -357,6 +357,7 @@ def test_inspection_helper_initializes_only_private_snapshot():
     helper = MODULE.PAPER_INSPECTION_HELPER
 
     assert "mode=ro" in helper
+    assert "immutable=1" in helper
     assert 'source.execute("PRAGMA query_only=ON")' in helper
     assert "source.backup(destination)" in helper
     assert "TemporaryDirectory" in helper
@@ -385,6 +386,7 @@ def test_post_cycle_audit_has_no_activation_or_write_primitive():
     assert "Storage(database)" not in source
     assert "Storage(snapshot)" in source
     assert "mode=ro" in source
+    assert "immutable=1" in source
     assert "source.backup(destination)" in source
     assert '"paper_timer_enable_authorized": False' in source
     assert '"transaction_signing_authorized": False' in source
