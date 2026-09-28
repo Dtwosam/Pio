@@ -593,6 +593,67 @@ def test_rehashed_receipt_cannot_claim_activation_side_effect():
         fixture["temp"].cleanup()
 
 
+def test_rehashed_update_receipt_cannot_drop_rollback_reverification():
+    fixture = _build_fixture()
+    try:
+        result = {
+            "index": 0,
+            "layer": "STATE_READER",
+            "operation": "UPDATE_PRESERVED_FILE",
+            "path": fixture["update_path"],
+            "expected_current_blob": _blob(fixture["old_payload"]),
+            "before_blob": _blob(fixture["old_payload"]),
+            "target_blob": _blob(fixture["update_target"]),
+            "after_blob": _blob(fixture["update_target"]),
+            "target_mode": 0o640,
+            "immediate_expected_state_recheck_passed": True,
+            "source_bytes_reverified": True,
+            "rollback_material_reverified": False,
+            "write_applied": True,
+            "post_write_verified": True,
+        }
+        identity = {
+            "format_version": MODULE.FORMAT_VERSION,
+            "artifact_type": MODULE.ARTIFACT_TYPE,
+            "reviewed_source_blobs": {
+                str(path): blob
+                for path, blob in sorted(
+                    MODULE.REVIEWED_SOURCE_BLOBS.items(),
+                    key=lambda item: str(item[0]),
+                )
+            },
+            "execution_precheck_sha256": "b" * 64,
+            "production_repository": str(fixture["production"]),
+            "approver_principal": "wyck@example.com",
+            "approval_id": "01234567-89ab-4def-8123-456789abcdef",
+            "approval_expires_at": _future_expiry(),
+            "operation_results": [result],
+            "operation_count": 1,
+            "all_operations_applied": True,
+            "preserved_file_mutation_authorization_present": True,
+            "file_mutation_completed": True,
+            "requires_post_mutation_validation": True,
+            "rollback_performed": False,
+            "production_repository_git_mutated": False,
+            "service_restart_performed": False,
+            "detector_cursor_moved": False,
+            "paper_timer_enabled": False,
+            "transaction_signed": False,
+            "transaction_submitted": False,
+            "live_capital_deployed": False,
+        }
+        receipt = {
+            **identity,
+            "receipt_sha256": hashlib.sha256(
+                MODULE._canonical_bytes(identity)
+            ).hexdigest(),
+        }
+        with pytest.raises(ValueError, match="rollback-material semantics mismatch"):
+            MODULE.validate_mutation_receipt(receipt)
+    finally:
+        fixture["temp"].cleanup()
+
+
 def test_writer_has_no_git_service_or_transaction_primitives():
     source = TOOL.read_text(encoding="utf-8")
 
