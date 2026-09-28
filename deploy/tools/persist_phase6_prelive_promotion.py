@@ -98,6 +98,8 @@ RECEIPT_FIELDS = (
     "detector_cursor_movement_authorized",
     "production_source_file_modified",
     "production_repository_git_mutated",
+    "production_pio_database_modified_by_executor",
+    "production_execution_database_modified",
 )
 
 
@@ -472,9 +474,16 @@ def validate_persistence_receipt(receipt: dict[str, Any]) -> None:
         "detector_cursor_movement_authorized",
         "production_source_file_modified",
         "production_repository_git_mutated",
+        "production_execution_database_modified",
     ):
         if receipt.get(field) is not False:
             raise ValueError(f"Phase 6 persistence receipt requires {field}=false")
+
+    if receipt.get("production_pio_database_modified_by_executor") is not True:
+        raise ValueError(
+            "Phase 6 persistence receipt requires "
+            "production_pio_database_modified_by_executor=true"
+        )
 
     if (
         receipt["saved_promotion_readiness_sha256"]
@@ -647,6 +656,8 @@ def persist_phase6_promotion(
         "detector_cursor_movement_authorized": False,
         "production_source_file_modified": False,
         "production_repository_git_mutated": False,
+        "production_pio_database_modified_by_executor": True,
+        "production_execution_database_modified": False,
     }
     receipt = {
         **identity,
