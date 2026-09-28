@@ -38,6 +38,7 @@ RECEIPT_FIELDS = (
     "collection_plan_sha256",
     "collection_request_sha256",
     "signed_authorization_verification_sha256",
+    "production_repository",
     "account",
     "run_id",
     "target_timer_unit",
@@ -287,6 +288,7 @@ def validate_activation_receipt(receipt: dict[str, Any]) -> None:
             raise ValueError(f"Phase 5 collection activation {field} invalid")
 
     for field in (
+        "production_repository",
         "account",
         "run_id",
         "target_timer_unit",
@@ -300,6 +302,10 @@ def validate_activation_receipt(receipt: dict[str, Any]) -> None:
     ):
         if not isinstance(receipt.get(field), str) or not receipt[field]:
             raise ValueError(f"Phase 5 collection activation {field} invalid")
+
+    repository = receipt["production_repository"]
+    if not repository.startswith("/"):
+        raise ValueError("Phase 5 collection activation repository binding invalid")
 
     account = receipt["account"]
     if ACCOUNT_RE.fullmatch(account) is None:
@@ -502,6 +508,7 @@ def activate_phase5_evidence_collection(
             "signed_authorization_verification_sha256": saved[
                 "saved_signed_authorization_verification_sha256"
             ],
+            "production_repository": str(production),
             "account": account,
             "run_id": saved["run_id"],
             "target_timer_unit": target_timer,
