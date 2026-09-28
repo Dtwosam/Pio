@@ -499,6 +499,11 @@ def build_post_mutation_audit(
         "execution_precheck_sha256"
     ):
         raise ValueError("post-mutation receipt/precheck digest binding mismatch")
+    for field in ("approver_principal", "approval_id", "approval_expires_at"):
+        if receipt.get(field) != precheck.get(field):
+            raise ValueError(
+                f"post-mutation receipt/precheck approval binding mismatch: {field}"
+            )
     if Path(str(receipt["production_repository"])).resolve() != production:
         raise ValueError("post-mutation receipt repository binding mismatch")
     if Path(str(precheck["production_repository"])).resolve() != production:
