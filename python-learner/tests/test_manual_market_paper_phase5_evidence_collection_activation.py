@@ -84,8 +84,21 @@ def _run_with_fakes(
         lambda source: FakeReadinessModule,
     )
 
-    def fake_schedule(*, guard_base, target_timer_unit, seconds):
-        calls.append(("schedule-guard", target_timer_unit, seconds))
+    def fake_schedule(
+        *,
+        guard_base,
+        target_timer_unit,
+        target_service_unit,
+        seconds,
+    ):
+        calls.append(
+            (
+                "schedule-guard",
+                target_timer_unit,
+                target_service_unit,
+                seconds,
+            )
+        )
         if schedule_error is not None:
             raise schedule_error
         return f"{guard_base}.timer", f"{guard_base}.service"
@@ -161,6 +174,8 @@ def test_stop_guard_is_scheduled_before_timer_start(monkeypatch):
     assert schedule_index < start_index
 
     MODULE.validate_activation_receipt(receipt)
+    assert receipt["target_timer_unit"] == "pio-paper@pio-proof-1.timer"
+    assert receipt["target_service_unit"] == "pio-paper@pio-proof-1.service"
     assert receipt["paper_timer_start_authorized"] is True
     assert receipt["paper_timer_started"] is True
     assert receipt["paper_timer_active"] is True
@@ -219,6 +234,7 @@ def test_timer_start_failure_triggers_cleanup(monkeypatch):
     stop_calls = [call for call in calls if call[0] == "stop"]
     assert stop_calls
     assert any("pio-paper@pio-proof-1.timer" in call for call in stop_calls)
+    assert any("pio-paper@pio-proof-1.service" in call for call in stop_calls)
 
 
 def test_timer_that_became_enabled_is_immediately_stopped(monkeypatch):
@@ -275,6 +291,7 @@ def test_schedule_guard_uses_transient_timer_and_stop_only(monkeypatch):
     timer, service = MODULE._schedule_stop_guard(
         guard_base="pio-phase5-evidence-stop-pio-proof-1-aaaaaaaaaaaa",
         target_timer_unit="pio-paper@pio-proof-1.timer",
+        target_service_unit="pio-paper@pio-proof-1.service",
         seconds=3600,
     )
 
@@ -284,13 +301,31 @@ def test_schedule_guard_uses_transient_timer_and_stop_only(monkeypatch):
     assert command[:2] == ["/usr/bin/systemd-run", "--quiet"]
     assert "--on-active=3600s" in command
     assert "--timer-property=AccuracySec=1s" in command
-    assert command[-3:] == [
+    assert command[-4:] == [
         "/usr/bin/systemctl",
         "stop",
         "pio-paper@pio-proof-1.timer",
+        "pio-paper@pio-proof-1.service",
     ]
     assert "enable" not in command
     assert "disable" not in command
+
+
+
+
+
+def test_resealed_receipt_cannot_redirect_guard_service(monkeypatch):
+    temp, _, execute = _run_with_fakes(monkeypatch)
+    try:
+        receipt = execute()
+    finally:
+        temp.cleanup()
+
+    receipt["target_service_unit"] = "pio-paper@other.service"
+    _reseal(receipt)
+
+    with pytest.raises(ValueError, match="service binding mismatch"):
+        MODULE.validate_activation_receipt(receipt)
 
 
 def test_resealed_receipt_cannot_claim_persistent_timer_enable(monkeypatch):
