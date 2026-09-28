@@ -238,6 +238,21 @@ def test_payload_binds_exact_request_and_remains_non_executable():
     assert payload["request_sha256"] == _request()["request_sha256"]
 
 
+def test_signing_bytes_are_exact_validated_canonical_payload():
+    request = _request()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        payload, payload_path = _build_payload(root, request)
+        emitted = MODULE.authorization_signing_bytes(
+            source_tree=ROOT,
+            request_path=root / "request.json",
+            payload_path=payload_path,
+        )
+
+    assert emitted == MODULE._canonical_bytes(payload)
+    assert not emitted.endswith(b"\\n")
+
+
 def test_resealed_payload_cannot_become_execution_ready():
     request = _request()
     with tempfile.TemporaryDirectory() as tmp:
