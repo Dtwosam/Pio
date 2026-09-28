@@ -141,6 +141,7 @@ def _build_fixture():
     update_mode = 0o640
 
     _write(production / update_path, old_payload, update_mode)
+    (production / Path(create_path).parent).mkdir(parents=True, exist_ok=True)
     _write(bundle / update_path, update_target, 0o644)
     _write(source / create_path, create_target, MODULE.CREATE_FILE_MODE)
 
