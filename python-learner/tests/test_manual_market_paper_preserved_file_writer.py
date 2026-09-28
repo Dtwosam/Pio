@@ -387,6 +387,43 @@ def test_writer_applies_exact_batch_and_emits_non_activation_receipt(monkeypatch
         fixture["temp"].cleanup()
 
 
+def test_post_write_failure_self_rolls_back_current_operation(monkeypatch):
+    fixture = _build_fixture()
+    original_fsync = MODULE._fsync_directory
+    calls = {"count": 0}
+
+    def fail_first_fsync(parent):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError("forced post-write fsync failure")
+        return original_fsync(parent)
+
+    monkeypatch.setattr(MODULE, "_fsync_directory", fail_first_fsync)
+
+    try:
+        prepared = MODULE._prepare_operation(
+            operation=fixture["operations"][0],
+            source=fixture["source"],
+            private_bundle=fixture["bundle"],
+            backup_root=fixture["backup_root"],
+            backup_module=BACKUP,
+        )
+        target = fixture["production"] / fixture["update_path"]
+
+        with pytest.raises(OSError, match="forced post-write fsync failure"):
+            MODULE._install_operation(
+                prepared=prepared,
+                production=fixture["production"],
+                backup_module=BACKUP,
+            )
+
+        assert target.read_bytes() == fixture["old_payload"]
+        assert stat_mode(target) == 0o640
+        assert calls["count"] >= 2
+    finally:
+        fixture["temp"].cleanup()
+
+
 def test_later_operation_failure_rolls_back_earlier_update(monkeypatch):
     fixture = _build_fixture()
     _install_fake_modules(monkeypatch, fixture)
