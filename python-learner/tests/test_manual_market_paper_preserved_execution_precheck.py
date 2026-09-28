@@ -369,6 +369,35 @@ def test_builder_fails_on_signed_request_binding_drift(monkeypatch):
         temp.cleanup()
 
 
+def test_builder_rejects_symlink_production_root():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        production = root / "production"
+        production.mkdir()
+        link = root / "production-link"
+        link.symlink_to(production, target_is_directory=True)
+
+        with pytest.raises(ValueError, match="must not be a symlink"):
+            MODULE.build_execution_precheck(
+                repository=link,
+                source_tree=ROOT,
+                private_bundle_report_path=root / "private-bundle.json",
+                handoff_path=root / "handoff.json",
+                plan_path=root / "plan.json",
+                gate_path=root / "gate.json",
+                mutation_review_path=root / "mutation-review.json",
+                evidence_package_path=root / "evidence.json",
+                backup_capture_path=root / "backup.json",
+                authorization_review_path=root / "review.json",
+                authorization_request_path=root / "request.json",
+                signed_authorization_verification_path=root / "signed.json",
+                signed_payload_path=root / "payload.json",
+                signature_path=root / "payload.sig",
+                allowed_signers_path=root / "allowed_signers",
+                expected_allowed_signers_sha256="8" * 64,
+            )
+
+
 def test_tool_has_no_production_mutation_primitives():
     source = TOOL.read_text(encoding="utf-8")
 
