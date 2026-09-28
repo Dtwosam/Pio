@@ -53,12 +53,16 @@ from meteora_learner.storage import Storage
 
 database = Path(sys.argv[1])
 account = sys.argv[2]
+wal = Path(str(database) + "-wal")
+source_uri = f"file:{database}?mode=ro"
+if not wal.exists():
+    source_uri += "&immutable=1"
 
 with tempfile.TemporaryDirectory(prefix="pio-one-cycle-paper-audit.") as tmp:
     snapshot = Path(tmp) / "pio.db"
 
     source = sqlite3.connect(
-        f"file:{database}?mode=ro",
+        source_uri,
         uri=True,
     )
     try:
@@ -206,6 +210,16 @@ def _paper_database(production: Path, expected: str) -> Path:
     if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
         raise ValueError("post-cycle PAPER database must be a regular file")
     return database
+
+
+def _sha256_regular_or_none(path: Path) -> str | None:
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        raise ValueError(f"post-cycle PAPER sidecar is unsafe: {path.name}")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _inspect_paper_db(
@@ -455,11 +469,23 @@ def build_post_cycle_audit(
         production,
         str(receipt["paper_database_path"]),
     )
+    wal = Path(str(database) + "-wal")
+    database_before = _sha256_regular_or_none(database)
+    wal_before = _sha256_regular_or_none(wal)
+
     snapshot, ledger = _inspect_paper_db(
         source=source,
         database=database,
         account=str(receipt["account"]),
     )
+
+    database_after = _sha256_regular_or_none(database)
+    wal_after = _sha256_regular_or_none(wal)
+    if database_after != database_before:
+        raise ValueError("post-cycle PAPER database changed during audit")
+    if wal_after != wal_before:
+        raise ValueError("post-cycle PAPER WAL changed during audit")
+
     _validate_account_snapshot(snapshot, account=str(receipt["account"]))
     _validate_ledger_audit(ledger, account=str(receipt["account"]))
 
