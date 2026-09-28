@@ -37,6 +37,11 @@ REVIEWED_SOURCE_BLOBS = {
 WRITER_LOCK = Path("/var/tmp/pio-manual-paper-preserved-file-mutation.lock")
 CREATE_FILE_MODE = 0o644
 
+
+class OperationRollbackError(RuntimeError):
+    pass
+
+
 RESULT_FIELDS = (
     "index",
     "layer",
@@ -430,6 +435,7 @@ def _install_operation(
     )
 
     temp: Path | None = None
+    target_changed = False
     try:
         temp = _stage_temp_file(
             parent=parent,
@@ -455,10 +461,12 @@ def _install_operation(
                 raise ValueError(
                     f"preserved writer create target appeared before install: {relative}"
                 ) from exc
+            target_changed = True
             temp.unlink()
             temp = None
         else:
             os.replace(temp, target)
+            target_changed = True
             temp = None
 
         _fsync_directory(parent)
@@ -497,6 +505,19 @@ def _install_operation(
             "write_applied": True,
             "post_write_verified": True,
         }
+    except Exception as exc:
+        if target_changed:
+            try:
+                _rollback_operation(
+                    prepared=prepared,
+                    production=production,
+                    backup_module=backup_module,
+                )
+            except Exception as rollback_exc:
+                raise OperationRollbackError(
+                    f"current operation rollback incomplete: {relative}"
+                ) from rollback_exc
+        raise
     finally:
         _unlink_temp(temp)
 
@@ -863,6 +884,10 @@ def apply_preserved_file_mutations(
                 applied.append(item)
                 results.append(result)
         except Exception as exc:
+            current_rollback_incomplete = isinstance(
+                exc,
+                OperationRollbackError,
+            )
             rollback_errors: list[str] = []
             for item in reversed(applied):
                 try:
@@ -875,11 +900,13 @@ def apply_preserved_file_mutations(
                     rollback_errors.append(
                         f"{item['operation']['path']}: {rollback_exc}"
                     )
-            if rollback_errors:
-                joined = "; ".join(rollback_errors)
+            if current_rollback_incomplete or rollback_errors:
+                details = "; ".join(rollback_errors) if rollback_errors else (
+                    "the current operation could not be restored"
+                )
                 raise RuntimeError(
                     "preserved mutation failed and rollback was incomplete: "
-                    f"{joined}"
+                    f"{details}"
                 ) from exc
             raise RuntimeError(
                 "preserved mutation failed; all applied operations were rolled back"
