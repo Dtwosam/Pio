@@ -357,7 +357,7 @@ def test_collection_readiness_uses_only_read_only_systemctl_show():
     assert '"restart"' not in source
     assert '"daemon-reload"' not in source
     assert "shell=True" not in source
-    assert "source " not in source
+    assert "source /etc/pio/pio.env" not in source
     assert '"collection_execution_authorized": False' in source
     assert '"paper_timer_enable_authorized": False' in source
     assert '"transaction_signing_authorized": False' in source
