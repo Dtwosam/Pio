@@ -41,6 +41,7 @@ RECEIPT_FIELDS = (
     "account",
     "run_id",
     "target_timer_unit",
+    "target_service_unit",
     "guard_timer_unit",
     "guard_service_unit",
     "requested_collection_seconds",
@@ -220,6 +221,7 @@ def _schedule_stop_guard(
     *,
     guard_base: str,
     target_timer_unit: str,
+    target_service_unit: str,
     seconds: int,
 ) -> tuple[str, str]:
     systemctl = _systemctl_path()
@@ -237,6 +239,7 @@ def _schedule_stop_guard(
             str(systemctl),
             "stop",
             target_timer_unit,
+            target_service_unit,
         ],
         label="schedule Phase 5 collection auto-stop guard",
     )
@@ -287,6 +290,7 @@ def validate_activation_receipt(receipt: dict[str, Any]) -> None:
         "account",
         "run_id",
         "target_timer_unit",
+        "target_service_unit",
         "guard_timer_unit",
         "guard_service_unit",
         "scheduler_extra_args_text",
@@ -302,6 +306,8 @@ def validate_activation_receipt(receipt: dict[str, Any]) -> None:
         raise ValueError("Phase 5 collection activation account invalid")
     if receipt["target_timer_unit"] != f"pio-paper@{account}.timer":
         raise ValueError("Phase 5 collection activation timer binding mismatch")
+    if receipt["target_service_unit"] != f"pio-paper@{account}.service":
+        raise ValueError("Phase 5 collection activation service binding mismatch")
 
     seconds = receipt.get("requested_collection_seconds")
     if not isinstance(seconds, int) or isinstance(seconds, bool) or seconds <= 0:
@@ -412,6 +418,7 @@ def activate_phase5_evidence_collection(
     if ACCOUNT_RE.fullmatch(account) is None:
         raise ValueError("collection activation account is unsafe")
     target_timer = f"pio-paper@{account}.timer"
+    target_service = f"pio-paper@{account}.service"
 
     lock = Path(lock_path)
     lock.parent.mkdir(parents=True, exist_ok=True)
@@ -449,6 +456,7 @@ def activate_phase5_evidence_collection(
             guard_timer, guard_service = _schedule_stop_guard(
                 guard_base=guard_base,
                 target_timer_unit=target_timer,
+                target_service_unit=target_service,
                 seconds=seconds,
             )
             _systemctl_start(target_timer)
@@ -465,7 +473,7 @@ def activate_phase5_evidence_collection(
                     "Phase 5 PAPER timer became persistent instead of remaining disabled"
                 )
         except Exception:
-            _systemctl_stop(target_timer)
+            _systemctl_stop(target_timer, target_service)
             if guard_timer or guard_service:
                 _systemctl_stop(
                     *(unit for unit in (guard_timer, guard_service) if unit)
@@ -497,6 +505,7 @@ def activate_phase5_evidence_collection(
             "account": account,
             "run_id": saved["run_id"],
             "target_timer_unit": target_timer,
+            "target_service_unit": target_service,
             "guard_timer_unit": guard_timer,
             "guard_service_unit": guard_service,
             "requested_collection_seconds": seconds,
