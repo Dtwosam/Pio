@@ -43,7 +43,9 @@ INSPECTION_TIMEOUT_SECONDS = 30
 PAPER_INSPECTION_HELPER = r"""
 import json
 from pathlib import Path
+import sqlite3
 import sys
+import tempfile
 
 from meteora_learner.paper_account import paper_account_snapshot
 from meteora_learner.paper_audit import audit_paper_ledger
@@ -51,17 +53,35 @@ from meteora_learner.storage import Storage
 
 database = Path(sys.argv[1])
 account = sys.argv[2]
-storage = Storage(database)
-print(json.dumps({
-    "account_snapshot": paper_account_snapshot(
-        storage,
-        account_id=account,
-    ).to_record(),
-    "ledger_audit": audit_paper_ledger(
-        storage,
-        account_id=account,
-    ).to_record(),
-}, sort_keys=True))
+
+with tempfile.TemporaryDirectory(prefix="pio-one-cycle-paper-audit.") as tmp:
+    snapshot = Path(tmp) / "pio.db"
+
+    source = sqlite3.connect(
+        f"file:{database}?mode=ro",
+        uri=True,
+    )
+    try:
+        source.execute("PRAGMA query_only=ON")
+        destination = sqlite3.connect(snapshot)
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+    finally:
+        source.close()
+
+    storage = Storage(snapshot)
+    print(json.dumps({
+        "account_snapshot": paper_account_snapshot(
+            storage,
+            account_id=account,
+        ).to_record(),
+        "ledger_audit": audit_paper_ledger(
+            storage,
+            account_id=account,
+        ).to_record(),
+    }, sort_keys=True))
 """
 
 REPORT_FIELDS = (
