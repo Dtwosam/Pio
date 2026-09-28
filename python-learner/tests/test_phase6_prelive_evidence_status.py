@@ -31,7 +31,7 @@ def _phase6_result(*, ready: bool = False) -> dict:
     if ready:
         return {
             "phase5_promoted": True,
-            "execution_db": "/tmp/execution.db",
+            "execution_db": "/var/lib/pio/execution.db",
             "passed_enter_intents": 10,
             "distinct_pools": 2,
             "blocked_intents": 2,
@@ -44,7 +44,7 @@ def _phase6_result(*, ready: bool = False) -> dict:
         }
     return {
         "phase5_promoted": True,
-        "execution_db": "/tmp/execution.db",
+        "execution_db": "/var/lib/pio/execution.db",
         "passed_enter_intents": 2,
         "distinct_pools": 1,
         "blocked_intents": 0,
@@ -274,6 +274,18 @@ def test_resealed_status_cannot_authorize_live_submit():
         MODULE.validate_phase6_evidence_status(report)
 
 
+def test_resealed_status_cannot_redirect_nested_execution_db():
+    report = _report(ready=True)
+    report["phase6_report"]["execution_db"] = "/tmp/snapshot/execution.db"
+    report["phase6_report_sha256"] = hashlib.sha256(
+        MODULE._canonical_bytes(report["phase6_report"])
+    ).hexdigest()
+    _reseal(report)
+
+    with pytest.raises(ValueError, match="nested execution database binding mismatch"):
+        MODULE.validate_phase6_evidence_status(report)
+
+
 def test_resealed_status_cannot_lower_phase6_criteria():
     report = _report(ready=False)
     report["phase6_criteria"]["min_passed_enter_intents"] = 1
@@ -425,6 +437,10 @@ def test_builder_binds_confirmed_phase5_and_source_hashes(monkeypatch):
     assert report["phase5_promotion_confirmed"] is True
     assert report["source_databases_unchanged"] is True
     assert report["phase6_promotion_ready"] is False
+    assert (
+        report["phase6_report"]["execution_db"]
+        == report["execution_database_path"]
+    )
     assert report["phase6_promotion_persisted"] is False
 
 
