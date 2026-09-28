@@ -5,15 +5,15 @@ authorization review.
 
 Reviewed request-builder source:
 
-\`\`\`text
+```text
 14b69a9566fbeeea283f0c2893eff7bf4ec6258b
-\`\`\`
+```
 
 Reviewed request-builder blob:
 
-\`\`\`text
+```text
 f7d31b7bbd421945fd8f7ca1353832e6e89da11b
-\`\`\`
+```
 
 The tool is non-authorizing. It does not inspect production, write production
 files, grant mutation permission, restart services, move detector state, enable
@@ -23,10 +23,10 @@ the PAPER timer, sign or submit transactions, or deploy capital.
 
 Run this only after a preserved authorization review exists and reports:
 
-- \`authorization_review_ready=true\`;
-- \`authorization_granted=false\`;
-- \`requires_explicit_human_authorization=true\`;
-- \`requires_fresh_execution_recheck=true\`; and
+- `authorization_review_ready=true`;
+- `authorization_granted=false`;
+- `requires_explicit_human_authorization=true`;
+- `requires_fresh_execution_recheck=true`; and
 - every deployment/mutation/service/cursor/timer/capital authorization false.
 
 The request builder validates that terminal artifact with the exactly pinned
@@ -37,7 +37,7 @@ request.
 
 Use one isolated reviewed-source checkout:
 
-\`\`\`bash
+```bash
 set -euo pipefail
 
 REVIEWED_REF="14b69a9566fbeeea283f0c2893eff7bf4ec6258b"
@@ -56,15 +56,15 @@ python3 "$SRC/deploy/tools/build_manual_market_paper_preserved_human_authorizati
   > "$AUTH_REQUEST"
 
 python3 -m json.tool "$AUTH_REQUEST"
-\`\`\`
+```
 
-The tool has no \`--repo\` argument. It does not access \`/opt/pio\`.
+The tool has no `--repo` argument. It does not access `/opt/pio`.
 
 ## Ready result
 
-A valid request is sealed as \`request_sha256\` and binds:
+A valid request is sealed as `request_sha256` and binds:
 
-- the exact terminal \`authorization_review_sha256\`;
+- the exact terminal `authorization_review_sha256`;
 - the production-repository identity copied from that terminal review;
 - the private rollback-backup directory identity;
 - the exact operation index, layer, operation and path;
@@ -75,9 +75,9 @@ A valid request is sealed as \`request_sha256\` and binds:
 
 The authorization scope is only:
 
-\`\`\`text
+```text
 PRESERVED_FILE_MUTATIONS_ONLY
-\`\`\`
+```
 
 The request explicitly excludes:
 
@@ -91,15 +91,15 @@ The request explicitly excludes:
 
 ## Non-authorization boundary
 
-Even when \`authorization_request_ready=true\`, the request must still contain:
+Even when `authorization_request_ready=true`, the request must still contain:
 
-- \`approval_artifact_present=false\`;
-- \`authorization_granted=false\`;
-- \`explicit_human_authorization_required=true\`;
-- \`fresh_execution_recheck_required=true\`;
-- \`requires_separate_mutation_authorization=true\`;
-- \`production_file_modified=false\`;
-- \`production_repository_git_mutated=false\`; and
+- `approval_artifact_present=false`;
+- `authorization_granted=false`;
+- `explicit_human_authorization_required=true`;
+- `fresh_execution_recheck_required=true`;
+- `requires_separate_mutation_authorization=true`;
+- `production_file_modified=false`;
+- `production_repository_git_mutated=false`; and
 - every deployment/mutation/service/cursor/timer/capital authorization false.
 
 Re-hashing a modified JSON request cannot turn any of those fields into
@@ -118,7 +118,7 @@ or production mutation implementation is introduced by this stage.
 
 Any future continuation must separately define and review how an explicit human
 authorization is authenticated and bound to this exact
-\`authorization_review_sha256\`/\`request_sha256\`. After that authorization,
+`authorization_review_sha256`/`request_sha256`. After that authorization,
 the implementation must still perform an immediate per-operation
 expected-current recheck before the first production write.
 
