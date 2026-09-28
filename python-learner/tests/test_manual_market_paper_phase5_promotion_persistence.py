@@ -649,9 +649,8 @@ def test_persistence_tool_has_no_systemd_git_or_storage_initializer():
 
     assert "systemctl" not in source
     assert "Storage(" not in source
-    assert "persist_phase5_promotion(" not in source.replace(
-        "def persist_phase5_promotion(", ""
-    )
+    assert "from meteora_learner.phase_promotion import persist_phase5_promotion" not in source
+    assert "save_phase_promotion_evidence(" not in source
     assert 'git", "pull' not in source
     assert 'git", "checkout' not in source
     assert 'git", "reset' not in source
