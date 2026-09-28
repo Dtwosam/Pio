@@ -385,6 +385,8 @@ def test_full_persistence_uses_fresh_locked_readiness_and_writes_only_phase6(
     assert receipt["controlled_live_authorized"] is False
     assert receipt["live_submit_authorized"] is False
     assert receipt["live_capital_authorized"] is False
+    assert receipt["production_pio_database_modified_by_executor"] is True
+    assert receipt["production_execution_database_modified"] is False
     assert phase6_current == (MODULE.PHASE6_EVIDENCE_TYPE, 1)
     assert phase6_history == 1
     assert phase5_count == 1
@@ -519,6 +521,8 @@ def test_resealed_receipt_cannot_authorize_live_submit():
         "detector_cursor_movement_authorized": False,
         "production_source_file_modified": False,
         "production_repository_git_mutated": False,
+        "production_pio_database_modified_by_executor": True,
+        "production_execution_database_modified": False,
     }
     identity = {field: receipt[field] for field in MODULE.RECEIPT_FIELDS}
     receipt["receipt_sha256"] = hashlib.sha256(
@@ -547,3 +551,5 @@ def test_persistence_tool_has_no_controlled_live_executor():
     assert '"transaction_signing_authorized": False' in source
     assert '"transaction_submission_authorized": False' in source
     assert '"live_capital_authorized": False' in source
+    assert '"production_pio_database_modified_by_executor": True' in source
+    assert '"production_execution_database_modified": False' in source
