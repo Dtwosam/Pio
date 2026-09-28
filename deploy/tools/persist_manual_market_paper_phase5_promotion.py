@@ -192,9 +192,18 @@ def _load_reviewed_modules(source: Path) -> tuple[Any, Any, Any]:
 
 def _normalized_readiness(value: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(value)
-    normalized.pop("promotion_readiness_sha256", None)
-    normalized.pop("fresh_post_collection_audit_sha256", None)
-    normalized.pop("fresh_phase5_evidence_status_sha256", None)
+    for field in (
+        "promotion_readiness_sha256",
+        "fresh_post_collection_audit_sha256",
+        "fresh_phase5_evidence_status_sha256",
+        "database_sha256_before",
+        "database_sha256_after",
+        "wal_sha256_before",
+        "wal_sha256_after",
+        "shm_sha256_before",
+        "shm_sha256_after",
+    ):
+        normalized.pop(field, None)
     return normalized
 
 
@@ -328,19 +337,14 @@ def _row_payload(row: tuple[Any, ...] | None) -> dict[str, Any] | None:
     }
 
 
-def _persist_exact_phase5(
+def _persist_exact_phase5_in_transaction(
     *,
-    database: Path,
+    conn: sqlite3.Connection,
     evidence_record: dict[str, Any],
 ) -> dict[str, Any]:
     evidence_json = json.dumps(evidence_record, separators=(",", ":"))
     promoted_at = datetime.now(timezone.utc).isoformat()
-    conn = sqlite3.connect(database, timeout=20.0, isolation_level=None)
-    committed = False
-    try:
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("BEGIN IMMEDIATE")
-        _verify_schema_contract(conn)
+    _verify_schema_contract(conn)
 
         phase3 = conn.execute(
             """
@@ -448,19 +452,38 @@ def _persist_exact_phase5(
         if _row_payload(history_row) != expected:
             raise ValueError("Phase 5 history row verification failed")
 
+    return {
+        "promoted_at": promoted_at,
+        "history_id": history_id,
+        "rows_changed": rows_changed,
+        "schema_contract_verified": True,
+        "phase3_dependency_rechecked": True,
+        "in_transaction_replay_check_passed": True,
+        "history_inserted": True,
+        "current_record_inserted": True,
+        "history_record_verified": True,
+        "current_record_verified": True,
+    }
+
+
+def _persist_exact_phase5(
+    *,
+    database: Path,
+    evidence_record: dict[str, Any],
+) -> dict[str, Any]:
+    conn = sqlite3.connect(database, timeout=20.0, isolation_level=None)
+    committed = False
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("BEGIN IMMEDIATE")
+        result = _persist_exact_phase5_in_transaction(
+            conn=conn,
+            evidence_record=evidence_record,
+        )
         conn.commit()
         committed = True
         return {
-            "promoted_at": promoted_at,
-            "history_id": history_id,
-            "rows_changed": rows_changed,
-            "schema_contract_verified": True,
-            "phase3_dependency_rechecked": True,
-            "in_transaction_replay_check_passed": True,
-            "history_inserted": True,
-            "current_record_inserted": True,
-            "history_record_verified": True,
-            "current_record_verified": True,
+            **result,
             "database_transaction_committed": True,
         }
     except Exception:
@@ -664,33 +687,56 @@ def persist_phase5_promotion(
         except BlockingIOError as exc:
             raise ValueError("Phase 5 promotion persistence lock is busy") from exc
 
-        fresh_readiness = readiness_module.build_phase5_promotion_readiness(
-            repository=production,
-            source_tree=source,
-            post_cycle_audit_path=post_cycle_audit_path,
-            pre_collection_phase5_evidence_status_path=(
-                pre_collection_phase5_evidence_status_path
-            ),
-            activation_receipt_path=activation_receipt_path,
-            saved_post_collection_audit_path=saved_post_collection_audit_path,
-            promotion_request_path=promotion_request_path,
-            saved_signed_verification_path=saved_signed_verification_path,
-            signed_payload_path=signed_payload_path,
-            signature_path=signature_path,
-            allowed_signers_path=allowed_signers_path,
-            expected_allowed_signers_sha256=expected_allowed_signers_sha256,
-            now=now,
-        )
-        readiness_module.validate_phase5_promotion_readiness(fresh_readiness)
-        if _normalized_readiness(fresh_readiness) != _normalized_readiness(
-            saved_readiness
-        ):
-            raise ValueError("fresh Phase 5 promotion readiness materially drifted")
+        conn = sqlite3.connect(database, timeout=20.0, isolation_level=None)
+        committed = False
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("BEGIN IMMEDIATE")
 
-        persisted = _persist_exact_phase5(
-            database=database,
-            evidence_record=evidence_record,
-        )
+            fresh_readiness = readiness_module.build_phase5_promotion_readiness(
+                repository=production,
+                source_tree=source,
+                post_cycle_audit_path=post_cycle_audit_path,
+                pre_collection_phase5_evidence_status_path=(
+                    pre_collection_phase5_evidence_status_path
+                ),
+                activation_receipt_path=activation_receipt_path,
+                saved_post_collection_audit_path=saved_post_collection_audit_path,
+                promotion_request_path=promotion_request_path,
+                saved_signed_verification_path=saved_signed_verification_path,
+                signed_payload_path=signed_payload_path,
+                signature_path=signature_path,
+                allowed_signers_path=allowed_signers_path,
+                expected_allowed_signers_sha256=expected_allowed_signers_sha256,
+                now=now,
+            )
+            readiness_module.validate_phase5_promotion_readiness(fresh_readiness)
+            if _normalized_readiness(fresh_readiness) != _normalized_readiness(
+                saved_readiness
+            ):
+                raise ValueError(
+                    "fresh Phase 5 promotion readiness materially drifted"
+                )
+
+            persisted = _persist_exact_phase5_in_transaction(
+                conn=conn,
+                evidence_record=evidence_record,
+            )
+            conn.commit()
+            committed = True
+            persisted = {
+                **persisted,
+                "database_transaction_committed": True,
+            }
+        except Exception:
+            if not committed:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+            raise
+        finally:
+            conn.close()
 
     identity = {
         "format_version": FORMAT_VERSION,
