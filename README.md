@@ -34,6 +34,7 @@ Adaptive Meteora DLMM liquidity bot with a Rust execution/risk layer and a Pytho
 - deploy/manual-market-paper-phase5-evidence-status.md
 - deploy/manual-market-paper-phase5-evidence-collection-loop.md
 - deploy/phase6-prelive-promotion-boundary.md
+- deploy/phase7-controlled-live-transaction-boundary.md
 - deploy/market-paper-manual-activation.md
 
 ## Current status
