@@ -488,15 +488,24 @@ def build_post_promotion_audit(
     if Path(str(receipt["production_repository"])).resolve() != production:
         raise ValueError("Phase 6 post-promotion repository binding mismatch")
 
-    pio_database = Path(str(receipt["pio_database_path"])).resolve(strict=True)
+    pio_candidate = Path(str(receipt["pio_database_path"])).expanduser()
+    if pio_candidate.is_symlink():
+        raise ValueError("Phase 6 post-promotion Pio database must not be a symlink")
+    pio_database = pio_candidate.resolve(strict=True)
+    if not pio_database.is_file():
+        raise ValueError("Phase 6 post-promotion Pio database is invalid")
     if pio_database != (production / "data" / "pio.db").resolve(strict=False):
         raise ValueError("Phase 6 post-promotion Pio database binding mismatch")
 
-    execution_database = Path(execution_database_path).expanduser()
-    if not execution_database.is_absolute():
+    execution_candidate = Path(execution_database_path).expanduser()
+    if not execution_candidate.is_absolute():
         raise ValueError("Phase 6 post-promotion execution database must be absolute")
-    execution_database = execution_database.resolve(strict=True)
-    if execution_database.is_symlink() or not execution_database.is_file():
+    if execution_candidate.is_symlink():
+        raise ValueError(
+            "Phase 6 post-promotion execution database must not be a symlink"
+        )
+    execution_database = execution_candidate.resolve(strict=True)
+    if not execution_database.is_file():
         raise ValueError("Phase 6 post-promotion execution database is invalid")
     if execution_database != Path(str(receipt["execution_database_path"])).resolve():
         raise ValueError("Phase 6 post-promotion receipt execution DB mismatch")
