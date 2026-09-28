@@ -10,6 +10,9 @@ import tempfile
 
 import pytest
 
+from meteora_learner.paper_account import create_paper_account
+from meteora_learner.storage import Storage
+
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = (
@@ -319,6 +322,48 @@ def test_builder_rejects_database_symlink(monkeypatch):
         temp.cleanup()
 
 
+def test_real_paper_inspection_uses_snapshot_without_mutating_source_db():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        database = root / "pio.db"
+        storage = Storage(database)
+        create_paper_account(
+            storage,
+            account_id="pio-proof-1",
+            starting_cash_quote=1000.0,
+        )
+
+        before_db = database.read_bytes()
+        wal = Path(str(database) + "-wal")
+        before_wal = wal.read_bytes() if wal.exists() else None
+
+        snapshot, ledger = MODULE._inspect_paper_db(
+            source=ROOT,
+            database=database,
+            account="pio-proof-1",
+        )
+
+        after_db = database.read_bytes()
+        after_wal = wal.read_bytes() if wal.exists() else None
+
+    assert snapshot["account_id"] == "pio-proof-1"
+    assert ledger["account_id"] == "pio-proof-1"
+    assert ledger["passing"] is True
+    assert before_db == after_db
+    assert before_wal == after_wal
+
+
+def test_inspection_helper_initializes_only_private_snapshot():
+    helper = MODULE.PAPER_INSPECTION_HELPER
+
+    assert "mode=ro" in helper
+    assert 'source.execute("PRAGMA query_only=ON")' in helper
+    assert "source.backup(destination)" in helper
+    assert "TemporaryDirectory" in helper
+    assert "Storage(snapshot)" in helper
+    assert "Storage(database)" not in helper
+
+
 def test_resealed_post_cycle_audit_cannot_enable_timer():
     report = _report()
     report["paper_timer_enable_authorized"] = True
@@ -337,6 +382,10 @@ def test_post_cycle_audit_has_no_activation_or_write_primitive():
     assert 'git", "reset' not in source
     assert "write_text(" not in source
     assert "write_bytes(" not in source
+    assert "Storage(database)" not in source
+    assert "Storage(snapshot)" in source
+    assert "mode=ro" in source
+    assert "source.backup(destination)" in source
     assert '"paper_timer_enable_authorized": False' in source
     assert '"transaction_signing_authorized": False' in source
     assert '"transaction_submission_authorized": False' in source
