@@ -409,11 +409,16 @@ def execute_one_cycle(
     database = _paper_database(production)
     python_bin = _python_executable(production)
 
-    lock_fd = os.open(
-        LOCK_PATH,
-        os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0),
-        0o600,
-    )
+    lock_flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+    lock_flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        lock_fd = os.open(LOCK_PATH, lock_flags, 0o600)
+    except OSError as exc:
+        raise ValueError("one-cycle executor lock path is unsafe") from exc
+    lock_stat = os.fstat(lock_fd)
+    if not stat.S_ISREG(lock_stat.st_mode):
+        os.close(lock_fd)
+        raise ValueError("one-cycle executor lock must be a regular file")
     try:
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
