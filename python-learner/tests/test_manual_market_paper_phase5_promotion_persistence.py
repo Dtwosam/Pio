@@ -522,6 +522,8 @@ def test_full_executor_fresh_rechecks_then_commits_exact_promotion(monkeypatch):
         fresh["fresh_post_collection_audit_sha256"] = "a" * 64
         fresh["fresh_phase5_evidence_status_sha256"] = "b" * 64
 
+        writer_lock_observed = []
+
         class FakeReadiness:
             @staticmethod
             def validate_phase5_promotion_readiness(value):
@@ -529,6 +531,17 @@ def test_full_executor_fresh_rechecks_then_commits_exact_promotion(monkeypatch):
 
             @staticmethod
             def build_phase5_promotion_readiness(**kwargs):
+                probe = sqlite3.connect(
+                    database,
+                    timeout=0.0,
+                    isolation_level=None,
+                )
+                try:
+                    with pytest.raises(sqlite3.OperationalError, match="locked"):
+                        probe.execute("BEGIN IMMEDIATE")
+                    writer_lock_observed.append(True)
+                finally:
+                    probe.close()
                 return copy.deepcopy(fresh)
 
         class FakePost:
@@ -572,6 +585,7 @@ def test_full_executor_fresh_rechecks_then_commits_exact_promotion(monkeypatch):
 
     MODULE.validate_persistence_receipt(receipt)
     assert counts == (1, 1)
+    assert writer_lock_observed == [True]
     assert receipt["material_readiness_matches"] is True
     assert receipt["rows_changed"] == 2
     assert receipt["phase5_promotion_persisted"] is True
