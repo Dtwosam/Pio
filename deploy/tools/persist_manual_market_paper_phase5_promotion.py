@@ -346,111 +346,111 @@ def _persist_exact_phase5_in_transaction(
     promoted_at = datetime.now(timezone.utc).isoformat()
     _verify_schema_contract(conn)
 
-        phase3 = conn.execute(
-            """
-            SELECT evidence_type, qualified
-            FROM phase_promotion_evidence
-            WHERE phase_name = ?
-            LIMIT 1
-            """,
-            (PHASE3,),
-        ).fetchone()
-        if (
-            phase3 is None
-            or str(phase3[0]) != PHASE3_EVIDENCE_TYPE
-            or not bool(phase3[1])
-        ):
-            raise ValueError(
-                "Phase 3 is no longer persistently promoted inside transaction"
-            )
-
-        current = conn.execute(
-            """
-            SELECT promoted_at, evidence_type, qualified, evidence_json
-            FROM phase_promotion_evidence
-            WHERE phase_name = ?
-            LIMIT 1
-            """,
-            (PHASE5,),
-        ).fetchone()
-        history_count = int(
-            conn.execute(
-                """
-                SELECT COUNT(*)
-                FROM phase_promotion_evidence_history
-                WHERE phase_name = ?
-                """,
-                (PHASE5,),
-            ).fetchone()[0]
+    phase3 = conn.execute(
+        """
+        SELECT evidence_type, qualified
+        FROM phase_promotion_evidence
+        WHERE phase_name = ?
+        LIMIT 1
+        """,
+        (PHASE3,),
+    ).fetchone()
+    if (
+        phase3 is None
+        or str(phase3[0]) != PHASE3_EVIDENCE_TYPE
+        or not bool(phase3[1])
+    ):
+        raise ValueError(
+            "Phase 3 is no longer persistently promoted inside transaction"
         )
-        if current is not None or history_count != 0:
-            raise ValueError("Phase 5 promotion replay detected inside transaction")
 
-        before_changes = conn.total_changes
-        history_cursor = conn.execute(
-            """
-            INSERT INTO phase_promotion_evidence_history(
-                phase_name, promoted_at, evidence_type,
-                qualified, evidence_json
-            ) VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                PHASE5,
-                promoted_at,
-                PHASE5_EVIDENCE_TYPE,
-                1,
-                evidence_json,
-            ),
-        )
-        history_id = int(history_cursor.lastrowid)
+    current = conn.execute(
+        """
+        SELECT promoted_at, evidence_type, qualified, evidence_json
+        FROM phase_promotion_evidence
+        WHERE phase_name = ?
+        LIMIT 1
+        """,
+        (PHASE5,),
+    ).fetchone()
+    history_count = int(
         conn.execute(
             """
-            INSERT INTO phase_promotion_evidence(
-                phase_name, promoted_at, evidence_type,
-                qualified, evidence_json
-            ) VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                PHASE5,
-                promoted_at,
-                PHASE5_EVIDENCE_TYPE,
-                1,
-                evidence_json,
-            ),
-        )
-        rows_changed = conn.total_changes - before_changes
-        if rows_changed != 2:
-            raise ValueError("Phase 5 persistence changed an unexpected row count")
-
-        current_row = conn.execute(
-            """
-            SELECT phase_name, promoted_at, evidence_type,
-                   qualified, evidence_json
-            FROM phase_promotion_evidence
+            SELECT COUNT(*)
+            FROM phase_promotion_evidence_history
             WHERE phase_name = ?
             """,
             (PHASE5,),
-        ).fetchone()
-        history_row = conn.execute(
-            """
-            SELECT phase_name, promoted_at, evidence_type,
-                   qualified, evidence_json
-            FROM phase_promotion_evidence_history
-            WHERE id = ?
-            """,
-            (history_id,),
-        ).fetchone()
-        expected = {
-            "phase_name": PHASE5,
-            "promoted_at": promoted_at,
-            "evidence_type": PHASE5_EVIDENCE_TYPE,
-            "qualified": True,
-            "evidence": evidence_record,
-        }
-        if _row_payload(current_row) != expected:
-            raise ValueError("Phase 5 current promotion row verification failed")
-        if _row_payload(history_row) != expected:
-            raise ValueError("Phase 5 history row verification failed")
+        ).fetchone()[0]
+    )
+    if current is not None or history_count != 0:
+        raise ValueError("Phase 5 promotion replay detected inside transaction")
+
+    before_changes = conn.total_changes
+    history_cursor = conn.execute(
+        """
+        INSERT INTO phase_promotion_evidence_history(
+            phase_name, promoted_at, evidence_type,
+            qualified, evidence_json
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            PHASE5,
+            promoted_at,
+            PHASE5_EVIDENCE_TYPE,
+            1,
+            evidence_json,
+        ),
+    )
+    history_id = int(history_cursor.lastrowid)
+    conn.execute(
+        """
+        INSERT INTO phase_promotion_evidence(
+            phase_name, promoted_at, evidence_type,
+            qualified, evidence_json
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            PHASE5,
+            promoted_at,
+            PHASE5_EVIDENCE_TYPE,
+            1,
+            evidence_json,
+        ),
+    )
+    rows_changed = conn.total_changes - before_changes
+    if rows_changed != 2:
+        raise ValueError("Phase 5 persistence changed an unexpected row count")
+
+    current_row = conn.execute(
+        """
+        SELECT phase_name, promoted_at, evidence_type,
+               qualified, evidence_json
+        FROM phase_promotion_evidence
+        WHERE phase_name = ?
+        """,
+        (PHASE5,),
+    ).fetchone()
+    history_row = conn.execute(
+        """
+        SELECT phase_name, promoted_at, evidence_type,
+               qualified, evidence_json
+        FROM phase_promotion_evidence_history
+        WHERE id = ?
+        """,
+        (history_id,),
+    ).fetchone()
+    expected = {
+        "phase_name": PHASE5,
+        "promoted_at": promoted_at,
+        "evidence_type": PHASE5_EVIDENCE_TYPE,
+        "qualified": True,
+        "evidence": evidence_record,
+    }
+    if _row_payload(current_row) != expected:
+        raise ValueError("Phase 5 current promotion row verification failed")
+    if _row_payload(history_row) != expected:
+        raise ValueError("Phase 5 history row verification failed")
 
     return {
         "promoted_at": promoted_at,
@@ -464,7 +464,6 @@ def _persist_exact_phase5_in_transaction(
         "history_record_verified": True,
         "current_record_verified": True,
     }
-
 
 def _persist_exact_phase5(
     *,
