@@ -287,7 +287,7 @@ def _verify_schema_contract(conn: sqlite3.Connection) -> None:
         raise ValueError("Phase 5 persistence history-table schema mismatch")
     rows = conn.execute(
         """
-        SELECT name
+        SELECT name, sql
         FROM sqlite_master
         WHERE type = 'trigger'
           AND name IN (?, ?)
@@ -295,9 +295,25 @@ def _verify_schema_contract(conn: sqlite3.Connection) -> None:
         """,
         tuple(REQUIRED_HISTORY_TRIGGERS),
     ).fetchall()
-    found = {str(row[0]) for row in rows}
-    if found != set(REQUIRED_HISTORY_TRIGGERS):
+    trigger_sql = {
+        str(row[0]): " ".join(str(row[1] or "").split())
+        for row in rows
+    }
+    if set(trigger_sql) != set(REQUIRED_HISTORY_TRIGGERS):
         raise ValueError("Phase 5 persistence immutable-history triggers are missing")
+    update_sql = trigger_sql["phase_promotion_history_no_update"]
+    delete_sql = trigger_sql["phase_promotion_history_no_delete"]
+    expected_abort = "RAISE(ABORT, 'phase_promotion_evidence_history is immutable')"
+    if (
+        "BEFORE UPDATE ON phase_promotion_evidence_history" not in update_sql
+        or expected_abort not in update_sql
+    ):
+        raise ValueError("Phase 5 persistence history-update trigger drifted")
+    if (
+        "BEFORE DELETE ON phase_promotion_evidence_history" not in delete_sql
+        or expected_abort not in delete_sql
+    ):
+        raise ValueError("Phase 5 persistence history-delete trigger drifted")
 
 
 def _row_payload(row: tuple[Any, ...] | None) -> dict[str, Any] | None:
