@@ -390,6 +390,8 @@ def validate_phase6_evidence_status(report: dict[str, Any]) -> None:
     if not isinstance(nested, dict):
         raise ValueError("Phase 6 nested report is invalid")
     _validate_phase6_result(nested)
+    if nested.get("execution_db") != report.get("execution_database_path"):
+        raise ValueError("Phase 6 nested execution database binding mismatch")
     if report["phase6_report_sha256"] != _sha256_bytes(
         _canonical_bytes(nested)
     ):
@@ -553,6 +555,7 @@ def build_phase6_evidence_status(
             "production execution database changed during Phase 6 evaluation"
         )
 
+    result["execution_db"] = str(execution_database)
     _validate_phase6_result(result)
     promotion_ready = bool(result["promotion_ready"])
 
