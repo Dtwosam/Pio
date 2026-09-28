@@ -378,6 +378,26 @@ def build_authorization_payload(
     return payload
 
 
+def authorization_signing_bytes(
+    *,
+    source_tree: str | Path,
+    request_path: str | Path,
+    payload_path: str | Path,
+) -> bytes:
+    source = Path(source_tree).resolve()
+    if not source.is_dir():
+        raise ValueError("reviewed source tree is missing")
+    request_module = _load_reviewed_request_module(source)
+    request = _load_json(request_path, label="human-authorization request")
+    request_module.validate_authorization_request(request)
+    payload = _load_json(
+        payload_path,
+        label="signed human-authorization payload",
+    )
+    validate_authorization_payload(payload, request=request)
+    return _canonical_bytes(payload)
+
+
 def _ssh_keygen_path() -> Path:
     raw = shutil.which("ssh-keygen")
     if raw is None:
@@ -607,6 +627,16 @@ def _build_payload_main(args: argparse.Namespace) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
+def _emit_signing_bytes_main(args: argparse.Namespace) -> None:
+    sys.stdout.buffer.write(
+        authorization_signing_bytes(
+            source_tree=args.source_tree,
+            request_path=args.request,
+            payload_path=args.payload,
+        )
+    )
+
+
 def _verify_main(args: argparse.Namespace) -> None:
     report = verify_authorization(
         source_tree=args.source_tree,
@@ -647,6 +677,18 @@ def main() -> None:
     )
     build.add_argument("--approval-id")
     build.set_defaults(handler=_build_payload_main)
+
+    signing_bytes = subparsers.add_parser(
+        "emit-signing-bytes",
+        help=(
+            "Validate the readable payload and emit the exact canonical bytes "
+            "that must be detached-signed. No trailing newline is added."
+        ),
+    )
+    signing_bytes.add_argument("--source-tree", required=True)
+    signing_bytes.add_argument("--request", required=True)
+    signing_bytes.add_argument("--payload", required=True)
+    signing_bytes.set_defaults(handler=_emit_signing_bytes_main)
 
     verify = subparsers.add_parser(
         "verify",
