@@ -28,7 +28,7 @@ RUST_SIMULATION = Path("rust-executor/src/simulation.rs")
 RUST_TRANSACTION_GUARD = Path("rust-executor/src/transaction_guard.rs")
 RUST_WALLET_GUARD = Path("rust-executor/src/wallet_guard.rs")
 REVIEWED_SOURCE_BLOBS = {
-    PREPARATION_TOOL: "c9eb89768c67394313cad26525f70a8fd9ff7ee2",
+    PREPARATION_TOOL: "7cde66709653480989e9a2cb61b0ea2ecbf93a2e",
     FINALIZER_SOURCE: "aded09c930f78cec8dc02f1d3853909e369d8b71",
     RUST_BLOCKHASH: "792153a0bb1527b16d7f7fabf40fed3752225df4",
     RUST_PRESIGN: "7353bf6512947bc207a416c8a365d6a21038dc40",
@@ -54,6 +54,9 @@ REPORT_FIELDS = (
     "opened_decision_id",
     "exit_decision_id",
     "exit_signature",
+    "zero_liquidity_snapshot_sha256",
+    "zero_liquidity_capture_slot_start",
+    "zero_liquidity_capture_slot_end",
     "pool_address",
     "position_address",
     "executor_wallet_pubkey",
@@ -101,6 +104,7 @@ REPORT_FIELDS = (
     "automatic_resubmission_authorized",
     "new_live_entry_authorized",
     "new_live_capital_authorized",
+    "phase7_promotion_authorized",
     "phase7_promotion_persisted",
     "production_file_modified",
     "production_repository_git_mutated",
@@ -295,6 +299,7 @@ def validate_exit_settlement_finalization(
         "expected_preparation_sha256",
         "rpc_endpoint_sha256",
         "destination_config_sha256",
+        "zero_liquidity_snapshot_sha256",
         "prepared_settlement_transaction_sha256",
         "finalizer_binary_sha256",
         "expected_finalizer_binary_sha256",
@@ -344,6 +349,8 @@ def validate_exit_settlement_finalization(
 
     for field in (
         "last_valid_block_height",
+        "zero_liquidity_capture_slot_start",
+        "zero_liquidity_capture_slot_end",
         "prepared_rpc_context_slot",
         "exact_simulation_rpc_context_slot",
     ):
@@ -355,6 +362,14 @@ def validate_exit_settlement_finalization(
     if report["last_valid_block_height"] <= 0:
         raise ValueError(
             "Phase 7 EXIT settlement finalization block-height ceiling invalid"
+        )
+    if report["zero_liquidity_capture_slot_end"] < report["zero_liquidity_capture_slot_start"]:
+        raise ValueError(
+            "Phase 7 EXIT settlement finalization zero-liquidity slot range invalid"
+        )
+    if report["prepared_rpc_context_slot"] < report["zero_liquidity_capture_slot_start"]:
+        raise ValueError(
+            "Phase 7 EXIT settlement finalization blockhash refresh predates zero-liquidity snapshot"
         )
     if (
         report["exact_simulation_rpc_context_slot"]
@@ -401,6 +416,7 @@ def validate_exit_settlement_finalization(
         "automatic_resubmission_authorized",
         "new_live_entry_authorized",
         "new_live_capital_authorized",
+        "phase7_promotion_authorized",
         "phase7_promotion_persisted",
         "production_file_modified",
         "production_repository_git_mutated",
@@ -467,6 +483,7 @@ def build_exit_settlement_finalization(
         "automatic_resubmission_authorized",
         "new_live_entry_authorized",
         "new_live_capital_authorized",
+        "phase7_promotion_authorized",
         "phase7_promotion_persisted",
         "production_pio_database_modified",
     ):
@@ -754,6 +771,9 @@ def build_exit_settlement_finalization(
         "opened_decision_id": preparation["opened_decision_id"],
         "exit_decision_id": preparation["exit_decision_id"],
         "exit_signature": preparation["exit_signature"],
+        "zero_liquidity_snapshot_sha256": preparation["zero_liquidity_snapshot_sha256"],
+        "zero_liquidity_capture_slot_start": preparation["zero_liquidity_capture_slot_start"],
+        "zero_liquidity_capture_slot_end": preparation["zero_liquidity_capture_slot_end"],
         "pool_address": preparation["pool_address"],
         "position_address": preparation["position_address"],
         "executor_wallet_pubkey": preparation["executor_wallet_pubkey"],
@@ -809,6 +829,7 @@ def build_exit_settlement_finalization(
         "automatic_resubmission_authorized": False,
         "new_live_entry_authorized": False,
         "new_live_capital_authorized": False,
+        "phase7_promotion_authorized": False,
         "phase7_promotion_persisted": False,
         "production_file_modified": False,
         "production_repository_git_mutated": False,
