@@ -608,7 +608,7 @@ RPC_URL is accepted as a compatibility fallback",
             println!("{}", serde_json::to_string_pretty(&context)?);
         }
         #[cfg(feature = "live-submit")]
-        "controlled-live-submit" => {
+        "controlled-live-submit" | "controlled-live-submit-once" => {
             let live_enabled = std::env::var("PIO_LIVE_SUBMIT_ENABLED")
                 .unwrap_or_default();
             if live_enabled != "1" {
@@ -634,7 +634,8 @@ RPC_URL is accepted as a compatibility fallback",
                 .context("CONTROLLED_LIVE_CONFIG_JSON is required")?;
             if args.next().is_some() {
                 anyhow::bail!(
-                    "controlled-live-submit accepts exactly five arguments"
+                    "{} accepts exactly five arguments",
+                    command
                 );
             }
 
@@ -720,16 +721,29 @@ RPC_URL is accepted as a compatibility fallback",
                 );
             }
 
-            let report = submission::submit_execution_intent_rpc(
-                &rpc_url,
-                &store,
-                &decision_id,
-                &keypair,
-                &phase5,
-                &readiness,
-                &phase6,
-                &live,
-            )?;
+            let report = if command == "controlled-live-submit-once" {
+                submission::submit_new_execution_intent_rpc(
+                    &rpc_url,
+                    &store,
+                    &decision_id,
+                    &keypair,
+                    &phase5,
+                    &readiness,
+                    &phase6,
+                    &live,
+                )?
+            } else {
+                submission::submit_execution_intent_rpc(
+                    &rpc_url,
+                    &store,
+                    &decision_id,
+                    &keypair,
+                    &phase5,
+                    &readiness,
+                    &phase6,
+                    &live,
+                )?
+            };
             println!("{}", serde_json::to_string_pretty(&report)?);
             if !report.rpc_accepted {
                 std::process::exit(2);

@@ -25,7 +25,9 @@ REVIEWED_PHASE7_TOOL_BLOBS = {
     'deploy/tools/build_phase7_controlled_live_transaction_signed_authorization.py':
         '4889d419f559503add46282fe40bb2d71ccd5ee0',
     'deploy/tools/check_phase7_controlled_live_transaction_execution_readiness.py':
-        '61bb12102b2fb03593dc4bcb9d6130882a9809de',
+        '0c01228e19905b36a6b88451fe11e7ff587258be',
+    'deploy/tools/check_phase7_controlled_live_transaction_execution_admission.py':
+        'c3d7b349bc8c33f8d3e0fac5e87c105279e2dd04',
 }
 
 
@@ -54,7 +56,10 @@ def test_phase7_terminal_boundary_is_explicitly_non_executing():
     assert '`transaction_submission_authorized=false`' in text
     assert '`live_capital_authorized=false`' in text
     assert 'No tool in this reviewed chain is a transaction signer or submitter.' in text
-    assert 'load an executor private key' in text
+    assert '`execution_admission_ready=true`' in text
+    assert '`wallet-status`' in text
+    assert '`controlled-live-submit-once`' in text
+    assert 'No reviewed orchestration in this chain invokes that' in text
     assert 'call Solana `sendTransaction`' in text
     assert 'retry or resubmit' in text
     assert 'persist Phase 7 promotion' in text
