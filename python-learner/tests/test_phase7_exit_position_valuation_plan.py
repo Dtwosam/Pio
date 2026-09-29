@@ -235,7 +235,7 @@ def test_atomic_only_outcome_plans_exactly_one_valuation(monkeypatch):
     assert report["valuation_reused_existing"] is False
     assert report["post_outcome_label_status"] == "VALUED"
     assert report["requires_separate_valuation_apply"] is True
-    assert report["learning_label_reconciliation_ready"] is True
+    assert report["learning_label_reconciliation_ready"] is False
     assert report["production_pio_database_modified"] is False
     assert report["transaction_submission_authorized"] is False
     assert report["phase7_promotion_authorized"] is False
@@ -250,6 +250,7 @@ def test_existing_valued_outcome_is_idempotent(monkeypatch):
     assert report["valuation_reused_existing"] is True
     assert report["requires_separate_valuation_apply"] is False
     assert report["post_outcome_label_status"] == "VALUED"
+    assert report["learning_label_reconciliation_ready"] is True
 
 
 def test_database_must_match_post_apply_audit(monkeypatch):
