@@ -48,6 +48,7 @@ REPORT_FIELDS = (
     "transaction_failure_observed",
     "confirmation_pending",
     "confirmation_recheck_required",
+    "failed_execution_recovery_required",
     "liquidity_removal_effect_reconciliation_required",
     "zero_liquidity_proof_required",
     "separate_position_close_required",
@@ -371,12 +372,22 @@ def validate_exit_submission_confirmation(
             "Phase 7 EXIT confirmed observation has invalid commitment status"
         )
 
+    if report.get("failed_execution_recovery_required") is not expected_failed:
+        raise ValueError(
+            "Phase 7 EXIT submission confirmation recovery flag mismatch"
+        )
     for field in (
         "liquidity_removal_effect_reconciliation_required",
         "zero_liquidity_proof_required",
         "separate_position_close_required",
         "post_close_account_absence_proof_required",
         "post_exit_state_reconciliation_required",
+    ):
+        if report.get(field) is not expected_confirmed:
+            raise ValueError(
+                f"Phase 7 EXIT submission confirmation {field} binding mismatch"
+            )
+    for field in (
         "requires_separate_phase7_promotion_action",
         "read_only",
     ):
@@ -491,11 +502,12 @@ def build_exit_submission_confirmation(
         "transaction_failure_observed": status == "FAILED",
         "confirmation_pending": status == "PENDING",
         "confirmation_recheck_required": status == "PENDING",
-        "liquidity_removal_effect_reconciliation_required": True,
-        "zero_liquidity_proof_required": True,
-        "separate_position_close_required": True,
-        "post_close_account_absence_proof_required": True,
-        "post_exit_state_reconciliation_required": True,
+        "failed_execution_recovery_required": status == "FAILED",
+        "liquidity_removal_effect_reconciliation_required": status == "CONFIRMED",
+        "zero_liquidity_proof_required": status == "CONFIRMED",
+        "separate_position_close_required": status == "CONFIRMED",
+        "post_close_account_absence_proof_required": status == "CONFIRMED",
+        "post_exit_state_reconciliation_required": status == "CONFIRMED",
         "requires_separate_phase7_promotion_action": True,
         "automatic_resubmission_performed": False,
         "read_only": True,
