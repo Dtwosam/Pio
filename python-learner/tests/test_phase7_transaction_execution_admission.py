@@ -283,6 +283,15 @@ def test_keypair_path_rejects_symlink():
             MODULE._validate_keypair_path(str(link))
 
 
+def test_resealed_admission_cannot_change_executor_trust_root(monkeypatch):
+    report = _build(monkeypatch)
+    report["executor_binary_sha256"] = "f" * 64
+    _reseal(report)
+
+    with pytest.raises(ValueError, match="executor binary trust-root mismatch"):
+        MODULE.validate_execution_admission(report)
+
+
 def test_resealed_admission_cannot_authorize_signing(monkeypatch):
     report = _build(monkeypatch)
     report["transaction_signing_authorized"] = True
