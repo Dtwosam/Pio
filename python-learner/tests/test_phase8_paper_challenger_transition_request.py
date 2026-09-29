@@ -254,12 +254,13 @@ def test_wrong_debt_type_is_rejected(monkeypatch):
 
 
 def test_cycle_model_binding_must_match(monkeypatch):
-    status = copy.deepcopy(
-        _audit(Path("/tmp/prod"), Path("/tmp/prod/data/pio.db"))[
-            "fresh_phase8_evidence_status"
-        ]
-    )
-    status["active_cycle_challenger_model_id"] = "challenger-2"
+    status = {
+        "phase7_promoted": True,
+        "active_cycle_id": CYCLE_ID,
+        "active_cycle_status": "OFFLINE_QUALIFIED",
+        "active_cycle_challenger_model_id": "challenger-2",
+        "active_cycle_challenger_status": "OFFLINE_QUALIFIED",
+    }
     with pytest.raises(ValueError, match="cycle/model mismatch"):
         _build(
             monkeypatch,
