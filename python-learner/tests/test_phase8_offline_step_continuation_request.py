@@ -238,12 +238,16 @@ def test_non_allowed_debt_type_is_rejected(monkeypatch):
 
 
 def test_operator_action_binding_must_match_audit(monkeypatch):
-    bad_operator = copy.deepcopy(
-        _audit(Path("/tmp/p"), Path("/tmp/p/data/pio.db"))[
-            "fresh_phase8_operator_handoff"
-        ]
-    )
-    bad_operator["scope"] = "cycle-2"
+    bad_operator = {
+        "status": "AUTOMATIC_ACTION",
+        "automatic_action_available": True,
+        "operator_action_required": False,
+        "manual_input_required": False,
+        "debt_type": DEBT_TYPE,
+        "scope": "cycle-2",
+        "reason": REASON,
+        "suggested_command": COMMAND,
+    }
 
     with pytest.raises(ValueError, match="action mismatch"):
         _build(
