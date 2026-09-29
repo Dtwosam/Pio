@@ -480,10 +480,29 @@ def build_exit_settlement_execution_readiness(
         ("opened_decision_id", "opened_decision_id"),
         ("exit_decision_id", "exit_decision_id"),
         ("exit_signature", "exit_signature"),
+        (
+            "zero_liquidity_snapshot_sha256",
+            "zero_liquidity_snapshot_sha256",
+        ),
+        (
+            "zero_liquidity_capture_slot_start",
+            "zero_liquidity_capture_slot_start",
+        ),
+        (
+            "zero_liquidity_capture_slot_end",
+            "zero_liquidity_capture_slot_end",
+        ),
         ("pool_address", "pool_address"),
         ("position_address", "position_address"),
         ("executor_wallet_pubkey", "executor_wallet_pubkey"),
+        ("rpc_endpoint_sha256", "rpc_endpoint_sha256"),
         ("destination_config_sha256", "destination_config_sha256"),
+        ("user_token_x", "user_token_x"),
+        ("user_token_y", "user_token_y"),
+        (
+            "reward_token_destinations",
+            "reward_token_destinations",
+        ),
         (
             "final_settlement_transaction_sha256",
             "final_settlement_transaction_sha256",
