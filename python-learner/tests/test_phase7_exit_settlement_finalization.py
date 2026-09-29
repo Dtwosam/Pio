@@ -57,7 +57,18 @@ def _preparation() -> dict:
         "position_address": POSITION,
         "executor_wallet_pubkey": WALLET,
         "rpc_endpoint_sha256": MODULE._sha256_text(RPC_URL),
-        "destination_config_sha256": "b" * 64,
+        "destination_config_sha256": MODULE._sha256_value(
+            {
+                "user_token_x": USER_X,
+                "user_token_y": USER_Y,
+                "reward_token_destinations": [
+                    {
+                        "reward_index": 0,
+                        "user_token_account": REWARD_0,
+                    }
+                ],
+            }
+        ),
         "user_token_x": USER_X,
         "user_token_y": USER_Y,
         "reward_token_destinations": [
@@ -311,6 +322,32 @@ def test_rpc_endpoint_must_match_preparation(monkeypatch):
         )
 
 
+def test_resealed_destination_tampering_fails_nested_digest(monkeypatch):
+    report, _ = _build(monkeypatch)
+    report["reward_token_destinations"][0]["user_token_account"] = (
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    )
+    _reseal(report)
+
+    with pytest.raises(
+        ValueError,
+        match="destination-config digest mismatch",
+    ):
+        MODULE.validate_exit_settlement_finalization(report)
+
+
+def test_resealed_final_transaction_tampering_fails_nested_digest(monkeypatch):
+    report, _ = _build(monkeypatch)
+    report["final_settlement_transaction_base64"] = "dGFtcGVyZWQ="
+    _reseal(report)
+
+    with pytest.raises(
+        ValueError,
+        match="transaction digest mismatch",
+    ):
+        MODULE.validate_exit_settlement_finalization(report)
+
+
 def test_resealed_finalization_cannot_authorize_settlement(monkeypatch):
     report, _ = _build(monkeypatch)
     report["settlement_authorized"] = True
@@ -344,3 +381,4 @@ def test_settlement_finalization_has_no_signing_or_submission_primitive():
     assert '"settlement_authorized": False' in source
     assert '"transaction_signing_authorized": False' in source
     assert '"transaction_submission_authorized": False' in source
+    assert '"phase7_promotion_authorized": False' in source
