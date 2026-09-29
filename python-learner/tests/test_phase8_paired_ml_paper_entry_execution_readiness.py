@@ -132,6 +132,8 @@ def _write(path: Path, value: dict) -> Path:
 class _Record:
     def __init__(self, value: dict):
         self.value = value
+        for key, item in value.items():
+            setattr(self, key, item)
 
     def to_record(self):
         return copy.deepcopy(self.value)
