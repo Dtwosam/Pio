@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 from types import SimpleNamespace
 
@@ -32,52 +33,20 @@ def _sha(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _record_hash(value: dict) -> str:
+def _hash_record(value) -> str:
+    if hasattr(value, "to_record"):
+        value = value.to_record()
     return hashlib.sha256(
         MODULE._canonical_bytes(value)
     ).hexdigest()
 
 
-def _candidate_frame() -> dict:
-    return {
-        "pool_address": "pool-1",
-        "decision_observed_at": "2026-09-30T00:40:00+00:00",
-        "previous_observed_at": "2026-09-30T00:35:00+00:00",
-        "lookback_observations": 12,
-        "candidates_seen": 2,
-        "candidates_built": 2,
-        "candidates_dropped": 0,
-        "drop_reasons": [],
-        "rows": [
-            {
-                "pool_address": "pool-1",
-                "decision_observed_at": "2026-09-30T00:40:00+00:00",
-                "strategy": "SPOT",
-                "half_width": 2,
-                "center_offset": 0,
-            }
-        ],
-        "no_lookahead": True,
-    }
+class _Record:
+    def __init__(self, value: dict):
+        self.value = copy.deepcopy(value)
 
-
-def _inference(model_id: str) -> dict:
-    return {
-        "model_id": model_id,
-        "candidates_seen": 2,
-        "candidates_eligible": 1,
-        "research_choice": {
-            "row_index": 0,
-            "pool_address": "pool-1",
-            "decision_observed_at": "2026-09-30T00:40:00+00:00",
-            "strategy": "SPOT",
-            "half_width": 2,
-            "center_offset": 0,
-        },
-        "policy_actionable": False,
-        "ranking_rule": "test",
-        "predictions": [],
-    }
+    def to_record(self) -> dict:
+        return copy.deepcopy(self.value)
 
 
 def _choice(model_id: str, policy_source: str) -> dict:
@@ -98,12 +67,55 @@ def _choice(model_id: str, policy_source: str) -> dict:
     }
 
 
+def _preflight(policy_source: str) -> dict:
+    return {
+        "policy_source": policy_source,
+        "pool_address": "pool-1",
+        "entry_observed_at": "2026-09-30T00:40:00+00:00",
+        "strategy": "SPOT",
+        "min_bin_id": 98,
+        "max_bin_id": 102,
+        "chain_bound": True,
+    }
+
+
+def _seed_database(path: Path) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE paper_accounts(
+                account_id TEXT PRIMARY KEY,
+                cash_quote REAL NOT NULL
+            );
+            CREATE TABLE paper_positions(
+                position_id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                policy_source TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                entry_capital_quote REAL NOT NULL
+            );
+            CREATE TABLE paper_previews(
+                position_id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO paper_accounts(account_id, cash_quote) VALUES (?, ?)",
+            ("paper-1", 5000.0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _readiness(production: Path, database: Path) -> dict:
-    frame = _candidate_frame()
-    inc_inf = _inference("champion-1")
-    chal_inf = _inference("challenger-1")
-    inc_choice = _choice("champion-1", "ML_CHAMPION")
-    chal_choice = _choice("challenger-1", "ML_CHALLENGER")
+    incumbent_choice = _choice("champion-1", "ML_CHAMPION")
+    challenger_choice = _choice("challenger-1", "ML_CHALLENGER")
+    incumbent_preflight = _Record(_preflight("ML_CHAMPION"))
+    challenger_preflight = _Record(_preflight("ML_CHALLENGER"))
     return {
         "readiness_sha256": "a" * 64,
         "paper_pair_entry_execution_readiness_ready": True,
@@ -148,11 +160,15 @@ def _readiness(production: Path, database: Path) -> dict:
         "challenger_position_id": "pair-1-challenger",
         "incumbent_event_key": "pair-1-incumbent-enter",
         "challenger_event_key": "pair-1-challenger-enter",
-        "candidate_frame_sha256": _record_hash(frame),
-        "incumbent_inference_sha256": _record_hash(inc_inf),
-        "challenger_inference_sha256": _record_hash(chal_inf),
-        "incumbent_choice_sha256": _record_hash(inc_choice),
-        "challenger_choice_sha256": _record_hash(chal_choice),
+        "candidate_frame_sha256": "1" * 64,
+        "incumbent_inference_sha256": "2" * 64,
+        "challenger_inference_sha256": "3" * 64,
+        "incumbent_choice_sha256": _hash_record(incumbent_choice),
+        "challenger_choice_sha256": _hash_record(challenger_choice),
+        "incumbent_preflight_sha256": _hash_record(incumbent_preflight),
+        "challenger_preflight_sha256": _hash_record(challenger_preflight),
+        "incumbent_choice": incumbent_choice,
+        "challenger_choice": challenger_choice,
     }
 
 
@@ -167,7 +183,7 @@ def _signed_verification() -> dict:
     return {
         "approval_payload_sha256": "e" * 64,
         "approval_signature_sha256": "f" * 64,
-        "allowed_signers_sha256": "1" * 64,
+        "allowed_signers_sha256": "4" * 64,
     }
 
 
@@ -176,84 +192,12 @@ def _write(path: Path, value: dict) -> Path:
     return path
 
 
-class _Result:
-    def __init__(self, value: dict):
-        self.value = value
-
-    def to_record(self) -> dict:
-        return copy.deepcopy(self.value)
-
-
-def _pair_result(*, decision=None, hash_drift=False) -> dict:
-    frame = _candidate_frame()
-    inc_inf = _inference("champion-1")
-    chal_inf = _inference("challenger-1")
-    inc_choice = _choice("champion-1", "ML_CHAMPION")
-    chal_choice = _choice("challenger-1", "ML_CHALLENGER")
-    if decision is not None:
-        frame["decision_observed_at"] = decision
-        inc_inf["research_choice"]["decision_observed_at"] = decision
-        chal_inf["research_choice"]["decision_observed_at"] = decision
-        inc_choice["decision_observed_at"] = decision
-        chal_choice["decision_observed_at"] = decision
-    if hash_drift:
-        chal_choice["half_width"] = 5
-    return {
-        "account_id": "paper-1",
-        "cycle_id": "cycle-1",
-        "pool_address": "pool-1",
-        "decision_observed_at": (
-            decision or "2026-09-30T00:40:00+00:00"
-        ),
-        "incumbent_model_id": "champion-1",
-        "challenger_model_id": "challenger-1",
-        "incumbent_position_id": "pair-1-incumbent",
-        "challenger_position_id": "pair-1-challenger",
-        "incumbent_choice": inc_choice,
-        "challenger_choice": chal_choice,
-        "incumbent_position": {
-            "position_id": "pair-1-incumbent",
-            "account_id": "paper-1",
-            "status": "OPEN",
-            "policy_source": "ML_CHAMPION",
-            "model_id": "champion-1",
-            "entry_capital_quote": 1000.0,
-        },
-        "challenger_position": {
-            "position_id": "pair-1-challenger",
-            "account_id": "paper-1",
-            "status": "OPEN",
-            "policy_source": "ML_CHALLENGER",
-            "model_id": "challenger-1",
-            "entry_capital_quote": 1000.0,
-        },
-        "account": {
-            "cash_quote": 2990.0,
-            "open_positions": 2,
-        },
-        "candidate_frame": frame,
-        "incumbent_inference": inc_inf,
-        "challenger_inference": chal_inf,
-        "equal_capital_quote": 1000.0,
-        "equal_entry_cost_quote": 5.0,
-        "same_candidate_frame": True,
-        "same_decision_snapshot": True,
-        "equal_capital": True,
-        "atomic_pair_open": True,
-        "chain_bound": True,
-        "no_lookahead": True,
-        "paper_only": True,
-        "policy_actionable": False,
-        "live_authorized": False,
-    }
-
-
 def _build(
     monkeypatch,
     *,
     fresh_readiness_mutator=None,
-    result_decision=None,
-    result_hash_drift=False,
+    preflight_drift: bool = False,
+    fail_second_open: bool = False,
 ):
     temp = tempfile.TemporaryDirectory()
     root = Path(temp.name)
@@ -261,7 +205,7 @@ def _build(
     data = production / "data"
     data.mkdir(parents=True)
     database = data / "pio.db"
-    database.write_bytes(b"before")
+    _seed_database(database)
 
     readiness = _readiness(production, database)
     fresh = copy.deepcopy(readiness)
@@ -290,8 +234,7 @@ def _build(
     allowed = root / "allowed"
     allowed.write_bytes(b"allowed")
 
-    state = {"mutated": False}
-    call_args = {}
+    calls = {"opens": [], "preflights": []}
 
     class FakeAccount:
         @staticmethod
@@ -300,9 +243,9 @@ def _build(
 
         @staticmethod
         def _database_state(path):
-            p = Path(path)
+            path = Path(path)
             return {
-                "database": _sha(p.read_bytes()),
+                "database": _sha(path.read_bytes()),
                 "wal": None,
                 "shm": None,
             }
@@ -321,32 +264,177 @@ def _build(
             return copy.deepcopy(fresh)
 
         @staticmethod
+        def _hash_record(value):
+            return _hash_record(value)
+
+        @staticmethod
         def _load_reviewed(source):
             return FakeAccount, object(), object(), FakePair
 
-    class FakeInferenceConfig:
+    class FakeChoice:
         def __init__(self, **kwargs):
-            self.kwargs = kwargs
+            for key, value in kwargs.items():
+                setattr(self, key, value)
 
     class FakeStorage:
         def __init__(self, path):
             self.path = Path(path)
 
+        def connect(self):
+            return sqlite3.connect(self.path)
+
     class FakePair:
-        MLInferenceConfig = FakeInferenceConfig
+        PairedMLPaperChoice = FakeChoice
         Storage = FakeStorage
-        StrategyType = staticmethod(lambda value: value)
 
         @staticmethod
-        def open_paired_ml_paper_entries(storage, **kwargs):
-            call_args.update(kwargs)
-            storage.path.write_bytes(b"after-pair-open")
-            state["mutated"] = True
-            return _Result(
-                _pair_result(
-                    decision=result_decision,
-                    hash_drift=result_hash_drift,
-                )
+        def _preflight_choice(storage, *, choice, **kwargs):
+            calls["preflights"].append(choice.policy_source)
+            record = _preflight(choice.policy_source)
+            if preflight_drift and choice.policy_source == "ML_CHALLENGER":
+                record["max_bin_id"] = 105
+            return _Record(record)
+
+        @staticmethod
+        def _verify_pair_transaction_state(
+            conn,
+            *,
+            cycle_id,
+            incumbent_model_id,
+            challenger_model_id,
+        ):
+            assert cycle_id == "cycle-1"
+            assert incumbent_model_id == "champion-1"
+            assert challenger_model_id == "challenger-1"
+
+        @staticmethod
+        def _open_paper_position_in_conn(
+            conn,
+            *,
+            account_id,
+            position_id,
+            policy_source,
+            model_id,
+            capital,
+            cost,
+            **kwargs,
+        ):
+            calls["opens"].append(position_id)
+            if (
+                fail_second_open
+                and policy_source == "ML_CHALLENGER"
+            ):
+                raise ValueError("forced second pair open failure")
+            cash = conn.execute(
+                """
+                SELECT cash_quote
+                FROM paper_accounts
+                WHERE account_id = ?
+                """,
+                (account_id,),
+            ).fetchone()
+            assert cash is not None
+            debit = float(capital + cost)
+            if float(cash[0]) < debit:
+                raise ValueError("insufficient paper cash")
+            conn.execute(
+                """
+                UPDATE paper_accounts
+                SET cash_quote = cash_quote - ?
+                WHERE account_id = ?
+                """,
+                (debit, account_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO paper_positions(
+                    position_id, account_id, policy_source,
+                    model_id, status, entry_capital_quote
+                ) VALUES (?, ?, ?, ?, 'OPEN', ?)
+                """,
+                (
+                    position_id,
+                    account_id,
+                    policy_source,
+                    model_id,
+                    float(capital),
+                ),
+            )
+
+        @staticmethod
+        def _insert_counterfactual_preview(
+            conn,
+            *,
+            position_id,
+            preview,
+            **kwargs,
+        ):
+            conn.execute(
+                """
+                INSERT INTO paper_previews(position_id, payload)
+                VALUES (?, ?)
+                """,
+                (
+                    position_id,
+                    json.dumps(preview.to_record(), sort_keys=True),
+                ),
+            )
+
+        @staticmethod
+        def paper_position_snapshot(storage, *, position_id):
+            conn = sqlite3.connect(storage.path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT position_id, account_id, policy_source,
+                           model_id, status, entry_capital_quote
+                    FROM paper_positions
+                    WHERE position_id = ?
+                    """,
+                    (position_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            assert row is not None
+            return _Record(
+                {
+                    "position_id": str(row[0]),
+                    "account_id": str(row[1]),
+                    "policy_source": str(row[2]),
+                    "model_id": str(row[3]),
+                    "status": str(row[4]),
+                    "entry_capital_quote": float(row[5]),
+                }
+            )
+
+        @staticmethod
+        def paper_account_snapshot(storage, *, account_id):
+            conn = sqlite3.connect(storage.path)
+            try:
+                cash = conn.execute(
+                    """
+                    SELECT cash_quote
+                    FROM paper_accounts
+                    WHERE account_id = ?
+                    """,
+                    (account_id,),
+                ).fetchone()
+                count = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM paper_positions
+                    WHERE account_id = ? AND status = 'OPEN'
+                    """,
+                    (account_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            assert cash is not None and count is not None
+            return _Record(
+                {
+                    "cash_quote": float(cash[0]),
+                    "open_positions": int(count[0]),
+                }
             )
 
     monkeypatch.setattr(
@@ -376,11 +464,36 @@ def _build(
             signed_payload_path=root / "payload.json",
             signature_path=signature,
             allowed_signers_path=allowed,
-            expected_allowed_signers_sha256="1" * 64,
+            expected_allowed_signers_sha256="4" * 64,
             now="2026-09-30T00:45:00Z",
         )
 
-    return temp, database, state, call_args, run
+    return temp, database, calls, run
+
+
+def _database_snapshot(database: Path) -> dict:
+    conn = sqlite3.connect(database)
+    try:
+        cash = conn.execute(
+            "SELECT cash_quote FROM paper_accounts WHERE account_id='paper-1'"
+        ).fetchone()
+        positions = conn.execute(
+            """
+            SELECT position_id, policy_source, model_id, entry_capital_quote
+            FROM paper_positions
+            ORDER BY position_id
+            """
+        ).fetchall()
+        previews = conn.execute(
+            "SELECT position_id FROM paper_previews ORDER BY position_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "cash": float(cash[0]),
+        "positions": positions,
+        "previews": previews,
+    }
 
 
 def _reseal(receipt: dict) -> None:
@@ -401,24 +514,22 @@ def test_reviewed_readiness_is_exactly_pinned():
     ]
 
 
-def test_one_shot_opens_exact_pair_and_stops_before_scheduler(
-    monkeypatch,
-):
-    temp, _, state, call_args, run = _build(monkeypatch)
+def test_one_shot_opens_exact_readiness_bound_pair(monkeypatch):
+    temp, database, calls, run = _build(monkeypatch)
     try:
         receipt = run()
+        state = _database_snapshot(database)
     finally:
         temp.cleanup()
 
-    assert state["mutated"] is True
-    assert call_args["account_id"] == "paper-1"
-    assert call_args["cycle_id"] == "cycle-1"
-    assert call_args["pool_address"] == "pool-1"
-    assert call_args["capital_quote"] == 1000.0
-    assert call_args["entry_cost_quote"] == 5.0
-    assert call_args["incumbent_position_id"] == "pair-1-incumbent"
-    assert call_args["challenger_position_id"] == "pair-1-challenger"
-    assert call_args["as_of"] == "2026-09-30T00:40:00+00:00"
+    assert calls["preflights"] == ["ML_CHAMPION", "ML_CHALLENGER"]
+    assert calls["opens"] == [
+        "pair-1-incumbent",
+        "pair-1-challenger",
+    ]
+    assert state["cash"] == 2990.0
+    assert len(state["positions"]) == 2
+    assert len(state["previews"]) == 2
 
     assert receipt["paper_pair_entry_authorized"] is True
     assert receipt["paper_pair_entry_executed"] is True
@@ -442,66 +553,72 @@ def test_one_shot_opens_exact_pair_and_stops_before_scheduler(
     assert receipt["phase8_promotion_authorized"] is False
 
 
-def test_fresh_readiness_drift_fails_before_pair_open(monkeypatch):
-    temp, _, state, _, run = _build(
+def test_fresh_readiness_drift_fails_before_mutation(monkeypatch):
+    temp, database, calls, run = _build(
         monkeypatch,
         fresh_readiness_mutator=lambda value: value.update(
             decision_observed_at="2026-09-30T00:41:00+00:00"
         ),
     )
     try:
+        before = _database_snapshot(database)
         with pytest.raises(ValueError, match="differs from saved"):
             run()
+        after = _database_snapshot(database)
     finally:
         temp.cleanup()
 
-    assert state["mutated"] is False
+    assert calls["opens"] == []
+    assert after == before
 
 
-def test_execution_is_pinned_to_authorized_decision_snapshot(monkeypatch):
-    temp, _, _, call_args, run = _build(monkeypatch)
-    try:
-        run()
-    finally:
-        temp.cleanup()
-
-    assert call_args["as_of"] == (
-        "2026-09-30T00:40:00+00:00"
-    )
-
-
-def test_result_decision_drift_is_detected(monkeypatch):
-    temp, _, state, _, run = _build(
+def test_preflight_drift_fails_before_mutation(monkeypatch):
+    temp, database, calls, run = _build(
         monkeypatch,
-        result_decision="2026-09-30T00:41:00+00:00",
+        preflight_drift=True,
     )
     try:
-        with pytest.raises(ValueError, match="decision snapshot drifted"):
+        before = _database_snapshot(database)
+        with pytest.raises(
+            ValueError,
+            match="challenger counterfactual preflight drifted",
+        ):
             run()
+        after = _database_snapshot(database)
     finally:
         temp.cleanup()
 
-    assert state["mutated"] is True
+    assert calls["opens"] == []
+    assert after == before
 
 
-def test_result_choice_hash_drift_is_detected(monkeypatch):
-    temp, _, state, _, run = _build(
+def test_second_open_failure_rolls_back_entire_pair(monkeypatch):
+    temp, database, calls, run = _build(
         monkeypatch,
-        result_hash_drift=True,
+        fail_second_open=True,
     )
     try:
-        with pytest.raises(ValueError, match="challenger_choice drifted"):
+        before = _database_snapshot(database)
+        with pytest.raises(
+            ValueError,
+            match="forced second pair open failure",
+        ):
             run()
+        after = _database_snapshot(database)
     finally:
         temp.cleanup()
 
-    assert state["mutated"] is True
+    assert calls["opens"] == [
+        "pair-1-incumbent",
+        "pair-1-challenger",
+    ]
+    assert after == before
 
 
 def test_resealed_receipt_cannot_authorize_ongoing_paper_trading(
     monkeypatch,
 ):
-    temp, _, _, _, run = _build(monkeypatch)
+    temp, _, _, run = _build(monkeypatch)
     try:
         receipt = run()
     finally:
@@ -519,7 +636,7 @@ def test_resealed_receipt_cannot_authorize_ongoing_paper_trading(
 
 
 def test_resealed_receipt_cannot_claim_live_submission(monkeypatch):
-    temp, _, _, _, run = _build(monkeypatch)
+    temp, _, _, run = _build(monkeypatch)
     try:
         receipt = run()
     finally:
@@ -537,7 +654,7 @@ def test_resealed_receipt_cannot_claim_live_submission(monkeypatch):
 
 
 def test_receipt_rejects_wrong_cash_delta(monkeypatch):
-    temp, _, _, _, run = _build(monkeypatch)
+    temp, _, _, run = _build(monkeypatch)
     try:
         receipt = run()
     finally:
@@ -555,6 +672,17 @@ def test_executor_uses_dedicated_one_shot_lock():
     assert MODULE.LOCK_PATH == Path(
         "/var/tmp/pio-phase8-paired-paper-entry-one-shot.lock"
     )
+
+
+def test_executor_uses_bound_choices_not_model_rescoring():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "score_ml_candidates(" not in source
+    assert "load_registered_ml_v1(" not in source
+    assert "build_current_ml_candidate_frame(" not in source
+    assert "open_paired_ml_paper_entries(" not in source
+    assert "PairedMLPaperChoice(" in source
+    assert "_preflight_choice(" in source
 
 
 def test_executor_has_no_scheduler_or_live_submit_primitive():
