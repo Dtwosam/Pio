@@ -37,7 +37,7 @@ POSITION = "33333333333333333333333333333333"
 def _handoff() -> dict:
     return {
         "handoff_sha256": "a" * 64,
-        "continuation_route": MODULE._load_reviewed.__name__ and "OPEN_POSITION_LIFECYCLE",
+        "continuation_route": "OPEN_POSITION_LIFECYCLE",
         "position_status": "OPEN",
         "position_address": POSITION,
         "new_entry_evidence_candidate": False,
