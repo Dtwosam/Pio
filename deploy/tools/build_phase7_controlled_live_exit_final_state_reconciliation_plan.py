@@ -146,6 +146,7 @@ REPORT_FIELDS = (
     "pre_settlement_effect_present",
     "pre_closure_proof_present",
     "pre_close_event_present",
+    "pre_position_closed",
     "pre_position_outcome_present",
     "planned_actions",
     "reconciliation_required",
@@ -502,6 +503,16 @@ def _pre_state(
                 "SELECT 1 FROM live_position_events WHERE decision_id = ?",
                 (settlement_decision_id,),
             ),
+            "position_closed": (
+                (
+                    conn.execute(
+                        "SELECT status FROM live_positions WHERE position_address = ?",
+                        (position_address,),
+                    ).fetchone()
+                    or [None]
+                )[0]
+                == "CLOSED"
+            ),
             "position_outcome": _row_exists(
                 conn,
                 "SELECT 1 FROM live_position_outcomes WHERE position_address = ?",
@@ -521,10 +532,18 @@ def _planned_actions(pre: dict[str, bool]) -> list[str]:
         ("settlement_chain", ACTION_INGEST_SETTLEMENT_CHAIN),
         ("settlement_receipt", ACTION_INGEST_SETTLEMENT_RECEIPT),
         ("settlement_effect", ACTION_APPLY_SETTLEMENT_EFFECT),
-        ("closure_proof", ACTION_FINALIZE_CLOSURE),
-        ("position_outcome", ACTION_BUILD_OUTCOME),
     )
-    return [action for field, action in mapping if not pre[field]]
+    actions = [action for field, action in mapping if not pre[field]]
+    closure_complete = (
+        pre["closure_proof"]
+        and pre["close_event"]
+        and pre["position_closed"]
+    )
+    if not closure_complete:
+        actions.append(ACTION_FINALIZE_CLOSURE)
+    if not pre["position_outcome"]:
+        actions.append(ACTION_BUILD_OUTCOME)
+    return actions
 
 
 def _rows(
@@ -780,6 +799,7 @@ def validate_exit_final_reconciliation_plan(
         "pre_settlement_effect_present",
         "pre_closure_proof_present",
         "pre_close_event_present",
+        "pre_position_closed",
         "pre_position_outcome_present",
         "reconciliation_required",
         "private_replay_succeeded",
@@ -1042,6 +1062,20 @@ def build_exit_final_reconciliation_plan(
         settlement_signature=settlement["signature"],
         position_address=principal["position_address"],
     )
+    closure_flags = (
+        pre["closure_proof"],
+        pre["close_event"],
+        pre["position_closed"],
+    )
+    if any(closure_flags) and not all(closure_flags):
+        raise ValueError(
+            "production Pio database contains partial settlement closure state"
+        )
+    if pre["position_outcome"] and not all(closure_flags):
+        raise ValueError(
+            "position outcome exists before complete settlement closure"
+        )
+
     planned = _planned_actions(pre)
 
     principal_receipt_payload = _receipt_payload(
@@ -1229,6 +1263,7 @@ def build_exit_final_reconciliation_plan(
         "pre_settlement_effect_present": pre["settlement_effect"],
         "pre_closure_proof_present": pre["closure_proof"],
         "pre_close_event_present": pre["close_event"],
+        "pre_position_closed": pre["position_closed"],
         "pre_position_outcome_present": pre["position_outcome"],
         "planned_actions": planned,
         "reconciliation_required": bool(planned),
