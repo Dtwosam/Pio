@@ -7,6 +7,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -208,6 +209,17 @@ def _regular_file(path: str | Path, *, label: str) -> Path:
     if not stat.S_ISREG(st.st_mode):
         raise ValueError(f"{label} must be a regular file")
     return resolved
+
+
+def _ssh_keygen_path() -> Path:
+    raw = shutil.which("ssh-keygen")
+    if raw is None:
+        raise ValueError("ssh-keygen is not available")
+    path = Path(raw).resolve(strict=True)
+    st = path.stat()
+    if not stat.S_ISREG(st.st_mode) or not (st.st_mode & stat.S_IXUSR):
+        raise ValueError("ssh-keygen executable is invalid")
+    return path
 
 
 def _load_request_module(source: Path) -> Any:
@@ -693,7 +705,7 @@ def verify_authorization(
 
     completed = subprocess.run(
         [
-            "ssh-keygen",
+            str(_ssh_keygen_path()),
             "-Y",
             "verify",
             "-f",
