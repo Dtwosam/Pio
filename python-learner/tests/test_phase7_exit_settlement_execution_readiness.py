@@ -333,7 +333,7 @@ def test_zero_liquidity_lineage_drift_fails_closed(monkeypatch):
 
 
 def test_rpc_endpoint_must_match_finalization(monkeypatch):
-    with pytest.raises(ValueError, match="RPC endpoint mismatch"):
+    with pytest.raises(ValueError, match="rpc_endpoint_sha256 binding mismatch"):
         _build(
             monkeypatch,
             finalization_override={"rpc_endpoint_sha256": "8" * 64},
