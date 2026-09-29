@@ -49,7 +49,15 @@ def _handoff(database: Path) -> dict:
         "phase8_read_only": True,
         "phase8_policy_actionable": False,
         "phase8_execution_wired": False,
+        "phase8_evidence_status": {
+            "as_of": "2026-09-29T21:30:00Z",
+            "research_only": True,
+            "policy_actionable": False,
+            "execution_wired": False,
+            "phase7_promoted": True,
+        },
         "phase8_operator_handoff": {
+            "as_of": "2026-09-29T21:30:00Z",
             "status": "AUTOMATIC_ACTION",
             "debt_type": DEBT_TYPE,
             "scope": SCOPE,
@@ -284,14 +292,55 @@ def test_ready_report_freshly_rechecks_handoff_and_authorization(
     assert report["new_live_capital_authorized"] is False
 
 
-def test_fresh_handoff_drift_fails_closed(monkeypatch):
+def test_fresh_handoff_timestamp_drift_is_allowed(monkeypatch):
+    report = _build(
+        monkeypatch,
+        fresh_handoff_override={
+            "handoff_sha256": "9" * 64,
+            "phase8_evidence_status": {
+                "as_of": "2026-09-29T21:35:00Z",
+                "research_only": True,
+                "policy_actionable": False,
+                "execution_wired": False,
+                "phase7_promoted": True,
+            },
+            "phase8_operator_handoff": {
+                "as_of": "2026-09-29T21:35:00Z",
+                "status": "AUTOMATIC_ACTION",
+                "debt_type": DEBT_TYPE,
+                "scope": SCOPE,
+                "reason": REASON,
+                "suggested_command": COMMAND,
+            },
+        },
+    )
+
+    assert report["saved_phase8_handoff_sha256"] == "a" * 64
+    assert report["fresh_phase8_handoff_sha256"] == "9" * 64
+    assert (
+        report["saved_phase8_handoff_stable_sha256"]
+        == report["fresh_phase8_handoff_stable_sha256"]
+    )
+    assert report["fresh_handoff_matches_saved"] is True
+
+
+def test_fresh_handoff_substantive_drift_fails_closed(monkeypatch):
     with pytest.raises(
         ValueError,
-        match="fresh Phase 8 handoff differs",
+        match="stable state differs",
     ):
         _build(
             monkeypatch,
-            fresh_handoff_override={"handoff_sha256": "9" * 64},
+            fresh_handoff_override={
+                "phase8_operator_handoff": {
+                    "as_of": "2026-09-29T21:35:00Z",
+                    "status": "AUTOMATIC_ACTION",
+                    "debt_type": "RETRAIN_OFFLINE_VALIDATION_READY",
+                    "scope": SCOPE,
+                    "reason": REASON,
+                    "suggested_command": COMMAND,
+                }
+            },
         )
 
 
