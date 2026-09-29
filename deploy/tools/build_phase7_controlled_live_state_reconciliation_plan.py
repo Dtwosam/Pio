@@ -401,7 +401,10 @@ def _rows(
 ) -> list[dict[str, Any]]:
     conn.row_factory = sqlite3.Row
     values = conn.execute(query, args).fetchall()
-    return [dict(row) for row in values]
+    return [
+        {key: value for key, value in dict(row).items() if key != "id"}
+        for row in values
+    ]
 
 
 def _target_state(
@@ -431,7 +434,7 @@ def _target_state(
                 conn,
                 (
                     "SELECT * FROM chain_add_liquidity_requests "
-                    "WHERE signature = ? ORDER BY parent_ix_index ASC"
+                    "WHERE signature = ? ORDER BY instruction_index ASC"
                 ),
                 (signature,),
             ),
