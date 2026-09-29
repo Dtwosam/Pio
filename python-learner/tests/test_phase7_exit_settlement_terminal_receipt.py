@@ -359,7 +359,7 @@ def test_pending_observation_cannot_build_terminal_receipt(monkeypatch):
 
 
 def test_rpc_endpoint_must_match_request(monkeypatch):
-    with pytest.raises(ValueError, match="RPC endpoint mismatch"):
+    with pytest.raises(ValueError, match="rpc_endpoint_sha256 binding mismatch"):
         _build(
             monkeypatch,
             observation_override={
