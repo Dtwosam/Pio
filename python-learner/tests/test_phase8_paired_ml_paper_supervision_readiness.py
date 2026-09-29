@@ -164,6 +164,7 @@ def _build(
     quote_time="2026-09-30T00:44:30+00:00",
     quote_value="0.0001",
     extra_reward=False,
+    chain_max_age_seconds=300,
 ):
     temp = tempfile.TemporaryDirectory()
     root = Path(temp.name)
@@ -228,6 +229,7 @@ def _build(
             source_tree=ROOT,
             post_audit_path=audit_path,
             as_of="2026-09-30T00:45:00+00:00",
+            chain_max_age_seconds=chain_max_age_seconds,
         )
 
     return temp, database, run
@@ -298,6 +300,7 @@ def test_waits_for_fresh_chain_snapshot(monkeypatch):
     temp, _, run = _build(
         monkeypatch,
         latest_chain="2026-09-30T00:41:00+00:00",
+        chain_max_age_seconds=60,
     )
     try:
         report = run()
