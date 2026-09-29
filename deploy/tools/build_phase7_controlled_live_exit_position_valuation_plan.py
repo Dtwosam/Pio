@@ -437,7 +437,6 @@ def validate_exit_position_valuation_plan(
         "valuation_plan_ready",
         "requires_post_valuation_audit",
         "learning_label_reconciliation_required",
-        "learning_label_reconciliation_ready",
         "phase7_evidence_status_recheck_required",
         "requires_separate_phase7_promotion_action",
     ):
@@ -445,6 +444,12 @@ def validate_exit_position_valuation_plan(
             raise ValueError(
                 f"Phase 7 EXIT valuation plan requires {field}=true"
             )
+    if report.get("learning_label_reconciliation_ready") is not (
+        not valuation_required
+    ):
+        raise ValueError(
+            "Phase 7 EXIT valuation-plan learning-label readiness mismatch"
+        )
 
     for field in (
         "new_live_entry_authorized",
@@ -635,7 +640,7 @@ def build_exit_position_valuation_plan(
         "requires_separate_valuation_apply": valuation_required,
         "requires_post_valuation_audit": True,
         "learning_label_reconciliation_required": True,
-        "learning_label_reconciliation_ready": True,
+        "learning_label_reconciliation_ready": not valuation_required,
         "phase7_evidence_status_recheck_required": True,
         "requires_separate_phase7_promotion_action": True,
         "new_live_entry_authorized": False,
