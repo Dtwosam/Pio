@@ -454,126 +454,129 @@ def execute_phase8_paired_ml_paper_entry_once(
         account_cash_before = float(saved_account["account_cash_quote"])
         account_open_before = int(saved_account["account_open_positions"])
 
-        inference_config = pair_module.MLInferenceConfig(
-            risk_lambda=float(saved_readiness["risk_lambda"]),
-            min_positive_excess_probability=float(
-                saved_readiness["min_positive_excess_probability"]
-            ),
-            min_range_survival_probability=float(
-                saved_readiness["min_range_survival_probability"]
-            ),
-            min_score_bps=float(saved_readiness["min_score_bps"]),
+        incumbent_choice = pair_module.PairedMLPaperChoice(
+            **saved_readiness["incumbent_choice"]
         )
-        result = pair_module.open_paired_ml_paper_entries(
+        challenger_choice = pair_module.PairedMLPaperChoice(
+            **saved_readiness["challenger_choice"]
+        )
+        incumbent_preflight = pair_module._preflight_choice(
             pair_module.Storage(database),
-            account_id=saved_readiness["account_id"],
-            cycle_id=saved_readiness["active_cycle_id"],
-            pool_address=saved_readiness["pool_address"],
+            choice=incumbent_choice,
             amount_x=int(saved_readiness["amount_x"]),
             amount_y=int(saved_readiness["amount_y"]),
-            network_cost_y_atomic=int(
-                saved_readiness["network_cost_y_atomic"]
-            ),
-            capital_quote=float(saved_readiness["capital_quote"]),
-            incumbent_position_id=saved_readiness[
-                "incumbent_position_id"
-            ],
-            challenger_position_id=saved_readiness[
-                "challenger_position_id"
-            ],
-            incumbent_event_key=saved_readiness[
-                "incumbent_event_key"
-            ],
-            challenger_event_key=saved_readiness[
-                "challenger_event_key"
-            ],
-            entry_cost_quote=float(saved_readiness["entry_cost_quote"]),
-            lookback_observations=int(
-                saved_readiness["lookback_observations"]
-            ),
-            half_widths=tuple(
-                int(x) for x in saved_readiness["half_widths"]
-            ),
-            center_offsets=tuple(
-                int(x) for x in saved_readiness["center_offsets"]
-            ),
-            strategies=tuple(
-                pair_module.StrategyType(value)
-                for value in saved_readiness["strategies"]
-            ),
             max_share_bps=int(saved_readiness["max_share_bps"]),
             favor_x_in_active_bin=bool(
                 saved_readiness["favor_x_in_active_bin"]
             ),
-            near_liquidity_radius=int(
-                saved_readiness["near_liquidity_radius"]
-            ),
-            inference_config=inference_config,
-            as_of=saved_readiness["decision_observed_at"],
         )
-        record = result.to_record()
-
-        if record.get("paper_only") is not True:
-            raise ValueError("paired PAPER executor result is not paper-only")
-        if record.get("policy_actionable") is not False:
-            raise ValueError("paired PAPER executor became policy-actionable")
-        if record.get("live_authorized") is not False:
-            raise ValueError("paired PAPER executor authorized live capital")
-        for field in (
-            "same_candidate_frame",
-            "same_decision_snapshot",
-            "equal_capital",
-            "atomic_pair_open",
-            "chain_bound",
-            "no_lookahead",
-        ):
-            if record.get(field) is not True:
-                raise ValueError(
-                    f"paired PAPER executor result requires {field}=true"
-                )
-
-        if record["decision_observed_at"] != saved_readiness[
-            "decision_observed_at"
-        ]:
-            raise ValueError("paired PAPER execution decision snapshot drifted")
-        if record["incumbent_model_id"] != saved_readiness[
-            "incumbent_model_id"
-        ]:
-            raise ValueError("paired PAPER incumbent model drifted")
-        if record["challenger_model_id"] != saved_readiness[
-            "challenger_model_id"
-        ]:
-            raise ValueError("paired PAPER challenger model drifted")
-
-        hash_pairs = (
-            (
-                "candidate_frame",
-                "candidate_frame_sha256",
-            ),
-            (
-                "incumbent_inference",
-                "incumbent_inference_sha256",
-            ),
-            (
-                "challenger_inference",
-                "challenger_inference_sha256",
-            ),
-            (
-                "incumbent_choice",
-                "incumbent_choice_sha256",
-            ),
-            (
-                "challenger_choice",
-                "challenger_choice_sha256",
+        challenger_preflight = pair_module._preflight_choice(
+            pair_module.Storage(database),
+            choice=challenger_choice,
+            amount_x=int(saved_readiness["amount_x"]),
+            amount_y=int(saved_readiness["amount_y"]),
+            max_share_bps=int(saved_readiness["max_share_bps"]),
+            favor_x_in_active_bin=bool(
+                saved_readiness["favor_x_in_active_bin"]
             ),
         )
-        for result_field, readiness_field in hash_pairs:
-            if _hash_record(record[result_field]) != saved_readiness[
-                readiness_field
-            ]:
-                raise ValueError(
-                    f"paired PAPER execution {result_field} drifted"
-                )
+        if readiness_module._hash_record(
+            incumbent_preflight
+        ) != saved_readiness["incumbent_preflight_sha256"]:
+            raise ValueError(
+                "paired PAPER incumbent counterfactual preflight drifted"
+            )
+        if readiness_module._hash_record(
+            challenger_preflight
+        ) != saved_readiness["challenger_preflight_sha256"]:
+            raise ValueError(
+                "paired PAPER challenger counterfactual preflight drifted"
+            )
+
+        capital = Decimal(str(saved_readiness["capital_quote"]))
+        cost = Decimal(str(saved_readiness["entry_cost_quote"]))
+        storage = pair_module.Storage(database)
+        with storage.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            pair_module._verify_pair_transaction_state(
+                conn,
+                cycle_id=saved_readiness["active_cycle_id"],
+                incumbent_model_id=saved_readiness["incumbent_model_id"],
+                challenger_model_id=saved_readiness[
+                    "challenger_model_id"
+                ],
+            )
+            pair_module._open_paper_position_in_conn(
+                conn,
+                event_key=saved_readiness["incumbent_event_key"],
+                account_id=saved_readiness["account_id"],
+                position_id=saved_readiness["incumbent_position_id"],
+                pool_address=saved_readiness["pool_address"],
+                policy_source="ML_CHAMPION",
+                strategy=incumbent_choice.strategy,
+                min_bin_id=incumbent_choice.min_bin_id,
+                max_bin_id=incumbent_choice.max_bin_id,
+                capital=capital,
+                cost=cost,
+                model_id=saved_readiness["incumbent_model_id"],
+                event_time=saved_readiness["decision_observed_at"],
+            )
+            pair_module._insert_counterfactual_preview(
+                conn,
+                position_id=saved_readiness["incumbent_position_id"],
+                capital_quote=float(capital),
+                preview=incumbent_preflight,
+            )
+            pair_module._open_paper_position_in_conn(
+                conn,
+                event_key=saved_readiness["challenger_event_key"],
+                account_id=saved_readiness["account_id"],
+                position_id=saved_readiness["challenger_position_id"],
+                pool_address=saved_readiness["pool_address"],
+                policy_source="ML_CHALLENGER",
+                strategy=challenger_choice.strategy,
+                min_bin_id=challenger_choice.min_bin_id,
+                max_bin_id=challenger_choice.max_bin_id,
+                capital=capital,
+                cost=cost,
+                model_id=saved_readiness["challenger_model_id"],
+                event_time=saved_readiness["decision_observed_at"],
+            )
+            pair_module._insert_counterfactual_preview(
+                conn,
+                position_id=saved_readiness["challenger_position_id"],
+                capital_quote=float(capital),
+                preview=challenger_preflight,
+            )
+
+        incumbent_position = pair_module.paper_position_snapshot(
+            storage,
+            position_id=saved_readiness["incumbent_position_id"],
+        )
+        challenger_position = pair_module.paper_position_snapshot(
+            storage,
+            position_id=saved_readiness["challenger_position_id"],
+        )
+        account_after_snapshot = pair_module.paper_account_snapshot(
+            storage,
+            account_id=saved_readiness["account_id"],
+        )
+        record = {
+            "decision_observed_at": saved_readiness[
+                "decision_observed_at"
+            ],
+            "incumbent_model_id": saved_readiness[
+                "incumbent_model_id"
+            ],
+            "challenger_model_id": saved_readiness[
+                "challenger_model_id"
+            ],
+            "incumbent_choice": saved_readiness["incumbent_choice"],
+            "challenger_choice": saved_readiness["challenger_choice"],
+            "incumbent_position": incumbent_position.to_record(),
+            "challenger_position": challenger_position.to_record(),
+            "account": account_after_snapshot.to_record(),
+        }
 
         after_state = account_module._database_state(database)
         if after_state == before_state:
