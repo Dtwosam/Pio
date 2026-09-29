@@ -52,6 +52,9 @@ REPORT_FIELDS = (
     "database_unchanged_since_post_reconciliation",
     "phase7_evidence_status_sha256",
     "phase7_evidence_plan_sha256",
+    "decision_id",
+    "signature",
+    "pool_address",
     "intent_status",
     "position_address",
     "position_status",
@@ -254,6 +257,12 @@ def validate_post_reconciliation_evidence_handoff(
     ):
         value = report.get(field)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(
+                f"Phase 7 post-reconciliation handoff {field} is invalid"
+            )
+
+    for field in ("decision_id", "signature", "pool_address"):
+        if not isinstance(report.get(field), str) or not report[field]:
             raise ValueError(
                 f"Phase 7 post-reconciliation handoff {field} is invalid"
             )
@@ -525,6 +534,9 @@ def build_post_reconciliation_evidence_handoff(
             "phase7_evidence_status_sha256"
         ],
         "phase7_evidence_plan_sha256": plan["plan_sha256"],
+        "decision_id": post["decision_id"],
+        "signature": post["signature"],
+        "pool_address": post["pool_address"],
         "intent_status": post["intent_status"],
         "position_address": post["position_address"],
         "position_status": post["position_status"],
