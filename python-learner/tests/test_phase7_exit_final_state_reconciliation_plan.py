@@ -264,6 +264,7 @@ def _all_false_pre() -> dict[str, bool]:
         "settlement_effect": False,
         "closure_proof": False,
         "close_event": False,
+        "position_closed": False,
         "position_outcome": False,
     }
 
@@ -409,6 +410,14 @@ def test_already_reconciled_state_requires_no_apply(monkeypatch):
     assert report["reconciliation_required"] is False
     assert report["requires_separate_reconciliation_apply"] is False
     assert report["private_replay_succeeded"] is True
+
+
+def test_partial_closure_state_fails_closed(monkeypatch):
+    pre = _all_false_pre()
+    pre["closure_proof"] = True
+
+    with pytest.raises(ValueError, match="partial settlement closure state"):
+        _build(monkeypatch, pre=pre)
 
 
 def test_settlement_cannot_predate_principal_exit(monkeypatch):
