@@ -227,6 +227,8 @@ def validate_exit_single_execution_request(request: dict[str, Any]) -> None:
         "exit_decision_id",
         "pool_address",
         "position_address",
+        "user_token_x",
+        "user_token_y",
         "executor_wallet_pubkey",
         "final_transaction_base64",
         "recent_blockhash",
