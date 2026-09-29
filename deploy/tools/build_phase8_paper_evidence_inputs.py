@@ -293,6 +293,10 @@ def verify_phase8_paper_evidence_inputs(
     module.validate_phase8_paper_challenger_transition_post_audit(audit)
     base = _base_from_audit(audit)
     value = _load_json(input_path, label="Phase 8 PAPER evidence inputs")
+    expected_template = build_phase8_paper_evidence_input_template(
+        source_tree=source,
+        post_audit_path=post_audit_path,
+    )
 
     allowed = set(TEMPLATE_FIELDS) | {"template_sha256"}
     if set(value) != allowed:
@@ -304,6 +308,37 @@ def verify_phase8_paper_evidence_inputs(
         raise ValueError("Phase 8 PAPER evidence input artifact type mismatch")
     if value.get("format_version") != FORMAT_VERSION:
         raise ValueError("Phase 8 PAPER evidence input format mismatch")
+    if value.get("reviewed_source_blobs") != expected_template[
+        "reviewed_source_blobs"
+    ]:
+        raise ValueError("Phase 8 PAPER evidence input lineage mismatch")
+    if value.get("template_sha256") != expected_template["template_sha256"]:
+        raise ValueError("Phase 8 PAPER evidence template digest mismatch")
+    if value.get("required_manual_fields") != expected_template[
+        "required_manual_fields"
+    ]:
+        raise ValueError("Phase 8 PAPER evidence required-field contract changed")
+    for field in (
+        "paper_evidence_inputs_ready",
+        "paper_evidence_collection_authorized",
+        "paper_trading_authorized",
+        "live_submit_authorized",
+        "new_live_capital_authorized",
+        "phase8_promotion_authorized",
+    ):
+        if value.get(field) is not False:
+            raise ValueError(
+                f"Phase 8 PAPER evidence input requires {field}=false"
+            )
+    for field in (
+        "requires_separate_paper_account_action",
+        "requires_separate_paper_evidence_execution_authorization",
+        "requires_closed_trade_evidence_before_validation",
+    ):
+        if value.get(field) is not True:
+            raise ValueError(
+                f"Phase 8 PAPER evidence input requires {field}=true"
+            )
 
     mode = value.get("account_mode")
     account = value.get("account_id")
