@@ -32,11 +32,12 @@ def test_exit_signed_transaction_verifier_is_read_only():
 
 def test_exit_signed_transaction_verifier_never_mutates_or_rebuilds_message():
     source = VERIFIER.read_text(encoding="utf-8")
+    production = source.split("#[cfg(test)]", 1)[0]
 
-    assert "unsigned.message.serialize()" in source
-    assert "signed.message.serialize()" in source
-    assert "unsigned_message != signed_message" in source
+    assert "unsigned.message.serialize()" in production
+    assert "signed.message.serialize()" in production
+    assert "unsigned_message != signed_message" in production
 
-    assert "prepare_unsigned_transaction_with_latest_blockhash" not in source
-    assert "recent_blockhash =" not in source
-    assert "transaction.signatures[0] =" not in source
+    assert "prepare_unsigned_transaction_with_latest_blockhash" not in production
+    assert "recent_blockhash =" not in production
+    assert "transaction.signatures[0] =" not in production
