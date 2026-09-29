@@ -107,6 +107,7 @@ def _build(
     saved_override: dict | None = None,
     fresh_override: dict | None = None,
     wallet_pubkey: str = WALLET,
+    live_submit_opt_in: bool = True,
 ):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -144,7 +145,10 @@ def _build(
         if os.name == "posix":
             keypair.chmod(0o600)
 
-        monkeypatch.setenv(MODULE.LIVE_SUBMIT_ENV, "1")
+        if live_submit_opt_in:
+            monkeypatch.setenv(MODULE.LIVE_SUBMIT_ENV, "1")
+        else:
+            monkeypatch.delenv(MODULE.LIVE_SUBMIT_ENV, raising=False)
         monkeypatch.setenv(MODULE.KEYPAIR_ENV, str(keypair))
         monkeypatch.setattr(
             MODULE,
@@ -221,10 +225,8 @@ def test_exit_execution_admission_verifies_identity_without_authorizing(monkeypa
 
 
 def test_live_submit_opt_in_is_required_but_not_execution(monkeypatch):
-    monkeypatch.delenv(MODULE.LIVE_SUBMIT_ENV, raising=False)
-
     with pytest.raises(ValueError, match="required for EXIT execution admission"):
-        _build(monkeypatch)
+        _build(monkeypatch, live_submit_opt_in=False)
 
 
 def test_wallet_identity_mismatch_fails_closed(monkeypatch):
