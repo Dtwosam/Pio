@@ -442,7 +442,7 @@ def _target_state(
                 conn,
                 (
                     "SELECT * FROM chain_rebalance_requests "
-                    "WHERE signature = ? ORDER BY parent_ix_index ASC"
+                    "WHERE signature = ? ORDER BY instruction_index ASC"
                 ),
                 (signature,),
             ),
