@@ -50,6 +50,9 @@ def _preparation() -> dict:
         "opened_decision_id": OPENED_DECISION_ID,
         "exit_decision_id": EXIT_DECISION_ID,
         "exit_signature": "sig-confirmed-exit",
+        "zero_liquidity_snapshot_sha256": "d" * 64,
+        "zero_liquidity_capture_slot_start": 130,
+        "zero_liquidity_capture_slot_end": 130,
         "pool_address": POOL,
         "position_address": POSITION,
         "executor_wallet_pubkey": WALLET,
@@ -76,6 +79,7 @@ def _preparation() -> dict:
         "automatic_resubmission_authorized": False,
         "new_live_entry_authorized": False,
         "new_live_capital_authorized": False,
+        "phase7_promotion_authorized": False,
         "phase7_promotion_persisted": False,
         "production_pio_database_modified": False,
     }
@@ -250,6 +254,7 @@ def test_settlement_finalization_refreshes_without_keypair(monkeypatch):
     assert USER_Y in observed["guard"]["required_account_pubkeys"]
     assert REWARD_0 in observed["guard"]["required_account_pubkeys"]
 
+    assert report["zero_liquidity_capture_slot_start"] == 130
     assert report["final_transaction_unsigned"] is True
     assert report["expected_wallet_verified"] is True
     assert report["exact_simulation_succeeded"] is True
