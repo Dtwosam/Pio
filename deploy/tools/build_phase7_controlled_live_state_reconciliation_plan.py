@@ -575,14 +575,22 @@ def validate_reconciliation_plan(report: dict[str, Any]) -> None:
         "transaction_snapshot_matches_receipt",
         "private_replay_succeeded",
         "reconciliation_plan_ready",
-        "requires_separate_reconciliation_apply",
-        "requires_post_apply_audit",
-        "requires_position_state_reconciliation",
-        "requires_learning_label_reconciliation",
         "requires_separate_phase7_promotion_action",
     ):
         if report.get(field) is not True:
             raise ValueError(f"Phase 7 reconciliation plan requires {field}=true")
+
+    required = bool(actions)
+    if report.get("requires_separate_reconciliation_apply") is not required:
+        raise ValueError("Phase 7 reconciliation apply-required binding mismatch")
+    if report.get("requires_post_apply_audit") is not required:
+        raise ValueError("Phase 7 reconciliation post-audit binding mismatch")
+    position_required = ACTION_APPLY_POSITION in actions
+    if report.get("requires_position_state_reconciliation") is not position_required:
+        raise ValueError("Phase 7 position-reconciliation binding mismatch")
+    label_required = report["intent_status"] == "CONFIRMED"
+    if report.get("requires_learning_label_reconciliation") is not label_required:
+        raise ValueError("Phase 7 learning-label reconciliation binding mismatch")
 
     for field in (
         "transaction_signing_authorized",
@@ -806,10 +814,14 @@ def build_reconciliation_plan(
             live_audit_record.get("clean")
         ),
         "reconciliation_plan_ready": True,
-        "requires_separate_reconciliation_apply": True,
-        "requires_post_apply_audit": True,
-        "requires_position_state_reconciliation": True,
-        "requires_learning_label_reconciliation": True,
+        "requires_separate_reconciliation_apply": bool(actions),
+        "requires_post_apply_audit": bool(actions),
+        "requires_position_state_reconciliation": (
+            ACTION_APPLY_POSITION in actions
+        ),
+        "requires_learning_label_reconciliation": (
+            receipt["intent_status"] == "CONFIRMED"
+        ),
         "requires_separate_phase7_promotion_action": True,
         "transaction_signing_authorized": False,
         "transaction_submission_authorized": False,
