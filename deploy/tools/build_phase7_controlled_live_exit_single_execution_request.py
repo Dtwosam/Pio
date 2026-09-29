@@ -49,6 +49,8 @@ REQUEST_FIELDS = (
     "exit_decision_id",
     "pool_address",
     "position_address",
+    "user_token_x",
+    "user_token_y",
     "executor_wallet_pubkey",
     "rpc_endpoint_sha256",
     "final_transaction_base64",
@@ -450,6 +452,8 @@ def build_exit_single_execution_request(
         "exit_decision_id": finalization["exit_decision_id"],
         "pool_address": finalization["pool_address"],
         "position_address": finalization["position_address"],
+        "user_token_x": finalization["user_token_x"],
+        "user_token_y": finalization["user_token_y"],
         "executor_wallet_pubkey": finalization["executor_wallet_pubkey"],
         "rpc_endpoint_sha256": finalization["rpc_endpoint_sha256"],
         "final_transaction_base64": finalization[
