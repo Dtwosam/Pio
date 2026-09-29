@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from meteora_learner import cli as MODULE
+from meteora_learner import paper_ml_pair_entry_cli as MODULE
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,71 +15,61 @@ class _Result:
     def to_record(self):
         return {
             "paper_only": True,
+            "policy_actionable": False,
             "live_authorized": False,
             "atomic_pair_open": True,
         }
 
 
-def test_paper_open_ml_pair_dispatches_explicit_economic_inputs(
-    monkeypatch,
-    capsys,
-):
+def _args(*, include_capital=True, include_entry_cost=True):
+    values = [
+        "--account",
+        "paper-1",
+        "--cycle-id",
+        "cycle-1",
+        "--pool",
+        "pool-1",
+        "--amount-x",
+        "100",
+        "--amount-y",
+        "200",
+        "--network-cost-y-atomic",
+        "3",
+    ]
+    if include_capital:
+        values += ["--capital", "1000"]
+    if include_entry_cost:
+        values += ["--entry-cost", "5"]
+    values += [
+        "--incumbent-position",
+        "inc-pos",
+        "--challenger-position",
+        "chal-pos",
+        "--incumbent-event-key",
+        "inc-event",
+        "--challenger-event-key",
+        "chal-event",
+        "--as-of",
+        "2026-09-29T22:30:00+00:00",
+    ]
+    return values
+
+
+def test_standalone_pair_cli_dispatches_explicit_economic_inputs():
     captured = {}
-    monkeypatch.setattr(
-        MODULE.Settings,
-        "from_env",
-        classmethod(
-            lambda cls: SimpleNamespace(database_path=Path("/tmp/pio.db"))
-        ),
-    )
-    monkeypatch.setattr(
-        MODULE,
-        "Storage",
-        lambda path: SimpleNamespace(path=path),
-    )
 
     def run(storage, **kwargs):
+        captured["storage_path"] = storage.path
         captured.update(kwargs)
         return _Result()
 
-    monkeypatch.setattr(MODULE, "open_paired_ml_paper_entries", run)
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "pio",
-            "paper-open-ml-pair",
-            "--account",
-            "paper-1",
-            "--cycle-id",
-            "cycle-1",
-            "--pool",
-            "pool-1",
-            "--amount-x",
-            "100",
-            "--amount-y",
-            "200",
-            "--network-cost-y-atomic",
-            "3",
-            "--capital",
-            "1000",
-            "--entry-cost",
-            "5",
-            "--incumbent-position",
-            "inc-pos",
-            "--challenger-position",
-            "chal-pos",
-            "--incumbent-event-key",
-            "inc-event",
-            "--challenger-event-key",
-            "chal-event",
-            "--as-of",
-            "2026-09-29T22:30:00+00:00",
-        ],
+    result = MODULE.run(
+        _args(),
+        settings=SimpleNamespace(database_path=Path("/tmp/pio.db")),
+        pair_entry=run,
     )
 
-    MODULE.main()
-    output = json.loads(capsys.readouterr().out)
-
+    assert captured["storage_path"] == Path("/tmp/pio.db")
     assert captured["account_id"] == "paper-1"
     assert captured["cycle_id"] == "cycle-1"
     assert captured["pool_address"] == "pool-1"
@@ -104,119 +93,58 @@ def test_paper_open_ml_pair_dispatches_explicit_economic_inputs(
         == 0.50
     )
     assert captured["inference_config"].min_score_bps == 0.0
-    assert output["paper_only"] is True
-    assert output["live_authorized"] is False
-    assert output["atomic_pair_open"] is True
+    assert result["paper_only"] is True
+    assert result["policy_actionable"] is False
+    assert result["live_authorized"] is False
 
 
-def test_paper_open_ml_pair_requires_entry_cost(monkeypatch):
-    called = False
-
-    def run(*args, **kwargs):
-        nonlocal called
-        called = True
-        return _Result()
-
-    monkeypatch.setattr(MODULE, "open_paired_ml_paper_entries", run)
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "pio",
-            "paper-open-ml-pair",
-            "--account",
-            "paper-1",
-            "--cycle-id",
-            "cycle-1",
-            "--pool",
-            "pool-1",
-            "--amount-x",
-            "100",
-            "--amount-y",
-            "200",
-            "--network-cost-y-atomic",
-            "3",
-            "--capital",
-            "1000",
-            "--incumbent-position",
-            "inc-pos",
-            "--challenger-position",
-            "chal-pos",
-            "--incumbent-event-key",
-            "inc-event",
-            "--challenger-event-key",
-            "chal-event",
-        ],
-    )
-
+def test_standalone_pair_cli_requires_entry_cost():
     with pytest.raises(SystemExit) as exc:
-        MODULE.main()
-
+        MODULE.run(
+            _args(include_entry_cost=False),
+            settings=SimpleNamespace(database_path=Path("/tmp/pio.db")),
+            pair_entry=lambda *args, **kwargs: _Result(),
+        )
     assert exc.value.code == 2
-    assert called is False
 
 
-def test_paper_open_ml_pair_requires_capital(monkeypatch):
-    called = False
-
-    def run(*args, **kwargs):
-        nonlocal called
-        called = True
-        return _Result()
-
-    monkeypatch.setattr(MODULE, "open_paired_ml_paper_entries", run)
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "pio",
-            "paper-open-ml-pair",
-            "--account",
-            "paper-1",
-            "--cycle-id",
-            "cycle-1",
-            "--pool",
-            "pool-1",
-            "--amount-x",
-            "100",
-            "--amount-y",
-            "200",
-            "--network-cost-y-atomic",
-            "3",
-            "--entry-cost",
-            "5",
-            "--incumbent-position",
-            "inc-pos",
-            "--challenger-position",
-            "chal-pos",
-            "--incumbent-event-key",
-            "inc-event",
-            "--challenger-event-key",
-            "chal-event",
-        ],
-    )
-
+def test_standalone_pair_cli_requires_capital():
     with pytest.raises(SystemExit) as exc:
-        MODULE.main()
-
+        MODULE.run(
+            _args(include_capital=False),
+            settings=SimpleNamespace(database_path=Path("/tmp/pio.db")),
+            pair_entry=lambda *args, **kwargs: _Result(),
+        )
     assert exc.value.code == 2
-    assert called is False
 
 
-def test_paired_ml_cli_source_has_no_live_submit_path():
+def test_standalone_pair_cli_rejects_crossed_safety_boundary():
+    class Unsafe:
+        def to_record(self):
+            return {
+                "paper_only": True,
+                "policy_actionable": False,
+                "live_authorized": True,
+            }
+
+    with pytest.raises(RuntimeError, match="safety boundary"):
+        MODULE.run(
+            _args(),
+            settings=SimpleNamespace(database_path=Path("/tmp/pio.db")),
+            pair_entry=lambda *args, **kwargs: Unsafe(),
+        )
+
+
+def test_standalone_pair_cli_has_no_live_submit_path():
     source = (
         ROOT
         / "python-learner"
         / "src"
         / "meteora_learner"
-        / "cli.py"
+        / "paper_ml_pair_entry_cli.py"
     ).read_text(encoding="utf-8")
-    command_start = source.index('if args.command == "paper-open-ml-pair":')
-    command_end = source.index(
-        'if args.command == "paper-open-phase3":',
-        command_start,
-    )
-    block = source[command_start:command_end]
 
-    assert "send_transaction" not in block
-    assert "controlled-live-submit" not in block
-    assert "PIO_EXECUTOR_KEYPAIR" not in block
-    assert "open_paired_ml_paper_entries" in block
+    assert "send_transaction" not in source
+    assert "controlled-live-submit" not in source
+    assert "PIO_EXECUTOR_KEYPAIR" not in source
+    assert "open_paired_ml_paper_entries" in source
