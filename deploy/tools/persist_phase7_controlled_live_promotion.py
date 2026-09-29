@@ -244,12 +244,16 @@ def _verify_schema_contract(conn: sqlite3.Connection) -> None:
             "Phase 7 persistence immutable-history triggers missing"
         )
     expected_abort = (
-        "RAISE(ABORT, 'phase_promotion_evidence_history is immutable')"
+        "RAISE(ABORT,'phase_promotion_evidence_historyisimmutable')"
     )
-    update_sql = trigger_sql["phase_promotion_history_no_update"]
-    delete_sql = trigger_sql["phase_promotion_history_no_delete"]
+    update_sql = "".join(
+        trigger_sql["phase_promotion_history_no_update"].split()
+    )
+    delete_sql = "".join(
+        trigger_sql["phase_promotion_history_no_delete"].split()
+    )
     if (
-        "BEFORE UPDATE ON phase_promotion_evidence_history"
+        "BEFOREUPDATEONphase_promotion_evidence_history"
         not in update_sql
         or expected_abort not in update_sql
     ):
@@ -257,7 +261,7 @@ def _verify_schema_contract(conn: sqlite3.Connection) -> None:
             "Phase 7 persistence history-update trigger drifted"
         )
     if (
-        "BEFORE DELETE ON phase_promotion_evidence_history"
+        "BEFOREDELETEONphase_promotion_evidence_history"
         not in delete_sql
         or expected_abort not in delete_sql
     ):
