@@ -345,6 +345,105 @@ def test_atomic_transition_updates_model_cycle_and_histories(tmp_path):
     assert cycle == ("PAPER_CHALLENGER", "ACTIVE", MODEL_ID)
 
 
+def test_atomic_transition_rolls_back_if_cycle_update_fails_after_model_update(
+    tmp_path,
+):
+    database = tmp_path / "pio.db"
+    _seed_database(database)
+
+    conn = sqlite3.connect(database)
+    try:
+        conn.execute(
+            """
+            CREATE TRIGGER refuse_cycle_paper_transition
+            BEFORE UPDATE OF status ON continuous_learning_cycles
+            WHEN NEW.status = 'PAPER_CHALLENGER'
+            BEGIN
+                SELECT RAISE(ABORT, 'cycle sync refused');
+            END;
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(sqlite3.IntegrityError, match="cycle sync refused"):
+        MODULE._atomic_transition(
+            database,
+            model_id=MODEL_ID,
+            cycle_id=CYCLE_ID,
+        )
+
+    conn = sqlite3.connect(database)
+    try:
+        model = conn.execute(
+            "SELECT status FROM model_registry WHERE model_id = ?",
+            (MODEL_ID,),
+        ).fetchone()
+        cycle = conn.execute(
+            "SELECT status FROM continuous_learning_cycles WHERE cycle_id = ?",
+            (CYCLE_ID,),
+        ).fetchone()
+        model_history = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM phase8_model_status_history
+            WHERE model_id = ?
+            """,
+            (MODEL_ID,),
+        ).fetchone()
+        cycle_history = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM phase8_cycle_status_history
+            WHERE cycle_id = ?
+            """,
+            (CYCLE_ID,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert model == ("OFFLINE_QUALIFIED",)
+    assert cycle == ("OFFLINE_QUALIFIED",)
+    assert model_history == (1,)
+    assert cycle_history == (1,)
+
+
+def test_atomic_transition_refuses_unqualified_offline_evidence(tmp_path):
+    database = tmp_path / "pio.db"
+    _seed_database(database)
+    conn = sqlite3.connect(database)
+    try:
+        conn.execute(
+            """
+            UPDATE model_offline_evidence
+            SET qualified = 0
+            WHERE model_id = ?
+            """,
+            (MODEL_ID,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(ValueError, match="evidence is not qualified"):
+        MODULE._atomic_transition(
+            database,
+            model_id=MODEL_ID,
+            cycle_id=CYCLE_ID,
+        )
+
+    conn = sqlite3.connect(database)
+    try:
+        status = conn.execute(
+            "SELECT status FROM model_registry WHERE model_id = ?",
+            (MODEL_ID,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert status == ("OFFLINE_QUALIFIED",)
+
+
 def test_atomic_transition_rolls_back_on_cycle_binding_drift(tmp_path):
     database = tmp_path / "pio.db"
     _seed_database(database, cycle_model="challenger-2")
@@ -437,6 +536,83 @@ def test_one_shot_executor_transitions_state_without_starting_paper_trades(
     assert receipt["phase8_promotion_authorized"] is False
     assert receipt["production_pio_database_modified"] is True
     assert receipt["production_research_artifacts_modified"] is False
+
+
+def test_substantive_fresh_readiness_drift_fails_before_transition(
+    monkeypatch,
+):
+    temp, database, _ = _build(monkeypatch)
+    try:
+        saved = _readiness(
+            Path(database).parents[1],
+            database,
+        )
+        fresh = copy.deepcopy(saved)
+        fresh["readiness_sha256"] = "2" * 64
+        fresh["fresh_post_audit_sha256"] = "3" * 64
+        fresh["model_id"] = "challenger-2"
+
+        class DriftedReadiness:
+            @staticmethod
+            def validate_phase8_paper_challenger_transition_execution_readiness(
+                value,
+            ):
+                assert isinstance(value, dict)
+
+            @staticmethod
+            def build_phase8_paper_challenger_transition_execution_readiness(
+                **kwargs,
+            ):
+                return copy.deepcopy(fresh)
+
+        monkeypatch.setattr(
+            MODULE,
+            "_load_readiness_module",
+            lambda source: DriftedReadiness,
+        )
+
+        root = Path(temp.name)
+        saved_path = root / "readiness.json"
+        before = sqlite3.connect(database)
+        try:
+            status_before = before.execute(
+                "SELECT status FROM model_registry WHERE model_id = ?",
+                (MODEL_ID,),
+            ).fetchone()
+        finally:
+            before.close()
+
+        with pytest.raises(ValueError, match="stable state differs"):
+            MODULE.execute_phase8_paper_challenger_transition_once(
+                repository=Path(database).parents[1],
+                source_tree=ROOT,
+                saved_readiness_path=saved_path,
+                saved_post_audit_path=root / "audit.json",
+                execution_receipt_path=root / "offline-receipt.json",
+                transition_request_path=root / "request.json",
+                saved_signed_authorization_verification_path=(
+                    root / "verification.json"
+                ),
+                signed_payload_path=root / "payload.json",
+                signature_path=root / "signature",
+                allowed_signers_path=root / "allowed",
+                expected_allowed_signers_sha256="1" * 64,
+                now="2026-09-29T21:55:00Z",
+            )
+
+        after = sqlite3.connect(database)
+        try:
+            status_after = after.execute(
+                "SELECT status FROM model_registry WHERE model_id = ?",
+                (MODEL_ID,),
+            ).fetchone()
+        finally:
+            after.close()
+    finally:
+        temp.cleanup()
+
+    assert status_before == ("OFFLINE_QUALIFIED",)
+    assert status_after == ("OFFLINE_QUALIFIED",)
 
 
 def test_resealed_receipt_cannot_authorize_paper_evidence_collection(
