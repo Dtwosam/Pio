@@ -148,7 +148,7 @@ def _seed_database(
             )
             event_key = (
                 "pair-1-incumbent-enter"
-                if policy == "ML_CHAMPION"
+                if position_id == "pair-1-incumbent"
                 else "pair-1-challenger-enter"
             )
             conn.execute(
