@@ -801,9 +801,9 @@ def validate_exit_final_reconciliation_plan(
         raise ValueError("planned_actions must be a list")
     if len(planned) != len(set(planned)):
         raise ValueError("planned_actions contains duplicates")
-    positions = [ACTION_ORDER.index(item) for item in planned]
     if any(item not in ACTION_ORDER for item in planned):
         raise ValueError("planned_actions contains unsupported action")
+    positions = [ACTION_ORDER.index(item) for item in planned]
     if positions != sorted(positions):
         raise ValueError("planned_actions are out of order")
     if report["reconciliation_required"] is not bool(planned):
