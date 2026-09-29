@@ -30,6 +30,8 @@ REPORT_FIELDS = (
     "reviewed_source_blobs",
     "saved_phase8_handoff_sha256",
     "fresh_phase8_handoff_sha256",
+    "saved_phase8_handoff_stable_sha256",
+    "fresh_phase8_handoff_stable_sha256",
     "offline_step_request_sha256",
     "saved_signed_authorization_verification_sha256",
     "fresh_signed_authorization_verification_sha256",
@@ -158,6 +160,30 @@ def _load_reviewed(source: Path) -> tuple[Any, Any, Any]:
     )
 
 
+def _stable_handoff_projection(value: dict[str, Any]) -> dict[str, Any]:
+    projection = {
+        key: item
+        for key, item in value.items()
+        if key != "handoff_sha256"
+    }
+    for field in ("phase8_evidence_status", "phase8_operator_handoff"):
+        nested = projection.get(field)
+        if not isinstance(nested, dict):
+            raise ValueError(
+                f"Phase 8 handoff {field} must be an object"
+            )
+        normalized = dict(nested)
+        normalized.pop("as_of", None)
+        projection[field] = normalized
+    return projection
+
+
+def _stable_handoff_sha256(value: dict[str, Any]) -> str:
+    return _sha256_bytes(
+        _canonical_bytes(_stable_handoff_projection(value))
+    )
+
+
 def _production_database(production: Path) -> Path:
     data = production / "data"
     if data.is_symlink() or not data.is_dir():
@@ -203,6 +229,8 @@ def validate_phase8_offline_step_execution_readiness(
     for field in (
         "saved_phase8_handoff_sha256",
         "fresh_phase8_handoff_sha256",
+        "saved_phase8_handoff_stable_sha256",
+        "fresh_phase8_handoff_stable_sha256",
         "offline_step_request_sha256",
         "saved_signed_authorization_verification_sha256",
         "fresh_signed_authorization_verification_sha256",
@@ -281,11 +309,11 @@ def validate_phase8_offline_step_execution_readiness(
             )
 
     if (
-        report["saved_phase8_handoff_sha256"]
-        != report["fresh_phase8_handoff_sha256"]
+        report["saved_phase8_handoff_stable_sha256"]
+        != report["fresh_phase8_handoff_stable_sha256"]
     ):
         raise ValueError(
-            "Phase 8 offline-step readiness handoff digest mismatch"
+            "Phase 8 offline-step readiness stable handoff mismatch"
         )
     if (
         report["saved_signed_authorization_verification_sha256"]
@@ -429,9 +457,11 @@ def build_phase8_offline_step_execution_readiness(
         ],
     )
     handoff_module.validate_phase8_post_phase7_handoff(fresh_handoff)
-    if fresh_handoff != saved_handoff:
+    saved_handoff_stable_sha256 = _stable_handoff_sha256(saved_handoff)
+    fresh_handoff_stable_sha256 = _stable_handoff_sha256(fresh_handoff)
+    if fresh_handoff_stable_sha256 != saved_handoff_stable_sha256:
         raise ValueError(
-            "fresh Phase 8 handoff differs from saved handoff"
+            "fresh Phase 8 handoff stable state differs from saved handoff"
         )
 
     fresh_verification = signer_module.verify_authorization(
@@ -504,6 +534,12 @@ def build_phase8_offline_step_execution_readiness(
         "fresh_phase8_handoff_sha256": fresh_handoff[
             "handoff_sha256"
         ],
+        "saved_phase8_handoff_stable_sha256": (
+            saved_handoff_stable_sha256
+        ),
+        "fresh_phase8_handoff_stable_sha256": (
+            fresh_handoff_stable_sha256
+        ),
         "offline_step_request_sha256": request["request_sha256"],
         "saved_signed_authorization_verification_sha256": (
             saved_verification["verification_sha256"]
