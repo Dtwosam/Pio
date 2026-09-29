@@ -1,0 +1,635 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import sqlite3
+import stat
+import sys
+import tempfile
+from typing import Any
+
+
+FORMAT_VERSION = 1
+ARTIFACT_TYPE = "PHASE7_CONTROLLED_LIVE_EXIT_LEARNING_LABEL_PLAN_V1"
+
+POST_RECONCILIATION_TOOL = Path(
+    "deploy/tools/check_phase7_controlled_live_exit_final_post_reconciliation.py"
+)
+PYTHON_STORAGE = Path("python-learner/src/meteora_learner/storage.py")
+PYTHON_VALUATION = Path(
+    "python-learner/src/meteora_learner/live_position_valuation.py"
+)
+PYTHON_LABEL = Path(
+    "python-learner/src/meteora_learner/live_learning_label.py"
+)
+REVIEWED_SOURCE_BLOBS = {
+    POST_RECONCILIATION_TOOL: "2a3b39e6e487257d35252804fdf2b4447eda6d26",
+    PYTHON_STORAGE: "39bcc99413df357b89d261e854861e9e4a3fff23",
+    PYTHON_VALUATION: "f0f339be6c3483d6886cdc7eb7d2c00766f09caf",
+    PYTHON_LABEL: "49f16559cc764dc00496167c6281631b59c39f06",
+}
+
+REPORT_FIELDS = (
+    "format_version",
+    "artifact_type",
+    "reviewed_source_blobs",
+    "saved_post_reconciliation_audit_sha256",
+    "expected_post_reconciliation_audit_sha256",
+    "opened_decision_id",
+    "principal_exit_decision_id",
+    "settlement_decision_id",
+    "pool_address",
+    "position_address",
+    "pio_database_path",
+    "pio_database_sha256_before",
+    "pio_database_sha256_after",
+    "pio_wal_sha256_before",
+    "pio_wal_sha256_after",
+    "pio_shm_sha256_before",
+    "pio_shm_sha256_after",
+    "max_quote_age_seconds",
+    "pre_valuation_present",
+    "pre_learning_label_present",
+    "private_valuation",
+    "private_learning_label",
+    "valuation_reused_existing",
+    "learning_label_reused_existing",
+    "private_target_state_sha256",
+    "learning_label_plan_ready",
+    "learning_label_reconciliation_required",
+    "requires_separate_learning_label_apply",
+    "requires_post_label_audit",
+    "phase7_evidence_status_recheck_required",
+    "requires_separate_phase7_promotion_action",
+    "transaction_signing_authorized",
+    "transaction_submission_authorized",
+    "automatic_resubmission_authorized",
+    "new_live_entry_authorized",
+    "new_live_capital_authorized",
+    "phase7_promotion_authorized",
+    "phase7_promotion_persisted",
+    "production_file_modified",
+    "production_repository_git_mutated",
+    "production_pio_database_modified",
+)
+
+
+def _canonical_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _git_blob_sha_bytes(payload: bytes) -> str:
+    header = f"blob {len(payload)}\0".encode()
+    return hashlib.sha1(header + payload).hexdigest()
+
+
+def _git_blob_sha(path: Path) -> str:
+    return _git_blob_sha_bytes(path.read_bytes())
+
+
+def _is_hex_digest(value: Any, length: int) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == length
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
+
+
+def _load_module(path: Path, name: str) -> Any:
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load reviewed module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_json(path: str | Path, *, label: str) -> dict[str, Any]:
+    candidate = Path(path).expanduser()
+    if candidate.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    resolved = candidate.resolve(strict=True)
+    if not resolved.is_file():
+        raise ValueError(f"{label} must be a regular file")
+    value = json.loads(resolved.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return value
+
+
+def _regular_hash_or_none(path: Path) -> str | None:
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        raise ValueError(f"unsafe Pio database state file: {path}")
+    return _sha256_bytes(path.read_bytes())
+
+
+def _database_state(database: Path) -> dict[str, str | None]:
+    return {
+        "database": _regular_hash_or_none(database),
+        "wal": _regular_hash_or_none(Path(str(database) + "-wal")),
+        "shm": _regular_hash_or_none(Path(str(database) + "-shm")),
+    }
+
+
+def _snapshot_sqlite(source: Path, destination: Path) -> None:
+    before = _database_state(source)
+    if before["database"] is None:
+        raise ValueError("Pio database disappeared before snapshot")
+    uri = f"file:{source.as_posix()}?mode=ro"
+    if before["wal"] is None:
+        uri += "&immutable=1"
+    src = sqlite3.connect(uri, uri=True)
+    try:
+        dst = sqlite3.connect(destination)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    if _database_state(source) != before:
+        raise ValueError("Pio database changed during private label snapshot")
+
+
+def _load_reviewed(source: Path) -> tuple[Any, dict[str, Any]]:
+    for relative, expected_blob in REVIEWED_SOURCE_BLOBS.items():
+        path = source / relative
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(
+                f"Phase 7 EXIT learning-label dependency missing: {relative}"
+            )
+        if _git_blob_sha(path) != expected_blob:
+            raise ValueError(
+                f"Phase 7 EXIT learning-label dependency mismatch: {relative}"
+            )
+
+    audit_module = _load_module(
+        source / POST_RECONCILIATION_TOOL,
+        "phase7_exit_learning_label_post_reconciliation",
+    )
+
+    python_src = source / "python-learner" / "src"
+    if str(python_src) not in sys.path:
+        sys.path.insert(0, str(python_src))
+
+    from meteora_learner.live_learning_label import build_live_learning_label
+    from meteora_learner.live_position_valuation import value_live_position_outcome
+    from meteora_learner.storage import Storage
+
+    return audit_module, {
+        "Storage": Storage,
+        "value_live_position_outcome": value_live_position_outcome,
+        "build_live_learning_label": build_live_learning_label,
+    }
+
+
+def _pre_state(database: Path, position_address: str) -> dict[str, bool]:
+    conn = sqlite3.connect(database)
+    try:
+        valuation = conn.execute(
+            "SELECT 1 FROM live_position_valuations WHERE position_address = ?",
+            (position_address,),
+        ).fetchone()
+        label = conn.execute(
+            "SELECT 1 FROM live_learning_labels WHERE position_address = ?",
+            (position_address,),
+        ).fetchone()
+        return {
+            "valuation": valuation is not None,
+            "label": label is not None,
+        }
+    finally:
+        conn.close()
+
+
+def _target_state(database: Path, position_address: str) -> dict[str, Any]:
+    conn = sqlite3.connect(database)
+    conn.row_factory = sqlite3.Row
+    try:
+        outcome = conn.execute(
+            """
+            SELECT position_address, pool_address, opened_decision_id,
+                   closed_decision_id, execution_count,
+                   token_x_wallet_delta_atomic, token_y_wallet_delta_atomic,
+                   composition_fee_x_atomic, composition_fee_y_atomic,
+                   earned_fee_x_atomic, earned_fee_y_atomic,
+                   reward_one_atomic, reward_two_atomic,
+                   network_fee_lamports, label_status, raw_json
+            FROM live_position_outcomes
+            WHERE position_address = ?
+            """,
+            (position_address,),
+        ).fetchone()
+        valuation = conn.execute(
+            """
+            SELECT position_address, pool_address, opened_decision_id,
+                   closed_decision_id, quote_unit, valued_execution_count,
+                   principal_cashflow_quote, composition_cost_quote,
+                   fee_income_quote, reward_income_quote,
+                   network_cost_quote, realized_pnl_quote,
+                   entry_outflow_quote, realized_return_bps,
+                   max_age_seconds, quote_evidence_json, raw_json
+            FROM live_position_valuations
+            WHERE position_address = ?
+            """,
+            (position_address,),
+        ).fetchone()
+        label = conn.execute(
+            """
+            SELECT position_address, decision_id, pool_address,
+                   model_version, strategy, min_bin_id, max_bin_id,
+                   range_width_bins, proposed_capital_quote,
+                   expected_net_return_pct, expected_downside_pct,
+                   realized_pnl_quote, realized_return_bps,
+                   prediction_error_bps, target_positive_return,
+                   quote_unit, opened_signature, closed_decision_id,
+                   raw_json
+            FROM live_learning_labels
+            WHERE position_address = ?
+            """,
+            (position_address,),
+        ).fetchone()
+
+        def record(row: sqlite3.Row | None) -> dict[str, Any] | None:
+            return dict(row) if row is not None else None
+
+        return {
+            "outcome": record(outcome),
+            "valuation": record(valuation),
+            "learning_label": record(label),
+        }
+    finally:
+        conn.close()
+
+
+def validate_exit_learning_label_plan(report: dict[str, Any]) -> None:
+    if not isinstance(report, dict):
+        raise ValueError("Phase 7 EXIT learning-label plan must be a JSON object")
+    if set(report) != set(REPORT_FIELDS) | {"plan_sha256"}:
+        raise ValueError("Phase 7 EXIT learning-label plan schema mismatch")
+    if report.get("format_version") != FORMAT_VERSION:
+        raise ValueError("unsupported Phase 7 EXIT learning-label plan format")
+    if report.get("artifact_type") != ARTIFACT_TYPE:
+        raise ValueError("unexpected Phase 7 EXIT learning-label plan type")
+
+    expected_blobs = {
+        str(path): blob
+        for path, blob in sorted(
+            REVIEWED_SOURCE_BLOBS.items(),
+            key=lambda item: str(item[0]),
+        )
+    }
+    if report.get("reviewed_source_blobs") != expected_blobs:
+        raise ValueError("Phase 7 EXIT learning-label plan lineage mismatch")
+
+    for field in (
+        "saved_post_reconciliation_audit_sha256",
+        "expected_post_reconciliation_audit_sha256",
+        "pio_database_sha256_before",
+        "pio_database_sha256_after",
+        "private_target_state_sha256",
+        "plan_sha256",
+    ):
+        if not _is_hex_digest(report.get(field), 64):
+            raise ValueError(
+                f"Phase 7 EXIT learning-label plan {field} is invalid"
+            )
+    for field in (
+        "pio_wal_sha256_before",
+        "pio_wal_sha256_after",
+        "pio_shm_sha256_before",
+        "pio_shm_sha256_after",
+    ):
+        value = report.get(field)
+        if value is not None and not _is_hex_digest(value, 64):
+            raise ValueError(
+                f"Phase 7 EXIT learning-label plan {field} is invalid"
+            )
+
+    if report["saved_post_reconciliation_audit_sha256"] != report[
+        "expected_post_reconciliation_audit_sha256"
+    ]:
+        raise ValueError("post-reconciliation audit digest mismatch")
+    if report["pio_database_sha256_before"] != report[
+        "pio_database_sha256_after"
+    ]:
+        raise ValueError("production Pio database changed during label planning")
+    if report["pio_wal_sha256_before"] != report["pio_wal_sha256_after"]:
+        raise ValueError("production Pio WAL changed during label planning")
+    if report["pio_shm_sha256_before"] != report["pio_shm_sha256_after"]:
+        raise ValueError("production Pio SHM changed during label planning")
+
+    for field in (
+        "opened_decision_id",
+        "principal_exit_decision_id",
+        "settlement_decision_id",
+        "pool_address",
+        "position_address",
+        "pio_database_path",
+    ):
+        if not isinstance(report.get(field), str) or not report[field]:
+            raise ValueError(
+                f"Phase 7 EXIT learning-label plan {field} is invalid"
+            )
+    age = report.get("max_quote_age_seconds")
+    if not isinstance(age, int) or isinstance(age, bool) or age < 0:
+        raise ValueError("max_quote_age_seconds is invalid")
+
+    for field in (
+        "pre_valuation_present",
+        "pre_learning_label_present",
+        "valuation_reused_existing",
+        "learning_label_reused_existing",
+        "learning_label_reconciliation_required",
+        "requires_separate_learning_label_apply",
+    ):
+        if not isinstance(report.get(field), bool):
+            raise ValueError(
+                f"Phase 7 EXIT learning-label plan {field} is invalid"
+            )
+
+    if not isinstance(report.get("private_valuation"), dict):
+        raise ValueError("private valuation is invalid")
+    if not isinstance(report.get("private_learning_label"), dict):
+        raise ValueError("private learning label is invalid")
+    valuation = report["private_valuation"]
+    label = report["private_learning_label"]
+    if valuation.get("position_address") != report["position_address"]:
+        raise ValueError("private valuation position mismatch")
+    if valuation.get("closed_decision_id") != report["settlement_decision_id"]:
+        raise ValueError("private valuation settlement decision mismatch")
+    if label.get("position_address") != report["position_address"]:
+        raise ValueError("private learning-label position mismatch")
+    if label.get("decision_id") != report["opened_decision_id"]:
+        raise ValueError("private learning-label opening decision mismatch")
+    if label.get("closed_decision_id") != report["settlement_decision_id"]:
+        raise ValueError("private learning-label settlement decision mismatch")
+    if label.get("realized_pnl_quote") != valuation.get("realized_pnl_quote"):
+        raise ValueError("learning-label PnL differs from valuation")
+    if label.get("realized_return_bps") != valuation.get(
+        "realized_return_bps"
+    ):
+        raise ValueError("learning-label return differs from valuation")
+
+    expected_required = not (
+        report["pre_valuation_present"] and report["pre_learning_label_present"]
+    )
+    if report["learning_label_reconciliation_required"] is not expected_required:
+        raise ValueError("learning-label reconciliation-required flag mismatch")
+    if report["requires_separate_learning_label_apply"] is not expected_required:
+        raise ValueError("learning-label apply flag mismatch")
+
+    for field in (
+        "learning_label_plan_ready",
+        "requires_post_label_audit",
+        "phase7_evidence_status_recheck_required",
+        "requires_separate_phase7_promotion_action",
+    ):
+        if report.get(field) is not True:
+            raise ValueError(
+                f"Phase 7 EXIT learning-label plan requires {field}=true"
+            )
+
+    for field in (
+        "transaction_signing_authorized",
+        "transaction_submission_authorized",
+        "automatic_resubmission_authorized",
+        "new_live_entry_authorized",
+        "new_live_capital_authorized",
+        "phase7_promotion_authorized",
+        "phase7_promotion_persisted",
+        "production_file_modified",
+        "production_repository_git_mutated",
+        "production_pio_database_modified",
+    ):
+        if report.get(field) is not False:
+            raise ValueError(
+                f"Phase 7 EXIT learning-label plan requires {field}=false"
+            )
+
+    identity = {field: report[field] for field in REPORT_FIELDS}
+    if report["plan_sha256"] != _sha256_bytes(_canonical_bytes(identity)):
+        raise ValueError("Phase 7 EXIT learning-label plan digest mismatch")
+
+
+def build_exit_learning_label_plan(
+    *,
+    source_tree: str | Path,
+    saved_post_reconciliation_audit_path: str | Path,
+    expected_post_reconciliation_audit_sha256: str,
+    pio_database_path: str | Path,
+    max_quote_age_seconds: int = 300,
+) -> dict[str, Any]:
+    source = Path(source_tree).resolve()
+    if not source.is_dir():
+        raise ValueError("reviewed source tree is missing")
+    audit_module, runtime = _load_reviewed(source)
+
+    audit = _load_json(
+        saved_post_reconciliation_audit_path,
+        label="saved Phase 7 EXIT post-reconciliation audit",
+    )
+    audit_module.validate_exit_final_post_reconciliation_audit(audit)
+    if (
+        not _is_hex_digest(expected_post_reconciliation_audit_sha256, 64)
+        or audit["audit_sha256"]
+        != expected_post_reconciliation_audit_sha256
+    ):
+        raise ValueError("saved post-reconciliation audit digest mismatch")
+
+    for field in (
+        "target_state_matches_apply",
+        "closure_proof_present",
+        "position_outcome_present",
+        "global_receipt_audit_clean",
+        "global_live_ledger_clean",
+        "exact_exit_lifecycle_reconciled",
+        "learning_label_reconciliation_required",
+        "phase7_evidence_status_recheck_required",
+        "requires_separate_phase7_promotion_action",
+    ):
+        if audit.get(field) is not True:
+            raise ValueError(
+                f"post-reconciliation audit lost required {field}"
+            )
+    if audit.get("position_status") != "CLOSED":
+        raise ValueError("learning-label plan requires CLOSED position")
+    if audit.get("open_position_lifecycle_followup_required") is not False:
+        raise ValueError("closed position cannot require open lifecycle followup")
+    if audit.get("production_pio_database_modified") is not False:
+        raise ValueError("post-reconciliation audit mutated production database")
+
+    if (
+        not isinstance(max_quote_age_seconds, int)
+        or isinstance(max_quote_age_seconds, bool)
+        or max_quote_age_seconds < 0
+    ):
+        raise ValueError("max_quote_age_seconds must be a non-negative integer")
+
+    database = Path(pio_database_path).expanduser()
+    if database.is_symlink():
+        raise ValueError("Pio database must not be a symlink")
+    database = database.resolve(strict=True)
+    if str(database) != audit["pio_database_path"]:
+        raise ValueError("learning-label Pio database differs from audit")
+    if not stat.S_ISREG(os.lstat(database).st_mode):
+        raise ValueError("Pio database must be a regular file")
+
+    before = _database_state(database)
+    if before["database"] != audit["pio_database_sha256_after"]:
+        raise ValueError("Pio database changed after post-reconciliation audit")
+    if before["wal"] != audit["pio_wal_sha256_after"]:
+        raise ValueError("Pio WAL changed after post-reconciliation audit")
+    if before["shm"] != audit["pio_shm_sha256_after"]:
+        raise ValueError("Pio SHM changed after post-reconciliation audit")
+
+    pre = _pre_state(database, audit["position_address"])
+
+    with tempfile.TemporaryDirectory(prefix="pio-phase7-exit-label-plan-") as tmp:
+        private_db = Path(tmp) / "pio.db"
+        _snapshot_sqlite(database, private_db)
+        storage = runtime["Storage"](private_db)
+        valuation_result = runtime["value_live_position_outcome"](
+            storage,
+            position_address=audit["position_address"],
+            max_age_seconds=max_quote_age_seconds,
+        )
+        label_result = runtime["build_live_learning_label"](
+            storage,
+            position_address=audit["position_address"],
+        )
+        valuation = valuation_result.valuation.to_record()
+        label = label_result.label.to_record()
+        target = _target_state(private_db, audit["position_address"])
+        target_sha = _sha256_bytes(_canonical_bytes(target))
+
+    after = _database_state(database)
+    if after != before:
+        raise ValueError(
+            "production Pio database changed during learning-label planning"
+        )
+
+    identity = {
+        "format_version": FORMAT_VERSION,
+        "artifact_type": ARTIFACT_TYPE,
+        "reviewed_source_blobs": {
+            str(path): blob
+            for path, blob in sorted(
+                REVIEWED_SOURCE_BLOBS.items(),
+                key=lambda item: str(item[0]),
+            )
+        },
+        "saved_post_reconciliation_audit_sha256": audit["audit_sha256"],
+        "expected_post_reconciliation_audit_sha256": (
+            expected_post_reconciliation_audit_sha256
+        ),
+        "opened_decision_id": audit["opened_decision_id"],
+        "principal_exit_decision_id": audit["principal_exit_decision_id"],
+        "settlement_decision_id": audit["settlement_decision_id"],
+        "pool_address": audit["pool_address"],
+        "position_address": audit["position_address"],
+        "pio_database_path": str(database),
+        "pio_database_sha256_before": before["database"],
+        "pio_database_sha256_after": after["database"],
+        "pio_wal_sha256_before": before["wal"],
+        "pio_wal_sha256_after": after["wal"],
+        "pio_shm_sha256_before": before["shm"],
+        "pio_shm_sha256_after": after["shm"],
+        "max_quote_age_seconds": max_quote_age_seconds,
+        "pre_valuation_present": pre["valuation"],
+        "pre_learning_label_present": pre["label"],
+        "private_valuation": valuation,
+        "private_learning_label": label,
+        "valuation_reused_existing": bool(
+            valuation_result.reused_existing
+        ),
+        "learning_label_reused_existing": bool(
+            label_result.reused_existing
+        ),
+        "private_target_state_sha256": target_sha,
+        "learning_label_plan_ready": True,
+        "learning_label_reconciliation_required": not (
+            pre["valuation"] and pre["label"]
+        ),
+        "requires_separate_learning_label_apply": not (
+            pre["valuation"] and pre["label"]
+        ),
+        "requires_post_label_audit": True,
+        "phase7_evidence_status_recheck_required": True,
+        "requires_separate_phase7_promotion_action": True,
+        "transaction_signing_authorized": False,
+        "transaction_submission_authorized": False,
+        "automatic_resubmission_authorized": False,
+        "new_live_entry_authorized": False,
+        "new_live_capital_authorized": False,
+        "phase7_promotion_authorized": False,
+        "phase7_promotion_persisted": False,
+        "production_file_modified": False,
+        "production_repository_git_mutated": False,
+        "production_pio_database_modified": False,
+    }
+    report = {
+        **identity,
+        "plan_sha256": _sha256_bytes(_canonical_bytes(identity)),
+    }
+    validate_exit_learning_label_plan(report)
+    return report
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Privately replay the final closed Phase 7 EXIT position valuation "
+            "and learning-label build against a snapshot of the reconciled Pio "
+            "database. Fresh persisted no-lookahead quote evidence is required. "
+            "Production state is never mutated by this planning step."
+        )
+    )
+    parser.add_argument("--source-tree", required=True)
+    parser.add_argument("--saved-post-reconciliation-audit", required=True)
+    parser.add_argument(
+        "--expected-post-reconciliation-audit-sha256",
+        required=True,
+    )
+    parser.add_argument("--pio-db", default="/opt/pio/data/pio.db")
+    parser.add_argument(
+        "--max-quote-age-seconds",
+        type=int,
+        default=300,
+    )
+    args = parser.parse_args()
+
+    report = build_exit_learning_label_plan(
+        source_tree=args.source_tree,
+        saved_post_reconciliation_audit_path=(
+            args.saved_post_reconciliation_audit
+        ),
+        expected_post_reconciliation_audit_sha256=(
+            args.expected_post_reconciliation_audit_sha256
+        ),
+        pio_database_path=args.pio_db,
+        max_quote_age_seconds=args.max_quote_age_seconds,
+    )
+    print(json.dumps(report, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
