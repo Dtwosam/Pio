@@ -190,6 +190,7 @@ def _build(
         production = root / "production"
         production.mkdir()
         post["pio_database_path"] = str(production / "data" / "pio.db")
+        status["pio_database_path"] = post["pio_database_path"]
         audit_path = _write(root / "post.json", post)
         phase6_path = _write(root / "phase6.json", {"unused": True})
 
