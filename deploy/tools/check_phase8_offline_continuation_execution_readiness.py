@@ -571,6 +571,28 @@ def build_phase8_offline_continuation_execution_readiness(
         execution_receipt_path=execution_receipt_path,
     )
     audit_module.validate_phase8_offline_step_post_audit(fresh_audit)
+
+    operator = fresh_audit.get("fresh_phase8_operator_handoff")
+    operator_projection = _operator_projection(operator)
+    expected_operator = {
+        "status": "AUTOMATIC_ACTION",
+        "automatic_action_available": True,
+        "operator_action_required": False,
+        "manual_input_required": False,
+        "debt_type": request["debt_type"],
+        "scope": request["scope"],
+        "reason": request["reason"],
+        "suggested_command": request["suggested_command"],
+        "research_only": True,
+        "read_only": True,
+        "policy_actionable": False,
+        "execution_wired": False,
+    }
+    if operator_projection != expected_operator:
+        raise ValueError(
+            "fresh Phase 8 operator action differs from continuation request"
+        )
+
     saved_audit_state_sha = _audit_state_sha256(saved_audit)
     fresh_audit_state_sha = _audit_state_sha256(fresh_audit)
     if fresh_audit_state_sha != saved_audit_state_sha:
@@ -621,27 +643,6 @@ def build_phase8_offline_continuation_execution_readiness(
     if fresh_audit.get("next_scope") != request["scope"]:
         raise ValueError(
             "fresh Phase 8 post-audit scope differs from request"
-        )
-
-    operator = fresh_audit.get("fresh_phase8_operator_handoff")
-    operator_projection = _operator_projection(operator)
-    expected_operator = {
-        "status": "AUTOMATIC_ACTION",
-        "automatic_action_available": True,
-        "operator_action_required": False,
-        "manual_input_required": False,
-        "debt_type": request["debt_type"],
-        "scope": request["scope"],
-        "reason": request["reason"],
-        "suggested_command": request["suggested_command"],
-        "research_only": True,
-        "read_only": True,
-        "policy_actionable": False,
-        "execution_wired": False,
-    }
-    if operator_projection != expected_operator:
-        raise ValueError(
-            "fresh Phase 8 operator action differs from continuation request"
         )
 
     if request["debt_type"] not in ALLOWED_DEBT_TYPES:
