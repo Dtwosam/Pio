@@ -268,7 +268,6 @@ from .paper_latest import (
 )
 from .paper_portfolio import run_portfolio_live_paper_cycle
 from .paper_entry_workflow import build_and_open_bound_phase3_paper_entry
-from .paper_ml_pair_entry import open_paired_ml_paper_entries
 from .paper_chain_collection import build_paper_chain_collection_queue
 from .quote_registry import save_token_quote, token_quote_status
 from .paper_supervisor import run_paper_supervisor
@@ -753,105 +752,6 @@ def main() -> None:
     paper_chain_queue.add_argument("--account")
     paper_chain_queue.add_argument("--max-age-seconds", type=int, default=300)
     paper_chain_queue.add_argument("--array-radius", type=int, default=1)
-
-    paper_ml_pair_open = subparsers.add_parser(
-        "paper-open-ml-pair",
-        help=(
-            "Open equal-capital chain-bound ML_CHAMPION and "
-            "ML_CHALLENGER PAPER positions from one no-lookahead frame"
-        ),
-    )
-    paper_ml_pair_open.add_argument("--account", required=True)
-    paper_ml_pair_open.add_argument("--cycle-id", required=True)
-    paper_ml_pair_open.add_argument("--pool", required=True)
-    paper_ml_pair_open.add_argument("--amount-x", required=True, type=int)
-    paper_ml_pair_open.add_argument("--amount-y", required=True, type=int)
-    paper_ml_pair_open.add_argument(
-        "--network-cost-y-atomic",
-        required=True,
-        type=int,
-    )
-    paper_ml_pair_open.add_argument(
-        "--capital",
-        required=True,
-        type=float,
-    )
-    paper_ml_pair_open.add_argument(
-        "--entry-cost",
-        required=True,
-        type=float,
-    )
-    paper_ml_pair_open.add_argument(
-        "--incumbent-position",
-        required=True,
-    )
-    paper_ml_pair_open.add_argument(
-        "--challenger-position",
-        required=True,
-    )
-    paper_ml_pair_open.add_argument(
-        "--incumbent-event-key",
-        required=True,
-    )
-    paper_ml_pair_open.add_argument(
-        "--challenger-event-key",
-        required=True,
-    )
-    paper_ml_pair_open.add_argument(
-        "--lookback-observations",
-        type=int,
-        default=12,
-    )
-    paper_ml_pair_open.add_argument(
-        "--half-widths",
-        type=_parse_int_csv,
-        default=(0, 1, 2, 5, 10),
-    )
-    paper_ml_pair_open.add_argument(
-        "--center-offsets",
-        type=_parse_int_csv,
-        default=(0,),
-    )
-    paper_ml_pair_open.add_argument(
-        "--strategies",
-        type=_parse_strategy_csv,
-        default=tuple(StrategyType),
-    )
-    paper_ml_pair_open.add_argument(
-        "--max-share-bps",
-        type=int,
-        default=500,
-    )
-    paper_ml_pair_open.add_argument(
-        "--favor-x-active",
-        action="store_true",
-    )
-    paper_ml_pair_open.add_argument(
-        "--near-liquidity-radius",
-        type=int,
-        default=5,
-    )
-    paper_ml_pair_open.add_argument(
-        "--risk-lambda",
-        type=float,
-        default=1.5,
-    )
-    paper_ml_pair_open.add_argument(
-        "--min-positive-probability",
-        type=float,
-        default=0.55,
-    )
-    paper_ml_pair_open.add_argument(
-        "--min-range-survival",
-        type=float,
-        default=0.50,
-    )
-    paper_ml_pair_open.add_argument(
-        "--min-score-bps",
-        type=float,
-        default=0.0,
-    )
-    paper_ml_pair_open.add_argument("--as-of")
 
     paper_phase3_open = subparsers.add_parser(
         "paper-open-phase3",
@@ -8470,45 +8370,6 @@ def main() -> None:
             account_id=args.account,
             max_age_seconds=args.max_age_seconds,
             array_radius=args.array_radius,
-        )
-        print(json.dumps(result.to_record(), indent=2))
-        return
-
-    if args.command == "paper-open-ml-pair":
-        settings = Settings.from_env()
-        storage = Storage(settings.database_path)
-        result = open_paired_ml_paper_entries(
-            storage,
-            account_id=args.account,
-            cycle_id=args.cycle_id,
-            pool_address=args.pool,
-            amount_x=args.amount_x,
-            amount_y=args.amount_y,
-            network_cost_y_atomic=args.network_cost_y_atomic,
-            capital_quote=args.capital,
-            incumbent_position_id=args.incumbent_position,
-            challenger_position_id=args.challenger_position,
-            incumbent_event_key=args.incumbent_event_key,
-            challenger_event_key=args.challenger_event_key,
-            entry_cost_quote=args.entry_cost,
-            lookback_observations=args.lookback_observations,
-            half_widths=args.half_widths,
-            center_offsets=args.center_offsets,
-            strategies=args.strategies,
-            max_share_bps=args.max_share_bps,
-            favor_x_in_active_bin=args.favor_x_active,
-            near_liquidity_radius=args.near_liquidity_radius,
-            inference_config=MLInferenceConfig(
-                risk_lambda=args.risk_lambda,
-                min_positive_excess_probability=(
-                    args.min_positive_probability
-                ),
-                min_range_survival_probability=(
-                    args.min_range_survival
-                ),
-                min_score_bps=args.min_score_bps,
-            ),
-            as_of=args.as_of,
         )
         print(json.dumps(result.to_record(), indent=2))
         return
