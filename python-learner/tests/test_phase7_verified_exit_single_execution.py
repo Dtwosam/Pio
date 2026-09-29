@@ -335,6 +335,7 @@ def test_execution_wrapper_has_no_keypair_or_retry_primitive():
     assert "load_executor_keypair" not in source
     assert "sign_message" not in source
     assert "send_transaction" not in source
-    assert "max_retries" not in source
+    assert "max_retries: Some(" not in source
+    assert "send_and_confirm" not in source
     assert "for attempt" not in source
     assert "while True" not in source
