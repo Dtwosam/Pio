@@ -80,7 +80,17 @@ def _saved_plan(database: Path) -> dict:
 
 
 class _FakeModule:
-    pass
+    @staticmethod
+    def validate_exit_terminal_receipt(value):
+        assert isinstance(value, dict)
+
+    @staticmethod
+    def validate_exit_settlement_terminal_receipt(value):
+        assert isinstance(value, dict)
+
+    @staticmethod
+    def validate_exit_settlement_account_absence_proof(value):
+        assert isinstance(value, dict)
 
 
 class _FakeStorage:
