@@ -275,15 +275,40 @@ def validate_phase8_offline_step_mutation_plan(
     if report["debt_type"] not in ALLOWED_DEBT_TYPES:
         raise ValueError("Phase 8 mutation plan debt type is not allowed")
 
+    production = Path(report["production_repository"]).resolve()
+    database = Path(report["pio_database_path"]).resolve()
+    expected_database = (production / "data" / "pio.db").resolve()
+    if database != expected_database:
+        raise ValueError("Phase 8 mutation plan database path mismatch")
+
+    expected_root = _artifact_root(
+        production=production,
+        debt_type=report["debt_type"],
+        scope=report["scope"],
+    )
+    expected_root_text = (
+        str(expected_root.resolve(strict=False))
+        if expected_root is not None
+        else None
+    )
     artifact_root = report.get("allowed_artifact_root")
+    if artifact_root != expected_root_text:
+        raise ValueError("Phase 8 mutation artifact root binding mismatch")
     if report["debt_type"] == OFFLINE_VALIDATE:
-        if artifact_root is not None or report["artifact_root_exists"] is not False:
+        if report["artifact_root_exists"] is not False:
             raise ValueError("Phase 8 validation step must be DB-only")
-    else:
-        if not isinstance(artifact_root, str) or not artifact_root.startswith("/"):
-            raise ValueError("Phase 8 mutation artifact root is invalid")
-        if not isinstance(report.get("artifact_root_exists"), bool):
-            raise ValueError("Phase 8 artifact-root existence flag is invalid")
+    elif not isinstance(report.get("artifact_root_exists"), bool):
+        raise ValueError("Phase 8 artifact-root existence flag is invalid")
+
+    expected_targets = [
+        str(database),
+        str(Path(str(database) + "-wal")),
+        str(Path(str(database) + "-shm")),
+    ]
+    if expected_root_text is not None:
+        expected_targets.append(expected_root_text)
+    if report.get("allowed_mutation_targets") != expected_targets:
+        raise ValueError("Phase 8 mutation targets binding mismatch")
 
     for field in (
         "artifact_inventory_before",
