@@ -289,6 +289,9 @@ def validate_execution_admission(report: dict[str, Any]) -> None:
     if report["saved_readiness_sha256"] != report["expected_saved_readiness_sha256"]:
         raise ValueError("Phase 7 saved readiness digest mismatch")
 
+    if report["executor_binary_sha256"] != report["expected_executor_binary_sha256"]:
+        raise ValueError("Phase 7 executor binary trust-root mismatch")
+
     for field in (
         "decision_id",
         "pool_address",
