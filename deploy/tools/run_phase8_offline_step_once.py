@@ -59,6 +59,10 @@ ALLOWED_DEBT_TYPES = {
     "RETRAIN_OFFLINE_TRAIN_READY",
     "RETRAIN_OFFLINE_VALIDATION_READY",
 }
+ALLOWED_ARTIFACT_ROOTS = (
+    "phase8_retraining_datasets",
+    "phase8_ml_artifacts",
+)
 LOCK_PATH = Path("/var/tmp/pio-phase8-offline-step-one-shot.lock")
 
 RECEIPT_FIELDS = (
@@ -85,6 +89,11 @@ RECEIPT_FIELDS = (
     "pio_wal_sha256_after",
     "pio_shm_sha256_before",
     "pio_shm_sha256_after",
+    "research_artifacts_before",
+    "research_artifacts_after",
+    "research_artifact_changes",
+    "research_artifact_change_count",
+    "production_research_artifacts_modified",
     "debt_type",
     "scope",
     "planner_before",
@@ -276,6 +285,83 @@ def _production_database(production: Path) -> Path:
     return database.resolve()
 
 
+def _research_artifacts(data_root: Path) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+    for root_name in ALLOWED_ARTIFACT_ROOTS:
+        root = data_root / root_name
+        try:
+            root_stat = os.lstat(root)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(
+            root_stat.st_mode
+        ):
+            raise ValueError(
+                f"unsafe Phase 8 research artifact root: {root}"
+            )
+        for path in sorted(root.rglob("*")):
+            item_stat = os.lstat(path)
+            if stat.S_ISLNK(item_stat.st_mode):
+                raise ValueError(
+                    f"unsafe Phase 8 research artifact symlink: {path}"
+                )
+            if stat.S_ISDIR(item_stat.st_mode):
+                continue
+            if not stat.S_ISREG(item_stat.st_mode):
+                raise ValueError(
+                    f"unsafe Phase 8 research artifact file type: {path}"
+                )
+            payload = path.read_bytes()
+            artifacts.append(
+                {
+                    "path": path.relative_to(data_root).as_posix(),
+                    "size_bytes": len(payload),
+                    "sha256": _sha256_bytes(payload),
+                }
+            )
+    return artifacts
+
+
+def _artifact_changes(
+    before: list[dict[str, Any]],
+    after: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    before_by_path = {item["path"]: item for item in before}
+    after_by_path = {item["path"]: item for item in after}
+    changes: list[dict[str, Any]] = []
+    for path in sorted(set(before_by_path) | set(after_by_path)):
+        old = before_by_path.get(path)
+        new = after_by_path.get(path)
+        if old == new:
+            continue
+        status_name = (
+            "ADDED"
+            if old is None
+            else "REMOVED"
+            if new is None
+            else "MODIFIED"
+        )
+        changes.append(
+            {
+                "path": path,
+                "status": status_name,
+                "before_size_bytes": (
+                    old["size_bytes"] if old is not None else None
+                ),
+                "after_size_bytes": (
+                    new["size_bytes"] if new is not None else None
+                ),
+                "before_sha256": (
+                    old["sha256"] if old is not None else None
+                ),
+                "after_sha256": (
+                    new["sha256"] if new is not None else None
+                ),
+            }
+        )
+    return changes
+
+
 def _stable_readiness_projection(
     value: dict[str, Any],
 ) -> dict[str, Any]:
@@ -334,6 +420,7 @@ def _execute_exact_offline_step(
     *,
     debt_type: str,
     scope: str,
+    data_root: Path,
 ) -> tuple[str, dict[str, Any] | None, str | None]:
     try:
         if debt_type == "RETRAIN_DATASET_BUILD_READY":
@@ -354,6 +441,9 @@ def _execute_exact_offline_step(
             result = runtime["run_phase8_retrain_build_from_inputs"](
                 storage,
                 artifact=artifact,
+                output_directory=(
+                    data_root / "phase8_retraining_datasets"
+                ),
             )
             return "COMPLETE", _record(result), None
 
@@ -361,6 +451,9 @@ def _execute_exact_offline_step(
             result = runtime["train_phase8_cycle_challenger"](
                 storage,
                 cycle_id=scope,
+                artifact_directory=(
+                    data_root / "phase8_ml_artifacts" / scope
+                ),
             )
             return "COMPLETE", _record(result), None
 
@@ -440,6 +533,59 @@ def validate_phase8_offline_step_execution_receipt(
         value = receipt.get(field)
         if value is not None and not _is_hex_digest(value, 64):
             raise ValueError(f"Phase 8 one-shot receipt {field} is invalid")
+
+    for artifact_field in (
+        "research_artifacts_before",
+        "research_artifacts_after",
+    ):
+        artifacts = receipt.get(artifact_field)
+        if not isinstance(artifacts, list):
+            raise ValueError(
+                f"Phase 8 one-shot receipt {artifact_field} is invalid"
+            )
+        for item in artifacts:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"path", "size_bytes", "sha256"}
+                or not isinstance(item["path"], str)
+                or not item["path"]
+                or Path(item["path"]).is_absolute()
+                or ".." in Path(item["path"]).parts
+                or not any(
+                    item["path"] == root
+                    or item["path"].startswith(root + "/")
+                    for root in ALLOWED_ARTIFACT_ROOTS
+                )
+                or not isinstance(item["size_bytes"], int)
+                or isinstance(item["size_bytes"], bool)
+                or item["size_bytes"] < 0
+                or not _is_hex_digest(item["sha256"], 64)
+            ):
+                raise ValueError(
+                    f"Phase 8 one-shot receipt {artifact_field} entry is invalid"
+                )
+
+    expected_artifact_changes = _artifact_changes(
+        receipt["research_artifacts_before"],
+        receipt["research_artifacts_after"],
+    )
+    if receipt.get("research_artifact_changes") != expected_artifact_changes:
+        raise ValueError(
+            "Phase 8 one-shot research artifact changes mismatch"
+        )
+    if receipt.get("research_artifact_change_count") != len(
+        expected_artifact_changes
+    ):
+        raise ValueError(
+            "Phase 8 one-shot research artifact change count mismatch"
+        )
+    artifacts_modified = bool(expected_artifact_changes)
+    if receipt.get(
+        "production_research_artifacts_modified"
+    ) is not artifacts_modified:
+        raise ValueError(
+            "Phase 8 one-shot research artifact modified binding mismatch"
+        )
 
     for field in (
         "production_repository",
@@ -729,6 +875,9 @@ def execute_phase8_offline_step_once(
                 "Pio database changed after Phase 8 execution readiness"
             )
 
+        data_root = database.parent
+        before_artifacts = _research_artifacts(data_root)
+
         storage = runtime["Storage"](database)
         planner_before = _record(
             runtime["build_phase8_evidence_plan"](storage)
@@ -773,11 +922,13 @@ def execute_phase8_offline_step_once(
             storage,
             debt_type=debt_type,
             scope=scope,
+            data_root=data_root,
         )
         planner_after = _record(
             runtime["build_phase8_evidence_plan"](storage)
         )
         after_state = _database_state(database)
+        after_artifacts = _research_artifacts(data_root)
     finally:
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
@@ -792,6 +943,11 @@ def execute_phase8_offline_step_once(
         _canonical_bytes(planner_after)
     )
     database_modified = before_state != after_state
+    artifact_changes = _artifact_changes(
+        before_artifacts,
+        after_artifacts,
+    )
+    artifacts_modified = bool(artifact_changes)
     completed = operation_status in {"COMPLETE", "NOT_QUALIFIED"}
     progressed = (
         operation_status == "COMPLETE"
@@ -840,6 +996,11 @@ def execute_phase8_offline_step_once(
         "pio_wal_sha256_after": after_state["wal"],
         "pio_shm_sha256_before": before_state["shm"],
         "pio_shm_sha256_after": after_state["shm"],
+        "research_artifacts_before": before_artifacts,
+        "research_artifacts_after": after_artifacts,
+        "research_artifact_changes": artifact_changes,
+        "research_artifact_change_count": len(artifact_changes),
+        "production_research_artifacts_modified": artifacts_modified,
         "debt_type": debt_type,
         "scope": scope,
         "planner_before": planner_before,
