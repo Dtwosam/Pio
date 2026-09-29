@@ -118,6 +118,28 @@ pub fn sign_new_execution_intent(
         );
     }
 
+    // Reject an obviously wrong loaded wallet before changing state. The
+    // atomic claim below remains authoritative for concurrent status changes.
+    let current = store.load(decision_id)?;
+    if current.status != ExecutionIntentStatus::SimulationPassed {
+        anyhow::bail!(
+            "new execution signing requires SIMULATION_PASSED status; current status is {:?}",
+            current.status
+        );
+    }
+    let current_authorization = current
+        .wallet_authorization
+        .as_ref()
+        .context("signing intent is missing wallet authorization")?;
+    if !current_authorization.accepted {
+        anyhow::bail!("signing intent wallet authorization is not accepted");
+    }
+    if current_authorization.wallet_pubkey != keypair.pubkey().to_string() {
+        anyhow::bail!(
+            "loaded executor keypair differs from persisted wallet authorization"
+        );
+    }
+
     // Atomically claim only a fresh SIMULATION_PASSED intent. Unlike the
     // restart/recovery signer below, this path deliberately refuses an
     // already-SIGNING or SENT intent so a first submission cannot become a
@@ -421,6 +443,29 @@ mod tests {
         assert_eq!(
             store.load(&id).unwrap().status,
             ExecutionIntentStatus::Signing
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn new_execution_signer_rejects_wrong_wallet_before_state_change() {
+        let expected = Keypair::new();
+        let other = Keypair::new();
+        let (store, path, id) = ready_store(&expected);
+
+        assert!(
+            sign_new_execution_intent(
+                &store,
+                &id,
+                &other,
+                &accepted_phase5_gate(),
+            )
+            .is_err()
+        );
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::SimulationPassed
         );
 
         let _ = std::fs::remove_file(path);
