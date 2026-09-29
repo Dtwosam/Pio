@@ -383,6 +383,23 @@ def validate_exit_settlement_finalization(
         raise ValueError(
             "Phase 7 EXIT settlement finalization reward destinations invalid"
         )
+    normalized_destination_config = {
+        "user_token_x": report["user_token_x"],
+        "user_token_y": report["user_token_y"],
+        "reward_token_destinations": report["reward_token_destinations"],
+    }
+    if report["destination_config_sha256"] != _sha256_value(
+        normalized_destination_config
+    ):
+        raise ValueError(
+            "Phase 7 EXIT settlement finalization destination-config digest mismatch"
+        )
+    if report["final_settlement_transaction_sha256"] != _sha256_text(
+        report["final_settlement_transaction_base64"]
+    ):
+        raise ValueError(
+            "Phase 7 EXIT settlement finalization transaction digest mismatch"
+        )
 
     for field in (
         "final_risk_accepted",
