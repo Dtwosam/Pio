@@ -32,12 +32,14 @@ def _handoff(database: Path) -> dict:
         "handoff_sha256": "a" * 64,
         "saved_post_label_audit_sha256": "b" * 64,
         "continuation_route": "PHASE7_PROMOTION_REVIEW",
+        "production_repository": str(database.parent.parent),
     }
 
 
 def _request(database: Path) -> dict:
     return {
         "request_sha256": "c" * 64,
+        "production_repository": str(database.parent.parent),
         "completion_handoff_sha256": "a" * 64,
         "phase7_evidence_status_sha256": "d" * 64,
         "phase7_evidence_plan_sha256": "e" * 64,
