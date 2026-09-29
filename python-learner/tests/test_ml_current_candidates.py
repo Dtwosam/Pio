@@ -1,28 +1,14 @@
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from meteora_learner import ml_current_candidates as MODULE
+
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = (
-    ROOT
-    / "python-learner"
-    / "src"
-    / "meteora_learner"
-    / "ml_current_candidates.py"
-)
-
-SPEC = importlib.util.spec_from_file_location(
-    "meteora_learner.ml_current_candidates_test_target",
-    MODULE_PATH,
-)
-assert SPEC is not None and SPEC.loader is not None
-MODULE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(MODULE)
 
 
 T1 = "2026-09-29T20:00:00+00:00"
