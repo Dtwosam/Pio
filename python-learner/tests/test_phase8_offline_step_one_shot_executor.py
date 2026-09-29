@@ -176,12 +176,23 @@ def _build(
             before_plan if plan_calls["count"] == 1 else after_plan
         )
 
-    def train(storage, *, cycle_id):
+    def train(storage, *, cycle_id, artifact_directory):
         operation_calls["count"] += 1
         assert cycle_id == SCOPE
+        expected_root = (
+            storage.path.parent
+            / "phase8_ml_artifacts"
+            / SCOPE
+        )
+        assert Path(artifact_directory) == expected_root
         if operation_raises:
             raise RuntimeError("offline training failed")
         storage.path.write_bytes(b"phase8-after")
+        expected_root.mkdir(parents=True)
+        (expected_root / "model.json").write_text(
+            '{"model":"challenger-1"}',
+            encoding="utf-8",
+        )
         return _Record(
             {
                 "cycle_id": cycle_id,
@@ -275,6 +286,12 @@ def test_one_shot_executes_exact_authorized_offline_step_once(
     assert receipt["step_progressed"] is True
     assert receipt["requires_post_step_audit"] is True
     assert receipt["production_pio_database_modified"] is True
+    assert receipt["production_research_artifacts_modified"] is True
+    assert receipt["research_artifact_change_count"] == 1
+    assert receipt["research_artifact_changes"][0]["status"] == "ADDED"
+    assert receipt["research_artifact_changes"][0]["path"] == (
+        "phase8_ml_artifacts/cycle-1/model.json"
+    )
     assert receipt["paper_challenger_transition_performed"] is False
     assert receipt["paper_trading_authorized"] is False
     assert receipt["live_submit_authorized"] is False
@@ -443,5 +460,6 @@ def test_executor_has_no_paper_or_live_execution_primitive():
     assert '"paper_challenger_transition_performed": False' in source
     assert '"transaction_submission_performed": False' in source
     assert '"new_live_capital_used": False' in source
+    assert '"production_research_artifacts_modified": artifacts_modified' in source
     assert '"phase8_execution_authorized": False' in source
     assert '"phase8_promotion_authorized": False' in source
