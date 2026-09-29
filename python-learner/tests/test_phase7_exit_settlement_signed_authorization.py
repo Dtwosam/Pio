@@ -486,6 +486,8 @@ def test_resealed_verification_cannot_authorize_submission():
 def test_signed_authorization_tool_has_no_execution_primitive():
     source = TOOL.read_text(encoding="utf-8")
 
+    assert 'shutil.which("ssh-keygen")' in source
+    assert "str(_ssh_keygen_path())" in source
     assert "load_executor_keypair" not in source
     assert "controlled-live-submit" not in source
     assert "send_transaction" not in source
