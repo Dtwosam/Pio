@@ -235,10 +235,14 @@ def validate_exit_position_valuation_apply(
             )
     if report.get("valuation_remaining") is not False:
         raise ValueError("valuation apply still has remaining work")
-    if not isinstance(report.get("valuation_reused_existing"), bool):
-        raise ValueError("valuation apply reuse flag is invalid")
-    if not isinstance(report.get("production_pio_database_modified"), bool):
-        raise ValueError("valuation apply DB mutation flag is invalid")
+    if report.get("valuation_reused_existing") is not False:
+        raise ValueError(
+            "valuation apply requires valuation_reused_existing=false"
+        )
+    if report.get("production_pio_database_modified") is not True:
+        raise ValueError(
+            "valuation apply requires production_pio_database_modified=true"
+        )
 
     for field in (
         "new_live_entry_authorized",
