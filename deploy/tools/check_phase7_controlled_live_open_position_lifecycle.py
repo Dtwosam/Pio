@@ -20,12 +20,16 @@ HANDOFF_TOOL = Path(
 RECEIPT_TOOL = Path(
     "deploy/tools/build_phase7_controlled_live_execution_receipt.py"
 )
+EXECUTE_ONCE_TOOL = Path(
+    "deploy/tools/execute_phase7_controlled_live_transaction_once.py"
+)
 RUST_MAIN = Path("rust-executor/src/main.rs")
 RUST_STATE_READER = Path("rust-executor/src/state_reader.rs")
 
 REVIEWED_SOURCE_BLOBS = {
     HANDOFF_TOOL: "5cde6cb56e00df3493f669886e08d400eb241ab4",
     RECEIPT_TOOL: "b7d096fdf1baeff85bc311a630df5c77dc220ce1",
+    EXECUTE_ONCE_TOOL: "7580321ce1e418f1fa3d612c196748bef3c0e59a",
     RUST_MAIN: "96ecb4479482d146abbecafc53466b93fa452d80",
     RUST_STATE_READER: "30d1435af1329bca07f73d6639539b43503e84e9",
 }
@@ -42,10 +46,13 @@ REPORT_FIELDS = (
     "expected_handoff_sha256",
     "saved_execution_receipt_sha256",
     "expected_execution_receipt_sha256",
+    "saved_execution_once_sha256",
+    "expected_execution_once_sha256",
     "decision_id",
     "signature",
     "pool_address",
     "position_address",
+    "executor_wallet_pubkey",
     "rpc_endpoint_sha256",
     "executor_binary_path",
     "executor_binary_sha256",
@@ -56,6 +63,7 @@ REPORT_FIELDS = (
     "capture_slot_end",
     "snapshot_pool_matches",
     "snapshot_position_matches",
+    "snapshot_owner_matches_executor_wallet",
     "owner",
     "fee_owner",
     "lower_bin_id",
@@ -155,7 +163,7 @@ def _load_json(path: str | Path, *, label: str) -> dict[str, Any]:
     return value
 
 
-def _load_reviewed(source: Path) -> tuple[Any, Any]:
+def _load_reviewed(source: Path) -> tuple[Any, Any, Any]:
     for relative, expected_blob in REVIEWED_SOURCE_BLOBS.items():
         path = source / relative
         if path.is_symlink() or not path.is_file():
@@ -170,7 +178,11 @@ def _load_reviewed(source: Path) -> tuple[Any, Any]:
         source / RECEIPT_TOOL,
         "phase7_open_position_lifecycle_receipt",
     )
-    return handoff, receipt
+    execute_once = _load_module(
+        source / EXECUTE_ONCE_TOOL,
+        "phase7_open_position_lifecycle_execute_once",
+    )
+    return handoff, receipt, execute_once
 
 
 def _inspect_env(*, rpc_url: str) -> dict[str, str]:
@@ -285,6 +297,8 @@ def validate_open_position_lifecycle_status(report: dict[str, Any]) -> None:
         "expected_handoff_sha256",
         "saved_execution_receipt_sha256",
         "expected_execution_receipt_sha256",
+        "saved_execution_once_sha256",
+        "expected_execution_once_sha256",
         "rpc_endpoint_sha256",
         "executor_binary_sha256",
         "expected_executor_binary_sha256",
@@ -302,6 +316,11 @@ def validate_open_position_lifecycle_status(report: dict[str, Any]) -> None:
     ):
         raise ValueError("Phase 7 open-position receipt digest mismatch")
     if (
+        report["saved_execution_once_sha256"]
+        != report["expected_execution_once_sha256"]
+    ):
+        raise ValueError("Phase 7 open-position execute-once digest mismatch")
+    if (
         report["executor_binary_sha256"]
         != report["expected_executor_binary_sha256"]
     ):
@@ -312,6 +331,7 @@ def validate_open_position_lifecycle_status(report: dict[str, Any]) -> None:
         "signature",
         "pool_address",
         "position_address",
+        "executor_wallet_pubkey",
         "executor_binary_path",
         "owner",
         "fee_owner",
@@ -350,6 +370,7 @@ def validate_open_position_lifecycle_status(report: dict[str, Any]) -> None:
     for field in (
         "snapshot_pool_matches",
         "snapshot_position_matches",
+        "snapshot_owner_matches_executor_wallet",
         "position_account_present",
         "open_position_snapshot_ready",
         "requires_operator_review",
@@ -397,6 +418,8 @@ def build_open_position_lifecycle_status(
     expected_handoff_sha256: str,
     saved_execution_receipt_path: str | Path,
     expected_execution_receipt_sha256: str,
+    saved_execution_once_path: str | Path,
+    expected_execution_once_sha256: str,
     executor_binary_path: str | Path,
     expected_executor_binary_sha256: str,
     rpc_url: str,
@@ -404,7 +427,7 @@ def build_open_position_lifecycle_status(
     source = Path(source_tree).resolve()
     if not source.is_dir():
         raise ValueError("reviewed source tree is missing")
-    handoff_module, receipt_module = _load_reviewed(source)
+    handoff_module, receipt_module, execute_once_module = _load_reviewed(source)
 
     handoff = _load_json(
         saved_handoff_path,
@@ -441,6 +464,23 @@ def build_open_position_lifecycle_status(
     if execution.get("transaction_chain_confirmation_observed") is not True:
         raise ValueError("open-position lifecycle requires confirmed execution receipt")
 
+    execute_once = _load_json(
+        saved_execution_once_path,
+        label="saved Phase 7 execute-once artifact",
+    )
+    execute_once_module.validate_execution_once_report(execute_once)
+    if not _is_hex_digest(expected_execution_once_sha256, 64):
+        raise ValueError("expected Phase 7 execute-once digest is invalid")
+    if execute_once["execution_once_sha256"] != expected_execution_once_sha256:
+        raise ValueError("saved Phase 7 execute-once digest mismatch")
+    if execution["saved_execution_once_sha256"] != execute_once["execution_once_sha256"]:
+        raise ValueError("execution receipt/execute-once binding mismatch")
+    for field in ("decision_id", "signature", "pool_address"):
+        if execute_once[field] != handoff[field]:
+            raise ValueError(
+                f"execute-once {field} differs from lifecycle handoff"
+            )
+
     if _sha256_text(rpc_url) != execution["rpc_endpoint_sha256"]:
         raise ValueError("lifecycle RPC endpoint differs from execution receipt")
 
@@ -461,6 +501,10 @@ def build_open_position_lifecycle_status(
         position_address=handoff["position_address"],
         pool_address=handoff["pool_address"],
     )
+    if snapshot["owner"] != execute_once["executor_wallet_pubkey"]:
+        raise ValueError(
+            "open-position owner differs from the authorized executor wallet"
+        )
 
     bins = snapshot["bins"]
     identity = {
@@ -479,10 +523,13 @@ def build_open_position_lifecycle_status(
             "receipt_artifact_sha256"
         ],
         "expected_execution_receipt_sha256": expected_execution_receipt_sha256,
+        "saved_execution_once_sha256": execute_once["execution_once_sha256"],
+        "expected_execution_once_sha256": expected_execution_once_sha256,
         "decision_id": handoff["decision_id"],
         "signature": handoff["signature"],
         "pool_address": handoff["pool_address"],
         "position_address": handoff["position_address"],
+        "executor_wallet_pubkey": execute_once["executor_wallet_pubkey"],
         "rpc_endpoint_sha256": execution["rpc_endpoint_sha256"],
         "executor_binary_path": str(binary),
         "executor_binary_sha256": binary_sha,
@@ -493,6 +540,7 @@ def build_open_position_lifecycle_status(
         "capture_slot_end": snapshot["capture_slot_end"],
         "snapshot_pool_matches": True,
         "snapshot_position_matches": True,
+        "snapshot_owner_matches_executor_wallet": True,
         "owner": snapshot["owner"],
         "fee_owner": snapshot["fee_owner"],
         "lower_bin_id": snapshot["lower_bin_id"],
@@ -551,6 +599,8 @@ def main() -> None:
     parser.add_argument("--expected-handoff-sha256", required=True)
     parser.add_argument("--saved-execution-receipt", required=True)
     parser.add_argument("--expected-execution-receipt-sha256", required=True)
+    parser.add_argument("--saved-execution-once", required=True)
+    parser.add_argument("--expected-execution-once-sha256", required=True)
     parser.add_argument("--executor-binary", required=True)
     parser.add_argument("--expected-executor-binary-sha256", required=True)
     parser.add_argument("--rpc-url", required=True)
@@ -564,6 +614,8 @@ def main() -> None:
         expected_execution_receipt_sha256=(
             args.expected_execution_receipt_sha256
         ),
+        saved_execution_once_path=args.saved_execution_once,
+        expected_execution_once_sha256=args.expected_execution_once_sha256,
         executor_binary_path=args.executor_binary,
         expected_executor_binary_sha256=args.expected_executor_binary_sha256,
         rpc_url=args.rpc_url,
