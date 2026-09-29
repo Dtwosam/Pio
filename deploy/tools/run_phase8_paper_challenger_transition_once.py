@@ -421,6 +421,22 @@ def _atomic_transition(
                 "Phase 8 PAPER transition active-cycle uniqueness changed"
             )
 
+        other_paper = conn.execute(
+            """
+            SELECT model_id
+            FROM model_registry
+            WHERE status = 'PAPER_CHALLENGER'
+              AND model_id <> ?
+            LIMIT 1
+            """,
+            (model_id,),
+        ).fetchone()
+        if other_paper is not None:
+            raise ValueError(
+                "another PAPER_CHALLENGER already exists: "
+                f"{other_paper[0]}"
+            )
+
         model_history_before = _history_count(
             conn,
             table="phase8_model_status_history",
