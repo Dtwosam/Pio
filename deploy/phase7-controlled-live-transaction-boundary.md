@@ -2,8 +2,11 @@
 
 This runbook documents the reviewed Phase 7 controlled-LIVE evidence and transaction-readiness chain.
 
-It does **not** authorize a transaction, load a private key, sign a message, call Solana
-`sendTransaction`, widen controlled-LIVE limits, or persist Phase 7 promotion.
+It does **not** authorize a transaction, sign a message, call Solana
+`sendTransaction`, widen controlled-LIVE limits, or persist Phase 7 promotion. The terminal
+admission step may load the isolated executor keypair only through the reviewed Rust
+`wallet-status` path to verify its public identity; the Python wrapper never reads or copies
+secret key bytes.
 
 The terminal artifact produced by this chain is a **readiness-only** report. A later execution
 component would still need its own separately reviewed implementation and must independently
@@ -31,7 +34,9 @@ The reviewed chain is:
 - `build_phase7_controlled_live_transaction_signed_authorization.py`
   - blob `4889d419f559503add46282fe40bb2d71ccd5ee0`
 - `check_phase7_controlled_live_transaction_execution_readiness.py`
-  - blob `61bb12102b2fb03593dc4bcb9d6130882a9809de`
+  - blob `0c01228e19905b36a6b88451fe11e7ff587258be`
+- `check_phase7_controlled_live_transaction_execution_admission.py`
+  - blob `c3d7b349bc8c33f8d3e0fac5e87c105279e2dd04`
 
 Any source change requires a new review and new blob pins. Do not silently substitute a newer
 tool under an older artifact.
@@ -249,21 +254,46 @@ The RPC URL itself is not emitted; only its SHA-256 is recorded.
 The executor-binary SHA-256 is an **external trust root**. This chain does not claim a
 reproducible-build proof between source and binary merely because the hashes were supplied.
 
-The readiness artifact requires immediate follow-on if an execution component is ever invoked,
-because block height and authorization lifetime continue to move. The Rust submitter must still
-perform its own native blockhash-expiry check.
+The readiness artifact requires immediate follow-on because block height and authorization lifetime
+continue to move. The Rust submitter must still perform its own native blockhash-expiry check.
+
+## 10. Keypair-bound execution admission
+
+The execution-admission checker consumes the exact saved readiness digest, re-runs the full final
+readiness, and permits only the expected block-height/readiness-digest fields to advance. All
+static transaction, simulation, wallet, binary, authorization, and evidence bindings must remain
+identical.
+
+It then validates the executor keypair path as absolute, non-symlink, regular, and owner-only, and
+invokes only the reviewed `wallet-status` command from the exact approved executor binary. The
+loaded public key must equal the wallet already bound by final readiness. The admission wrapper
+does not read or emit private-key bytes and strips the live-submit and RPC environment from the
+`wallet-status` subprocess.
+
+A ready admission still records:
+
+- `transaction_signing_authorized=false`
+- `transaction_submission_authorized=false`
+- `live_capital_authorized=false`
+- `requires_separate_single_shot_submitter=true`
+
+The Rust executor now also contains a feature-gated `controlled-live-submit-once` path. That path
+atomically claims only `SIMULATION_PASSED -> SIGNING`, refuses pre-existing `SIGNING` or
+`SENT`, persists the exact signature before RPC send, and leaves ambiguous RPC outcomes in
+`SENT` for separate confirmation/recovery. No reviewed orchestration in this chain invokes that
+command.
 
 ## Stop boundary
 
-Stop after the final readiness artifact.
+Stop after the execution-admission artifact.
 
-A result with `transaction_execution_readiness_ready=true` means only that the reviewed
-read-only evidence is fresh under the exact supplied inputs at that instant.
+A result with `execution_admission_ready=true` means only that the exact transaction evidence,
+authorization, binary, current block-height window, and isolated keypair identity are fresh enough
+for a separately reviewed immediate one-shot execution component.
 
 It does **not** mean:
 
-- load an executor private key;
-- sign the prepared transaction;
+- use the loaded executor keypair to sign the prepared transaction;
 - submit the transaction;
 - call Solana `sendTransaction`;
 - retry or resubmit;
@@ -276,15 +306,16 @@ No tool in this reviewed chain is a transaction signer or submitter.
 
 Any later execution component must be a separate review boundary and must, at minimum:
 
-1. consume the exact final-readiness digest;
-2. independently re-verify the exact signed transaction authorization;
+1. consume the exact execution-admission digest;
+2. independently rebuild the admission immediately before execution;
 3. independently re-read the execution intent and reject any drift;
 4. independently recheck the current block height against the same prepared transaction;
 5. use only the exact isolated executor wallet already bound by the evidence;
-6. permit at most one submission for the exact decision;
-7. preserve the Rust executor's persisted-signature/idempotent retry behavior;
-8. record/reconcile confirmation before any new live risk; and
-9. leave Phase 7 promotion as a separate post-evidence decision.
+6. invoke only the first-submission-only Rust path for an initial attempt;
+7. permit at most one initial submission for the exact decision;
+8. route any `SENT` or ambiguous outcome to separate confirmation/recovery rather than automatic retry;
+9. record/reconcile confirmation before any new live risk; and
+10. leave Phase 7 promotion as a separate post-evidence decision.
 
 Do not treat a ready artifact, an authenticated request, the runtime environment variable, or the
 existence of a feature-gated submit command as substitute authorization for execution.
