@@ -4,7 +4,8 @@ use crate::phase5_gate::Phase5PromotionGateReport;
 use crate::phase6_gate::Phase6PromotionGateReport;
 use crate::phase6_readiness::Phase6ReadinessReport;
 use crate::signer::{
-    sign_execution_intent, sign_prepared_transaction, SignedExecutionTransaction,
+    sign_execution_intent, sign_new_execution_intent,
+    sign_prepared_transaction, SignedExecutionTransaction,
 };
 #[cfg(feature = "live-submit")]
 use crate::simulation::decode_transaction_base64;
@@ -248,6 +249,160 @@ where
 }
 
 
+pub fn submit_new_execution_intent_with<F>(
+    store: &ExecutionIntentStore,
+    decision_id: &str,
+    keypair: &Keypair,
+    phase5_gate: &Phase5PromotionGateReport,
+    phase6_readiness: &Phase6ReadinessReport,
+    phase6_gate: &Phase6PromotionGateReport,
+    controlled_live: &ControlledLiveReport,
+    current_block_height: u64,
+    send: F,
+) -> Result<SubmissionReport>
+where
+    F: FnOnce(&SignedExecutionTransaction) -> Result<String>,
+{
+    if !phase5_gate.accepted {
+        anyhow::bail!(
+            "Phase 5 promotion gate rejected live submission: {}",
+            phase5_gate.reason
+        );
+    }
+    if !phase6_readiness.accepted {
+        anyhow::bail!(
+            "Phase 6 readiness rejected live submission: {}",
+            phase6_readiness.reason
+        );
+    }
+    if !phase6_gate.accepted {
+        anyhow::bail!(
+            "Phase 6 promotion gate rejected live submission: {}",
+            phase6_gate.reason
+        );
+    }
+    if phase6_gate.authorized_wallets.len() != 1
+        || phase6_gate.authorized_wallets[0]
+            != phase6_readiness.wallet_pubkey
+    {
+        anyhow::bail!(
+            "Phase 6 promotion evidence wallet does not match Phase 6 readiness wallet"
+        );
+    }
+    if phase6_readiness.phase5.promoted_at != phase5_gate.promoted_at
+        || phase6_readiness.phase5.evidence_type
+            != phase5_gate.evidence_type
+    {
+        anyhow::bail!(
+            "Phase 6 readiness Phase 5 evidence does not match submission gate"
+        );
+    }
+    if !controlled_live.accepted {
+        anyhow::bail!(
+            "controlled-live authorization rejected submission: {}",
+            controlled_live.reason
+        );
+    }
+    if controlled_live.decision_id != decision_id {
+        anyhow::bail!(
+            "controlled-live authorization decision_id does not match submission"
+        );
+    }
+    if controlled_live.phase5.promoted_at != phase5_gate.promoted_at
+        || controlled_live.phase5.evidence_type != phase5_gate.evidence_type
+    {
+        anyhow::bail!(
+            "controlled-live authorization Phase 5 evidence does not match submission gate"
+        );
+    }
+
+    let current_for_authorization = store.load(decision_id)?;
+    if current_for_authorization.status != ExecutionIntentStatus::SimulationPassed {
+        anyhow::bail!(
+            "first submission requires SIMULATION_PASSED status; current status is {:?}; SIGNING/SENT require separate recovery",
+            current_for_authorization.status
+        );
+    }
+    let persisted_wallet = current_for_authorization
+        .wallet_authorization
+        .as_ref()
+        .context(
+            "execution intent is missing persisted wallet authorization",
+        )?;
+    if persisted_wallet.wallet_pubkey != phase6_readiness.wallet_pubkey {
+        anyhow::bail!(
+            "Phase 6 readiness wallet does not match persisted execution wallet authorization"
+        );
+    }
+    if controlled_live.pool_address != current_for_authorization.pool_address {
+        anyhow::bail!(
+            "controlled-live authorization pool does not match execution intent"
+        );
+    }
+    let expected_action = match controlled_live.action {
+        crate::models::Action::Enter => "ENTER",
+        crate::models::Action::Rebalance => "REBALANCE",
+        crate::models::Action::Exit => "EXIT",
+        crate::models::Action::Skip => "SKIP",
+    };
+    if current_for_authorization.action != expected_action {
+        anyhow::bail!(
+            "controlled-live authorization action does not match execution intent"
+        );
+    }
+
+    ensure_submission_blockhash_is_live(
+        store,
+        decision_id,
+        current_block_height,
+    )?;
+
+    // This call performs the atomic SIMULATION_PASSED -> SIGNING claim. It
+    // deliberately refuses restart/retry states.
+    let signed = sign_new_execution_intent(
+        store,
+        decision_id,
+        keypair,
+        phase5_gate,
+    )?;
+
+    let current = store.load(decision_id)?;
+    if current.status != ExecutionIntentStatus::Signing {
+        anyhow::bail!(
+            "first-submission signer did not leave execution intent in SIGNING state"
+        );
+    }
+    store.record_sent(decision_id, &signed.signature)?;
+
+    match send(&signed) {
+        Ok(observed_signature) => {
+            let observed_signature = observed_signature.trim();
+            if observed_signature != signed.signature {
+                anyhow::bail!(
+                    "RPC returned a transaction signature different from the persisted signed transaction"
+                );
+            }
+            Ok(SubmissionReport {
+                decision_id: decision_id.to_string(),
+                signature: signed.signature,
+                reused_persisted_signature: false,
+                rpc_accepted: true,
+                rpc_error: None,
+                intent_status: store.load(decision_id)?.status,
+            })
+        }
+        Err(error) => Ok(SubmissionReport {
+            decision_id: decision_id.to_string(),
+            signature: signed.signature,
+            reused_persisted_signature: false,
+            rpc_accepted: false,
+            rpc_error: Some(error.to_string()),
+            intent_status: store.load(decision_id)?.status,
+        }),
+    }
+}
+
+
 #[cfg(feature = "live-submit")]
 pub fn submit_execution_intent_rpc(
     rpc_url: &str,
@@ -286,6 +441,46 @@ pub fn submit_execution_intent_rpc(
         },
     )
 }
+
+#[cfg(feature = "live-submit")]
+pub fn submit_new_execution_intent_rpc(
+    rpc_url: &str,
+    store: &ExecutionIntentStore,
+    decision_id: &str,
+    keypair: &Keypair,
+    phase5_gate: &Phase5PromotionGateReport,
+    phase6_readiness: &Phase6ReadinessReport,
+    phase6_gate: &Phase6PromotionGateReport,
+    controlled_live: &ControlledLiveReport,
+) -> Result<SubmissionReport> {
+    if rpc_url.trim().is_empty() {
+        anyhow::bail!("RPC URL is required");
+    }
+    let client = RpcClient::new(rpc_url.to_string());
+    let current_block_height = client
+        .get_block_height()
+        .context("failed to fetch current Solana block height")?;
+
+    submit_new_execution_intent_with(
+        store,
+        decision_id,
+        keypair,
+        phase5_gate,
+        phase6_readiness,
+        phase6_gate,
+        controlled_live,
+        current_block_height,
+        |signed| {
+            let transaction =
+                decode_transaction_base64(&signed.transaction_base64)?;
+            let signature = client
+                .send_transaction(&transaction)
+                .context("Solana send_transaction RPC failed")?;
+            Ok(signature.to_string())
+        },
+    )
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -511,6 +706,150 @@ mod tests {
             .unwrap();
 
         (store, path, id)
+    }
+
+    #[test]
+    fn first_submission_persists_signature_before_send() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        let saw_sent = Cell::new(false);
+
+        let report = submit_new_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            &accepted_phase5_gate(),
+            &accepted_phase6_readiness(&keypair.pubkey().to_string()),
+            &accepted_phase6_gate(&keypair.pubkey().to_string()),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
+            950,
+            |signed| {
+                let current = store.load(&id).unwrap();
+                saw_sent.set(
+                    current.status == ExecutionIntentStatus::Sent
+                        && current.signature.as_deref()
+                            == Some(signed.signature.as_str()),
+                );
+                Ok(signed.signature.clone())
+            },
+        )
+        .unwrap();
+
+        assert!(saw_sent.get());
+        assert!(report.rpc_accepted);
+        assert!(!report.reused_persisted_signature);
+        assert_eq!(report.intent_status, ExecutionIntentStatus::Sent);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn first_submission_refuses_preexisting_signing_without_send() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        store.begin_signing(&id).unwrap();
+        let called = Cell::new(false);
+
+        let result = submit_new_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            &accepted_phase5_gate(),
+            &accepted_phase6_readiness(&keypair.pubkey().to_string()),
+            &accepted_phase6_gate(&keypair.pubkey().to_string()),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
+            950,
+            |_| {
+                called.set(true);
+                Ok("must-not-send".into())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!called.get());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::Signing
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn first_submission_refuses_preexisting_sent_without_resubmit() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        store.begin_signing(&id).unwrap();
+        store.record_sent(&id, "persisted-signature").unwrap();
+        let called = Cell::new(false);
+
+        let result = submit_new_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            &accepted_phase5_gate(),
+            &accepted_phase6_readiness(&keypair.pubkey().to_string()),
+            &accepted_phase6_gate(&keypair.pubkey().to_string()),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
+            950,
+            |_| {
+                called.set(true);
+                Ok("must-not-send".into())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!called.get());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::Sent
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn first_submission_ambiguous_rpc_error_stays_sent_without_retry() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+
+        let report = submit_new_execution_intent_with(
+            &store,
+            &id,
+            &keypair,
+            &accepted_phase5_gate(),
+            &accepted_phase6_readiness(&keypair.pubkey().to_string()),
+            &accepted_phase6_gate(&keypair.pubkey().to_string()),
+            &accepted_controlled_live(
+                &id,
+                &store.load(&id).unwrap().pool_address,
+                crate::models::Action::Enter,
+            ),
+            950,
+            |_| anyhow::bail!("timeout after submit"),
+        )
+        .unwrap();
+
+        assert!(!report.rpc_accepted);
+        assert!(!report.reused_persisted_signature);
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::Sent
+        );
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
