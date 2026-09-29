@@ -23,8 +23,6 @@ CURRENT_CANDIDATE_COLUMNS = (
     "pool_address",
     "decision_observed_at",
     "strategy",
-    "half_width",
-    "center_offset",
     "baseline_selected",
     *ML_FEATURE_COLUMNS,
 )
