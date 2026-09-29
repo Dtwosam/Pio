@@ -217,11 +217,9 @@ def _nonnegative_int(value: Any, *, label: str) -> int:
     return value
 
 
-def _load_reward_destinations(path: str | Path) -> list[dict[str, Any]]:
-    value = _load_json(
-        path,
-        label="Phase 7 EXIT settlement reward destinations",
-    )
+def _validate_reward_destinations_value(
+    value: Any,
+) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         raise ValueError(
             "Phase 7 EXIT settlement reward destinations must be a JSON list"
@@ -265,6 +263,14 @@ def _load_reward_destinations(path: str | Path) -> list[dict[str, Any]]:
             }
         )
     return sorted(destinations, key=lambda item: item["reward_index"])
+
+
+def _load_reward_destinations(path: str | Path) -> list[dict[str, Any]]:
+    value = _load_json(
+        path,
+        label="Phase 7 EXIT settlement reward destinations",
+    )
+    return _validate_reward_destinations_value(value)
 
 
 def _execution_env(*, rpc_url: str) -> dict[str, str]:
@@ -506,15 +512,22 @@ def validate_settlement_transaction_preparation(
         )
 
     rewards = _validate_reward_validations(report.get("reward_validations"))
-    destinations = report.get("reward_token_destinations")
-    if not isinstance(destinations, list):
+    destinations = _validate_reward_destinations_value(
+        report.get("reward_token_destinations")
+    )
+    if report["reward_destinations_sha256"] != _sha256_value(destinations):
         raise ValueError(
-            "Phase 7 EXIT settlement preparation reward destinations invalid"
+            "Phase 7 EXIT settlement preparation reward-destination digest mismatch"
+        )
+    if report["transaction_sha256"] != _sha256_text(
+        report["transaction_base64"]
+    ):
+        raise ValueError(
+            "Phase 7 EXIT settlement preparation transaction digest mismatch"
         )
     destination_indices = [
-        item.get("reward_index")
+        item["reward_index"]
         for item in destinations
-        if isinstance(item, dict)
     ]
     reward_indices = [item["reward_index"] for item in rewards]
     if destination_indices != reward_indices:
