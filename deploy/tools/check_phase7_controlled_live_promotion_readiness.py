@@ -160,9 +160,18 @@ def _load_reviewed(source: Path) -> tuple[Any, Any, Any]:
                 f"Phase 7 promotion readiness dependency mismatch: {relative}"
             )
     return (
-        _load_module(HANDOFF_TOOL if False else source / HANDOFF_TOOL, "phase7_promotion_readiness_handoff"),
-        _load_module(source / REQUEST_TOOL, "phase7_promotion_readiness_request"),
-        _load_module(source / SIGNER_TOOL, "phase7_promotion_readiness_signer"),
+        _load_module(
+            source / HANDOFF_TOOL,
+            "phase7_promotion_readiness_handoff",
+        ),
+        _load_module(
+            source / REQUEST_TOOL,
+            "phase7_promotion_readiness_request",
+        ),
+        _load_module(
+            source / SIGNER_TOOL,
+            "phase7_promotion_readiness_signer",
+        ),
     )
 
 
@@ -435,6 +444,10 @@ def build_phase7_promotion_readiness(
 
     if request["completion_handoff_sha256"] != saved_handoff["handoff_sha256"]:
         raise ValueError("Phase 7 promotion request/handoff binding mismatch")
+    if Path(str(saved_handoff["production_repository"])).resolve() != production:
+        raise ValueError("Phase 7 completion handoff repository binding mismatch")
+    if Path(str(request["production_repository"])).resolve() != production:
+        raise ValueError("Phase 7 promotion request repository binding mismatch")
     if saved_verification["request_sha256"] != request["request_sha256"]:
         raise ValueError("Phase 7 signed verification/request binding mismatch")
     if saved_verification.get(
