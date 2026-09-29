@@ -51,6 +51,9 @@ def _proof() -> dict:
         "exit_decision_id": EXIT_DECISION_ID,
         "signature": "sig-confirmed-exit",
         "transaction_slot": 120,
+        "position_snapshot_sha256": "b" * 64,
+        "capture_slot_start": 121,
+        "capture_slot_end": 121,
         "pool_address": POOL,
         "position_address": POSITION,
         "executor_wallet_pubkey": WALLET,
@@ -153,10 +156,10 @@ def _guard(*, reward: bool = True, signed: bool = False) -> dict:
     }
 
 
-def _simulation(*, succeeded: bool = True) -> dict:
+def _simulation(*, succeeded: bool = True, slot: int = 130) -> dict:
     return {
         "succeeded": succeeded,
-        "rpc_context_slot": 130,
+        "rpc_context_slot": slot,
         "result": {"err": None if succeeded else {"custom": 1}},
     }
 
@@ -242,6 +245,18 @@ def test_reviewed_dependencies_are_exactly_pinned():
         assert MODULE._git_blob_sha(path) == expected
 
 
+def test_anchor_instruction_prefixes_are_exact():
+    assert MODULE.CLAIM_FEE2_PREFIX == hashlib.sha256(
+        b"global:claim_fee2"
+    ).digest()[:8].hex()
+    assert MODULE.CLAIM_REWARD2_PREFIX == hashlib.sha256(
+        b"global:claim_reward2"
+    ).digest()[:8].hex()
+    assert MODULE.CLOSE_POSITION2_PREFIX == hashlib.sha256(
+        b"global:close_position2"
+    ).digest()[:8].hex()
+
+
 def test_token_aware_settlement_is_guarded_simulated_and_non_authorizing(
     monkeypatch,
 ):
@@ -268,6 +283,8 @@ def test_token_aware_settlement_is_guarded_simulated_and_non_authorizing(
     assert report["guard_instruction_sequence_valid"] is True
     assert report["guard_unsigned"] is True
     assert report["simulation_succeeded"] is True
+    assert report["simulation_at_or_after_zero_liquidity_snapshot"] is True
+    assert report["zero_liquidity_capture_slot_start"] == 121
     assert report["settlement_prepared"] is True
     assert report["fresh_blockhash_exact_finalization_required"] is True
     assert report["exact_settlement_transaction_authorization_required"] is True
@@ -326,6 +343,17 @@ def test_failed_simulation_fails_closed(monkeypatch):
         )
 
 
+def test_simulation_cannot_precede_zero_liquidity_snapshot(monkeypatch):
+    with pytest.raises(
+        ValueError,
+        match="predates zero-liquidity snapshot",
+    ):
+        _build(
+            monkeypatch,
+            simulation=_simulation(slot=120),
+        )
+
+
 def test_zero_liquidity_proof_cannot_pre_authorize_settlement(monkeypatch):
     with pytest.raises(
         ValueError,
@@ -357,6 +385,32 @@ def test_duplicate_reward_destination_is_rejected(monkeypatch):
 
     with pytest.raises(ValueError, match="invalid or duplicated"):
         _build(monkeypatch, destinations=destinations)
+
+
+def test_resealed_destination_tampering_fails_nested_digest(monkeypatch):
+    report, _ = _build(monkeypatch)
+    report["reward_token_destinations"][0]["user_token_account"] = (
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    )
+    _reseal(report)
+
+    with pytest.raises(
+        ValueError,
+        match="destination-config digest mismatch",
+    ):
+        MODULE.validate_exit_settlement_preparation(report)
+
+
+def test_resealed_transaction_tampering_fails_nested_digest(monkeypatch):
+    report, _ = _build(monkeypatch)
+    report["settlement_transaction_base64"] = "dGFtcGVyZWQ="
+    _reseal(report)
+
+    with pytest.raises(
+        ValueError,
+        match="transaction digest mismatch",
+    ):
+        MODULE.validate_exit_settlement_preparation(report)
 
 
 def test_resealed_preparation_cannot_authorize_signing(monkeypatch):
@@ -400,3 +454,4 @@ def test_settlement_preparation_has_no_signing_or_submission_primitive():
     assert '"settlement_authorized": False' in source
     assert '"transaction_signing_authorized": False' in source
     assert '"transaction_submission_authorized": False' in source
+    assert '"phase7_promotion_authorized": False' in source
