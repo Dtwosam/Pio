@@ -32,6 +32,7 @@ DECISION_ID = "11111111-2222-4333-8444-555555555555"
 SIGNATURE = "sig-1"
 POOL = "11111111111111111111111111111111"
 POSITION = "33333333333333333333333333333333"
+WALLET = "44444444444444444444444444444444"
 
 
 def _handoff() -> dict:
@@ -54,8 +55,19 @@ def _receipt(binary_sha: str) -> dict:
         "signature": SIGNATURE,
         "pool_address": POOL,
         "transaction_chain_confirmation_observed": True,
+        "saved_execution_once_sha256": "c" * 64,
         "rpc_endpoint_sha256": MODULE._sha256_text(RPC_URL),
         "executor_binary_sha256": binary_sha,
+    }
+
+
+def _execute_once() -> dict:
+    return {
+        "execution_once_sha256": "c" * 64,
+        "decision_id": DECISION_ID,
+        "signature": SIGNATURE,
+        "pool_address": POOL,
+        "executor_wallet_pubkey": WALLET,
     }
 
 
@@ -69,7 +81,7 @@ def _snapshot(
         "capture_slot_start": 100,
         "capture_slot_end": 101,
         "pool_address": pool,
-        "owner": "44444444444444444444444444444444",
+        "owner": WALLET,
         "fee_owner": "55555555555555555555555555555555",
         "lower_bin_id": -10,
         "upper_bin_id": 10,
@@ -102,6 +114,7 @@ def _build(
     snapshot: dict | None = None,
     handoff_override: dict | None = None,
     receipt_override: dict | None = None,
+    execute_once_override: dict | None = None,
 ) -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -115,9 +128,13 @@ def _build(
         receipt = _receipt(binary_sha)
         if receipt_override:
             receipt.update(receipt_override)
+        execute_once = _execute_once()
+        if execute_once_override:
+            execute_once.update(execute_once_override)
 
         handoff_path = _write(root / "handoff.json", handoff)
         receipt_path = _write(root / "receipt.json", receipt)
+        execute_once_path = _write(root / "execute-once.json", execute_once)
 
         class FakeHandoff:
             ROUTE_OPEN = "OPEN_POSITION_LIFECYCLE"
@@ -131,10 +148,15 @@ def _build(
             def validate_receipt_artifact(value):
                 assert isinstance(value, dict)
 
+        class FakeExecuteOnce:
+            @staticmethod
+            def validate_execution_once_report(value):
+                assert isinstance(value, dict)
+
         monkeypatch.setattr(
             MODULE,
             "_load_reviewed",
-            lambda source: (FakeHandoff, FakeReceipt),
+            lambda source: (FakeHandoff, FakeReceipt, FakeExecuteOnce),
         )
         monkeypatch.setattr(
             MODULE,
@@ -148,6 +170,8 @@ def _build(
             expected_handoff_sha256=handoff["handoff_sha256"],
             saved_execution_receipt_path=receipt_path,
             expected_execution_receipt_sha256=receipt["receipt_artifact_sha256"],
+            saved_execution_once_path=execute_once_path,
+            expected_execution_once_sha256=execute_once["execution_once_sha256"],
             executor_binary_path=binary,
             expected_executor_binary_sha256=binary_sha,
             rpc_url=RPC_URL,
@@ -175,6 +199,8 @@ def test_open_position_snapshot_is_read_only_and_non_authorizing(monkeypatch):
     assert report["signature"] == SIGNATURE
     assert report["pool_address"] == POOL
     assert report["position_address"] == POSITION
+    assert report["executor_wallet_pubkey"] == WALLET
+    assert report["snapshot_owner_matches_executor_wallet"] is True
     assert report["position_account_present"] is True
     assert report["position_closed_proven"] is False
     assert report["open_position_snapshot_ready"] is True
@@ -223,6 +249,24 @@ def test_snapshot_pool_must_match_handoff(monkeypatch):
             snapshot=_snapshot(
                 pool="99999999999999999999999999999999"
             ),
+        )
+
+
+def test_snapshot_owner_must_match_executor_wallet(monkeypatch):
+    bad = _snapshot()
+    bad["owner"] = "88888888888888888888888888888888"
+
+    with pytest.raises(ValueError, match="owner differs"):
+        _build(monkeypatch, snapshot=bad)
+
+
+def test_execute_once_identity_must_match_handoff(monkeypatch):
+    with pytest.raises(ValueError, match="execute-once decision_id differs"):
+        _build(
+            monkeypatch,
+            execute_once_override={
+                "decision_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+            },
         )
 
 
