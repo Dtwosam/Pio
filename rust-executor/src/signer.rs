@@ -105,6 +105,46 @@ pub fn sign_prepared_transaction(
 }
 
 
+pub fn sign_new_execution_intent(
+    store: &ExecutionIntentStore,
+    decision_id: &str,
+    keypair: &Keypair,
+    phase5_gate: &Phase5PromotionGateReport,
+) -> Result<SignedExecutionTransaction> {
+    if !phase5_gate.accepted {
+        anyhow::bail!(
+            "Phase 5 promotion gate rejected execution signing: {}",
+            phase5_gate.reason
+        );
+    }
+
+    // Atomically claim only a fresh SIMULATION_PASSED intent. Unlike the
+    // restart/recovery signer below, this path deliberately refuses an
+    // already-SIGNING or SENT intent so a first submission cannot become a
+    // retry under concurrency.
+    let signing = store.begin_signing(decision_id)?;
+
+    let authorization = signing
+        .wallet_authorization
+        .as_ref()
+        .context("signing intent is missing wallet authorization")?;
+    if !authorization.accepted {
+        anyhow::bail!("signing intent wallet authorization is not accepted");
+    }
+    if authorization.wallet_pubkey != keypair.pubkey().to_string() {
+        anyhow::bail!(
+            "loaded executor keypair differs from persisted wallet authorization"
+        );
+    }
+
+    let prepared = signing
+        .prepared_transaction
+        .as_ref()
+        .context("signing intent is missing prepared transaction")?;
+    sign_prepared_transaction(decision_id, prepared, keypair)
+}
+
+
 pub fn sign_execution_intent(
     store: &ExecutionIntentStore,
     decision_id: &str,
@@ -362,6 +402,75 @@ mod tests {
             .unwrap();
 
         (store, path, id)
+    }
+
+    #[test]
+    fn new_execution_signer_claims_only_fresh_simulation_passed_intent() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+
+        let signed = sign_new_execution_intent(
+            &store,
+            &id,
+            &keypair,
+            &accepted_phase5_gate(),
+        )
+        .unwrap();
+
+        assert!(!signed.signature.is_empty());
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::Signing
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn new_execution_signer_refuses_preexisting_signing_state() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        store.begin_signing(&id).unwrap();
+
+        assert!(
+            sign_new_execution_intent(
+                &store,
+                &id,
+                &keypair,
+                &accepted_phase5_gate(),
+            )
+            .is_err()
+        );
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::Signing
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn new_execution_signer_refuses_preexisting_sent_state() {
+        let keypair = Keypair::new();
+        let (store, path, id) = ready_store(&keypair);
+        store.begin_signing(&id).unwrap();
+        store.record_sent(&id, "persisted-signature").unwrap();
+
+        assert!(
+            sign_new_execution_intent(
+                &store,
+                &id,
+                &keypair,
+                &accepted_phase5_gate(),
+            )
+            .is_err()
+        );
+        assert_eq!(
+            store.load(&id).unwrap().status,
+            ExecutionIntentStatus::Sent
+        );
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
