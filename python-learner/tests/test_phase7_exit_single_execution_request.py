@@ -30,6 +30,8 @@ OPENED_DECISION_ID = "11111111-2222-4333-8444-555555555555"
 EXIT_DECISION_ID = "01234567-89ab-4def-8123-456789abcdef"
 POOL = "11111111111111111111111111111111"
 POSITION = "33333333333333333333333333333333"
+TOKEN_X = "55555555555555555555555555555555"
+TOKEN_Y = "66666666666666666666666666666666"
 WALLET = "44444444444444444444444444444444"
 
 
@@ -56,6 +58,8 @@ def _finalization() -> dict:
         "exit_decision_id": EXIT_DECISION_ID,
         "pool_address": POOL,
         "position_address": POSITION,
+        "user_token_x": TOKEN_X,
+        "user_token_y": TOKEN_Y,
         "executor_wallet_pubkey": WALLET,
         "rpc_endpoint_sha256": "1" * 64,
         "final_transaction_base64": _tx(),
@@ -186,6 +190,8 @@ def test_single_execution_request_binds_exact_transaction_and_retry_contract(
     assert request["finalization_sha256"] == "a" * 64
     assert request["final_transaction_base64"] == _tx()
     assert request["final_transaction_sha256"] == MODULE._sha256_text(_tx())
+    assert request["user_token_x"] == TOKEN_X
+    assert request["user_token_y"] == TOKEN_Y
     assert request["single_execution_request_ready"] is True
     assert request["dedicated_submission_journal_required"] is True
     assert request["atomic_first_submission_claim_required"] is True
