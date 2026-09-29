@@ -20,6 +20,7 @@ ZERO_LIQUIDITY_TOOL = Path(
     "deploy/tools/check_phase7_controlled_live_exit_zero_liquidity_v2.py"
 )
 RUST_MAIN = Path("rust-executor/src/main.rs")
+RUST_SETTLEMENT = Path("rust-executor/src/settlement.rs")
 RUST_TOKEN_SETTLEMENT = Path("rust-executor/src/token_settlement.rs")
 RUST_TOKEN_EXTENSIONS = Path("rust-executor/src/token_extensions.rs")
 RUST_TRANSACTION_GUARD = Path("rust-executor/src/transaction_guard.rs")
@@ -27,6 +28,7 @@ RUST_SIMULATION = Path("rust-executor/src/simulation.rs")
 REVIEWED_SOURCE_BLOBS = {
     ZERO_LIQUIDITY_TOOL: "b40f7671c245238e0d7743f760e4e66233c02b17",
     RUST_MAIN: "96ecb4479482d146abbecafc53466b93fa452d80",
+    RUST_SETTLEMENT: "9fb57245eeac79138fa9df172daad6f494ceb330",
     RUST_TOKEN_SETTLEMENT: "6607d5e95024d4f9869181656b903a68f71dc34a",
     RUST_TOKEN_EXTENSIONS: "7de5a3b5892f1d69c95d920d3adb3f57ff84148b",
     RUST_TRANSACTION_GUARD: "ca8189735003d4e2f2f97e4c498c4d1d67c0f878",
@@ -55,6 +57,9 @@ REPORT_FIELDS = (
     "exit_decision_id",
     "exit_signature",
     "exit_transaction_slot",
+    "zero_liquidity_snapshot_sha256",
+    "zero_liquidity_capture_slot_start",
+    "zero_liquidity_capture_slot_end",
     "pool_address",
     "position_address",
     "executor_wallet_pubkey",
@@ -94,6 +99,7 @@ REPORT_FIELDS = (
     "simulation_report_sha256",
     "simulation_rpc_context_slot",
     "simulation_succeeded",
+    "simulation_at_or_after_zero_liquidity_snapshot",
     "settlement_prepared",
     "fresh_blockhash_exact_finalization_required",
     "exact_settlement_transaction_authorization_required",
@@ -107,6 +113,7 @@ REPORT_FIELDS = (
     "automatic_resubmission_authorized",
     "new_live_entry_authorized",
     "new_live_capital_authorized",
+    "phase7_promotion_authorized",
     "phase7_promotion_persisted",
     "production_file_modified",
     "production_repository_git_mutated",
@@ -346,6 +353,7 @@ def validate_exit_settlement_preparation(
         "saved_zero_liquidity_proof_sha256",
         "expected_zero_liquidity_proof_sha256",
         "rpc_endpoint_sha256",
+        "zero_liquidity_snapshot_sha256",
         "destination_config_sha256",
         "executor_binary_sha256",
         "expected_executor_binary_sha256",
@@ -396,6 +404,8 @@ def validate_exit_settlement_preparation(
 
     for field in (
         "exit_transaction_slot",
+        "zero_liquidity_capture_slot_start",
+        "zero_liquidity_capture_slot_end",
         "position_width",
         "fee_transfer_hook_account_count",
         "reward_transfer_hook_account_count",
@@ -409,8 +419,55 @@ def validate_exit_settlement_preparation(
             )
     if report["exit_transaction_slot"] <= 0:
         raise ValueError("Phase 7 EXIT settlement transaction slot is invalid")
-    if report["position_width"] <= 0:
+    if (
+        report["zero_liquidity_capture_slot_start"]
+        < report["exit_transaction_slot"]
+    ):
+        raise ValueError(
+            "Phase 7 EXIT settlement zero-liquidity snapshot predates EXIT transaction"
+        )
+    if (
+        report["zero_liquidity_capture_slot_end"]
+        < report["zero_liquidity_capture_slot_start"]
+    ):
+        raise ValueError(
+            "Phase 7 EXIT settlement zero-liquidity snapshot slot range invalid"
+        )
+    if (
+        report["simulation_rpc_context_slot"]
+        < report["zero_liquidity_capture_slot_start"]
+    ):
+        raise ValueError(
+            "Phase 7 EXIT settlement simulation predates zero-liquidity snapshot"
+        )
+    if report["position_width"] <= 0 or report["position_width"] > 70:
         raise ValueError("Phase 7 EXIT settlement position width is invalid")
+
+    normalized_destination_config = {
+        "user_token_x": report["user_token_x"],
+        "user_token_y": report["user_token_y"],
+        "reward_token_destinations": report["reward_token_destinations"],
+    }
+    user_x, user_y, rewards = _validated_destination_config(
+        normalized_destination_config
+    )
+    normalized_destination_config = {
+        "user_token_x": user_x,
+        "user_token_y": user_y,
+        "reward_token_destinations": rewards,
+    }
+    if report["destination_config_sha256"] != _sha256_value(
+        normalized_destination_config
+    ):
+        raise ValueError(
+            "Phase 7 EXIT settlement destination-config digest mismatch"
+        )
+    if report["settlement_transaction_sha256"] != _sha256_text(
+        report["settlement_transaction_base64"]
+    ):
+        raise ValueError(
+            "Phase 7 EXIT settlement transaction digest mismatch"
+        )
 
     rewards = report.get("reward_token_destinations")
     if not isinstance(rewards, list) or len(rewards) > 2:
@@ -451,6 +508,7 @@ def validate_exit_settlement_preparation(
         "guard_no_address_lookup_tables",
         "guard_instruction_sequence_valid",
         "simulation_succeeded",
+        "simulation_at_or_after_zero_liquidity_snapshot",
         "settlement_prepared",
         "fresh_blockhash_exact_finalization_required",
         "exact_settlement_transaction_authorization_required",
@@ -471,6 +529,7 @@ def validate_exit_settlement_preparation(
         "automatic_resubmission_authorized",
         "new_live_entry_authorized",
         "new_live_capital_authorized",
+        "phase7_promotion_authorized",
         "phase7_promotion_persisted",
         "production_file_modified",
         "production_repository_git_mutated",
@@ -554,7 +613,12 @@ def build_exit_settlement_preparation(
     user_x, user_y, reward_destinations = _validated_destination_config(
         destinations
     )
-    destination_sha = _sha256_value(destinations)
+    normalized_destinations = {
+        "user_token_x": user_x,
+        "user_token_y": user_y,
+        "reward_token_destinations": reward_destinations,
+    }
+    destination_sha = _sha256_value(normalized_destinations)
 
     binary = _regular_executable(
         executor_binary_path,
@@ -782,6 +846,10 @@ def build_exit_settlement_preparation(
             raise ValueError(
                 "Phase 7 EXIT settlement simulation slot is invalid"
             )
+        if simulation_slot < proof["capture_slot_start"]:
+            raise ValueError(
+                "Phase 7 EXIT settlement simulation predates zero-liquidity snapshot"
+            )
 
     reward_validation = validation.get("rewards")
     bin_arrays = validation.get("bin_array_accounts")
@@ -808,6 +876,15 @@ def build_exit_settlement_preparation(
         "exit_decision_id": proof["exit_decision_id"],
         "exit_signature": proof["signature"],
         "exit_transaction_slot": proof["transaction_slot"],
+        "zero_liquidity_snapshot_sha256": proof[
+            "position_snapshot_sha256"
+        ],
+        "zero_liquidity_capture_slot_start": proof[
+            "capture_slot_start"
+        ],
+        "zero_liquidity_capture_slot_end": proof[
+            "capture_slot_end"
+        ],
         "pool_address": proof["pool_address"],
         "position_address": proof["position_address"],
         "executor_wallet_pubkey": proof["executor_wallet_pubkey"],
@@ -851,6 +928,7 @@ def build_exit_settlement_preparation(
         "simulation_report_sha256": _sha256_value(simulation),
         "simulation_rpc_context_slot": simulation_slot,
         "simulation_succeeded": True,
+        "simulation_at_or_after_zero_liquidity_snapshot": True,
         "settlement_prepared": True,
         "fresh_blockhash_exact_finalization_required": True,
         "exact_settlement_transaction_authorization_required": True,
@@ -864,6 +942,7 @@ def build_exit_settlement_preparation(
         "automatic_resubmission_authorized": False,
         "new_live_entry_authorized": False,
         "new_live_capital_authorized": False,
+        "phase7_promotion_authorized": False,
         "phase7_promotion_persisted": False,
         "production_file_modified": False,
         "production_repository_git_mutated": False,
