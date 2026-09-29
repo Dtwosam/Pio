@@ -398,8 +398,7 @@ def test_final_reconciliation_private_replay_closes_position(monkeypatch):
 
     assert observed[0] == "chain:principal-sig"
     assert "position:" + EXIT_DECISION_ID in observed
-    assert observed[-2].startswith("outcome:")
-    assert observed[-1].startswith("outcome:") is False
+    assert observed[-1] == "outcome:" + POSITION
 
 
 def test_already_reconciled_state_requires_no_apply(monkeypatch):
