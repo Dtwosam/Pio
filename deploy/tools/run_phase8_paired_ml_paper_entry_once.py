@@ -509,7 +509,7 @@ def execute_phase8_paired_ml_paper_entry_once(
                 saved_readiness["near_liquidity_radius"]
             ),
             inference_config=inference_config,
-            as_of=saved_readiness["as_of"],
+            as_of=saved_readiness["decision_observed_at"],
         )
         record = result.to_record()
 
