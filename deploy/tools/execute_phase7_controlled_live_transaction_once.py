@@ -604,6 +604,8 @@ def execute_once(
     presubmit_module.validate_phase7_presubmit_evidence_gate(saved_presubmit)
     if saved_presubmit.get("presubmit_evidence_ready") is not True:
         raise ValueError("saved Phase 7 presubmit evidence is not ready")
+    if saved_presubmit.get("decision_id") != fresh_admission["decision_id"]:
+        raise ValueError("presubmit decision differs from execution admission")
 
     guard_config = _load_json(
         transaction_guard_config_path,
@@ -631,6 +633,8 @@ def execute_once(
         raise ValueError("executor binary changed after admission")
     if fresh_admission["executor_binary_sha256"] != expected_executor_binary_sha256:
         raise ValueError("executor binary trust-root mismatch")
+    if _sha256_text(rpc_url) != fresh_admission["rpc_endpoint_sha256"]:
+        raise ValueError("RPC endpoint differs from execution admission")
 
     env = _executor_env(rpc_url=rpc_url)
 
