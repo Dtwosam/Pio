@@ -18,7 +18,7 @@ PLANNER_TOOL = Path(
     "deploy/tools/build_phase7_controlled_live_exit_position_valuation_plan.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    PLANNER_TOOL: "b6420264578691c7809861ebfda7b0f9bef9b8b5",
+    PLANNER_TOOL: "6dfabd7bfe19a0723aff2b0606800e4515f23f32",
 }
 
 REPORT_FIELDS = (
