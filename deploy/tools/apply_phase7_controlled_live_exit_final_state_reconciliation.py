@@ -19,7 +19,7 @@ PLANNER_TOOL = Path(
     "deploy/tools/build_phase7_controlled_live_exit_final_state_reconciliation_plan.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    PLANNER_TOOL: "82aa2dccd5f0acd928d4ecc36d957a94fa6e862e",
+    PLANNER_TOOL: "3a094dd08eb09ed9245fe6a72e9f3e2895377cec",
 }
 
 REPORT_FIELDS = (
