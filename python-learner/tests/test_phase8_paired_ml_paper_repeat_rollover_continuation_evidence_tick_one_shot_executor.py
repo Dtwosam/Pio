@@ -599,7 +599,7 @@ def test_receipt_rejects_inconsistent_completion_flag(monkeypatch):
 
 def test_executor_uses_dedicated_lock():
     assert MODULE.LOCK_PATH == Path(
-        "/var/tmp/pio-phase8-repeat-paired-paper-continuation-evidence-tick-one-shot.lock"
+        "/var/tmp/pio-phase8-repeat-rollover-paired-paper-continuation-evidence-tick-one-shot.lock"
     )
 
 
