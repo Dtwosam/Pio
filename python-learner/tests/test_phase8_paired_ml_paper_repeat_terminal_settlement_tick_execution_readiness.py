@@ -160,7 +160,7 @@ def _build(
     database = data / "pio.db"
     conn = sqlite3.connect(database)
     try:
-        conn.execute(
+        conn.executescript(
             """
             CREATE TABLE paper_counterfactual_positions(
                 position_id TEXT PRIMARY KEY,
