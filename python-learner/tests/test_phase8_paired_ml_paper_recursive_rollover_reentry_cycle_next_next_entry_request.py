@@ -19,7 +19,7 @@ TOOL = (
 )
 
 SPEC = importlib.util.spec_from_file_location(
-    "build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request",
+    "build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request",
     TOOL,
 )
 assert SPEC is not None and SPEC.loader is not None
@@ -31,7 +31,7 @@ def _readiness(*, status: str = "READY") -> dict:
     ready = status == "READY"
     return {
         "readiness_sha256": "a" * 64,
-        "recursive_rollover_reentry_cycle_next_next_next_input_verification_sha256": "b" * 64,
+        "recursive_rollover_reentry_cycle_next_next_input_verification_sha256": "b" * 64,
         "source_final_evaluation_sha256": "c" * 64,
         "production_repository": "/opt/pio",
         "pio_database_path": "/opt/pio/data/pio.db",
@@ -77,7 +77,7 @@ class _FakeReadiness:
     STATUS_READY = "READY"
 
     @staticmethod
-    def validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_account_readiness(value):
+    def validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_account_readiness(value):
         assert isinstance(value, dict)
 
 
@@ -122,15 +122,15 @@ def test_reviewed_reentry_cycle_next_next_readiness_is_exactly_pinned():
 def test_request_binds_fresh_reentry_cycle_next_next_pair_state(monkeypatch):
     temp, path = _build(monkeypatch)
     try:
-        request = MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(
+        request = MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(
             source_tree=ROOT,
             account_readiness_path=path,
         )
     finally:
         temp.cleanup()
 
-    assert request["source_recursive_rollover_reentry_cycle_next_next_next_account_readiness_sha256"] == "a" * 64
-    assert request["recursive_rollover_reentry_cycle_next_next_next_input_verification_sha256"] == "b" * 64
+    assert request["source_recursive_rollover_reentry_cycle_next_next_account_readiness_sha256"] == "a" * 64
+    assert request["recursive_rollover_reentry_cycle_next_next_input_verification_sha256"] == "b" * 64
     assert request["source_final_evaluation_sha256"] == "c" * 64
     assert request["authorization_scope"] == (
         "OPEN_ONE_PHASE8_RECURSIVE_REENTRY_CYCLE_NEXT_NEXT_PAIRED_ML_PAPER_ENTRY_ONLY"
@@ -162,7 +162,7 @@ def test_request_requires_ready_reentry_cycle_next_next_account(monkeypatch):
     )
     try:
         with pytest.raises(ValueError, match="requires READY account state"):
-            MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(
+            MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(
                 source_tree=ROOT,
                 account_readiness_path=path,
             )
@@ -179,7 +179,7 @@ def test_request_refuses_previous_pair_not_closed(monkeypatch):
             ValueError,
             match="previous_pair_positions_closed=true",
         ):
-            MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(
+            MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(
                 source_tree=ROOT,
                 account_readiness_path=path,
             )
@@ -190,7 +190,7 @@ def test_request_refuses_previous_pair_not_closed(monkeypatch):
 def test_resealed_request_cannot_reuse_previous_pair_id(monkeypatch):
     temp, path = _build(monkeypatch)
     try:
-        request = MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(
+        request = MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(
             source_tree=ROOT,
             account_readiness_path=path,
         )
@@ -200,13 +200,13 @@ def test_resealed_request_cannot_reuse_previous_pair_id(monkeypatch):
     request["pair_id"] = request["previous_pair_id"]
     _reseal(request)
     with pytest.raises(ValueError, match="pair id was not advanced"):
-        MODULE.validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(request)
+        MODULE.validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(request)
 
 
 def test_resealed_request_cannot_authorize_pair_open(monkeypatch):
     temp, path = _build(monkeypatch)
     try:
-        request = MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(
+        request = MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(
             source_tree=ROOT,
             account_readiness_path=path,
         )
@@ -219,14 +219,14 @@ def test_resealed_request_cannot_authorize_pair_open(monkeypatch):
         ValueError,
         match="paper_pair_entry_authorized=false",
     ):
-        MODULE.validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(request)
+        MODULE.validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(request)
 
 
 def test_resealed_request_cannot_authorize_promotion(monkeypatch):
     temp, path = _build(monkeypatch)
     try:
         request = (
-            MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(
+            MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(
                 source_tree=ROOT,
                 account_readiness_path=path,
             )
@@ -240,7 +240,7 @@ def test_resealed_request_cannot_authorize_promotion(monkeypatch):
         ValueError,
         match="continuous_promotion_authorized=false",
     ):
-        MODULE.validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(
+        MODULE.validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(
             request
         )
 
@@ -248,7 +248,7 @@ def test_resealed_request_cannot_authorize_promotion(monkeypatch):
 def test_resealed_request_rejects_cash_binding_change(monkeypatch):
     temp, path = _build(monkeypatch)
     try:
-        request = MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(
+        request = MODULE.build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(
             source_tree=ROOT,
             account_readiness_path=path,
         )
@@ -258,7 +258,7 @@ def test_resealed_request_rejects_cash_binding_change(monkeypatch):
     request["required_pair_cash_quote"] = 2000.0
     _reseal(request)
     with pytest.raises(ValueError, match="cash binding mismatch"):
-        MODULE.validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request(request)
+        MODULE.validate_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request(request)
 
 
 def test_reentry_cycle_next_next_request_has_no_execution_primitive():
