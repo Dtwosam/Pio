@@ -28,7 +28,7 @@ BASE_SIGNER_TOOL = Path(
     "deploy/tools/build_phase8_paired_ml_paper_entry_signed_authorization.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    REQUEST_TOOL: "6d80f90b0f6770b058fb0814e26e476192c193f7",
+    REQUEST_TOOL: "241c7e3299e2cc81a529a39cd994b68e571072d7",
     BASE_SIGNER_TOOL: "ffba2650c1ee24e9296149757a0d5cb65382ced3",
 }
 
