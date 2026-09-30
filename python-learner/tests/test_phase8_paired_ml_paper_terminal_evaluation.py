@@ -45,6 +45,7 @@ def _audit(
         "account_id": "paper-1",
         "pair_id": "pair-20",
         "pool_address": "pool-1",
+        "target_chain_observed_at": "2026-09-30T08:00:00+00:00",
         "incumbent_position_id": "pair-20-incumbent",
         "challenger_position_id": "pair-20-challenger",
         "fresh_positions": {
