@@ -261,6 +261,9 @@ def _build(
         readiness["pair_cycle_items"][1][
             "token_y_quote_per_atomic"
         ] = 0.000002
+        fresh["pair_cycle_items"][1][
+            "token_y_quote_per_atomic"
+        ] = 0.000002
 
     readiness_path = _write(root / "readiness.json", readiness)
     verification_path = _write(
