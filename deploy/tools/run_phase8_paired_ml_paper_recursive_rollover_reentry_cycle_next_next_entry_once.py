@@ -23,7 +23,7 @@ READINESS_TOOL = Path(
     "deploy/tools/check_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_execution_readiness.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    READINESS_TOOL: "80278d68bfd5f486929948c61e5df7877ec8082f",
+    READINESS_TOOL: "b125f0a548a40dfa3e31651841e1af09941213b3",
 }
 
 LOCK_PATH = Path(
