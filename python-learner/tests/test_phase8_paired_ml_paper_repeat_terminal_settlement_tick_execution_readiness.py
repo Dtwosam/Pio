@@ -150,6 +150,7 @@ def _build(
     quote_map=None,
     valuation=False,
     existing_run=False,
+    pair_regression=False,
 ):
     temp = tempfile.TemporaryDirectory()
     root = Path(temp.name)
@@ -186,6 +187,8 @@ def _build(
 
     readiness = _readiness()
     request = _request()
+    if pair_regression:
+        request["pair_id"] = request["previous_pair_id"]
     request["production_repository"] = str(production)
     request["pio_database_path"] = str(database)
     if valuation or existing_run:
@@ -412,6 +415,15 @@ def test_existing_deterministic_run_fails_closed(monkeypatch):
     temp, run = _build(monkeypatch, existing_run=True)
     try:
         with pytest.raises(ValueError, match="run already exists"):
+            run()
+    finally:
+        temp.cleanup()
+
+
+def test_repeat_pair_id_regression_fails_closed(monkeypatch):
+    temp, run = _build(monkeypatch, pair_regression=True)
+    try:
+        with pytest.raises(ValueError, match="pair id was not advanced"):
             run()
     finally:
         temp.cleanup()
