@@ -20,7 +20,7 @@ PREVIOUS_TICK_AUDIT_TOOL = Path(
     "deploy/tools/check_phase8_paired_ml_paper_recursive_rollover_evidence_tick_post_audit.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    PREVIOUS_TICK_AUDIT_TOOL: "fb4087c8a39a386ccf049f4297149955306c873b",
+    PREVIOUS_TICK_AUDIT_TOOL: "937e28ce36468df3b4621603c30f84cbfa3125c4",
 }
 
 STATUS_READY = "READY"
