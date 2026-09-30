@@ -114,7 +114,7 @@ def _seed(
         conn.execute(
             """
             INSERT INTO paper_positions
-            VALUES ('p8-pair-3-incumbent', 'paper-1', 'CLOSED')
+            VALUES ('p8-pair-2-incumbent', 'paper-1', 'CLOSED')
             """
         )
         conn.execute(
