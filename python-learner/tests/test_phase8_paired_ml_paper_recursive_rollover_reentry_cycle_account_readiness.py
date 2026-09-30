@@ -59,8 +59,8 @@ def _verification() -> dict:
 def _final() -> dict:
     return {
         "evaluation_sha256": "b" * 64,
-        "incumbent_position_id": "p8-pair-5-incumbent",
-        "challenger_position_id": "p8-pair-5-challenger",
+        "incumbent_position_id": "p8-pair-4-incumbent",
+        "challenger_position_id": "p8-pair-4-challenger",
     }
 
 
@@ -114,13 +114,13 @@ def _seed(
         conn.execute(
             """
             INSERT INTO paper_positions
-            VALUES ('p8-pair-3-incumbent', 'paper-1', 'CLOSED')
+            VALUES ('p8-pair-4-incumbent', 'paper-1', 'CLOSED')
             """
         )
         conn.execute(
             """
             INSERT INTO paper_positions
-            VALUES ('p8-pair-3-challenger', 'paper-1', ?)
+            VALUES ('p8-pair-4-challenger', 'paper-1', ?)
             """,
             (previous_challenger_status,),
         )
