@@ -18,7 +18,7 @@ TERMINAL_EVALUATION_TOOL = Path(
     "deploy/tools/check_phase8_paired_ml_paper_repeat_terminal_evaluation.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    TERMINAL_EVALUATION_TOOL: "1cfc934306e38799079f693f87022d4a12a2eaac",
+    TERMINAL_EVALUATION_TOOL: "d771a7daa0a73154442012309bc5ded98edd4303",
 }
 
 STATUS_READY = "READY"
