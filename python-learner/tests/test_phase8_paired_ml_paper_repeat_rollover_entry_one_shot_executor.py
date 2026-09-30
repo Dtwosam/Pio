@@ -227,9 +227,6 @@ def _build(
     database = data / "pio.db"
     _seed(database, extra_open=extra_open)
     saved = _readiness(database)
-    fresh = copy.deepcopy(saved)
-    if readiness_drift:
-        fresh["pair_id"] = "pair-4"
 
     readiness_path = _write(root / "readiness.json", saved)
     verification_path = _write(
@@ -431,7 +428,10 @@ def _build(
         def build_phase8_paired_ml_paper_repeat_rollover_entry_execution_readiness(
             **kwargs,
         ):
-            return copy.deepcopy(fresh)
+            result = copy.deepcopy(saved)
+            if readiness_drift:
+                result["pair_id"] = "pair-4"
+            return result
 
         @staticmethod
         def _hash_record(value):
