@@ -431,7 +431,10 @@ def _build(
         def build_phase8_paired_ml_paper_repeat_rollover_entry_execution_readiness(
             **kwargs,
         ):
-            return copy.deepcopy(fresh)
+            result = copy.deepcopy(saved)
+            if readiness_drift:
+                result["pair_id"] = "pair-4"
+            return result
 
         @staticmethod
         def _hash_record(value):
