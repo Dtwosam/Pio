@@ -430,7 +430,7 @@ def _build(
         ):
             result = copy.deepcopy(saved)
             if readiness_drift:
-                result["pair_id"] = "pair-4"
+                result["pair_id"] = "pair-5"
             return result
 
         @staticmethod
