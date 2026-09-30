@@ -149,7 +149,7 @@ def _build(monkeypatch, *, account_drift: bool = False):
 
     class FakeInput:
         @staticmethod
-        def verify_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_inputs(**kwargs):
+        def verify_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_inputs(**kwargs):
             return copy.deepcopy(input_record)
 
     class FakeAccount:
