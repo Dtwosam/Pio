@@ -908,7 +908,7 @@ def main() -> None:
         build_phase8_paired_ml_paper_repeat_evidence_tick_execution_readiness(
             repository=args.repo,
             source_tree=args.source_tree,
-            post_audit_path=args.repeat_post_audit,
+            repeat_post_audit_path=args.repeat_post_audit,
             saved_supervision_readiness_path=(
                 args.saved_supervision_readiness
             ),
