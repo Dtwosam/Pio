@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import hashlib
 import importlib.util
 import json
@@ -117,23 +118,22 @@ class _FakeSigner:
         assert isinstance(value, dict)
 
 
+@dataclass(frozen=True)
 class _FakeItem:
-    def __init__(
-        self,
-        *,
-        position_id,
-        token_y_quote_per_atomic,
-        quote_max_age_seconds,
-        emergency_exit,
-        estimated_exit_cost_quote,
-        rebalance_cost_quote,
-    ):
-        self.position_id = position_id
-        self.token_y_quote_per_atomic = token_y_quote_per_atomic
-        self.quote_max_age_seconds = quote_max_age_seconds
-        self.emergency_exit = emergency_exit
-        self.estimated_exit_cost_quote = estimated_exit_cost_quote
-        self.rebalance_cost_quote = rebalance_cost_quote
+    position_id: str
+    token_y_quote_per_atomic: float
+    quote_max_age_seconds: int
+    emergency_exit: bool
+    estimated_exit_cost_quote: float
+    rebalance_cost_quote: float | None
+
+
+@dataclass(frozen=True)
+class _FakeSafety:
+    pool_address: str
+    safe: bool
+    reason: str | None
+    assessment: object | None
 
 
 def _build(
@@ -249,7 +249,7 @@ def _build(
             observed_at,
             config,
         ):
-            return SimpleNamespace(
+            return _FakeSafety(
                 pool_address=pool_address,
                 safe=False,
                 reason="fixture unsafe",
