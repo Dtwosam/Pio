@@ -446,7 +446,7 @@ def build_phase8_paired_ml_paper_repeat_entry_execution_readiness(
         signer_module,
         base_readiness_module,
     ) = _load_reviewed(source)
-    _, base_account_module, _, pair_module = (
+    base_account_module, _, _, pair_module = (
         base_readiness_module._load_reviewed(source)
     )
 
