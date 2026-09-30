@@ -18,7 +18,7 @@ READINESS_TOOL = Path(
     "deploy/tools/check_phase8_paired_ml_paper_recursive_rollover_continuation_supervision_readiness.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    READINESS_TOOL: "d6e50a7c6c310f5d779911d18daaa8fbf42781ba",
+    READINESS_TOOL: "02227e7c28d808d72a47366b325acf291db37cdd",
 }
 
 AUTHORIZATION_SCOPE = "RUN_ONE_PHASE8_RECURSIVE_ROLLOVER_PAIRED_ML_PAPER_CONTINUATION_EVIDENCE_TICK_ONLY"
