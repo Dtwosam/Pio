@@ -17,11 +17,11 @@ TOOL = (
     ROOT
     / "deploy"
     / "tools"
-    / "build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_signed_authorization.py"
+    / "build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_signed_authorization.py"
 )
 
 SPEC = importlib.util.spec_from_file_location(
-    "build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_signed_authorization",
+    "build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_signed_authorization",
     TOOL,
 )
 assert SPEC is not None and SPEC.loader is not None
