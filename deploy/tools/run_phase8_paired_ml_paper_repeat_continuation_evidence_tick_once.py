@@ -56,9 +56,13 @@ RECEIPT_FIELDS = (
     "incumbent_model_id",
     "challenger_model_id",
     "account_id",
+    "previous_pair_id",
     "pair_id",
     "pool_address",
+    "entry_observed_at",
     "source_previous_tick_post_audit_sha256",
+    "source_repeat_post_audit_sha256",
+    "source_final_evaluation_sha256",
     "previous_tick_observed_at",
     "requested_position_ids",
     "incumbent_position_id",
@@ -213,6 +217,8 @@ def validate_phase8_paired_ml_paper_repeat_continuation_evidence_tick_execution_
         "fresh_readiness_sha256",
         "saved_request_sha256",
         "source_previous_tick_post_audit_sha256",
+        "source_repeat_post_audit_sha256",
+        "source_final_evaluation_sha256",
         "signed_authorization_verification_sha256",
         "approval_payload_sha256",
         "approval_signature_sha256",
@@ -685,10 +691,18 @@ def execute_phase8_paired_ml_paper_repeat_continuation_evidence_tick_once(
         "incumbent_model_id": saved_readiness["incumbent_model_id"],
         "challenger_model_id": saved_readiness["challenger_model_id"],
         "account_id": saved_readiness["account_id"],
+        "previous_pair_id": saved_readiness["previous_pair_id"],
         "pair_id": saved_readiness["pair_id"],
         "pool_address": saved_readiness["pool_address"],
+        "entry_observed_at": saved_readiness["entry_observed_at"],
         "source_previous_tick_post_audit_sha256": saved_readiness[
             "source_previous_tick_post_audit_sha256"
+        ],
+        "source_repeat_post_audit_sha256": saved_readiness[
+            "source_repeat_post_audit_sha256"
+        ],
+        "source_final_evaluation_sha256": saved_readiness[
+            "source_final_evaluation_sha256"
         ],
         "previous_tick_observed_at": saved_readiness[
             "previous_tick_observed_at"
