@@ -178,7 +178,7 @@ def _build(
         conn.execute(
             """
             INSERT INTO paper_counterfactual_positions
-            VALUES ('pair-1-challenger', 'y-mint')
+            VALUES ('p8-pair-2-challenger', 'y-mint')
             """
         )
         conn.commit()
