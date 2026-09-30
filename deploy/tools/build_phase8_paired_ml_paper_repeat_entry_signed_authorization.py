@@ -668,6 +668,60 @@ def validate_verification(report: dict[str, Any]) -> None:
             "repeat paired PAPER verification scope mismatch"
         )
 
+    for field in (
+        "approver_principal",
+        "approval_id",
+        "issued_at",
+        "expires_at",
+        "previous_pair_id",
+        "pair_id",
+        "incumbent_model_id",
+        "challenger_model_id",
+        "incumbent_position_id",
+        "challenger_position_id",
+        "incumbent_event_key",
+        "challenger_event_key",
+    ):
+        if not isinstance(report.get(field), str) or not report[field]:
+            raise ValueError(
+                f"repeat paired PAPER verification {field} is invalid"
+            )
+    if report["pair_id"] == report["previous_pair_id"]:
+        raise ValueError(
+            "repeat paired PAPER verification pair id was not advanced"
+        )
+    if report["incumbent_model_id"] == report["challenger_model_id"]:
+        raise ValueError(
+            "repeat paired PAPER verification model identities must differ"
+        )
+    if report["incumbent_position_id"] == report["challenger_position_id"]:
+        raise ValueError(
+            "repeat paired PAPER verification position ids must differ"
+        )
+    if report["incumbent_event_key"] == report["challenger_event_key"]:
+        raise ValueError(
+            "repeat paired PAPER verification event keys must differ"
+        )
+    try:
+        capital = Decimal(str(report["capital_quote"]))
+        cost = Decimal(str(report["entry_cost_quote"]))
+        required = Decimal(str(report["required_pair_cash_quote"]))
+    except Exception as exc:
+        raise ValueError(
+            "repeat paired PAPER verification economics are invalid"
+        ) from exc
+    if (
+        not capital.is_finite()
+        or capital <= 0
+        or not cost.is_finite()
+        or cost < 0
+        or not required.is_finite()
+        or required != 2 * (capital + cost)
+    ):
+        raise ValueError(
+            "repeat paired PAPER verification economic binding mismatch"
+        )
+
     identity = {
         field: report[field]
         for field in VERIFICATION_FIELDS
