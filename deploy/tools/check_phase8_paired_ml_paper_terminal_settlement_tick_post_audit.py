@@ -74,6 +74,8 @@ REPORT_FIELDS = (
     "fresh_run",
     "fresh_run_item",
     "fresh_valuation",
+    "receipt_settlement_tick_complete",
+    "receipt_settlement_tick_partial_failure",
     "open_position_after",
     "closed_position_after",
     "paper_ledger_audit",
@@ -330,6 +332,7 @@ def validate_phase8_paired_ml_paper_terminal_settlement_tick_post_audit(
         "run_identity_verified",
         "run_scope_verified",
         "run_counts_verified",
+        "applied_item_has_applied_valuation",
         "closed_leg_stayed_closed",
         "ledger_audit_passing",
         "cycle_model_binding_verified",
@@ -375,7 +378,16 @@ def validate_phase8_paired_ml_paper_terminal_settlement_tick_post_audit(
             "paired PAPER settlement tick post-audit modified SHM"
         )
 
-    if report["settlement_tick_partial_failure_verified"]:
+    if report["settlement_tick_partial_failure_verified"] is not True:
+        raise ValueError(
+            "paired PAPER settlement tick partial-failure verification missing"
+        )
+    if report["settlement_tick_complete_verified"] is not True:
+        raise ValueError(
+            "paired PAPER settlement tick complete verification missing"
+        )
+
+    if report["receipt_settlement_tick_partial_failure"]:
         if report["settlement_recovery_review_ready"] is not True:
             raise ValueError(
                 "paired PAPER settlement partial failure lacks recovery route"
@@ -695,6 +707,8 @@ def build_phase8_paired_ml_paper_terminal_settlement_tick_post_audit(
         "fresh_run": fresh_run,
         "fresh_run_item": fresh_item,
         "fresh_valuation": valuation,
+        "receipt_settlement_tick_complete": complete,
+        "receipt_settlement_tick_partial_failure": partial,
         "open_position_after": open_position,
         "closed_position_after": closed_position,
         "paper_ledger_audit": ledger_record,
@@ -715,8 +729,8 @@ def build_phase8_paired_ml_paper_terminal_settlement_tick_post_audit(
         "closed_leg_stayed_closed": True,
         "ledger_audit_passing": True,
         "cycle_model_binding_verified": True,
-        "settlement_tick_complete_verified": complete or partial,
-        "settlement_tick_partial_failure_verified": partial,
+        "settlement_tick_complete_verified": True,
+        "settlement_tick_partial_failure_verified": True,
         "open_leg_still_open": still_open,
         "open_leg_now_closed": now_closed,
         "next_debt_type": next_debt,
