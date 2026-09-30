@@ -547,7 +547,7 @@ def build_phase8_paired_ml_paper_repeat_rollover_evidence_tick_execution_readine
     )
     signer_module.validate_verification(saved_verification)
 
-    if request["source_repeat_supervision_readiness_sha256"] != saved_supervision[
+    if request["source_rollover_supervision_readiness_sha256"] != saved_supervision[
         "readiness_sha256"
     ]:
         raise ValueError(
