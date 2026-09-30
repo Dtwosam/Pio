@@ -795,7 +795,15 @@ def build_phase8_paired_ml_paper_repeat_continuation_evidence_tick_execution_rea
         "fresh_signed_authorization_verification_sha256": (
             fresh_verification["verification_sha256"]
         ),
-        "source_previous_tick_post_audit_sha256": request["source_previous_tick_post_audit_sha256"],
+        "source_previous_tick_post_audit_sha256": request[
+            "source_previous_tick_post_audit_sha256"
+        ],
+        "source_repeat_post_audit_sha256": request[
+            "source_repeat_post_audit_sha256"
+        ],
+        "source_final_evaluation_sha256": request[
+            "source_final_evaluation_sha256"
+        ],
         "production_repository": str(production),
         "pio_database_path": str(database),
         "pio_database_sha256": database_state["database"],
