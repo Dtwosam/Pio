@@ -275,7 +275,7 @@ def build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entr
         )
     for field in (
         "account_ready",
-        "reentry_cycle_next_preconditions_ready",
+        "reentry_cycle_next_next_preconditions_ready",
         "previous_pair_positions_closed",
         "zero_open_positions_verified",
         "paper_cash_sufficient_for_pair",
