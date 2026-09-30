@@ -229,7 +229,7 @@ def _build(
     saved = _readiness(database)
     fresh = copy.deepcopy(saved)
     if readiness_drift:
-        fresh["pair_id"] = "pair-3"
+        fresh["pair_id"] = "pair-4"
 
     readiness_path = _write(root / "readiness.json", saved)
     verification_path = _write(
