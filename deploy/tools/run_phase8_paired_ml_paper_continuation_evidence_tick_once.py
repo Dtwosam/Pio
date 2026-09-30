@@ -175,7 +175,7 @@ def _load_json(path: str | Path, *, label: str) -> dict[str, Any]:
     return value
 
 
-def validate_phase8_paired_ml_paper_evidence_tick_execution_receipt(
+def validate_phase8_paired_ml_paper_continuation_evidence_tick_execution_receipt(
     receipt: dict[str, Any],
 ) -> None:
     if not isinstance(receipt, dict):
@@ -744,7 +744,7 @@ def execute_phase8_paired_ml_paper_continuation_evidence_tick_once(
         **identity,
         "receipt_sha256": _sha256_bytes(_canonical_bytes(identity)),
     }
-    validate_phase8_paired_ml_paper_evidence_tick_execution_receipt(
+    validate_phase8_paired_ml_paper_continuation_evidence_tick_execution_receipt(
         receipt
     )
     return receipt
