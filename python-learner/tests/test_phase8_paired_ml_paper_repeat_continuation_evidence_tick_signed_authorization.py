@@ -291,10 +291,10 @@ def test_verification_checks_trust_root_and_expiry(monkeypatch):
             signature_path=signature,
             allowed_signers_path=allowed,
             expected_allowed_signers_sha256=allowed_sha,
-            now="2026-09-30T00:50:00Z",
+            now="2026-09-30T09:34:00Z",
         )
         assert report[
-            "human_pair_evidence_tick_authorization_verified"
+            "human_repeat_continuation_pair_evidence_tick_authorization_verified"
         ] is True
         assert report["approval_not_expired"] is True
         assert report["paper_supervisor_tick_executed"] is False
@@ -309,7 +309,7 @@ def test_verification_checks_trust_root_and_expiry(monkeypatch):
                 signature_path=signature,
                 allowed_signers_path=allowed,
                 expected_allowed_signers_sha256=allowed_sha,
-                now="2026-09-30T00:52:00Z",
+                now="2026-09-30T09:38:00Z",
             )
 
 
@@ -351,7 +351,7 @@ def test_verification_rejects_wrong_trust_root(monkeypatch):
                 signature_path=signature,
                 allowed_signers_path=allowed,
                 expected_allowed_signers_sha256="9" * 64,
-                now="2026-09-30T00:50:00Z",
+                now="2026-09-30T09:34:00Z",
             )
 
 
@@ -392,7 +392,7 @@ def _verified(monkeypatch) -> dict:
         signature_path=signature,
         allowed_signers_path=allowed,
         expected_allowed_signers_sha256=allowed_sha,
-        now="2026-09-30T00:50:00Z",
+        now="2026-09-30T09:34:00Z",
     )
     temp.cleanup()
     return result
