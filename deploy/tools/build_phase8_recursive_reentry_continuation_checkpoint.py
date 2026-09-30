@@ -30,6 +30,9 @@ CHECKPOINT_FIELDS = (
     "source_post_audit_sha256",
     "source_execution_receipt_sha256",
     "source_final_evaluation_sha256",
+    "source_pair_entry_post_audit_sha256",
+    "pair_entry_request_sha256",
+    "pair_entry_input_verification_sha256",
     "production_repository",
     "pio_database_path",
     "pio_database_sha256",
@@ -194,6 +197,9 @@ def validate_phase8_recursive_reentry_continuation_checkpoint(
         "source_post_audit_sha256",
         "source_execution_receipt_sha256",
         "source_final_evaluation_sha256",
+        "source_pair_entry_post_audit_sha256",
+        "pair_entry_request_sha256",
+        "pair_entry_input_verification_sha256",
         "pio_database_sha256",
         "pair_lineage_sha256",
         "latest_previous_tick_post_audit_sha256",
@@ -242,13 +248,15 @@ def validate_phase8_recursive_reentry_continuation_checkpoint(
     if not isinstance(lineage, dict):
         raise ValueError("recursive re-entry continuation checkpoint pair lineage is invalid")
     expected_lineage = {
-        "source_pair_entry_post_audit_sha256": lineage.get(
+        "source_pair_entry_post_audit_sha256": checkpoint[
             "source_pair_entry_post_audit_sha256"
-        ),
-        "pair_entry_request_sha256": lineage.get("pair_entry_request_sha256"),
-        "pair_entry_input_verification_sha256": lineage.get(
+        ],
+        "pair_entry_request_sha256": checkpoint[
+            "pair_entry_request_sha256"
+        ],
+        "pair_entry_input_verification_sha256": checkpoint[
             "pair_entry_input_verification_sha256"
-        ),
+        ],
         "source_final_evaluation_sha256": checkpoint["source_final_evaluation_sha256"],
         "active_cycle_id": checkpoint["active_cycle_id"],
         "incumbent_model_id": checkpoint["incumbent_model_id"],
@@ -287,11 +295,15 @@ def validate_phase8_recursive_reentry_continuation_checkpoint(
             raise ValueError("recursive re-entry continuation checkpoint CONTINUE route mismatch")
         if checkpoint.get("pair_both_open") is not True:
             raise ValueError("recursive re-entry continuation checkpoint CONTINUE requires open pair")
+        if checkpoint.get("pair_any_closed") is not False:
+            raise ValueError("recursive re-entry continuation checkpoint CONTINUE forbids closed leg")
     elif checkpoint["checkpoint_state"] == STATE_TERMINAL:
         if flags != (False, True, False):
             raise ValueError("recursive re-entry continuation checkpoint TERMINAL route mismatch")
         if checkpoint.get("pair_any_closed") is not True:
             raise ValueError("recursive re-entry continuation checkpoint TERMINAL requires closed leg")
+        if checkpoint.get("pair_both_open") is not False:
+            raise ValueError("recursive re-entry continuation checkpoint TERMINAL forbids open pair")
     elif checkpoint["checkpoint_state"] == STATE_RECOVERY:
         if flags != (False, False, True):
             raise ValueError("recursive re-entry continuation checkpoint RECOVERY route mismatch")
@@ -379,6 +391,15 @@ def build_phase8_recursive_reentry_continuation_checkpoint(
         "source_post_audit_sha256": audit["post_audit_sha256"],
         "source_execution_receipt_sha256": audit["execution_receipt_sha256"],
         "source_final_evaluation_sha256": audit["source_final_evaluation_sha256"],
+        "source_pair_entry_post_audit_sha256": lineage[
+            "source_pair_entry_post_audit_sha256"
+        ],
+        "pair_entry_request_sha256": lineage[
+            "pair_entry_request_sha256"
+        ],
+        "pair_entry_input_verification_sha256": lineage[
+            "pair_entry_input_verification_sha256"
+        ],
         "production_repository": audit["production_repository"],
         "pio_database_path": audit["pio_database_path"],
         "pio_database_sha256": audit["audit_database_sha256_after"],
