@@ -288,7 +288,7 @@ def test_verification_checks_signature_and_expiry(monkeypatch):
             expected_allowed_signers_sha256=allowed_sha,
             now="2026-09-30T09:44:00Z",
         )
-        assert report["human_recursive_rollover_reentry_cycle_settlement_tick_authorization_verified"] is True
+        assert report["human_recursive_rollover_reentry_cycle_next_settlement_tick_authorization_verified"] is True
         assert report["approval_not_expired"] is True
         assert report["requested_position_ids"] == ["p8-pair-2-challenger"]
         assert report["paper_settlement_tick_executed"] is False
