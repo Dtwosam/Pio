@@ -159,12 +159,19 @@ def _build(
     import sqlite3
     conn = sqlite3.connect(database)
     try:
-        conn.execute(
+        conn.executescript(
             """
             CREATE TABLE paper_counterfactual_positions(
                 position_id TEXT PRIMARY KEY,
                 token_y_mint TEXT NOT NULL
-            )
+            );
+            CREATE TABLE paper_chain_valuations(
+                position_id TEXT NOT NULL,
+                observed_at TEXT NOT NULL
+            );
+            CREATE TABLE paper_runs(
+                run_id TEXT PRIMARY KEY
+            );
             """
         )
         conn.execute(
