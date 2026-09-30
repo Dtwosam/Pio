@@ -15,7 +15,7 @@ TOOL = (
     ROOT
     / "deploy"
     / "tools"
-    / "build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_next_entry_request.py"
+    / "build_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_next_next_entry_request.py"
 )
 
 SPEC = importlib.util.spec_from_file_location(
