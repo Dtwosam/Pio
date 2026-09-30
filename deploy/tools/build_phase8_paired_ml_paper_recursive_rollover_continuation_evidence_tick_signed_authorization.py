@@ -27,7 +27,7 @@ REQUEST_TOOL = Path(
     "deploy/tools/build_phase8_paired_ml_paper_recursive_rollover_continuation_evidence_tick_request.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    REQUEST_TOOL: "c4d7d2044cbb89020511a2731e28ea9a0861a57b",
+    REQUEST_TOOL: "735aaf315a85f966c9f081bc416b3aac79887bc3",
 }
 
 SIGNATURE_NAMESPACE = "pio-phase8-recursive-rollover-paired-ml-paper-continuation-evidence-tick-authorization-v1"
