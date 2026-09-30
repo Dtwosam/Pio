@@ -238,9 +238,6 @@ def _build(
             self.kwargs = kwargs
 
     class Live:
-        Storage = Storage
-        PoolSafetyConfig = SafetyConfig
-
         @staticmethod
         def assess_live_pool_safety(
             storage,
@@ -255,6 +252,9 @@ def _build(
                 reason="fixture unsafe",
                 assessment=None,
             )
+
+    Live.Storage = Storage
+    Live.PoolSafetyConfig = SafetyConfig
 
     class Latest:
         LatestPaperCycleItem = _FakeItem
