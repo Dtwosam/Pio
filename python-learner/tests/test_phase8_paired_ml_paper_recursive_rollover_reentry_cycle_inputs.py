@@ -121,7 +121,7 @@ def test_template_binds_to_more_evidence_route(monkeypatch):
     finally:
         temp.cleanup()
 
-    assert template["previous_pair_id"] == "pair-5"
+    assert template["previous_pair_id"] == "pair-4"
     assert template["account_mode"] == "EXISTING"
     assert template["previous_incumbent_closed_trades"] == 9
     assert template["previous_challenger_closed_trades"] == 9
@@ -174,7 +174,7 @@ def test_cycle_pair_id_must_differ_from_previous(monkeypatch):
         )
         input_path = _write(
             root / "input.json",
-            _filled(template, pair_id="pair-3"),
+            _filled(template, pair_id="pair-4"),
         )
         with pytest.raises(ValueError, match="pair_id must be new"):
             MODULE.verify_phase8_paired_ml_paper_recursive_rollover_reentry_cycle_inputs(
