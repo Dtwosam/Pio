@@ -547,7 +547,7 @@ def build_phase8_paired_ml_paper_recursive_rollover_reentry_evidence_tick_execut
     )
     signer_module.validate_verification(saved_verification)
 
-    if request["source_recursive_rollover_supervision_readiness_sha256"] != saved_supervision[
+    if request["source_recursive_rollover_reentry_supervision_readiness_sha256"] != saved_supervision[
         "readiness_sha256"
     ]:
         raise ValueError(
