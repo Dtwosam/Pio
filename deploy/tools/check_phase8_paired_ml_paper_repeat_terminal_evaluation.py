@@ -20,7 +20,7 @@ CONTINUOUS_PROMOTION_MODULE = Path(
     "python-learner/src/meteora_learner/continuous_promotion.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    POST_AUDIT_TOOL: "b9fc18fb8170d6937517514386441d4f551ac534",
+    POST_AUDIT_TOOL: "801fc60073aa23b93eb17146e9bcfc7909f929b5",
     CONTINUOUS_PROMOTION_MODULE: "6ae4acd70be4e03e7e2b2f5c410e37098b4b8bc6",
 }
 
