@@ -468,16 +468,14 @@ def execute_phase8_paired_ml_paper_terminal_settlement_tick_once(
                 "Pio database changed after paired PAPER settlement readiness"
             )
 
-        item = latest_module.LatestPaperCycleItem(
-            **saved_readiness["single_cycle_item"]
-        )
+        item_record = saved_readiness["single_cycle_item"]
         if _sha256_bytes(
-            _canonical_bytes(asdict(item))
+            _canonical_bytes(item_record)
         ) != saved_readiness["single_cycle_item_sha256"]:
             raise ValueError(
                 "paired PAPER settlement execution item digest changed"
             )
-        if item.position_id != saved_readiness["open_position_id"]:
+        if item_record["position_id"] != saved_readiness["open_position_id"]:
             raise ValueError(
                 "paired PAPER settlement execution position scope changed"
             )
@@ -488,44 +486,50 @@ def execute_phase8_paired_ml_paper_terminal_settlement_tick_once(
         management_config = latest_module.PositionManagementConfig(
             **saved_readiness["position_management_config"]
         )
-        result = latest_module.run_latest_live_paper_cycle(
-            latest_module.Storage(database),
-            cycle_id=saved_readiness["settlement_cycle_id"],
-            items=(item,),
+        live_item = live_module.LivePaperChainBatchItem(
+            position_id=item_record["position_id"],
+            token_y_quote_per_atomic=float(
+                item_record["token_y_quote_per_atomic"]
+            ),
+            quote_max_age_seconds=int(
+                item_record["quote_max_age_seconds"]
+            ),
+            emergency_exit=bool(item_record["emergency_exit"]),
+            estimated_exit_cost_quote=float(
+                item_record["estimated_exit_cost_quote"]
+            ),
+            rebalance_cost_quote=item_record["rebalance_cost_quote"],
+        )
+        result = live_module.run_live_chain_paper_batch(
+            live_module.Storage(database),
+            run_id=saved_readiness["expected_run_id"],
+            observed_at=saved_readiness["target_chain_observed_at"],
+            items=(live_item,),
             safety_config=safety_config,
             management_config=management_config,
             retry_failed=False,
         )
         result_record = result.to_record()
 
-        if result.positions_requested != 1 or result.groups != 1:
-            raise ValueError(
-                "paired PAPER settlement tick escaped single-position scope"
-            )
-        if len(result.details) != 1:
-            raise ValueError(
-                "paired PAPER settlement tick returned unexpected group count"
-            )
-        detail = result.details[0]
-        if detail.observed_at != saved_readiness["target_chain_observed_at"]:
-            raise ValueError(
-                "paired PAPER settlement tick used a different chain snapshot"
-            )
-        if detail.run_id != saved_readiness["expected_run_id"]:
+        if result.run_id != saved_readiness["expected_run_id"]:
             raise ValueError(
                 "paired PAPER settlement tick deterministic run id changed"
             )
-        if list(detail.positions) != [saved_readiness["open_position_id"]]:
+        if result.observed_at != saved_readiness["target_chain_observed_at"]:
+            raise ValueError(
+                "paired PAPER settlement tick used a different chain snapshot"
+            )
+        if result.items_total != 1 or len(result.items) != 1:
+            raise ValueError(
+                "paired PAPER settlement tick escaped single-position scope"
+            )
+        if result.items[0].position_id != saved_readiness["open_position_id"]:
             raise ValueError(
                 "paired PAPER settlement tick position scope changed"
             )
-        if detail.report.reused_existing_run is not False:
+        if result.reused_existing_run is not False:
             raise ValueError(
                 "paired PAPER settlement tick unexpectedly reused an existing run"
-            )
-        if detail.report.items_total != 1:
-            raise ValueError(
-                "paired PAPER settlement tick persisted item count changed"
             )
 
         after_state = settlement_readiness_module._database_state(database)
@@ -621,15 +625,15 @@ def execute_phase8_paired_ml_paper_terminal_settlement_tick_once(
         "tick_result_sha256": _sha256_bytes(
             _canonical_bytes(result_record)
         ),
-        "tick_status": detail.report.status,
-        "positions_requested": result.positions_requested,
-        "groups": result.groups,
-        "items_total": detail.report.items_total,
-        "items_applied": detail.report.items_applied,
-        "items_skipped": detail.report.items_skipped,
-        "items_failed": detail.report.items_failed,
-        "run_reused_existing": detail.report.reused_existing_run,
-        "run_item_status": detail.report.items[0].status,
+        "tick_status": result.status,
+        "positions_requested": 1,
+        "groups": 1,
+        "items_total": result.items_total,
+        "items_applied": result.items_applied,
+        "items_skipped": result.items_skipped,
+        "items_failed": result.items_failed,
+        "run_reused_existing": result.reused_existing_run,
+        "run_item_status": result.items[0].status,
         "fresh_readiness_matches_saved": True,
         "human_settlement_tick_authorization_verified": True,
         "exact_single_position_scope_verified": True,
@@ -640,8 +644,8 @@ def execute_phase8_paired_ml_paper_terminal_settlement_tick_once(
         "one_tick_only": True,
         "paper_settlement_tick_authorized": True,
         "paper_settlement_tick_executed": True,
-        "settlement_tick_complete": detail.report.items_failed == 0,
-        "settlement_tick_partial_failure": detail.report.items_failed > 0,
+        "settlement_tick_complete": result.items_failed == 0,
+        "settlement_tick_partial_failure": result.items_failed > 0,
         "requires_post_tick_audit": True,
         "paper_evidence_collection_authorized": False,
         "paper_trading_authorized": False,
