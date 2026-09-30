@@ -23,7 +23,7 @@ PAPER_AUDIT_MODULE = Path(
     "python-learner/src/meteora_learner/paper_audit.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    EXECUTOR_TOOL: "eb707d689b2977f390d9b69b42a98fe934c07c09",
+    EXECUTOR_TOOL: "3f9e231bc916a62da9c8b2a6067c3f8ede2ac528",
     PAPER_AUDIT_MODULE: "f58e27d7a8c629aca1235daf3b49134e3a63ad25",
 }
 
