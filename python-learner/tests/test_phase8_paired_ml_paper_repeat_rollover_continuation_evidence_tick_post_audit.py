@@ -465,7 +465,7 @@ def test_complete_open_pair_routes_to_next_tick(monkeypatch):
         "PAPER_CHALLENGER_EVIDENCE_REQUIRED"
     )
     assert report["continuation_route"] == (
-        "PHASE8_PAIRED_ML_PAPER_REPEAT_NEXT_EVIDENCE_TICK_REVIEW"
+        "PHASE8_PAIRED_ML_PAPER_REPEAT_ROLLOVER_NEXT_EVIDENCE_TICK_REVIEW"
     )
     assert report["next_evidence_tick_review_ready"] is True
     assert report["tick_recovery_review_ready"] is False
@@ -494,7 +494,7 @@ def test_complete_tick_with_closed_leg_routes_terminal(monkeypatch):
         "PAPER_PAIR_TERMINAL_EVALUATION_REQUIRED"
     )
     assert report["continuation_route"] == (
-        "PHASE8_PAIRED_ML_PAPER_REPEAT_TERMINAL_EVALUATION_REVIEW"
+        "PHASE8_PAIRED_ML_PAPER_REPEAT_ROLLOVER_TERMINAL_EVALUATION_REVIEW"
     )
     assert report["terminal_pair_evaluation_ready"] is True
     assert report["next_evidence_tick_review_ready"] is False
@@ -513,7 +513,7 @@ def test_partial_tick_routes_recovery(monkeypatch):
         "PAPER_PAIR_TICK_RECOVERY_REQUIRED"
     )
     assert report["continuation_route"] == (
-        "PHASE8_PAIRED_ML_PAPER_REPEAT_TICK_RECOVERY_REVIEW"
+        "PHASE8_PAIRED_ML_PAPER_REPEAT_ROLLOVER_TICK_RECOVERY_REVIEW"
     )
     assert report["tick_recovery_review_ready"] is True
     assert report["next_evidence_tick_review_ready"] is False
