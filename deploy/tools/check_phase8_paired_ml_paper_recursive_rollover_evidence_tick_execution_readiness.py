@@ -502,7 +502,7 @@ def build_phase8_paired_ml_paper_recursive_rollover_evidence_tick_execution_read
     *,
     repository: str | Path,
     source_tree: str | Path,
-    rollover_post_audit_path: str | Path,
+    recursive_rollover_post_audit_path: str | Path,
     saved_supervision_readiness_path: str | Path,
     request_path: str | Path,
     saved_signed_authorization_verification_path: str | Path,
@@ -562,7 +562,7 @@ def build_phase8_paired_ml_paper_recursive_rollover_evidence_tick_execution_read
         supervision_module.build_phase8_paired_ml_paper_recursive_rollover_supervision_readiness(
             repository=production,
             source_tree=source,
-            rollover_post_audit_path=rollover_post_audit_path,
+            recursive_rollover_post_audit_path=recursive_rollover_post_audit_path,
             as_of=saved_supervision["evaluation_as_of"],
             chain_max_age_seconds=int(
                 saved_supervision["chain_max_age_seconds"]
@@ -903,7 +903,7 @@ def main() -> None:
     )
     parser.add_argument("--repo", default="/opt/pio")
     parser.add_argument("--source-tree", required=True)
-    parser.add_argument("--rollover-post-audit", required=True)
+    parser.add_argument("--recursive-rollover-post-audit", required=True)
     parser.add_argument("--saved-supervision-readiness", required=True)
     parser.add_argument("--request", required=True)
     parser.add_argument("--saved-signed-verification", required=True)
@@ -918,7 +918,7 @@ def main() -> None:
         build_phase8_paired_ml_paper_recursive_rollover_evidence_tick_execution_readiness(
             repository=args.repo,
             source_tree=args.source_tree,
-            rollover_post_audit_path=args.rollover_post_audit,
+            recursive_rollover_post_audit_path=args.recursive_rollover_post_audit,
             saved_supervision_readiness_path=(
                 args.saved_supervision_readiness
             ),
