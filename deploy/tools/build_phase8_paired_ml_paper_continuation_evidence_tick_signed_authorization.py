@@ -27,7 +27,7 @@ REQUEST_TOOL = Path(
     "deploy/tools/build_phase8_paired_ml_paper_continuation_evidence_tick_request.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    REQUEST_TOOL: "1837e2141c47fedc61a45ed84be46d33fd208e0f",
+    REQUEST_TOOL: "04b1611300f7c0eeea8b07f35752e1e632006525",
 }
 
 SIGNATURE_NAMESPACE = "pio-phase8-paired-ml-paper-continuation-evidence-tick-authorization-v1"
