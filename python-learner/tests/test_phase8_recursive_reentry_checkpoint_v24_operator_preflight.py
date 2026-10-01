@@ -75,12 +75,13 @@ def test_manifest_and_reviewed_tools_are_exactly_pinned():
 
 def test_builds_read_only_operator_preflight(monkeypatch):
     temp, _, allowed, run = _build(monkeypatch)
+    expected_allowed_sha = _sha(allowed.read_bytes())
     try:
         report = run()
     finally:
         temp.cleanup()
 
-    assert report["allowed_signers_sha256"] == _sha(allowed.read_bytes())
+    assert report["allowed_signers_sha256"] == expected_allowed_sha
     assert report["manifest_valid"] is True
     assert report["reviewed_source_tools_verified"] is True
     assert report["source_tree_stable_during_preflight"] is True
