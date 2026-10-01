@@ -463,7 +463,7 @@ def build_phase8_recursive_reentry_continuation_checkpoint_v22(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a canonical, read-only recursive re-entry continuation v21 "
+            "Build a canonical, read-only recursive re-entry continuation v22 "
             "checkpoint from the latest sealed PAPER tick post-audit."
         )
     )
