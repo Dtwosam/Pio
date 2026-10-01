@@ -16,7 +16,7 @@ POST_AUDIT_TOOL = Path(
     "deploy/tools/check_phase8_recursive_reentry_checkpoint_continuation_evidence_tick_post_audit.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    POST_AUDIT_TOOL: "80cbee97381e6dcc82a2856547ab8dfe4fb08360",
+    POST_AUDIT_TOOL: "8e0d8d03790541bbc7dac0ad26c55382dc39777f",
 }
 
 STATE_CONTINUE = "CONTINUE"
