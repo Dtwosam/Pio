@@ -175,10 +175,19 @@ The research branch does not yet:
 
 The research branch now includes chain-liquidity state, token/mint context,
 normalized pool API metadata, historical execution-cost context, composition
-fee ratios, learned cross-sectional ranking evidence and rotation-transition
-evidence. Remaining evidence gaps include comparable realized exit/re-entry
-transition costs and actual controlled-live position PnL once upstream gates
-permit those observations.
+fee ratios, learned cross-sectional ranking evidence, rotation-transition
+evidence, and explicit controlled-live transition annotations with comparable
+quote-backed direct EXIT + ENTER costs. Transition relationships are never
+inferred from timing: a predecessor and successor position must be explicitly
+reviewed and linked, and the persisted lifecycle must prove EXIT strictly
+precedes ENTER.
+
+The transition-cost evidence currently covers composition plus network costs in
+a common quote unit. It deliberately does not claim complete switching
+economics: market impact, slippage not represented by the persisted direct-cost
+decomposition, opportunity cost, and any learned switching threshold remain
+outside this layer. Real controlled-live sample volume also remains dependent on
+upstream gates permitting those observations.
 
 
 ## Market context joined to LP outcomes
@@ -241,8 +250,26 @@ selection without turning them into live policy:
   - records the realized advantage afterward;
   - reports churn/leader-change frequency and predicted-vs-realized switch
     evidence;
-  - explicitly marks exit/re-entry transition costs as not yet included and
-    does not choose a switching threshold.
+  - still does not consume controlled-live transition-cost samples and does not
+    choose a switching threshold.
+
+- `live_position_transition.py`
+  - records only explicit research-reviewed predecessor/successor LIVE position
+    relationships;
+  - validates persisted EXIT/ENTER decision ids and strict time ordering;
+  - stores one-to-one immutable links as pool switches or same-pool re-entries;
+  - never infers a transition from temporal adjacency.
+
+- `live_transition_cost_evidence.py`
+  - joins those explicit links to quote-backed valued LIVE EXIT and ENTER
+    actions;
+  - requires matching quote units before aggregation;
+  - reports missing valued actions or quote-unit mismatches as visible evidence
+    gaps;
+  - measures comparable direct transition cost from composition plus network
+    costs;
+  - explicitly marks full transition economics as incomplete and remains
+    research-only, non-actionable and disconnected from execution.
 
 These components are evidence generators. They remain research-only,
 non-actionable, and disconnected from execution.
