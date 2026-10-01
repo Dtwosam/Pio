@@ -20,7 +20,7 @@ CHECKPOINT_TOOL = Path(
     "deploy/tools/build_phase8_recursive_reentry_continuation_checkpoint_v6.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    CHECKPOINT_TOOL: "513f491fa1867c3c107eff4b825c347fccf4a813",
+    CHECKPOINT_TOOL: "37cdd16eb4e4b661b79748339d377b818cce4876",
 }
 
 STATUS_READY = "READY"
