@@ -23,7 +23,7 @@ READINESS_TOOL = Path(
     "deploy/tools/check_phase8_recursive_reentry_checkpoint_v2_continuation_evidence_tick_execution_readiness.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    READINESS_TOOL: "fd29d4c1737817129e112f0ca34497daa57fa35f",
+    READINESS_TOOL: "25aafb2a3720a10a641660a0cf507d1473f065e2",
 }
 
 LOCK_PATH = Path(
