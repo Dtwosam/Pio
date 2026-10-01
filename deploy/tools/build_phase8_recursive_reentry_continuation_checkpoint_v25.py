@@ -146,6 +146,7 @@ def _load_reviewed(source: Path) -> tuple[Any, Any]:
         ),
     )
 
+
 def _load_json(path: str | Path, *, label: str) -> dict[str, Any]:
     candidate = Path(path).expanduser()
     if candidate.is_symlink():
@@ -209,6 +210,7 @@ def validate_phase8_recursive_reentry_continuation_checkpoint_v25(
         raise ValueError("recursive re-entry continuation checkpoint v25 lineage mismatch")
 
     for field in (
+        "source_evidence_bundle_sha256",
         "source_post_audit_sha256",
         "source_execution_receipt_sha256",
         "source_final_evaluation_sha256",
@@ -437,6 +439,7 @@ def build_phase8_recursive_reentry_continuation_checkpoint_v25(
         "evidence_cycle_id",
         "expected_run_id",
         "target_chain_observed_at",
+        "execution_receipt_sha256",
         "receipt_tick_status",
         "receipt_pair_tick_complete",
         "receipt_pair_tick_partial_failure",
