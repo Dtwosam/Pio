@@ -21,6 +21,7 @@ def test_phase8_v25_operator_runbook_keeps_single_tick_boundary_explicit():
 
     assert "check_phase8_recursive_reentry_checkpoint_v25_operator_preflight.py" in text
     assert "check_phase8_recursive_reentry_checkpoint_v25_artifact_status.py" in text
+    assert "check_phase8_recursive_reentry_checkpoint_v25_evidence_handoff.py" in text
     assert "build_phase8_recursive_reentry_continuation_checkpoint_v25.py" in text
     assert "continuation_supervision_readiness.py" in text
     assert "continuation_evidence_tick_request.py" in text
@@ -38,6 +39,9 @@ def test_phase8_v25_operator_runbook_keeps_single_tick_boundary_explicit():
     assert "authorizes no next action" in text
     assert "MUTATION_BOUNDARY_REVIEW_REQUIRED" in text
     assert "is not authorization to execute" in text
+    assert "evidence_handoff_ready=true" in text
+    assert "future_checkpoint_refresh_authorized=false" in text
+    assert "$ARTIFACT_DIR/evidence-handoff-v25.json" in text
     assert "does not reverify the detached SSH signature" in text
     assert "does not" in text and "production database" in text
     assert "recurring PAPER" in text
