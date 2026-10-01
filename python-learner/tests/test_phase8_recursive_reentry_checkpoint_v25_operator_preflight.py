@@ -73,6 +73,34 @@ def test_manifest_and_reviewed_tools_are_exactly_pinned():
     assert all(len(value) == 40 for value in blobs.values())
 
 
+def test_manifest_rejects_prior_bundle_boundary_drift():
+    manifest, _ = MODULE._load_operator_manifest(ROOT)
+    tampered = json.loads(json.dumps(manifest))
+    tampered["prior_evidence_boundary"][
+        "prior_bundle_digest_must_survive_all_v25_stages"
+    ] = False
+
+    with pytest.raises(
+        ValueError,
+        match="prior evidence boundary mismatch",
+    ):
+        MODULE._validate_operator_manifest(tampered)
+
+
+def test_manifest_rejects_missing_every_stage_bundle_binding():
+    manifest, _ = MODULE._load_operator_manifest(ROOT)
+    tampered = json.loads(json.dumps(manifest))
+    tampered["execution_boundary"][
+        "prior_bundle_digest_must_match_every_stage"
+    ] = False
+
+    with pytest.raises(
+        ValueError,
+        match="requires prior bundle lineage",
+    ):
+        MODULE._validate_operator_manifest(tampered)
+
+
 def test_builds_read_only_operator_preflight(monkeypatch):
     temp, _, allowed, run = _build(monkeypatch)
     expected_allowed_sha = _sha(allowed.read_bytes())
