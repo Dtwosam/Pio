@@ -18,7 +18,7 @@ READINESS_TOOL = Path(
     "deploy/tools/check_phase8_recursive_reentry_checkpoint_v17_continuation_supervision_readiness.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    READINESS_TOOL: "3a6ce8f07c7c09b541fc827bd7e3819c5ad77fd6",
+    READINESS_TOOL: "a1da127ec90a7254c3deb1e8aa4efe3463d0b5a6",
 }
 
 AUTHORIZATION_SCOPE = "RUN_ONE_PHASE8_RECURSIVE_REENTRY_CHECKPOINT_V17_PAPER_CONTINUATION_EVIDENCE_TICK_ONLY"
