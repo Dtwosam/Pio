@@ -1,0 +1,110 @@
+{
+  "format_version": 1,
+  "artifact_type": "PHASE8_RECURSIVE_REENTRY_CHECKPOINT_V25_CONTINUATION_OPERATOR_MANIFEST_V1",
+  "purpose": "Machine-readable operator sequence for checkpoint v25 continuation PAPER evidence capture with sealed v24 bundle provenance",
+  "checkpoint_version": 25,
+  "prior_evidence_boundary": {
+    "sealed_v24_evidence_bundle_required": true,
+    "matching_v24_post_audit_required": true,
+    "prior_bundle_digest_must_survive_all_v25_stages": true
+  },
+  "ordered_steps": [
+    {
+      "order": 1,
+      "role": "bundled-canonical-checkpoint",
+      "tool": "deploy/tools/build_phase8_recursive_reentry_continuation_checkpoint_v25.py",
+      "git_blob": "94e84f7c2cf4bfc3b559a31d956940ab26aef94b",
+      "output_artifact": "checkpoint-v25.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 2,
+      "role": "continuation-readiness",
+      "tool": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_continuation_supervision_readiness.py",
+      "git_blob": "eec97c8aac8ca003a5e4e697c8abc6b4e2e74d06",
+      "output_artifact": "continuation-readiness-v25.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 3,
+      "role": "tick-request",
+      "tool": "deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_request.py",
+      "git_blob": "558feebfab6b80798f65cde35a104cb324bdcd33",
+      "output_artifact": "request-v25.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 4,
+      "role": "detached-authorization",
+      "tool": "deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_signed_authorization.py",
+      "git_blob": "f2792861dd2a45260cbe8e72d615ce42bdb2efe3",
+      "output_artifact": "signed-authorization-verification-v25.json",
+      "paper_state_mutation": false,
+      "human_signature_required": true
+    },
+    {
+      "order": 5,
+      "role": "execution-readiness",
+      "tool": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_execution_readiness.py",
+      "git_blob": "e9199357d2301f3716074a0d759063048806b51e",
+      "output_artifact": "execution-readiness-v25.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 6,
+      "role": "one-shot-paper-executor",
+      "tool": "deploy/tools/run_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_once.py",
+      "git_blob": "5af51da94e41c6f7daa9031eaec1e6f9a4d79759",
+      "output_artifact": "execution-receipt-v25.json",
+      "paper_state_mutation": true,
+      "human_signature_required": false,
+      "maximum_tick_count": 1
+    },
+    {
+      "order": 7,
+      "role": "post-execution-audit",
+      "tool": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_post_audit.py",
+      "git_blob": "829806d8529d30edc06a7ca444ce2ffdbdd8f4ce",
+      "output_artifact": "post-audit-v25.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 8,
+      "role": "evidence-bundle",
+      "tool": "deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_bundle.py",
+      "git_blob": "99be522c3a9c9e71b8d6657b6a23133b1a4bef0f",
+      "output_artifact": "evidence-bundle-v25.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    }
+  ],
+  "required_external_authorization_inputs": [
+    "signed authorization payload",
+    "detached SSH signature",
+    "allowed_signers trust-root file",
+    "expected allowed_signers SHA-256"
+  ],
+  "execution_boundary": {
+    "only_mutating_step": "one-shot-paper-executor",
+    "maximum_paper_ticks_per_authorization": 1,
+    "fresh_execution_readiness_required": true,
+    "post_tick_audit_required": true,
+    "final_bundle_requires_database_to_match_post_audit": true,
+    "prior_bundle_digest_must_match_every_stage": true
+  },
+  "safety_boundary": {
+    "automatic_paper_execution_authorized": false,
+    "recurring_paper_collection_authorized": false,
+    "scheduler_execution_authorized": false,
+    "live_submit_authorized": false,
+    "transaction_submission_authorized": false,
+    "new_live_capital_authorized": false,
+    "continuous_promotion_authorized": false,
+    "phase8_promotion_authorized": false
+  }
+}
