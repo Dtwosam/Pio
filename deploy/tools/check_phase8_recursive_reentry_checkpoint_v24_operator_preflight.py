@@ -381,10 +381,19 @@ def build_phase8_recursive_reentry_checkpoint_v24_operator_preflight(
 
     ssh_keygen = _ssh_keygen_path()
 
-    database = (production / "data" / "pio.db").resolve(strict=True)
+    database_candidate = production / "data" / "pio.db"
+    try:
+        database_stat = os.lstat(database_candidate)
+    except FileNotFoundError as exc:
+        raise ValueError("production Pio database is missing") from exc
+    if stat.S_ISLNK(database_stat.st_mode) or not stat.S_ISREG(
+        database_stat.st_mode
+    ):
+        raise ValueError(
+            f"unsafe Pio database state file: {database_candidate}"
+        )
+    database = database_candidate.resolve(strict=True)
     before = _database_state(database)
-    if before["database"] is None:
-        raise ValueError("production Pio database is missing")
 
     tools_after = _verify_source_tools(source, manifest)
     if tools_after != tools_before:
