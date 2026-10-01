@@ -212,6 +212,16 @@ def test_reviewed_v25_handoff_dependencies_are_exactly_pinned():
         assert MODULE._git_blob_sha(path) == expected
 
 
+def test_reviewed_v25_handoff_validators_are_loadable():
+    bundle_module, audit_module = MODULE._load_reviewed(ROOT)
+    assert callable(
+        bundle_module.validate_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_bundle
+    )
+    assert callable(
+        audit_module.validate_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_post_audit
+    )
+
+
 @pytest.mark.parametrize(
     ("state", "field"),
     [
