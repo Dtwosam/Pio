@@ -155,4 +155,62 @@ def load_live_outcome_evidence_report(
         raise ValueError(
             "live-outcome sample count does not match metadata"
         )
+
+    action_cost = report.get("action_cost_evidence")
+    if action_cost is not None:
+        if not isinstance(action_cost, dict):
+            raise ValueError(
+                "live-outcome action-cost evidence must be an object"
+            )
+        if action_cost.get("research_only") is not True:
+            raise ValueError(
+                "live-outcome action-cost evidence must remain research-only"
+            )
+        if action_cost.get("policy_actionable") is not False:
+            raise ValueError(
+                "live-outcome action-cost evidence cannot be policy-actionable"
+            )
+        if action_cost.get("execution_wired") is not False:
+            raise ValueError(
+                "live-outcome action-cost evidence cannot be execution-wired"
+            )
+        if action_cost.get("transition_pairs_inferred") is not False:
+            raise ValueError(
+                "live-outcome action-cost evidence cannot infer transition pairs"
+            )
+
+    transition_cost = report.get("transition_cost_evidence")
+    if transition_cost is not None:
+        if not isinstance(transition_cost, dict):
+            raise ValueError(
+                "live-outcome transition-cost evidence must be an object"
+            )
+        if transition_cost.get("research_only") is not True:
+            raise ValueError(
+                "live-outcome transition-cost evidence must remain research-only"
+            )
+        if transition_cost.get("policy_actionable") is not False:
+            raise ValueError(
+                "live-outcome transition-cost evidence cannot be policy-actionable"
+            )
+        if transition_cost.get("execution_wired") is not False:
+            raise ValueError(
+                "live-outcome transition-cost evidence cannot be execution-wired"
+            )
+        if transition_cost.get("transition_pairs_inferred") is not False:
+            raise ValueError(
+                "live-outcome transition-cost evidence cannot infer transition pairs"
+            )
+        if transition_cost.get("explicit_transition_links_required") is not True:
+            raise ValueError(
+                "live-outcome transition-cost evidence requires explicit links"
+            )
+        if transition_cost.get("direct_costs_quote_backed") is not True:
+            raise ValueError(
+                "live-outcome transition-cost evidence must remain quote-backed"
+            )
+        if transition_cost.get("full_transition_economics_included") is not False:
+            raise ValueError(
+                "live-outcome transition-cost evidence cannot claim full economics"
+            )
     return report
