@@ -5,12 +5,29 @@ evidence tick and its audit trail. It does not authorize recurring PAPER
 collection, scheduler execution, live submission, new live capital, continuous
 promotion, or Phase 8 promotion.
 
-The machine-readable source of truth is:
+The machine-readable operator-surface source of truth is:
+
+`deploy/manifests/phase8-recursive-reentry-checkpoint-v25-operator-surface.json`
+
+It pins the read-only operator preflight, saved-artifact status verifier,
+evidence-handoff verifier, this runbook, and the core execution manifest.
+
+The core eight-stage execution/evidence sequence remains defined by:
 
 `deploy/manifests/phase8-recursive-reentry-checkpoint-v25-continuation.json`
 
-The manifest pins every reviewed tool by Git blob. Run the operator preflight
-before creating or signing any new v25 artifact.
+Before using any v25 operator workflow, verify the reviewed source surface:
+
+```sh
+python "$SOURCE_TREE/deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_operator_surface.py" \
+  --source-tree "$SOURCE_TREE" \
+  > "$ARTIFACT_DIR/operator-surface-integrity-v25.json"
+```
+
+Continue only if the report has `support_surface_verified=true` and
+`core_execution_manifest_verified=true`. The surface check is read-only,
+is not an execution sequence, and authorizes no next action. Run the operator
+preflight before creating or signing any new v25 artifact.
 
 ## Inputs
 

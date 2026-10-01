@@ -14,11 +14,18 @@ MANIFEST = (
     / "manifests"
     / "phase8-recursive-reentry-checkpoint-v25-continuation.json"
 )
+SURFACE_MANIFEST = (
+    ROOT
+    / "deploy"
+    / "manifests"
+    / "phase8-recursive-reentry-checkpoint-v25-operator-surface.json"
+)
 
 
 def test_phase8_v25_operator_runbook_keeps_single_tick_boundary_explicit():
     text = RUNBOOK.read_text(encoding="utf-8")
 
+    assert "check_phase8_recursive_reentry_checkpoint_v25_operator_surface.py" in text
     assert "check_phase8_recursive_reentry_checkpoint_v25_operator_preflight.py" in text
     assert "check_phase8_recursive_reentry_checkpoint_v25_artifact_status.py" in text
     assert "check_phase8_recursive_reentry_checkpoint_v25_evidence_handoff.py" in text
@@ -31,6 +38,11 @@ def test_phase8_v25_operator_runbook_keeps_single_tick_boundary_explicit():
     assert "continuation_evidence_tick_post_audit.py" in text
     assert "continuation_evidence_bundle.py" in text
 
+    assert "operator-surface source of truth" in text
+    assert "core eight-stage execution/evidence sequence" in text
+    assert "support_surface_verified=true" in text
+    assert "core_execution_manifest_verified=true" in text
+    assert "authorizes no next action" in text
     assert "This is the only mutation-capable step in the manifest." in text
     assert "V24_EVIDENCE_BUNDLE" in text
     assert "V24_POST_AUDIT" in text
@@ -74,3 +86,20 @@ def test_phase8_v25_operator_runbook_uses_manifest_artifact_names():
         "$ARTIFACT_DIR/evidence-bundle.json",
     )
     assert all(name not in text for name in legacy_names)
+
+
+def test_phase8_v25_operator_runbook_names_both_machine_readable_manifests():
+    text = RUNBOOK.read_text(encoding="utf-8")
+    surface = json.loads(SURFACE_MANIFEST.read_text(encoding="utf-8"))
+
+    assert SURFACE_MANIFEST.name in text
+    assert MANIFEST.name in text
+    assert surface["core_execution_manifest"]["path"].endswith(MANIFEST.name)
+    assert [
+        item["role"] for item in surface["support_entries"]
+    ] == [
+        "operator-preflight",
+        "artifact-status",
+        "evidence-handoff",
+        "operator-runbook",
+    ]
