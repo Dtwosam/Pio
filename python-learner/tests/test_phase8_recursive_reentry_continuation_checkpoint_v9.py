@@ -23,7 +23,7 @@ SPEC.loader.exec_module(MODULE)
 
 class _FakeAudit:
     @staticmethod
-    def validate_phase8_recursive_reentry_checkpoint_v7_continuation_evidence_tick_post_audit(
+    def validate_phase8_recursive_reentry_checkpoint_v8_continuation_evidence_tick_post_audit(
         value,
     ):
         assert isinstance(value, dict)
@@ -151,6 +151,14 @@ def test_reviewed_post_audit_is_exactly_pinned():
     assert MODULE._git_blob_sha(path) == MODULE.REVIEWED_SOURCE_BLOBS[
         MODULE.POST_AUDIT_TOOL
     ]
+
+
+def test_reviewed_post_audit_exports_expected_validator():
+    module = MODULE._load_post_audit(ROOT)
+    assert hasattr(
+        module,
+        "validate_phase8_recursive_reentry_checkpoint_v8_continuation_evidence_tick_post_audit",
+    )
 
 
 def test_continue_checkpoint_preserves_pair_lineage(monkeypatch):
