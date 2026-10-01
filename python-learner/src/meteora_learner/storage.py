@@ -684,6 +684,48 @@ BEGIN
     SELECT RAISE(ABORT, 'live_learning_labels is immutable');
 END;
 
+CREATE TABLE IF NOT EXISTS live_position_transitions (
+    transition_id TEXT PRIMARY KEY,
+    previous_position_address TEXT NOT NULL UNIQUE,
+    next_position_address TEXT NOT NULL UNIQUE,
+    previous_pool_address TEXT NOT NULL,
+    next_pool_address TEXT NOT NULL,
+    previous_exit_decision_id TEXT NOT NULL,
+    next_enter_decision_id TEXT NOT NULL,
+    previous_exit_at TEXT NOT NULL,
+    next_enter_at TEXT NOT NULL,
+    transition_kind TEXT NOT NULL CHECK(
+        transition_kind IN ('POOL_SWITCH', 'SAME_POOL_REENTRY')
+    ),
+    annotation_source TEXT NOT NULL CHECK(
+        annotation_source = 'EXPLICIT_RESEARCH_REVIEW'
+    ),
+    created_at TEXT NOT NULL,
+    raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_position_transitions_time
+ON live_position_transitions(next_enter_at, transition_id);
+
+CREATE INDEX IF NOT EXISTS idx_live_position_transitions_pools
+ON live_position_transitions(
+    previous_pool_address,
+    next_pool_address,
+    next_enter_at
+);
+
+CREATE TRIGGER IF NOT EXISTS live_position_transitions_no_update
+BEFORE UPDATE ON live_position_transitions
+BEGIN
+    SELECT RAISE(ABORT, 'live_position_transitions is immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS live_position_transitions_no_delete
+BEFORE DELETE ON live_position_transitions
+BEGIN
+    SELECT RAISE(ABORT, 'live_position_transitions is immutable');
+END;
+
 CREATE TABLE IF NOT EXISTS paper_ticks (
     tick_id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL,
