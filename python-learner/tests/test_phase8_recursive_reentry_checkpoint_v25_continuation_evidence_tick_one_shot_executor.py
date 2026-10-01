@@ -104,6 +104,7 @@ def _readiness(database: Path) -> dict:
         "pool_address": "pool-4",
         "entry_observed_at": "2026-09-30T09:20:00+00:00",
         "source_checkpoint_sha256": "9" * 64,
+        "source_evidence_bundle_sha256": "0" * 64,
         "source_post_audit_sha256": "2" * 64,
         "source_execution_receipt_sha256": "3" * 64,
         "source_pair_entry_post_audit_sha256": "4" * 64,
@@ -453,6 +454,7 @@ def test_complete_pair_tick_uses_exact_two_items(monkeypatch):
         "p8-pair-4-challenger",
     ]
     assert receipt["source_checkpoint_sha256"] == "9" * 64
+    assert receipt["source_evidence_bundle_sha256"] == "0" * 64
     assert receipt["source_post_audit_sha256"] == "2" * 64
     assert receipt["source_execution_receipt_sha256"] == "3" * 64
     assert receipt["source_pair_entry_post_audit_sha256"] == "4" * 64
