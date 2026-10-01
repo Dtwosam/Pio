@@ -187,7 +187,7 @@ def test_request_binds_new_target_and_fixed_policy(monkeypatch):
         request["target_chain_observed_at"].encode("utf-8")
     ).hexdigest()[:12]
     assert request["evidence_cycle_id"] == (
-        f"phase8-recursive-reentry-checkpoint-v15-continuation:pair-4:{expected_suffix}"
+        f"phase8-recursive-reentry-checkpoint-v19-continuation:pair-4:{expected_suffix}"
     )
 
 
