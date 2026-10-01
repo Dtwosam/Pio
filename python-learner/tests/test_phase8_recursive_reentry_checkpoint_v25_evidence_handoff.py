@@ -268,10 +268,23 @@ def test_mixed_bundle_and_post_audit_fail_closed(monkeypatch):
         temp.cleanup()
 
 
-def test_current_database_drift_fails_closed(monkeypatch):
+def test_bundle_audit_database_binding_mismatch_fails_closed(monkeypatch):
     temp, _, _, bundle, _, bundle_path, _, run = _build(monkeypatch)
     bundle["current_database_sha256"] = "0" * 64
     _write(bundle_path, bundle)
+    try:
+        with pytest.raises(
+            ValueError,
+            match="final database binding mismatch",
+        ):
+            run()
+    finally:
+        temp.cleanup()
+
+
+def test_current_database_drift_fails_closed(monkeypatch):
+    temp, _, database, _, _, _, _, run = _build(monkeypatch)
+    database.write_bytes(b"drifted-production-db")
     try:
         with pytest.raises(
             ValueError,
