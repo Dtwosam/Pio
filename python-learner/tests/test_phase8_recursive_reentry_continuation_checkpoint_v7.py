@@ -23,7 +23,7 @@ SPEC.loader.exec_module(MODULE)
 
 class _FakeAudit:
     @staticmethod
-    def validate_phase8_recursive_reentry_checkpoint_v7_continuation_evidence_tick_post_audit(
+    def validate_phase8_recursive_reentry_checkpoint_v6_continuation_evidence_tick_post_audit(
         value,
     ):
         assert isinstance(value, dict)
