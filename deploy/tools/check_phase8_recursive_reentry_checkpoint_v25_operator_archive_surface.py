@@ -254,7 +254,7 @@ def _verify_bound_file(
 def _verify_base_surface(
     source: Path,
     manifest: dict[str, Any],
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     base = manifest["base_operator_surface"]
     manifest_blob = _verify_bound_file(
         source,
