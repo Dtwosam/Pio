@@ -283,13 +283,13 @@ def test_signing_bytes_drift_fails_closed(monkeypatch):
 
 
 def test_signature_digest_drift_fails_closed(monkeypatch):
-    temp, paths, _, _, verification, _, _, run = _build(monkeypatch)
+    temp, paths, _, _, _, bundle, _, run = _build(monkeypatch)
     try:
-        verification["approval_signature_sha256"] = "0" * 64
-        _write_json(paths["verification"], verification)
+        bundle["approval_signature_sha256"] = "0" * 64
+        _write_json(paths["bundle"], bundle)
         with pytest.raises(
             ValueError,
-            match="signature/verification digest mismatch",
+            match="signature/bundle digest mismatch",
         ):
             run()
     finally:
