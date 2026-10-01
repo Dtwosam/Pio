@@ -161,7 +161,7 @@ def _validate_operator_manifest(value: dict[str, Any]) -> None:
         "PHASE8_RECURSIVE_REENTRY_CHECKPOINT_V25_CONTINUATION_OPERATOR_MANIFEST_V1"
     ):
         raise ValueError("checkpoint v25 operator manifest type mismatch")
-    if value.get("checkpoint_version") != 24:
+    if value.get("checkpoint_version") != 25:
         raise ValueError("checkpoint v25 operator manifest version mismatch")
     steps = value.get("ordered_steps")
     if not isinstance(steps, list) or len(steps) != len(EXPECTED_ROLES):
