@@ -39,11 +39,32 @@ python "$SOURCE_TREE/deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_
   --source-tree "$SOURCE_TREE" \
   --allowed-signers "$ALLOWED_SIGNERS" \
   --expected-allowed-signers-sha256 "$EXPECTED_ALLOWED_SIGNERS_SHA256" \
-  > "$ARTIFACT_DIR/operator-preflight.json"
+  > "$ARTIFACT_DIR/operator-preflight-v25.json"
 ```
 
 Continue only if the report has `preflight_ready=true`. The preflight itself
 authorizes no PAPER tick.
+
+## 0a. Inspect saved artifact status
+
+At any point, inspect the operator directory without creating, signing, or
+executing anything:
+
+```sh
+python "$SOURCE_TREE/deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_artifact_status.py" \
+  --source-tree "$SOURCE_TREE" \
+  --artifact-dir "$ARTIFACT_DIR" \
+  > "$ARTIFACT_DIR/artifact-status-v25.json"
+```
+
+The status report verifies the pinned manifest/tool blobs and applies each
+stage's native validator to artifacts already present under their canonical
+manifest filenames. It reports missing, invalid, unsafe, or out-of-order
+artifacts and classifies the next boundary. A
+`MUTATION_BOUNDARY_REVIEW_REQUIRED` result is not authorization to execute.
+The status tool does not reverify the detached SSH signature and does not
+revalidate the production database; run the fresh preflight and normal reviewed
+step immediately before any operator sequence.
 
 ## 1. Build the canonical v25 checkpoint
 
@@ -52,7 +73,7 @@ python "$SOURCE_TREE/deploy/tools/build_phase8_recursive_reentry_continuation_ch
   --source-tree "$SOURCE_TREE" \
   --evidence-bundle "$V24_EVIDENCE_BUNDLE" \
   --post-audit "$V24_POST_AUDIT" \
-  > "$ARTIFACT_DIR/checkpoint.json"
+  > "$ARTIFACT_DIR/checkpoint-v25.json"
 ```
 
 The v25 checkpoint first verifies that the sealed v24 evidence bundle and its
@@ -67,8 +88,8 @@ workflows.
 python "$SOURCE_TREE/deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_continuation_supervision_readiness.py" \
   --repo "$REPO" \
   --source-tree "$SOURCE_TREE" \
-  --checkpoint "$ARTIFACT_DIR/checkpoint.json" \
-  > "$ARTIFACT_DIR/continuation-readiness.json"
+  --checkpoint "$ARTIFACT_DIR/checkpoint-v25.json" \
+  > "$ARTIFACT_DIR/continuation-readiness-v25.json"
 ```
 
 Continue only if `readiness_status=READY`. A waiting state is a stop
@@ -79,8 +100,8 @@ condition, not permission to weaken freshness or quote-age bounds.
 ```sh
 python "$SOURCE_TREE/deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_request.py" \
   --source-tree "$SOURCE_TREE" \
-  --continuation-readiness "$ARTIFACT_DIR/continuation-readiness.json" \
-  > "$ARTIFACT_DIR/request.json"
+  --continuation-readiness "$ARTIFACT_DIR/continuation-readiness-v25.json" \
+  > "$ARTIFACT_DIR/request-v25.json"
 ```
 
 The request does not authorize or execute the PAPER tick.
@@ -93,9 +114,9 @@ Build the payload:
 python "$SOURCE_TREE/deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_signed_authorization.py" \
   build-payload \
   --source-tree "$SOURCE_TREE" \
-  --request "$ARTIFACT_DIR/request.json" \
+  --request "$ARTIFACT_DIR/request-v25.json" \
   --approver-principal "$APPROVER_PRINCIPAL" \
-  > "$ARTIFACT_DIR/signed-payload.json"
+  > "$ARTIFACT_DIR/signed-payload-v25.json"
 ```
 
 Emit the exact bytes to the existing reviewed operator signing process:
@@ -104,9 +125,9 @@ Emit the exact bytes to the existing reviewed operator signing process:
 python "$SOURCE_TREE/deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_signed_authorization.py" \
   emit-signing-bytes \
   --source-tree "$SOURCE_TREE" \
-  --request "$ARTIFACT_DIR/request.json" \
-  --payload "$ARTIFACT_DIR/signed-payload.json" \
-  > "$ARTIFACT_DIR/signing-bytes"
+  --request "$ARTIFACT_DIR/request-v25.json" \
+  --payload "$ARTIFACT_DIR/signed-payload-v25.json" \
+  > "$ARTIFACT_DIR/signing-bytes-v25"
 ```
 
 The detached signature must cover those exact bytes under the namespace enforced
@@ -118,12 +139,12 @@ Verify the detached signature and trust root:
 python "$SOURCE_TREE/deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_signed_authorization.py" \
   verify \
   --source-tree "$SOURCE_TREE" \
-  --request "$ARTIFACT_DIR/request.json" \
-  --payload "$ARTIFACT_DIR/signed-payload.json" \
+  --request "$ARTIFACT_DIR/request-v25.json" \
+  --payload "$ARTIFACT_DIR/signed-payload-v25.json" \
   --signature "$SIGNATURE" \
   --allowed-signers "$ALLOWED_SIGNERS" \
   --expected-allowed-signers-sha256 "$EXPECTED_ALLOWED_SIGNERS_SHA256" \
-  > "$ARTIFACT_DIR/signed-authorization-verification.json"
+  > "$ARTIFACT_DIR/signed-authorization-verification-v25.json"
 ```
 
 A failed, expired, not-yet-valid, or trust-root-mismatched authorization is a
@@ -135,15 +156,15 @@ hard stop.
 python "$SOURCE_TREE/deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_execution_readiness.py" \
   --repo "$REPO" \
   --source-tree "$SOURCE_TREE" \
-  --checkpoint "$ARTIFACT_DIR/checkpoint.json" \
-  --saved-continuation-readiness "$ARTIFACT_DIR/continuation-readiness.json" \
-  --request "$ARTIFACT_DIR/request.json" \
-  --saved-signed-verification "$ARTIFACT_DIR/signed-authorization-verification.json" \
-  --signed-payload "$ARTIFACT_DIR/signed-payload.json" \
+  --checkpoint "$ARTIFACT_DIR/checkpoint-v25.json" \
+  --saved-continuation-readiness "$ARTIFACT_DIR/continuation-readiness-v25.json" \
+  --request "$ARTIFACT_DIR/request-v25.json" \
+  --saved-signed-verification "$ARTIFACT_DIR/signed-authorization-verification-v25.json" \
+  --signed-payload "$ARTIFACT_DIR/signed-payload-v25.json" \
   --signature "$SIGNATURE" \
   --allowed-signers "$ALLOWED_SIGNERS" \
   --expected-allowed-signers-sha256 "$EXPECTED_ALLOWED_SIGNERS_SHA256" \
-  > "$ARTIFACT_DIR/execution-readiness.json"
+  > "$ARTIFACT_DIR/execution-readiness-v25.json"
 ```
 
 Continue only if
@@ -159,16 +180,16 @@ This is the only mutation-capable step in the manifest.
 python "$SOURCE_TREE/deploy/tools/run_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_once.py" \
   --repo "$REPO" \
   --source-tree "$SOURCE_TREE" \
-  --saved-execution-readiness "$ARTIFACT_DIR/execution-readiness.json" \
-  --checkpoint "$ARTIFACT_DIR/checkpoint.json" \
-  --saved-continuation-readiness "$ARTIFACT_DIR/continuation-readiness.json" \
-  --request "$ARTIFACT_DIR/request.json" \
-  --saved-signed-verification "$ARTIFACT_DIR/signed-authorization-verification.json" \
-  --signed-payload "$ARTIFACT_DIR/signed-payload.json" \
+  --saved-execution-readiness "$ARTIFACT_DIR/execution-readiness-v25.json" \
+  --checkpoint "$ARTIFACT_DIR/checkpoint-v25.json" \
+  --saved-continuation-readiness "$ARTIFACT_DIR/continuation-readiness-v25.json" \
+  --request "$ARTIFACT_DIR/request-v25.json" \
+  --saved-signed-verification "$ARTIFACT_DIR/signed-authorization-verification-v25.json" \
+  --signed-payload "$ARTIFACT_DIR/signed-payload-v25.json" \
   --signature "$SIGNATURE" \
   --allowed-signers "$ALLOWED_SIGNERS" \
   --expected-allowed-signers-sha256 "$EXPECTED_ALLOWED_SIGNERS_SHA256" \
-  > "$ARTIFACT_DIR/execution-receipt.json"
+  > "$ARTIFACT_DIR/execution-receipt-v25.json"
 ```
 
 Do not loop this command. Do not retry it under the same authorization as a
@@ -182,8 +203,8 @@ separate post-tick audit.
 python "$SOURCE_TREE/deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_tick_post_audit.py" \
   --repo "$REPO" \
   --source-tree "$SOURCE_TREE" \
-  --execution-receipt "$ARTIFACT_DIR/execution-receipt.json" \
-  > "$ARTIFACT_DIR/post-audit.json"
+  --execution-receipt "$ARTIFACT_DIR/execution-receipt-v25.json" \
+  > "$ARTIFACT_DIR/post-audit-v25.json"
 ```
 
 The audit is read-only. Its route determines whether the pair is eligible for a
@@ -198,14 +219,14 @@ make the final-state binding stale.
 python "$SOURCE_TREE/deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_continuation_evidence_bundle.py" \
   --repo "$REPO" \
   --source-tree "$SOURCE_TREE" \
-  --checkpoint "$ARTIFACT_DIR/checkpoint.json" \
-  --continuation-readiness "$ARTIFACT_DIR/continuation-readiness.json" \
-  --request "$ARTIFACT_DIR/request.json" \
-  --signed-verification "$ARTIFACT_DIR/signed-authorization-verification.json" \
-  --execution-readiness "$ARTIFACT_DIR/execution-readiness.json" \
-  --execution-receipt "$ARTIFACT_DIR/execution-receipt.json" \
-  --post-audit "$ARTIFACT_DIR/post-audit.json" \
-  > "$ARTIFACT_DIR/evidence-bundle.json"
+  --checkpoint "$ARTIFACT_DIR/checkpoint-v25.json" \
+  --continuation-readiness "$ARTIFACT_DIR/continuation-readiness-v25.json" \
+  --request "$ARTIFACT_DIR/request-v25.json" \
+  --signed-verification "$ARTIFACT_DIR/signed-authorization-verification-v25.json" \
+  --execution-readiness "$ARTIFACT_DIR/execution-readiness-v25.json" \
+  --execution-receipt "$ARTIFACT_DIR/execution-receipt-v25.json" \
+  --post-audit "$ARTIFACT_DIR/post-audit-v25.json" \
+  > "$ARTIFACT_DIR/evidence-bundle-v25.json"
 ```
 
 The bundle reruns every native artifact validator, checks cross-artifact
