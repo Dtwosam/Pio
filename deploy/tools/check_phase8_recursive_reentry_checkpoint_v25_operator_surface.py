@@ -16,7 +16,7 @@ ARTIFACT_TYPE = (
 SURFACE_MANIFEST = Path(
     "deploy/manifests/phase8-recursive-reentry-checkpoint-v25-operator-surface.json"
 )
-SURFACE_MANIFEST_BLOB = "ff2b075dfab5cdf544b1e3cd5df26a2583e17695"
+SURFACE_MANIFEST_BLOB = "0479c01b4e6cf86674d7e3a4eab7b18d8a571406"
 
 EXPECTED_SUPPORT_ROLES = (
     "operator-preflight",
