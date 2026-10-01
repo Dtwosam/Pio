@@ -175,13 +175,13 @@ def validate_phase8_recursive_reentry_continuation_checkpoint_v17(
     checkpoint: dict[str, Any],
 ) -> None:
     if not isinstance(checkpoint, dict):
-        raise ValueError("recursive re-entry continuation checkpoint v16 must be an object")
+        raise ValueError("recursive re-entry continuation checkpoint v17 must be an object")
     if set(checkpoint) != set(CHECKPOINT_FIELDS) | {"checkpoint_sha256"}:
-        raise ValueError("recursive re-entry continuation checkpoint v16 schema mismatch")
+        raise ValueError("recursive re-entry continuation checkpoint v17 schema mismatch")
     if checkpoint.get("format_version") != FORMAT_VERSION:
-        raise ValueError("unsupported recursive re-entry continuation checkpoint v16 format")
+        raise ValueError("unsupported recursive re-entry continuation checkpoint v17 format")
     if checkpoint.get("artifact_type") != ARTIFACT_TYPE:
-        raise ValueError("unexpected recursive re-entry continuation checkpoint v16 type")
+        raise ValueError("unexpected recursive re-entry continuation checkpoint v17 type")
 
     expected_blobs = {
         str(path): blob
@@ -191,7 +191,7 @@ def validate_phase8_recursive_reentry_continuation_checkpoint_v17(
         )
     }
     if checkpoint.get("reviewed_source_blobs") != expected_blobs:
-        raise ValueError("recursive re-entry continuation checkpoint v16 lineage mismatch")
+        raise ValueError("recursive re-entry continuation checkpoint v17 lineage mismatch")
 
     for field in (
         "source_post_audit_sha256",
@@ -206,11 +206,11 @@ def validate_phase8_recursive_reentry_continuation_checkpoint_v17(
         "checkpoint_sha256",
     ):
         if not _is_hex_digest(checkpoint.get(field)):
-            raise ValueError(f"recursive re-entry continuation checkpoint v16 {field} is invalid")
+            raise ValueError(f"recursive re-entry continuation checkpoint v17 {field} is invalid")
     for field in ("pio_wal_sha256", "pio_shm_sha256"):
         value = checkpoint.get(field)
         if value is not None and not _is_hex_digest(value):
-            raise ValueError(f"recursive re-entry continuation checkpoint v16 {field} is invalid")
+            raise ValueError(f"recursive re-entry continuation checkpoint v17 {field} is invalid")
 
     for field in (
         "production_repository",
@@ -234,19 +234,19 @@ def validate_phase8_recursive_reentry_continuation_checkpoint_v17(
         "continuation_route",
     ):
         if not isinstance(checkpoint.get(field), str) or not checkpoint[field]:
-            raise ValueError(f"recursive re-entry continuation checkpoint v16 {field} is invalid")
+            raise ValueError(f"recursive re-entry continuation checkpoint v17 {field} is invalid")
 
     if checkpoint["pair_id"] == checkpoint["previous_pair_id"]:
-        raise ValueError("recursive re-entry continuation checkpoint v16 pair id was not advanced")
+        raise ValueError("recursive re-entry continuation checkpoint v17 pair id was not advanced")
     if checkpoint.get("requested_position_ids") != [
         checkpoint["incumbent_position_id"],
         checkpoint["challenger_position_id"],
     ]:
-        raise ValueError("recursive re-entry continuation checkpoint v16 position scope mismatch")
+        raise ValueError("recursive re-entry continuation checkpoint v17 position scope mismatch")
 
     lineage = checkpoint.get("pair_lineage")
     if not isinstance(lineage, dict):
-        raise ValueError("recursive re-entry continuation checkpoint v16 pair lineage is invalid")
+        raise ValueError("recursive re-entry continuation checkpoint v17 pair lineage is invalid")
     expected_lineage = {
         "source_pair_entry_post_audit_sha256": checkpoint[
             "source_pair_entry_post_audit_sha256"
@@ -270,7 +270,7 @@ def validate_phase8_recursive_reentry_continuation_checkpoint_v17(
         "challenger_position_id": checkpoint["challenger_position_id"],
     }
     if lineage != expected_lineage:
-        raise ValueError("recursive re-entry continuation checkpoint v16 pair lineage drifted")
+        raise ValueError("recursive re-entry continuation checkpoint v17 pair lineage drifted")
     for field in (
         "source_pair_entry_post_audit_sha256",
         "pair_entry_request_sha256",
@@ -278,9 +278,9 @@ def validate_phase8_recursive_reentry_continuation_checkpoint_v17(
         "source_final_evaluation_sha256",
     ):
         if not _is_hex_digest(lineage.get(field)):
-            raise ValueError(f"recursive re-entry continuation checkpoint v16 lineage {field} is invalid")
+            raise ValueError(f"recursive re-entry continuation checkpoint v17 lineage {field} is invalid")
     if checkpoint["pair_lineage_sha256"] != _sha256_bytes(_canonical_bytes(lineage)):
-        raise ValueError("recursive re-entry continuation checkpoint v16 pair lineage digest mismatch")
+        raise ValueError("recursive re-entry continuation checkpoint v17 pair lineage digest mismatch")
 
     flags = (
         checkpoint.get("continuation_review_ready") is True,
@@ -288,31 +288,31 @@ def validate_phase8_recursive_reentry_continuation_checkpoint_v17(
         checkpoint.get("recovery_review_ready") is True,
     )
     if sum(bool(value) for value in flags) != 1:
-        raise ValueError("recursive re-entry continuation checkpoint v16 requires exactly one route")
+        raise ValueError("recursive re-entry continuation checkpoint v17 requires exactly one route")
 
     if checkpoint["checkpoint_state"] == STATE_CONTINUE:
         if flags != (True, False, False):
-            raise ValueError("recursive re-entry continuation checkpoint v16 CONTINUE route mismatch")
+            raise ValueError("recursive re-entry continuation checkpoint v17 CONTINUE route mismatch")
         if checkpoint.get("pair_both_open") is not True:
-            raise ValueError("recursive re-entry continuation checkpoint v16 CONTINUE requires open pair")
+            raise ValueError("recursive re-entry continuation checkpoint v17 CONTINUE requires open pair")
         if checkpoint.get("pair_any_closed") is not False:
-            raise ValueError("recursive re-entry continuation checkpoint v16 CONTINUE forbids closed leg")
+            raise ValueError("recursive re-entry continuation checkpoint v17 CONTINUE forbids closed leg")
     elif checkpoint["checkpoint_state"] == STATE_TERMINAL:
         if flags != (False, True, False):
-            raise ValueError("recursive re-entry continuation checkpoint v16 TERMINAL route mismatch")
+            raise ValueError("recursive re-entry continuation checkpoint v17 TERMINAL route mismatch")
         if checkpoint.get("pair_any_closed") is not True:
-            raise ValueError("recursive re-entry continuation checkpoint v16 TERMINAL requires closed leg")
+            raise ValueError("recursive re-entry continuation checkpoint v17 TERMINAL requires closed leg")
         if checkpoint.get("pair_both_open") is not False:
-            raise ValueError("recursive re-entry continuation checkpoint v16 TERMINAL forbids open pair")
+            raise ValueError("recursive re-entry continuation checkpoint v17 TERMINAL forbids open pair")
     elif checkpoint["checkpoint_state"] == STATE_RECOVERY:
         if flags != (False, False, True):
-            raise ValueError("recursive re-entry continuation checkpoint v16 RECOVERY route mismatch")
+            raise ValueError("recursive re-entry continuation checkpoint v17 RECOVERY route mismatch")
     else:
-        raise ValueError("recursive re-entry continuation checkpoint v16 state is invalid")
+        raise ValueError("recursive re-entry continuation checkpoint v17 state is invalid")
 
     if checkpoint.get("separate_next_action_authorization_required") is not True:
         raise ValueError(
-            "recursive re-entry continuation checkpoint v16 requires separate next action authorization"
+            "recursive re-entry continuation checkpoint v17 requires separate next action authorization"
         )
     for field in (
         "paper_supervisor_tick_authorized",
@@ -329,12 +329,12 @@ def validate_phase8_recursive_reentry_continuation_checkpoint_v17(
     ):
         if checkpoint.get(field) is not False:
             raise ValueError(
-                f"recursive re-entry continuation checkpoint v16 requires {field}=false"
+                f"recursive re-entry continuation checkpoint v17 requires {field}=false"
             )
 
     identity = {field: checkpoint[field] for field in CHECKPOINT_FIELDS}
     if checkpoint["checkpoint_sha256"] != _sha256_bytes(_canonical_bytes(identity)):
-        raise ValueError("recursive re-entry continuation checkpoint v16 digest mismatch")
+        raise ValueError("recursive re-entry continuation checkpoint v17 digest mismatch")
 
 
 def build_phase8_recursive_reentry_continuation_checkpoint_v17(
@@ -463,7 +463,7 @@ def build_phase8_recursive_reentry_continuation_checkpoint_v17(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a canonical, read-only recursive re-entry continuation v8 "
+            "Build a canonical, read-only recursive re-entry continuation v17 "
             "checkpoint from the latest sealed PAPER tick post-audit."
         )
     )
