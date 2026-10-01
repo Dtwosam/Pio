@@ -576,6 +576,42 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def live_position_transition_rows(
+        self,
+    ) -> list[dict[str, Any]]:
+        """
+        Load explicit, immutable LIVE position transition annotations.
+
+        These rows are research-reviewed relationships and are never inferred
+        from temporal adjacency.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    transition_id,
+                    previous_position_address,
+                    next_position_address,
+                    previous_pool_address,
+                    next_pool_address,
+                    previous_exit_decision_id,
+                    next_enter_decision_id,
+                    previous_exit_at,
+                    next_enter_at,
+                    transition_kind,
+                    annotation_source,
+                    created_at,
+                    raw_json
+                FROM live_position_transitions
+                ORDER BY julianday(next_enter_at) ASC,
+                         transition_id ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
     def live_learning_evidence_rows(
         self,
     ) -> list[dict[str, Any]]:
