@@ -1,0 +1,104 @@
+{
+  "format_version": 1,
+  "artifact_type": "PHASE8_RECURSIVE_REENTRY_CHECKPOINT_V24_CONTINUATION_OPERATOR_MANIFEST_V1",
+  "purpose": "Machine-readable operator sequence for checkpoint v24 continuation PAPER evidence capture and archival",
+  "checkpoint_version": 24,
+  "ordered_steps": [
+    {
+      "order": 1,
+      "role": "canonical-checkpoint",
+      "tool": "deploy/tools/build_phase8_recursive_reentry_continuation_checkpoint_v24.py",
+      "git_blob": "3879b85ba74fe2197029cd054d37e3d2eeb84993",
+      "output_artifact": "checkpoint.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 2,
+      "role": "continuation-readiness",
+      "tool": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v24_continuation_supervision_readiness.py",
+      "git_blob": "370552ebefbefede3f795a5723e1c67d80bb7f0a",
+      "output_artifact": "continuation-readiness.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 3,
+      "role": "tick-request",
+      "tool": "deploy/tools/build_phase8_recursive_reentry_checkpoint_v24_continuation_evidence_tick_request.py",
+      "git_blob": "8c7c0ad59007717f6a96afeac0a5510e60e2a77d",
+      "output_artifact": "request.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 4,
+      "role": "detached-authorization",
+      "tool": "deploy/tools/build_phase8_recursive_reentry_checkpoint_v24_continuation_evidence_tick_signed_authorization.py",
+      "git_blob": "839e264814505474bc3afb08a0fa4282d69e7f38",
+      "output_artifact": "signed-authorization-verification.json",
+      "paper_state_mutation": false,
+      "human_signature_required": true
+    },
+    {
+      "order": 5,
+      "role": "execution-readiness",
+      "tool": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v24_continuation_evidence_tick_execution_readiness.py",
+      "git_blob": "2368086290409e4bf9c93947610e77941865440b",
+      "output_artifact": "execution-readiness.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 6,
+      "role": "one-shot-paper-executor",
+      "tool": "deploy/tools/run_phase8_recursive_reentry_checkpoint_v24_continuation_evidence_tick_once.py",
+      "git_blob": "2f50a572e601829869e6d106dfd4f4f033672ba5",
+      "output_artifact": "execution-receipt.json",
+      "paper_state_mutation": true,
+      "human_signature_required": false,
+      "maximum_tick_count": 1
+    },
+    {
+      "order": 7,
+      "role": "post-execution-audit",
+      "tool": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v24_continuation_evidence_tick_post_audit.py",
+      "git_blob": "e4a950c721d956bc70a417d8ac34816115a5eae0",
+      "output_artifact": "post-audit.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    },
+    {
+      "order": 8,
+      "role": "evidence-bundle",
+      "tool": "deploy/tools/build_phase8_recursive_reentry_checkpoint_v24_continuation_evidence_bundle.py",
+      "git_blob": "00fc93c82fe46ab8a206381120b1ae98b55f04a9",
+      "output_artifact": "evidence-bundle.json",
+      "paper_state_mutation": false,
+      "human_signature_required": false
+    }
+  ],
+  "required_external_authorization_inputs": [
+    "signed authorization payload",
+    "detached SSH signature",
+    "allowed_signers trust-root file",
+    "expected allowed_signers SHA-256"
+  ],
+  "execution_boundary": {
+    "only_mutating_step": "one-shot-paper-executor",
+    "maximum_paper_ticks_per_authorization": 1,
+    "fresh_execution_readiness_required": true,
+    "post_tick_audit_required": true,
+    "final_bundle_requires_database_to_match_post_audit": true
+  },
+  "safety_boundary": {
+    "automatic_paper_execution_authorized": false,
+    "recurring_paper_collection_authorized": false,
+    "scheduler_execution_authorized": false,
+    "live_submit_authorized": false,
+    "transaction_submission_authorized": false,
+    "new_live_capital_authorized": false,
+    "continuous_promotion_authorized": false,
+    "phase8_promotion_authorized": false
+  }
+}
