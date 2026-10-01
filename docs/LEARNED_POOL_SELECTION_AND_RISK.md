@@ -258,7 +258,10 @@ selection without turning them into live policy:
     relationships;
   - validates persisted EXIT/ENTER decision ids and strict time ordering;
   - stores one-to-one immutable links as pool switches or same-pool re-entries;
-  - never infers a transition from temporal adjacency.
+  - never infers a transition from temporal adjacency;
+  - is exposed through `pio-live-transition-link --previous-position ... --next-position ...`,
+    which writes only the immutable research annotation table and does not
+    execute or alter a LIVE position.
 
 - `live_transition_cost_evidence.py`
   - joins those explicit links to quote-backed valued LIVE EXIT and ENTER
