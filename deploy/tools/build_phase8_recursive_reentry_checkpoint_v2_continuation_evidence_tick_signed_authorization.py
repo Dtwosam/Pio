@@ -27,7 +27,7 @@ REQUEST_TOOL = Path(
     "deploy/tools/build_phase8_recursive_reentry_checkpoint_v2_continuation_evidence_tick_request.py"
 )
 REVIEWED_SOURCE_BLOBS = {
-    REQUEST_TOOL: "3a2fe2cf65cbebe07a90d193503a871d0e4ea913",
+    REQUEST_TOOL: "cc4034c8ebf22a7a699da77851f6fb15d40511b4",
 }
 
 SIGNATURE_NAMESPACE = "pio-phase8-recursive-reentry-checkpoint-v2-paired-ml-paper-continuation-evidence-tick-authorization-v1"
