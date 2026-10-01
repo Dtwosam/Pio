@@ -33,6 +33,7 @@ def _request() -> dict:
         "request_sha256": "a" * 64,
         "source_continuation_supervision_readiness_sha256": "b" * 64,
         "source_checkpoint_sha256": "c" * 64,
+        "source_evidence_bundle_sha256": "0" * 64,
         "source_post_audit_sha256": "d" * 64,
         "source_execution_receipt_sha256": "e" * 64,
         "source_pair_entry_post_audit_sha256": "f" * 64,
