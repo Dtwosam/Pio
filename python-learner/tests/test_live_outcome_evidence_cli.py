@@ -61,6 +61,27 @@ def test_live_outcome_cli_is_read_only_and_can_save_report(
         payload["action_cost_evidence"]["transition_pairs_inferred"]
         is False
     )
+    assert payload["transition_cost_evidence"]["links_seen"] == 0
+    assert payload["transition_cost_evidence"]["samples_seen"] == 0
+    assert payload["transition_cost_evidence"]["gaps_seen"] == 0
+    assert (
+        payload["transition_cost_evidence"]["transition_pairs_inferred"]
+        is False
+    )
+    assert (
+        payload["transition_cost_evidence"]["policy_actionable"]
+        is False
+    )
+    assert (
+        payload["transition_cost_evidence"]["execution_wired"]
+        is False
+    )
+    assert (
+        payload["transition_cost_evidence"][
+            "full_transition_economics_included"
+        ]
+        is False
+    )
     assert payload["artifact"]["report_id"] == "live-cli-test"
     assert (reports / "live-cli-test.json").is_file()
     assert (reports / "live-cli-test.meta.json").is_file()
