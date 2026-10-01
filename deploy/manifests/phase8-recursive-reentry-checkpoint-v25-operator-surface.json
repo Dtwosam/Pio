@@ -40,7 +40,7 @@
     {
       "role": "operator-runbook",
       "path": "deploy/phase8-recursive-reentry-checkpoint-v25-operator-runbook.md",
-      "git_blob": "3ae96526d4de5bec0e82cc3d0141b02756cc996d",
+      "git_blob": "09e757ff4b9c71d7543ec030698a07ab4de5c8b9",
       "kind": "documentation",
       "read_only": true,
       "may_read_production_database": false,
