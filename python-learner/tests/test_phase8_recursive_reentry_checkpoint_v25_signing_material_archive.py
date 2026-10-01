@@ -253,6 +253,7 @@ def test_builds_non_reusable_historical_signing_archive(monkeypatch):
     assert report["cryptographic_signature_verified"] is True
     assert report["trust_root_digest_verified"] is True
     assert report["signing_material_archive_ready"] is True
+    assert report["input_files_stable_during_archive"] is True
     assert report["archive_read_only"] is True
     assert report["historical_authorization_only"] is True
     assert report["authorization_currently_reusable"] is False
@@ -331,6 +332,30 @@ def test_session_bundle_binding_drift_fails_closed(monkeypatch):
         with pytest.raises(
             ValueError,
             match="bundle/session archive digest mismatch",
+        ):
+            run()
+    finally:
+        temp.cleanup()
+
+
+def test_input_drift_during_archive_fails_closed(monkeypatch):
+    temp, _, _, _, _, _, _, run = _build(monkeypatch)
+    original = MODULE._regular_bytes
+    seen = {"checkpoint v25 detached signature": 0}
+
+    def drifting(path, *, label):
+        result = original(path, label=label)
+        if label == "checkpoint v25 detached signature":
+            seen[label] += 1
+            if seen[label] == 2:
+                return result[0], result[1], "0" * 64
+        return result
+
+    monkeypatch.setattr(MODULE, "_regular_bytes", drifting)
+    try:
+        with pytest.raises(
+            ValueError,
+            match="detached signature changed during signing archive",
         ):
             run()
     finally:
