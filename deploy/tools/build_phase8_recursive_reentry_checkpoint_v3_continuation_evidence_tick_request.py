@@ -396,7 +396,7 @@ def build_phase8_recursive_reentry_checkpoint_v3_continuation_evidence_tick_requ
 
     target = readiness["latest_chain_observed_at"]
     evidence_cycle_id = (
-        "phase8-recursive-reentry-checkpoint-v2-continuation:"
+        "phase8-recursive-reentry-checkpoint-v3-continuation:"
         + readiness["pair_id"]
         + ":"
         + hashlib.sha256(target.encode("utf-8")).hexdigest()[:12]
