@@ -1,0 +1,62 @@
+{
+  "format_version": 1,
+  "artifact_type": "PHASE8_RECURSIVE_REENTRY_CHECKPOINT_V25_OPERATOR_ARCHIVE_SURFACE_MANIFEST_V1",
+  "checkpoint_version": 25,
+  "purpose": "Pin the terminal read-only archival layer for an already-completed checkpoint v25 operator session without modifying the execution surface.",
+  "base_operator_surface": {
+    "manifest_path": "deploy/manifests/phase8-recursive-reentry-checkpoint-v25-operator-surface.json",
+    "manifest_git_blob": "0479c01b4e6cf86674d7e3a4eab7b18d8a571406",
+    "checker_path": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_operator_surface.py",
+    "checker_git_blob": "9ef36e3b4fd72580930d1deba6fcede5f3a4179c",
+    "must_verify_before_archive": true
+  },
+  "archive_entries": [
+    {
+      "role": "operator-session-archive",
+      "path": "deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_operator_session_archive.py",
+      "git_blob": "e5f7f83039e085e3b1fcc85822ea6122655d9621",
+      "kind": "tool",
+      "read_only": true,
+      "historical_only": true,
+      "authorizes_next_action": false
+    },
+    {
+      "role": "signing-material-archive",
+      "path": "deploy/tools/build_phase8_recursive_reentry_checkpoint_v25_signing_material_archive.py",
+      "git_blob": "77b3e4848aec660a43ec5fb5c98b42de48bcf095",
+      "kind": "tool",
+      "read_only": true,
+      "historical_only": true,
+      "authorizes_next_action": false
+    },
+    {
+      "role": "operator-archive-runbook",
+      "path": "deploy/phase8-recursive-reentry-checkpoint-v25-operator-archive-runbook.md",
+      "git_blob": "3b6f48b95b553c639f4c36f49a59133a5b5c274c",
+      "kind": "documentation",
+      "read_only": true,
+      "historical_only": true,
+      "authorizes_next_action": false
+    }
+  ],
+  "invariants": {
+    "base_operator_surface_must_remain_sealed": true,
+    "archive_layer_is_not_execution_sequence": true,
+    "archive_layer_is_historical_only": true,
+    "archive_layer_authorizes_no_next_action": true,
+    "raw_signing_materials_must_bind_to_sealed_session": true,
+    "real_v25_evidence_required": true
+  },
+  "safety_boundary": {
+    "authorization_currently_reusable": false,
+    "future_checkpoint_refresh_authorized": false,
+    "automatic_paper_execution_authorized": false,
+    "recurring_paper_collection_authorized": false,
+    "scheduler_execution_authorized": false,
+    "live_submit_authorized": false,
+    "transaction_submission_authorized": false,
+    "new_live_capital_authorized": false,
+    "continuous_promotion_authorized": false,
+    "phase8_promotion_authorized": false
+  }
+}
