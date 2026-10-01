@@ -1,0 +1,68 @@
+{
+  "format_version": 1,
+  "artifact_type": "PHASE8_RECURSIVE_REENTRY_CHECKPOINT_V25_OPERATOR_SURFACE_MANIFEST_V1",
+  "checkpoint_version": 25,
+  "purpose": "Pin the reviewed checkpoint v25 operator-facing read-only support surface around the core execution manifest.",
+  "core_execution_manifest": {
+    "path": "deploy/manifests/phase8-recursive-reentry-checkpoint-v25-continuation.json",
+    "git_blob": "bda473bcece0a90b281fafff2907ccadd67a79cf",
+    "role": "core-execution-sequence",
+    "mutation_boundary_owned_by_core_manifest": true
+  },
+  "support_entries": [
+    {
+      "role": "operator-preflight",
+      "path": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_operator_preflight.py",
+      "git_blob": "ec750da64adffec6f0b0813ecb450b22077db0ae",
+      "kind": "tool",
+      "read_only": true,
+      "may_read_production_database": true,
+      "authorizes_next_action": false
+    },
+    {
+      "role": "artifact-status",
+      "path": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_artifact_status.py",
+      "git_blob": "1c0c3dc90dee361e9bceaecff0d8644259eefd25",
+      "kind": "tool",
+      "read_only": true,
+      "may_read_production_database": false,
+      "authorizes_next_action": false
+    },
+    {
+      "role": "evidence-handoff",
+      "path": "deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_evidence_handoff.py",
+      "git_blob": "43ccdb2e6b701689c22d8b7fe026c686a6c3a52e",
+      "kind": "tool",
+      "read_only": true,
+      "may_read_production_database": true,
+      "authorizes_next_action": false
+    },
+    {
+      "role": "operator-runbook",
+      "path": "deploy/phase8-recursive-reentry-checkpoint-v25-operator-runbook.md",
+      "git_blob": "3ae96526d4de5bec0e82cc3d0141b02756cc996d",
+      "kind": "documentation",
+      "read_only": true,
+      "may_read_production_database": false,
+      "authorizes_next_action": false
+    }
+  ],
+  "invariants": {
+    "core_execution_manifest_required": true,
+    "support_entries_are_not_an_execution_sequence": true,
+    "support_tools_are_read_only": true,
+    "support_layer_authorizes_no_next_action": true,
+    "real_v25_evidence_required_for_future_checkpoint": true
+  },
+  "safety_boundary": {
+    "future_checkpoint_refresh_authorized": false,
+    "automatic_paper_execution_authorized": false,
+    "recurring_paper_collection_authorized": false,
+    "scheduler_execution_authorized": false,
+    "live_submit_authorized": false,
+    "transaction_submission_authorized": false,
+    "new_live_capital_authorized": false,
+    "continuous_promotion_authorized": false,
+    "phase8_promotion_authorized": false
+  }
+}
