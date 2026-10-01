@@ -351,7 +351,7 @@ def build_phase8_recursive_reentry_continuation_checkpoint_v9(
         post_audit_path,
         label="recursive re-entry continuation post-audit",
     )
-    module.validate_phase8_recursive_reentry_checkpoint_v7_continuation_evidence_tick_post_audit(
+    module.validate_phase8_recursive_reentry_checkpoint_v8_continuation_evidence_tick_post_audit(
         audit
     )
 
