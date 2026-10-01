@@ -274,6 +274,15 @@ selection without turning them into live policy:
   - explicitly marks full transition economics as incomplete and remains
     research-only, non-actionable and disconnected from execution.
 
+- `live_transition_annotation_backlog.py`
+  - lists unlinked CLOSED/EXIT predecessor candidates and unlinked ENTER
+    successor candidates in separate chronological lists;
+  - emits no suggested pairs, opportunity score, economic ordering or inferred
+    transition;
+  - is exposed read-only through `pio-live-transition-backlog` so annotation
+    review can find missing links without turning temporal adjacency into
+    evidence.
+
 These components are evidence generators. They remain research-only,
 non-actionable, and disconnected from execution.
 
