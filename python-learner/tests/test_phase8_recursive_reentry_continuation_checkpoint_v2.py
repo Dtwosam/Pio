@@ -10,7 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-TOOL = ROOT / "deploy" / "tools" / "build_phase8_recursive_reentry_continuation_checkpoint_v2_v2.py"
+TOOL = ROOT / "deploy" / "tools" / "build_phase8_recursive_reentry_continuation_checkpoint_v2.py"
 
 SPEC = importlib.util.spec_from_file_location(
     "build_phase8_recursive_reentry_continuation_checkpoint_v2",
