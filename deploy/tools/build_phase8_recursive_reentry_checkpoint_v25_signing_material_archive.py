@@ -71,6 +71,7 @@ REPORT_FIELDS = (
     "trust_root_digest_verified",
     "evidence_bundle_bound_to_session_archive",
     "signing_material_archive_ready",
+    "input_files_stable_during_archive",
     "archive_read_only",
     "historical_authorization_only",
     "authorization_currently_reusable",
@@ -275,6 +276,7 @@ def validate_phase8_recursive_reentry_checkpoint_v25_signing_material_archive(
         "trust_root_digest_verified",
         "evidence_bundle_bound_to_session_archive",
         "signing_material_archive_ready",
+        "input_files_stable_during_archive",
         "archive_read_only",
         "historical_authorization_only",
     ):
@@ -459,6 +461,25 @@ def build_phase8_recursive_reentry_checkpoint_v25_signing_material_archive(
         "production_pio_database_modified",
     )
 
+    stable_inputs = (
+        (request_path, "checkpoint v25 continuation request", request_file_sha),
+        (payload_path, "checkpoint v25 signed payload", payload_file_sha),
+        (signing_bytes_path, "checkpoint v25 signing bytes", signing_bytes_sha),
+        (signature_path, "checkpoint v25 detached signature", signature_file_sha),
+        (allowed_signers_path, "checkpoint v25 allowed_signers trust root", allowed_file_sha),
+        (
+            signed_verification_path,
+            "checkpoint v25 signed authorization verification",
+            verification_file_sha,
+        ),
+        (evidence_bundle_path, "checkpoint v25 evidence bundle", bundle_file_sha),
+        (session_archive_path, "checkpoint v25 operator session archive", session_file_sha),
+    )
+    for stable_path, stable_label, expected_sha in stable_inputs:
+        _, _, actual_sha = _regular_bytes(stable_path, label=stable_label)
+        if actual_sha != expected_sha:
+            raise ValueError(f"{stable_label} changed during signing archive")
+
     identity = {
         "format_version": FORMAT_VERSION,
         "artifact_type": ARTIFACT_TYPE,
@@ -504,6 +525,7 @@ def build_phase8_recursive_reentry_checkpoint_v25_signing_material_archive(
         "trust_root_digest_verified": True,
         "evidence_bundle_bound_to_session_archive": True,
         "signing_material_archive_ready": True,
+        "input_files_stable_during_archive": True,
         "archive_read_only": True,
         "historical_authorization_only": True,
         "authorization_currently_reusable": False,
