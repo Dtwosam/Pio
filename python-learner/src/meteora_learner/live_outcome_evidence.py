@@ -11,6 +11,10 @@ from .live_action_cost_evidence import (
     LiveActionCostEvidenceReport,
     build_live_action_cost_evidence,
 )
+from .live_transition_cost_evidence import (
+    LiveTransitionCostEvidenceReport,
+    build_live_transition_cost_evidence,
+)
 from .research_store import ResearchStore
 
 
@@ -98,6 +102,7 @@ class LiveOutcomeEvidenceReport:
     model_calibration: tuple[LiveModelCalibration, ...]
     samples: tuple[LiveOutcomeEvidenceSample, ...]
     action_cost_evidence: LiveActionCostEvidenceReport | None = None
+    transition_cost_evidence: LiveTransitionCostEvidenceReport | None = None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -222,6 +227,11 @@ def build_live_outcome_evidence(
     """
     rows = ResearchStore(database_path).live_learning_evidence_rows()
     samples = tuple(_sample(row) for row in rows)
+    action_cost_evidence = build_live_action_cost_evidence(database_path)
+    transition_cost_evidence = build_live_transition_cost_evidence(
+        database_path,
+        action_cost_evidence=action_cost_evidence,
+    )
 
     if not samples:
         return LiveOutcomeEvidenceReport(
@@ -248,9 +258,8 @@ def build_live_outcome_evidence(
             mean_reward_income_bps=None,
             model_calibration=(),
             samples=(),
-            action_cost_evidence=build_live_action_cost_evidence(
-                database_path
-            ),
+            action_cost_evidence=action_cost_evidence,
+            transition_cost_evidence=transition_cost_evidence,
         )
 
     realized = [item.realized_return_bps for item in samples]
@@ -302,7 +311,6 @@ def build_live_outcome_evidence(
         ),
         model_calibration=_model_calibration(samples),
         samples=samples,
-        action_cost_evidence=build_live_action_cost_evidence(
-            database_path
-        ),
+        action_cost_evidence=action_cost_evidence,
+        transition_cost_evidence=transition_cost_evidence,
     )
