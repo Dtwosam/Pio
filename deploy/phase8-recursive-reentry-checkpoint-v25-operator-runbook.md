@@ -233,6 +233,28 @@ The bundle reruns every native artifact validator, checks cross-artifact
 lineage, and requires the production DB/WAL/SHM to still match the final audit.
 It authorizes no next action.
 
+## 9. Verify sealed evidence handoff
+
+Before handing the completed v25 evidence forward to any separately reviewed
+future workflow, revalidate the sealed bundle/post-audit pair against the
+current production database:
+
+```sh
+python "$SOURCE_TREE/deploy/tools/check_phase8_recursive_reentry_checkpoint_v25_evidence_handoff.py" \
+  --repo "$REPO" \
+  --source-tree "$SOURCE_TREE" \
+  --evidence-bundle "$ARTIFACT_DIR/evidence-bundle-v25.json" \
+  --post-audit "$ARTIFACT_DIR/post-audit-v25.json" \
+  > "$ARTIFACT_DIR/evidence-handoff-v25.json"
+```
+
+Continue with no future workflow unless the report has
+`evidence_handoff_ready=true`. This only means the sealed v25 evidence,
+post-audit route, pair lineage, and current DB/WAL/SHM still agree. The report
+keeps `future_checkpoint_refresh_authorized=false`, requires a fresh operator
+preflight for any future sequence, and authorizes no PAPER tick, live
+submission, new capital, or promotion.
+
 ## Stop conditions
 
 Stop the v25 sequence instead of weakening a gate when any of these occur:
@@ -249,7 +271,9 @@ Stop the v25 sequence instead of weakening a gate when any of these occur:
 - the executor reports a partial failure;
 - either pair leg closes;
 - the post-audit fails its ledger or persisted-run checks;
-- the final database no longer matches the post-audit before bundling.
+- the final database no longer matches the post-audit before bundling;
+- the sealed v25 bundle/post-audit pair fails handoff validation or the current
+  DB/WAL/SHM no longer matches the sealed final state.
 
 Recovery, terminal evaluation, another evidence tick, recurring PAPER
 collection, live submission, new capital, and promotion all require separate
