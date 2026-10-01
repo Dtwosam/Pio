@@ -576,6 +576,83 @@ class ResearchStore:
             conn.close()
         return [dict(row) for row in rows]
 
+    def live_unlinked_transition_predecessor_rows(
+        self,
+    ) -> list[dict[str, Any]]:
+        """
+        Load CLOSED LIVE positions with an EXIT event and no explicit outgoing
+        transition annotation. Ordering is chronological and non-economic.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    p.position_address,
+                    p.pool_address,
+                    p.status,
+                    e.decision_id,
+                    e.event_time
+                FROM live_positions p
+                JOIN live_position_events e
+                  ON e.position_address = p.position_address
+                 AND e.action = 'EXIT'
+                LEFT JOIN live_position_transitions t
+                  ON t.previous_position_address = p.position_address
+                WHERE p.status = 'CLOSED'
+                  AND t.transition_id IS NULL
+                ORDER BY julianday(e.event_time) ASC,
+                         p.position_address ASC,
+                         e.decision_id ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
+    def live_unlinked_transition_successor_rows(
+        self,
+    ) -> list[dict[str, Any]]:
+        """
+        Load LIVE positions with an ENTER event and no explicit incoming
+        transition annotation. Ordering is chronological and non-economic.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    p.position_address,
+                    p.pool_address,
+                    p.status,
+                    e.decision_id,
+                    e.event_time
+                FROM live_positions p
+                JOIN live_position_events e
+                  ON e.position_address = p.position_address
+                 AND e.action = 'ENTER'
+                LEFT JOIN live_position_transitions t
+                  ON t.next_position_address = p.position_address
+                WHERE t.transition_id IS NULL
+                ORDER BY julianday(e.event_time) ASC,
+                         p.position_address ASC,
+                         e.decision_id ASC
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+        return [dict(row) for row in rows]
+
+    def live_position_transition_count(self) -> int:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM live_position_transitions"
+            ).fetchone()
+        finally:
+            conn.close()
+        return int(row[0])
+
     def live_position_transition_rows(
         self,
     ) -> list[dict[str, Any]]:
