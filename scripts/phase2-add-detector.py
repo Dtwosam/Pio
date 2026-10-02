@@ -616,6 +616,7 @@ def verify_prestate(candidate):
         )
 
     proof = json.loads(proc.stdout)
+    clear_rate_limit_cooldown()
 
     ingest = run(
         [
@@ -684,6 +685,11 @@ def save_state(state):
     tmp = STATE_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2))
     tmp.replace(STATE_PATH)
+
+
+def advance_cursor(state, pool, signature):
+    state["cursors"][pool] = signature
+    save_state(state)
 
 
 def pending_record(pool, signature, position, reason, add):
@@ -1049,10 +1055,15 @@ while True:
 
             # Oldest -> newest.
             for row in reversed(rows):
-                if row.get("err") is not None:
-                    continue
-
                 signature = row["signature"]
+
+                if row.get("err") is not None:
+                    advance_cursor(
+                        state,
+                        pool,
+                        signature,
+                    )
+                    continue
 
                 try:
                     tx, raw = inspect_transaction(signature)
@@ -1075,7 +1086,7 @@ while True:
                         signature=signature,
                         category=error_category(exc),
                     )
-                    continue
+                    break
 
                 adds = standalone_adds(tx, pool)
 
@@ -1116,6 +1127,12 @@ while True:
                         candidate_add,
                     )
 
+                advance_cursor(
+                    state,
+                    pool,
+                    signature,
+                )
+
             if batch_failed:
                 log(
                     "BATCH_RETRY",
@@ -1130,9 +1147,6 @@ while True:
                         pool=pool,
                     )
                     break
-            else:
-                state["cursors"][pool] = rows[0]["signature"]
-                save_state(state)
 
         except RpcRateLimited:
             enter_rate_limit_cooldown(
