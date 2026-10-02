@@ -9,6 +9,7 @@ from meteora_learner.phase2_evidence_cycle import (
     persist_phase2_evidence_cycle_progress,
     run_phase2_read_only_evidence_cycle,
 )
+from meteora_learner.phase2_rpc_guard import Phase2RpcRateLimited
 from meteora_learner.storage import Storage
 
 
@@ -496,3 +497,122 @@ def test_evidence_cycle_progress_rejects_boundary_crossing(
         build_phase2_evidence_cycle_progress(
             replace(report, promotion_gate_evaluated=True)
         )
+
+
+
+def test_evidence_cycle_opens_rpc_circuit_after_position_rate_limit(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+
+    def rate_limited_positions(*args, **kwargs):
+        calls.append("positions-rate-limited")
+        raise Phase2RpcRateLimited("RPC_RATE_LIMITED")
+
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.collect_phase2_position_observations",
+        rate_limited_positions,
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+
+    assert calls == [
+        "quotes",
+        "positions-rate-limited",
+        "reconciliation",
+        "evidence",
+        "queue",
+    ]
+    assert [item.status for item in report.stages] == [
+        "SUCCESS",
+        "FAILED",
+        "SKIPPED",
+        "SKIPPED",
+        "SUCCESS",
+        "SUCCESS",
+        "SUCCESS",
+    ]
+    assert report.stages_failed == 1
+    assert report.stages_skipped == 2
+    assert report.stages[1].failure_category == "RPC_RATE_LIMITED"
+    assert report.stages[2].failure_category == "RPC_CIRCUIT_OPEN"
+    assert report.stages[3].failure_category == "RPC_CIRCUIT_OPEN"
+
+
+def test_evidence_cycle_rate_limit_does_not_suppress_local_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+
+    def rate_limited_reinspection(*args, **kwargs):
+        calls.append("reinspect-rate-limited")
+        raise Phase2RpcRateLimited("RPC_RATE_LIMITED")
+
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.run_phase2_calibration_reinspection",
+        rate_limited_reinspection,
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+
+    assert calls == [
+        "quotes",
+        "positions",
+        "reinspect-rate-limited",
+        "reconciliation",
+        "evidence",
+        "queue",
+    ]
+    assert report.stages[2].status == "FAILED"
+    assert report.stages[2].failure_category == "RPC_RATE_LIMITED"
+    assert report.stages[3].status == "SKIPPED"
+    assert report.stages[3].failure_category == "RPC_CIRCUIT_OPEN"
+    assert report.stages[-3].name == "RECONCILIATION_CORPUS"
+    assert report.stages[-2].name == "CALIBRATION_EVIDENCE"
+    assert report.stages[-1].name == "CALIBRATION_WORK_QUEUE"
+
+
+def test_evidence_cycle_progress_surfaces_skipped_rpc_stages(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.collect_phase2_position_observations",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            Phase2RpcRateLimited("RPC_RATE_LIMITED")
+        ),
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+    progress = build_phase2_evidence_cycle_progress(report)
+
+    assert progress.overall_status == "FAILED"
+    assert progress.stages_failed == 1
+    assert progress.stages_skipped == 2
+    assert ("TRANSACTION_REINSPECTION", "SKIPPED") in progress.stage_statuses
+    assert ("PRESTATE_VERIFICATION", "SKIPPED") in progress.stage_statuses
