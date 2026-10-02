@@ -303,14 +303,13 @@ def _notification_stream(
 
 def _start_watch_process(
     *,
-    executor_path: str | Path,
+    watch_executor_path: str | Path,
     pool_address: str,
     max_notifications: int,
 ) -> subprocess.Popen[str]:
     return subprocess.Popen(
         [
-            str(executor_path),
-            "watch-account-env",
+            str(watch_executor_path),
             pool_address,
             str(max_notifications),
         ],
@@ -340,6 +339,13 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--watch-executor",
+        default=(
+            "/opt/pio-phase2-runtime/current/"
+            "rust-executor/target/release/pio-phase2-account-watch"
+        ),
+    )
+    parser.add_argument(
         "--cache-database",
         default=os.getenv("PIO_PHASE2_PRESTATE_CACHE"),
     )
@@ -365,7 +371,7 @@ def main() -> None:
     )
 
     watcher = _start_watch_process(
-        executor_path=args.executor,
+        watch_executor_path=args.watch_executor,
         pool_address=args.pool,
         max_notifications=args.max_notifications,
     )
