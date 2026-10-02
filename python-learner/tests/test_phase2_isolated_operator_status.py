@@ -119,7 +119,8 @@ def test_operator_status_surfaces_fresh_rate_limit_before_more_timer_cycles(
     assert report.state == "RATE_LIMIT_PAUSE_REQUIRED"
     assert report.provider_rate_limit_incident is True
     assert report.provider_rate_limit_paused is False
-    assert report.rejected_future_timer_cycles_blocked is False
+    assert report.future_timer_cycles_paused is False
+    assert report.rate_limit_waste_guard_satisfied is False
     assert report.attention_required is True
 
 
@@ -147,7 +148,8 @@ def test_operator_status_recognizes_rate_limit_timer_already_paused(monkeypatch)
 
     assert report.state == "RATE_LIMIT_PAUSED"
     assert report.provider_rate_limit_paused is True
-    assert report.rejected_future_timer_cycles_blocked is True
+    assert report.future_timer_cycles_paused is True
+    assert report.rate_limit_waste_guard_satisfied is True
     assert report.attention_required is True
 
 
