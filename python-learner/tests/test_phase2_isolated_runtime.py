@@ -48,6 +48,10 @@ def make_runtime(tmp_path: Path, monkeypatch) -> Path:
     executor.parent.mkdir(parents=True, exist_ok=True)
     executor.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     executor.chmod(executor.stat().st_mode | stat.S_IXUSR)
+
+    watcher = source / MODULE.WATCH_EXECUTOR_RELATIVE
+    watcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    watcher.chmod(watcher.stat().st_mode | stat.S_IXUSR)
     return source
 
 
@@ -78,4 +82,32 @@ def test_runtime_checker_requires_executable_binary(tmp_path, monkeypatch):
 
     assert report.executor_exists is True
     assert report.executor_executable is False
+    assert report.runtime_ready is False
+
+
+
+def test_runtime_checker_requires_event_watch_binary(tmp_path, monkeypatch):
+    source = make_runtime(tmp_path, monkeypatch)
+    watcher = source / MODULE.WATCH_EXECUTOR_RELATIVE
+    watcher.unlink()
+
+    report = MODULE.inspect_runtime(source)
+
+    assert report.watch_executor_exists is False
+    assert report.watch_executor_executable is False
+    assert report.runtime_ready is False
+
+
+def test_runtime_checker_requires_executable_event_watch_binary(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_runtime(tmp_path, monkeypatch)
+    watcher = source / MODULE.WATCH_EXECUTOR_RELATIVE
+    watcher.chmod(0o644)
+
+    report = MODULE.inspect_runtime(source)
+
+    assert report.watch_executor_exists is True
+    assert report.watch_executor_executable is False
     assert report.runtime_ready is False
