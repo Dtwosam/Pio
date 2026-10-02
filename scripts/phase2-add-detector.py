@@ -28,12 +28,28 @@ from meteora_learner.settings import Settings
 from meteora_learner.storage import Storage
 
 
-ROOT = "/opt/pio"
-RUST = f"{ROOT}/rust-executor/target/release/meteora-executor"
-PIO = f"{ROOT}/python-learner/.venv/bin/pio"
-STATE_PATH = Path(f"{ROOT}/data/phase2-add-detector-state.json")
+ROOT = os.getenv("PIO_PHASE2_RUNTIME_ROOT", "/opt/pio")
+RUST = os.getenv(
+    "PIO_PHASE2_EXECUTOR",
+    f"{ROOT}/rust-executor/target/release/meteora-executor",
+)
+PIO = os.getenv(
+    "PIO_PHASE2_PIO_CLI",
+    "/opt/pio/python-learner/.venv/bin/pio",
+)
+STATE_PATH = Path(
+    os.getenv(
+        "PIO_PHASE2_DETECTOR_STATE_PATH",
+        "/opt/pio/data/phase2-add-detector-state.json",
+    )
+)
 
-CACHE_DB = Path(f"{ROOT}/data/phase2-prestate-cache.db")
+CACHE_DB = Path(
+    os.getenv(
+        "PIO_PHASE2_PRESTATE_CACHE_DB",
+        "/opt/pio/data/phase2-prestate-cache.db",
+    )
+)
 
 SETTINGS = Settings.from_env()
 MAIN_DB = str(SETTINGS.database_path)
