@@ -11,7 +11,7 @@ import subprocess
 from typing import Any
 
 
-PINNED_SOURCE_HEAD = "ab5a70f26947be668d64068102624ac3f2796377"
+PINNED_SOURCE_HEAD = "5f91a8bc25dd721ae42e01f09a2406a465a56b78"
 EXECUTOR_RELATIVE = Path("rust-executor/target/release/meteora-executor")
 WATCH_EXECUTOR_RELATIVE = Path("rust-executor/target/release/pio-phase2-account-watch")
 
