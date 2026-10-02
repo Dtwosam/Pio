@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,23 @@ SLOW_POOL = "DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf"
 
 DQ9_POLL_SECONDS = 60.0
 CACHE_RETENTION_HOURS = 24
+
+# These are not throughput caps. They only suppress requests that cannot add
+# evidence (same slot/bin already cached) or that the RPC provider is actively
+# rejecting. Healthy, evidence-producing captures remain unthrottled.
+DUPLICATE_SLOT_RECHECK_SECONDS = float(
+    os.getenv("PIO_PHASE2_DUPLICATE_RECHECK_SECONDS", "0.25")
+)
+RATE_LIMIT_BACKOFF_SECONDS = (
+    5.0,
+    10.0,
+    20.0,
+    40.0,
+    80.0,
+    160.0,
+    300.0,
+    600.0,
+)
 
 STOP = threading.Event()
 PRINT_LOCK = threading.Lock()
@@ -48,6 +66,47 @@ def log(kind: str, **fields) -> None:
             ),
             flush=True,
         )
+
+
+def is_rate_limited_error(exc: BaseException) -> bool:
+    if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+        return True
+
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "429",
+            "too many requests",
+            "rate limit",
+            "ratelimit",
+        )
+    )
+
+
+def rate_limit_backoff_seconds(consecutive_rate_limits: int) -> float:
+    if consecutive_rate_limits <= 0:
+        return 0.0
+    index = min(
+        consecutive_rate_limits - 1,
+        len(RATE_LIMIT_BACKOFF_SECONDS) - 1,
+    )
+    return RATE_LIMIT_BACKOFF_SECONDS[index]
+
+
+def error_category(exc: BaseException) -> str:
+    if is_rate_limited_error(exc):
+        return "RPC_RATE_LIMITED"
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "EXECUTOR_TIMEOUT"
+    return type(exc).__name__.upper()
+
+
+def post_capture_delay(*, stored: bool) -> float:
+    # The cache key is (pool, capture_slot_end, active_bin_id). If a successful
+    # capture was not stored, an immediate retry would be discarded by the same
+    # uniqueness rule and therefore cannot add evidence.
+    return 0.0 if stored else max(0.0, DUPLICATE_SLOT_RECHECK_SECONDS)
 
 
 def connect_cache():
@@ -261,6 +320,8 @@ def capture_pool(pool: str, *, mode: str):
         cycle_ms=round(elapsed * 1000, 1),
     )
 
+    return stored
+
 
 def continuous_worker():
     log(
@@ -270,38 +331,60 @@ def continuous_worker():
     )
 
     failures = 0
+    consecutive_rate_limits = 0
     captures = 0
 
     while not STOP.is_set():
         try:
-            capture_pool(
+            stored = capture_pool(
                 FAST_POOL,
                 mode="continuous",
             )
 
             failures = 0
+            consecutive_rate_limits = 0
             captures += 1
 
             if captures % 250 == 0:
                 prune_cache()
 
+            delay = post_capture_delay(stored=stored)
+            if delay:
+                STOP.wait(delay)
+
         except Exception as exc:
             failures += 1
+            category = error_category(exc)
 
-            log(
-                "ERROR",
-                pool=FAST_POOL,
-                mode="continuous",
-                consecutive_failures=failures,
-                error=f"{type(exc).__name__}: {exc}",
-            )
-
-            STOP.wait(
-                min(
+            if category == "RPC_RATE_LIMITED":
+                consecutive_rate_limits += 1
+                delay = rate_limit_backoff_seconds(
+                    consecutive_rate_limits
+                )
+                log(
+                    "RPC_BACKOFF",
+                    pool=FAST_POOL,
+                    mode="continuous",
+                    consecutive_failures=failures,
+                    consecutive_rate_limits=consecutive_rate_limits,
+                    sleep_seconds=delay,
+                    category=category,
+                )
+            else:
+                consecutive_rate_limits = 0
+                delay = min(
                     5.0,
                     max(0.5, failures * 0.5),
                 )
-            )
+                log(
+                    "ERROR",
+                    pool=FAST_POOL,
+                    mode="continuous",
+                    consecutive_failures=failures,
+                    category=category,
+                )
+
+            STOP.wait(delay)
 
 
 def dq9_worker():
@@ -334,7 +417,7 @@ def dq9_worker():
             "ERROR",
             pool=SLOW_POOL,
             mode="baseline",
-            error=f"{type(exc).__name__}: {exc}",
+            category=error_category(exc),
         )
 
     while not STOP.wait(DQ9_POLL_SECONDS):
@@ -391,7 +474,7 @@ def dq9_worker():
                 "ERROR",
                 pool=SLOW_POOL,
                 mode="activity_triggered",
-                error=f"{type(exc).__name__}: {exc}",
+                category=error_category(exc),
             )
 
 
