@@ -448,3 +448,33 @@ def test_status_does_not_recommend_pause_for_stale_rate_limit_history(
     assert report.pause_recommended is False
     assert report.protected_from_future_timer_cycles is True
     assert report.attention_required is False
+
+
+
+def test_status_marks_missing_pool_configuration_as_attention(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    db = data / "pio.db"
+    init_db(db)
+    env = tmp_path / "pio.env"
+    env.write_text(
+        "SOLANA_RPC_URL=https://secret.invalid/?api-key=never-print\n",
+        encoding="utf-8",
+    )
+
+    report = MODULE.inspect_rpc_efficiency(
+        data_root=data,
+        env_file=env,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 35, tzinfo=timezone.utc
+        ),
+        runner=runner_state(active=False, enabled=False),
+    )
+
+    assert report.pool_address is None
+    assert report.pool_configured is False
+    assert report.attention_required is True
+    assert report.rpc_called is False
+    encoded = json.dumps(report.to_record())
+    assert "never-print" not in encoded
+    assert "SOLANA_RPC_URL" not in encoded
