@@ -304,3 +304,38 @@ def test_activation_preflight_rejects_malformed_detector_state(
     assert report.activation_ready is False
     assert report.detector_state_valid is False
     assert report.detector_cursors_complete is False
+
+
+
+def test_activation_preflight_blocks_overlapping_legacy_rpc_collectors(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    overlapping = {
+        "pio-phase2-position-observer.service",
+        "pio-phase2-position-observer.timer",
+        "pio-phase2-evidence-cycle.service",
+        "pio-phase2-evidence-cycle.timer",
+    }
+
+    assert overlapping.issubset(set(MODULE.LEGACY_UNITS))
+
+    for unit_name in sorted(overlapping):
+        report = MODULE.inspect_activation(
+            **args,
+            runner=systemctl_runner(enabled={unit_name}),
+        )
+        state = next(
+            item for item in report.unit_states
+            if item.name == unit_name
+        )
+        assert report.activation_ready is False
+        assert state.enabled is True
+        assert state.must_be_disabled is True
+        assert state.ready is False
+
+
+def test_activation_does_not_disable_independent_research_quote_density():
+    assert "pio-phase2-research-quotes.service" not in MODULE.LEGACY_UNITS
+    assert "pio-phase2-research-quotes.timer" not in MODULE.LEGACY_UNITS

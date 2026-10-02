@@ -86,6 +86,7 @@ def install_base(
     *,
     detector_active: bool = True,
     streams_active: bool = True,
+    legacy_active: tuple[str, ...] = (),
 ):
     streams = tuple(
         name
@@ -105,7 +106,11 @@ def install_base(
         unit(MODULE.EVIDENCE_SERVICE, active=False, enabled=False),
         unit(MODULE.TIMER_UNIT, active=True, enabled=True),
         *[
-            unit(name, active=False, enabled=False)
+            unit(
+                name,
+                active=name in set(legacy_active),
+                enabled=name in set(legacy_active),
+            )
             for name in MODULE.ACTIVATION.LEGACY_UNITS
         ],
     ]
@@ -482,4 +487,31 @@ def test_old_rate_limit_incident_does_not_extend_current_streak(
     assert report.latest_cycle_recent is True
     assert report.consecutive_rpc_rate_limited == 1
     assert report.pause_recommended is False
+    assert report.collection_healthy is False
+
+
+
+def test_health_rejects_overlapping_legacy_position_timer(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(
+        monkeypatch,
+        tmp_path,
+        legacy_active=("pio-phase2-position-observer.timer",),
+    )
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    report = MODULE.inspect_timer_health(
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.legacy_collectors_quiescent is False
     assert report.collection_healthy is False
