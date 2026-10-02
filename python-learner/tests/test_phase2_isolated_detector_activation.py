@@ -146,7 +146,8 @@ def test_detector_activation_starts_streams_then_detector(monkeypatch):
     )
     assert report.evidence_timer_untouched is True
     assert report.legacy_services_untouched is True
-    assert report.rpc_called is False
+    assert report.rpc_called_directly is False
+    assert report.activated_services_may_call_rpc is True
 
     expected_prefix = ["daemon-reload"]
     for unit in MODULE.PRESTATE_STREAM_UNITS:
@@ -177,6 +178,7 @@ def test_detector_activation_rolls_back_after_detector_start_failure(
     )
 
     assert report.applied is False
+    assert report.activated_services_may_call_rpc is True
     assert report.failure_step == f"START:{MODULE.DETECTOR_UNIT}"
     assert report.rollback_performed is True
     assert report.rollback_succeeded is True
@@ -200,6 +202,7 @@ def test_detector_activation_rolls_back_if_second_stream_fails(monkeypatch):
     )
 
     assert report.applied is False
+    assert report.activated_services_may_call_rpc is True
     assert report.failure_step == f"START:{second}"
     assert report.rollback_performed is True
     assert report.rollback_succeeded is True
