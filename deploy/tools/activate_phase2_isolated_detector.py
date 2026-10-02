@@ -53,7 +53,8 @@ class Phase2DetectorActivationReport:
     rollback_succeeded: bool
     evidence_timer_untouched: bool
     legacy_services_untouched: bool
-    rpc_called: bool
+    rpc_called_directly: bool
+    activated_services_may_call_rpc: bool
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -139,7 +140,8 @@ def activate_detector(
             rollback_succeeded=True,
             evidence_timer_untouched=True,
             legacy_services_untouched=True,
-            rpc_called=False,
+            rpc_called_directly=False,
+            activated_services_may_call_rpc=False,
         )
 
     if not apply:
@@ -156,7 +158,8 @@ def activate_detector(
             rollback_succeeded=True,
             evidence_timer_untouched=True,
             legacy_services_untouched=True,
-            rpc_called=False,
+            rpc_called_directly=False,
+            activated_services_may_call_rpc=False,
         )
 
     activated: list[str] = []
@@ -207,7 +210,8 @@ def activate_detector(
             rollback_succeeded=True,
             evidence_timer_untouched=True,
             legacy_services_untouched=True,
-            rpc_called=False,
+            rpc_called_directly=False,
+            activated_services_may_call_rpc=True,
         )
 
     rollback_performed = bool(activated or detector_enabled)
@@ -233,7 +237,8 @@ def activate_detector(
         rollback_succeeded=rollback_succeeded,
         evidence_timer_untouched=True,
         legacy_services_untouched=True,
-        rpc_called=False,
+        rpc_called_directly=False,
+        activated_services_may_call_rpc=bool(activated),
     )
 
 
