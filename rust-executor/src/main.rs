@@ -48,7 +48,7 @@ fn usage() {
   meteora-executor inspect-pool <RPC_URL> <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-pool-env <POOL_ADDRESS> [ARRAY_RADIUS]
   meteora-executor inspect-position <RPC_URL> <POSITION_ADDRESS>
-  meteora-executor inspect-position-env <POSITION_ADDRESS>
+  meteora-executor inspect-position-env <POSITION_ADDRESS> [POOL_ADDRESS LOWER_BIN_ID UPPER_BIN_ID]
   meteora-executor discover-pool-positions <RPC_URL> <POOL_ADDRESS> [LIMIT]
   meteora-executor discover-pool-positions-env <POOL_ADDRESS> [LIMIT]
   meteora-executor discover-pool-activity <RPC_URL> <POOL_ADDRESS> [LIMIT] [BEFORE_SIGNATURE] [UNTIL_SIGNATURE]
@@ -207,13 +207,45 @@ RPC_URL is accepted as a compatibility fallback",
                 )?;
             let position_address =
                 args.next().context("POSITION_ADDRESS is required")?;
+            let pool_hint = args.next();
+            let lower_hint = args.next();
+            let upper_hint = args.next();
             if args.next().is_some() {
                 anyhow::bail!(
-                    "inspect-position-env accepts exactly one argument"
+                    "inspect-position-env accepts one or four arguments"
                 );
             }
-            let snapshot =
-                state_reader::inspect_position(&rpc_url, &position_address).await?;
+
+            let snapshot = match (pool_hint, lower_hint, upper_hint) {
+                (None, None, None) => {
+                    state_reader::inspect_position(
+                        &rpc_url,
+                        &position_address,
+                    )
+                    .await?
+                }
+                (Some(pool), Some(lower), Some(upper)) => {
+                    let lower_bin_id: i32 = lower
+                        .parse()
+                        .context("LOWER_BIN_ID must be an integer")?;
+                    let upper_bin_id: i32 = upper
+                        .parse()
+                        .context("UPPER_BIN_ID must be an integer")?;
+                    state_reader::inspect_position_with_dependencies(
+                        &rpc_url,
+                        &position_address,
+                        &pool,
+                        lower_bin_id,
+                        upper_bin_id,
+                    )
+                    .await?
+                }
+                _ => {
+                    anyhow::bail!(
+                        "inspect-position-env dependency hint requires POOL_ADDRESS, LOWER_BIN_ID and UPPER_BIN_ID"
+                    );
+                }
+            };
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
         }
         "discover-pool-positions" => {
