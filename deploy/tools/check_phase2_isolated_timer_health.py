@@ -40,13 +40,6 @@ TIMER_UNIT = "pio-phase2-isolated-evidence-cycle.timer"
 EVIDENCE_SERVICE = "pio-phase2-isolated-evidence-cycle.service"
 DETECTOR_UNIT = "pio-phase2-isolated-add-detector.service"
 
-ADDITIONAL_LEGACY_UNITS = (
-    "pio-phase2-position-observer.service",
-    "pio-phase2-position-observer.timer",
-    "pio-phase2-evidence-cycle.service",
-    "pio-phase2-evidence-cycle.timer",
-)
-
 
 @dataclass(frozen=True)
 class TimerHealthCycle:
@@ -319,14 +312,10 @@ def inspect_timer_health(
         evidence_service and evidence_service.active
     )
 
-    legacy_states = {
-        name: _systemctl_state(name, runner=runner)
-        for name in ADDITIONAL_LEGACY_UNITS
-    }
+    # Activation owns the complete set of legacy Solana-RPC collectors that
+    # overlap this isolated topology. Reuse those already-read states rather
+    # than issuing duplicate local systemctl queries here.
     legacy_clear = all(
-        not state.active and not state.enabled
-        for state in legacy_states.values()
-    ) and all(
         name in base_states
         and not base_states[name].active
         and not base_states[name].enabled
