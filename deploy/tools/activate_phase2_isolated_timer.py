@@ -206,9 +206,9 @@ def activate_timer(
         detector_services_untouched=True,
         legacy_services_untouched=True,
         direct_rpc_called=False,
-        timer_may_trigger_rpc_cycles=bool(
-            enabled or active or failure != "ENABLE_NOW"
-        ),
+        # enable --now may have partially started the timer even when
+        # systemd reports failure, so fail closed in the activity report.
+        timer_may_trigger_rpc_cycles=True,
         service_control_performed=True,
     )
 
