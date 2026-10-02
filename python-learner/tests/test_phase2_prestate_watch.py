@@ -93,3 +93,79 @@ def test_watcher_promotes_verified_prestate():
     assert persisted["bin_arrays"][0]["bins"] == [
         {"bin_id": 7, "amount_x": "2"}
     ]
+
+
+
+def test_watcher_rate_limit_backoff_escalates_without_capping_healthy_calls():
+    nodes = _functions("rate_limit_backoff_seconds")
+    module = ast.Module(body=nodes, type_ignores=[])
+    ast.fix_missing_locations(module)
+
+    namespace = {
+        "RATE_LIMIT_BACKOFF_SECONDS": (
+            5.0,
+            10.0,
+            20.0,
+            40.0,
+            80.0,
+            160.0,
+            300.0,
+            600.0,
+        ),
+    }
+    exec(compile(module, str(WATCHER), "exec"), namespace)
+
+    backoff = namespace["rate_limit_backoff_seconds"]
+    assert backoff(0) == 0.0
+    assert backoff(1) == 5.0
+    assert backoff(4) == 40.0
+    assert backoff(8) == 600.0
+    assert backoff(100) == 600.0
+
+
+def test_watcher_only_delays_success_when_capture_would_be_duplicate():
+    nodes = _functions("post_capture_delay")
+    module = ast.Module(body=nodes, type_ignores=[])
+    ast.fix_missing_locations(module)
+
+    namespace = {
+        "DUPLICATE_SLOT_RECHECK_SECONDS": 0.25,
+    }
+    exec(compile(module, str(WATCHER), "exec"), namespace)
+
+    delay = namespace["post_capture_delay"]
+    assert delay(stored=True) == 0.0
+    assert delay(stored=False) == 0.25
+
+
+def test_watcher_uses_secret_safe_rate_limit_category():
+    import subprocess
+    import urllib.error
+
+    nodes = _functions("is_rate_limited_error", "error_category")
+    module = ast.Module(body=nodes, type_ignores=[])
+    ast.fix_missing_locations(module)
+
+    namespace = {
+        "subprocess": subprocess,
+        "urllib": __import__("urllib"),
+    }
+    namespace["urllib"].error = urllib.error
+    exec(compile(module, str(WATCHER), "exec"), namespace)
+
+    category = namespace["error_category"](
+        RuntimeError(
+            "HTTP 429 Too Many Requests for "
+            "https://rpc.invalid/?api-key=secret"
+        )
+    )
+    assert category == "RPC_RATE_LIMITED"
+
+
+def test_watcher_does_not_log_raw_rpc_exception_text():
+    worker_nodes = _functions("continuous_worker", "dq9_worker")
+    worker_source = "\n".join(ast.unparse(node) for node in worker_nodes)
+
+    assert "RPC_BACKOFF" in worker_source
+    assert "category=error_category(exc)" in worker_source
+    assert 'error=f"{type(exc).__name__}: {exc}"' not in worker_source
