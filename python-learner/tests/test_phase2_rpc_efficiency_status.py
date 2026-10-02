@@ -238,6 +238,8 @@ def test_status_recommends_pause_only_for_repeated_provider_rejection(tmp_path):
 
     assert report.consecutive_rpc_rate_limited_cycles == 2
     assert report.repeated_provider_rejection is True
+    assert report.latest_cycle_recent is True
+    assert report.latest_cycle_age_seconds == 300.0
     assert report.pause_recommended is True
     assert report.protected_from_future_timer_cycles is False
     assert report.attention_required is True
@@ -397,3 +399,52 @@ def test_status_treats_enabled_inactive_timer_as_future_rpc_work(tmp_path):
     assert report.pause_recommended is True
     assert report.protected_from_future_timer_cycles is False
     assert report.attention_required is True
+
+
+
+def test_status_does_not_recommend_pause_for_stale_rate_limit_history(
+    tmp_path,
+):
+    data = tmp_path / "data"
+    data.mkdir()
+    db = data / "pio.db"
+    init_db(db)
+    env = tmp_path / "pio.env"
+    write_env(env)
+
+    with sqlite3.connect(db) as conn:
+        for as_of in (
+            "2026-10-02T18:30:00+00:00",
+            "2026-10-02T18:15:00+00:00",
+        ):
+            conn.execute(
+                """
+                INSERT INTO advanced_edge_evidence(
+                    edge_type, pool_address, as_of, status, qualified,
+                    evidence_json
+                ) VALUES (?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    MODULE.PROGRESS_EDGE_TYPE,
+                    POOL,
+                    as_of,
+                    "COLLECTION_FAILED",
+                    json.dumps({"rpc_rate_limited": True}),
+                ),
+            )
+
+    report = MODULE.inspect_rpc_efficiency(
+        data_root=data,
+        env_file=env,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 35, tzinfo=timezone.utc
+        ),
+        runner=runner_state(active=True, enabled=True),
+    )
+
+    assert report.consecutive_rpc_rate_limited_cycles == 2
+    assert report.repeated_provider_rejection is True
+    assert report.latest_cycle_recent is False
+    assert report.pause_recommended is False
+    assert report.protected_from_future_timer_cycles is True
+    assert report.attention_required is False
