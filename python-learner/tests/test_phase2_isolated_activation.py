@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -37,8 +38,21 @@ def install_unit_tree(tmp_path: Path) -> Path:
 def data_tree(tmp_path: Path) -> Path:
     root = tmp_path / "data"
     root.mkdir()
-    for name in MODULE.REQUIRED_DATA_FILES:
-        (root / name).write_text("state", encoding="utf-8")
+    (root / "pio.db").write_text("db", encoding="utf-8")
+    (root / "phase2-prestate-cache.db").write_text("cache", encoding="utf-8")
+    (root / "phase2-add-detector-state.json").write_text(
+        json.dumps(
+            {
+                "cursors": {
+                    "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ": "sig-a",
+                    "DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf": "sig-b",
+                },
+                "processed": [],
+                "pending": {},
+            }
+        ),
+        encoding="utf-8",
+    )
     return root
 
 
@@ -127,6 +141,9 @@ def test_activation_preflight_ready_is_read_only(tmp_path, monkeypatch):
     assert report.installed_units_exact is True
     assert report.position_pool_matches_detector_topology is True
     assert report.detector_pool_count == 2
+    assert report.detector_state_valid is True
+    assert report.detector_cursor_pools == 2
+    assert report.detector_cursors_complete is True
     assert all(item.configured for item in report.env_keys)
     assert all(item.ready for item in report.unit_states)
     assert report.read_only is True
@@ -237,3 +254,53 @@ def test_activation_preflight_rejects_missing_state_file(
         if item.name == "phase2-add-detector-state.json"
     )
     assert detector_state.exists is False
+
+
+
+def test_activation_preflight_rejects_incomplete_detector_cursors(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    state = Path(args["data_root"]) / "phase2-add-detector-state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "cursors": {
+                    "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ": "sig-a",
+                    "DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf": None,
+                },
+                "processed": [],
+                "pending": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = MODULE.inspect_activation(
+        **args,
+        runner=systemctl_runner(),
+    )
+
+    assert report.activation_ready is False
+    assert report.detector_state_valid is True
+    assert report.detector_cursor_pools == 1
+    assert report.detector_cursors_complete is False
+
+
+def test_activation_preflight_rejects_malformed_detector_state(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    state = Path(args["data_root"]) / "phase2-add-detector-state.json"
+    state.write_text("{broken", encoding="utf-8")
+
+    report = MODULE.inspect_activation(
+        **args,
+        runner=systemctl_runner(),
+    )
+
+    assert report.activation_ready is False
+    assert report.detector_state_valid is False
+    assert report.detector_cursors_complete is False
