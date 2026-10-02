@@ -442,6 +442,10 @@ def test_evidence_cycle_progress_compacts_technical_counts(
         ("VERIFY_PRESTATE", 2),
         ("INSPECT_TRANSACTION", 1),
     ]
+    assert progress.rpc_rate_limited is False
+    assert progress.rpc_circuit_open is False
+    assert progress.stage_outcomes
+    assert all(len(item) == 3 for item in progress.stage_outcomes)
     assert progress.qualified is False
     assert progress.promotion_gate_evaluated is False
 
@@ -614,5 +618,69 @@ def test_evidence_cycle_progress_surfaces_skipped_rpc_stages(
     assert progress.overall_status == "FAILED"
     assert progress.stages_failed == 1
     assert progress.stages_skipped == 2
+    assert progress.rpc_rate_limited is True
+    assert progress.rpc_circuit_open is True
     assert ("TRANSACTION_REINSPECTION", "SKIPPED") in progress.stage_statuses
     assert ("PRESTATE_VERIFICATION", "SKIPPED") in progress.stage_statuses
+    assert (
+        "POSITION_OBSERVATIONS",
+        "FAILED",
+        "RPC_RATE_LIMITED",
+    ) in progress.stage_outcomes
+    assert (
+        "TRANSACTION_REINSPECTION",
+        "SKIPPED",
+        "RPC_CIRCUIT_OPEN",
+    ) in progress.stage_outcomes
+    assert (
+        "PRESTATE_VERIFICATION",
+        "SKIPPED",
+        "RPC_CIRCUIT_OPEN",
+    ) in progress.stage_outcomes
+
+
+
+def test_persisted_progress_keeps_rate_limit_category_without_raw_error_text(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+    secret = "https://rpc.invalid/?api-key=secret"
+
+    def rate_limited_positions(*args, **kwargs):
+        raise Phase2RpcRateLimited("RPC_RATE_LIMITED")
+
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.collect_phase2_position_observations",
+        rate_limited_positions,
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+    evidence_id = persist_phase2_evidence_cycle_progress(
+        storage,
+        report=report,
+    )
+
+    assert evidence_id > 0
+    saved = storage.latest_advanced_edge_evidence(
+        edge_type=PHASE2_EVIDENCE_CYCLE_PROGRESS_TYPE,
+        pool_address="pool",
+    )
+    assert saved is not None
+    evidence = saved["evidence"]
+    assert evidence["rpc_rate_limited"] is True
+    assert evidence["rpc_circuit_open"] is True
+    assert [
+        "POSITION_OBSERVATIONS",
+        "FAILED",
+        "RPC_RATE_LIMITED",
+    ] in evidence["stage_outcomes"]
+    encoded = json.dumps(evidence)
+    assert secret not in encoded
