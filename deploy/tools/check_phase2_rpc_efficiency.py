@@ -63,6 +63,7 @@ class CycleSummary:
 @dataclass(frozen=True)
 class Phase2RpcEfficiencyReport:
     pool_address: str | None
+    pool_configured: bool
     database_ready: bool
     database_path: str
     discovery_cache: DiscoveryCacheStatus
@@ -601,13 +602,15 @@ def inspect_rpc_efficiency(
 
     unsafe_cache = cache.symlink
     attention = bool(
-        not database_ready
+        not pool_address
+        or not database_ready
         or unsafe_cache
         or pause_recommended
     )
 
     return Phase2RpcEfficiencyReport(
         pool_address=pool_address,
+        pool_configured=bool(pool_address),
         database_ready=database_ready,
         database_path=str(database),
         discovery_cache=cache,
