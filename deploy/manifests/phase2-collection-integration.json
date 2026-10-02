@@ -95,6 +95,11 @@
       "pr": 728,
       "head": "8cf55a650af9b7b1f3ad93910ac98bf3e406fd52",
       "role": "event-driven prestate refresh via standalone pool account watcher binary"
+    },
+    {
+      "pr": 730,
+      "head": "c2486021e39b65719b9e03dfd357ac90027e5698",
+      "role": "failure-only exponential restart backoff for event-driven prestate stream"
     }
   ],
   "integration_notes": [
@@ -107,10 +112,11 @@
     "confirmed Solana RPC rate-limit responses stop the current network stage and skip later Solana RPC stages in the same cycle while database-only reconciliation and calibration continue",
     "prospective prestates can be maintained from pool account-change notifications: one initial baseline plus one refresh after observed changes, preserving the existing prestate cache schema without continuous successful HTTP polling",
     "the pool account WebSocket watcher is a separate Rust binary so the historically pinned meteora-executor main.rs remains byte-for-byte unchanged",
-    "the account-change subscription requests a zero-length account data slice because the prestate trigger needs only notification slot metadata"
+    "the account-change subscription requests a zero-length account data slice because the prestate trigger needs only notification slot metadata",
+    "the event-driven prestate stream is supervised with backoff only after child exit; healthy streams are not throttled and stable runs reset the reconnect failure streak"
   ],
   "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER",
-  "deployment_target_ref": "8cf55a650af9b7b1f3ad93910ac98bf3e406fd52",
+  "deployment_target_ref": "00b03d9f7505f50a1d4b9fea9001a29db6855628",
   "deployment_base_ref": "45d7f6b2f44a2e621d1d8c34220dd61d3a413b9b",
   "deployment_files": [
     "python-learner/src/meteora_learner/calibration_queue.py",
@@ -131,6 +137,7 @@
     "python-learner/src/meteora_learner/research_store.py",
     "python-learner/src/meteora_learner/storage.py",
     "python-learner/src/meteora_learner/phase2_event_prestate.py",
+    "python-learner/src/meteora_learner/phase2_stream_supervisor.py",
     "rust-executor/src/bin/pio-phase2-account-watch.rs",
     "rust-executor/src/main.rs"
   ],
@@ -154,7 +161,8 @@
     "rust-executor/src/main.rs": "96ecb4479482d146abbecafc53466b93fa452d80",
     "python-learner/src/meteora_learner/phase2_rpc_guard.py": "36277db7d701e34bb765b5be97b0ad757d784899",
     "python-learner/src/meteora_learner/phase2_event_prestate.py": "c06e4e20b851ffe21730723cf873a623d1710d70",
-    "rust-executor/src/bin/pio-phase2-account-watch.rs": "29ebea566a9ed4599b6dbe1a486a2ce509412995"
+    "rust-executor/src/bin/pio-phase2-account-watch.rs": "29ebea566a9ed4599b6dbe1a486a2ce509412995",
+    "python-learner/src/meteora_learner/phase2_stream_supervisor.py": "53678b7b33c73ac81fa476a8cf99fa6d149e5d77"
   },
   "deployment_base_file_blobs": {
     "python-learner/src/meteora_learner/calibration_queue.py": "daacbd260b4ce5175742232f4a03065e94eaaf97",
@@ -176,7 +184,8 @@
     "rust-executor/src/main.rs": "f82b0460eebd06ea99e6a7a56a90817eed027c6f",
     "python-learner/src/meteora_learner/phase2_rpc_guard.py": null,
     "python-learner/src/meteora_learner/phase2_event_prestate.py": null,
-    "rust-executor/src/bin/pio-phase2-account-watch.rs": null
+    "rust-executor/src/bin/pio-phase2-account-watch.rs": null,
+    "python-learner/src/meteora_learner/phase2_stream_supervisor.py": null
   },
   "deployment_source_tree_required": true,
   "deployment_guard_apply_locked": true
