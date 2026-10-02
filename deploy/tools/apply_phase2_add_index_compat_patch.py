@@ -15,7 +15,7 @@ PATCH_PATH = (
     / "patches"
     / "phase2-production-add-index-compat.patch"
 )
-EXPECTED_PATCH_SHA256 = "cd9144a4bb001424ad8503a23329b14e72c119860619e4d4c6251004a1f094a3"
+EXPECTED_PATCH_SHA256 = "2b494423d864afa2610043774afaf55022f88a83"
 
 FILE_CONTRACT = {
     "python-learner/src/meteora_learner/calibration_queue.py": (
@@ -84,8 +84,8 @@ def _patch() -> Path:
     patch = PATCH_PATH.resolve()
     if patch.is_symlink() or not patch.is_file():
         raise ValueError(f"reviewed compatibility patch is missing: {patch}")
-    if sha256(patch) != EXPECTED_PATCH_SHA256:
-        raise ValueError("reviewed compatibility patch bytes do not match pinned SHA256")
+    if git_blob_sha(patch) != EXPECTED_PATCH_SHA256:
+        raise ValueError("reviewed compatibility patch bytes do not match pinned Git blob")
     return patch
 
 
