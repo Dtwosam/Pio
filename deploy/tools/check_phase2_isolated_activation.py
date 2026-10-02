@@ -46,6 +46,12 @@ REQUIRED_DATA_FILES = (
 LEGACY_UNITS = (
     "pio-phase2-add-detector.service",
     "pio-phase2-prestate-watch.service",
+    # These standalone collectors overlap the isolated bounded evidence cycle
+    # and would duplicate Solana RPC work if left active or enabled.
+    "pio-phase2-position-observer.service",
+    "pio-phase2-position-observer.timer",
+    "pio-phase2-evidence-cycle.service",
+    "pio-phase2-evidence-cycle.timer",
 )
 
 NEW_INACTIVE_UNITS = (
