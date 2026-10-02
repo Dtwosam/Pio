@@ -505,7 +505,14 @@ class ResearchStore:
         user_address: str | None = None,
         preferred_instruction_index: int | None = None,
     ) -> int | None:
-        """Resolve a Data API add-event index to the decoded chain parent index."""
+        """
+        Resolve a Meteora API add-event index to the on-chain parent instruction.
+
+        The Data API ixIndex is not guaranteed to equal Solana outer instruction
+        index for routed/CPI transactions. Prefer an exact matching parent index;
+        otherwise resolve only when exactly one decoded AddLiquidity event matches
+        the same signature, position, pool, and user.
+        """
         events = self.load_transaction_events(signature)
         matches = []
         for event in events:
