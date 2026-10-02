@@ -48,8 +48,12 @@ class IsolatedRuntimeStageReport:
         return asdict(self)
 
 
+def _raw_path(value: str | Path) -> Path:
+    return Path(value).expanduser()
+
+
 def _resolved(value: str | Path) -> Path:
-    return Path(value).expanduser().resolve()
+    return _raw_path(value).resolve()
 
 
 def _assert_outside_production(path: Path, *, label: str) -> None:
@@ -59,7 +63,10 @@ def _assert_outside_production(path: Path, *, label: str) -> None:
 
 
 def _source(value: str | Path) -> Path:
-    source = _resolved(value)
+    raw = _raw_path(value)
+    if raw.is_symlink():
+        raise ValueError("source tree must not be a symlink")
+    source = raw.resolve()
     _assert_outside_production(source, label="source tree")
     if not source.is_dir():
         raise ValueError(f"prepared runtime source is missing: {source}")
@@ -67,10 +74,11 @@ def _source(value: str | Path) -> Path:
 
 
 def _destination(value: str | Path) -> Path:
-    destination = _resolved(value)
-    _assert_outside_production(destination, label="destination root")
-    if destination.exists() and destination.is_symlink():
+    raw = _raw_path(value)
+    if raw.is_symlink():
         raise ValueError("destination root must not be a symlink")
+    destination = raw.resolve()
+    _assert_outside_production(destination, label="destination root")
     return destination
 
 
