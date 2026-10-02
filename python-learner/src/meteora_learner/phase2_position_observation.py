@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -51,6 +52,8 @@ class Phase2PositionFailure:
 class Phase2PositionObservationResult:
     pool_address: str
     observed_at: str
+    discovery_cache_hit: bool
+    discovery_cache_age_seconds: float | None
     positions_found: int
     positions_returned: int
     positions_selected: int
@@ -96,6 +99,87 @@ def _run_executor_json(
         raise ValueError("executor returned invalid JSON") from exc
 
 
+def _parse_iso(value: str) -> datetime:
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _cache_path(storage: Storage) -> Path:
+    return storage.path.with_name("phase2-position-discovery-cache.json")
+
+
+def _load_discovery_cache(
+    path: Path,
+    *,
+    pool_address: str,
+    observed_at: str,
+    max_age_seconds: int,
+) -> tuple[dict[str, Any] | None, float | None]:
+    if max_age_seconds <= 0 or not path.exists():
+        return None, None
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("position discovery cache path is not a regular file")
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None, None
+
+    if not isinstance(payload, dict):
+        return None, None
+    if payload.get("format_version") != 1:
+        return None, None
+    if str(payload.get("pool_address", "")) != pool_address:
+        return None, None
+
+    captured_at = payload.get("captured_at")
+    discovery = payload.get("discovery")
+    if not isinstance(captured_at, str) or not isinstance(discovery, dict):
+        return None, None
+    positions = discovery.get("positions")
+    if not isinstance(positions, list):
+        return None, None
+
+    try:
+        age = (_parse_iso(observed_at) - _parse_iso(captured_at)).total_seconds()
+    except (TypeError, ValueError):
+        return None, None
+    if age < 0 or age > max_age_seconds:
+        return None, age
+    return discovery, age
+
+
+def _save_discovery_cache(
+    path: Path,
+    *,
+    pool_address: str,
+    captured_at: str,
+    discovery: dict[str, Any],
+) -> None:
+    if path.exists() and path.is_symlink():
+        raise ValueError("position discovery cache path must not be a symlink")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "format_version": 1,
+        "pool_address": pool_address,
+        "captured_at": captured_at,
+        "discovery": discovery,
+    }
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temp.write_text(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        os.replace(temp, path)
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
 def _require_single_capture_slot(snapshot: dict[str, Any]) -> int:
     start_raw = snapshot.get("capture_slot_start")
     end_raw = snapshot.get("capture_slot_end")
@@ -123,6 +207,8 @@ def collect_phase2_position_observations(
     min_revisit_per_run: int = 1,
     timeout_seconds: int = 120,
     observed_at: str | None = None,
+    discovery_cache_path: str | Path | None = None,
+    discovery_cache_max_age_seconds: int | None = None,
     runner: ExecutorRunner = subprocess.run,
 ) -> Phase2PositionObservationResult:
     if not pool_address.strip():
@@ -133,14 +219,46 @@ def collect_phase2_position_observations(
         raise ValueError("min_revisit_per_run cannot be negative")
 
     timestamp = observed_at or utc_now_iso()
-    discovery = _run_executor_json(
-        executor_path,
-        ("discover-pool-positions-env", pool_address, "5000"),
-        timeout_seconds=timeout_seconds,
-        runner=runner,
+    cache_ttl = (
+        int(os.getenv("PIO_PHASE2_POSITION_DISCOVERY_CACHE_SECONDS", "3600"))
+        if discovery_cache_max_age_seconds is None
+        else discovery_cache_max_age_seconds
     )
-    if not isinstance(discovery, dict):
-        raise ValueError("position discovery must return a JSON object")
+    if cache_ttl < 0:
+        raise ValueError("discovery_cache_max_age_seconds cannot be negative")
+    cache_file = (
+        Path(discovery_cache_path)
+        if discovery_cache_path is not None
+        else _cache_path(storage)
+    )
+
+    discovery, discovery_cache_age = _load_discovery_cache(
+        cache_file,
+        pool_address=pool_address,
+        observed_at=timestamp,
+        max_age_seconds=cache_ttl,
+    )
+    discovery_cache_hit = discovery is not None
+    if discovery is None:
+        discovery = _run_executor_json(
+            executor_path,
+            ("discover-pool-positions-env", pool_address, "5000"),
+            timeout_seconds=timeout_seconds,
+            runner=runner,
+        )
+        if not isinstance(discovery, dict):
+            raise ValueError("position discovery must return a JSON object")
+        positions_for_cache = discovery.get("positions")
+        if not isinstance(positions_for_cache, list):
+            raise ValueError("position discovery is missing positions")
+        _save_discovery_cache(
+            cache_file,
+            pool_address=pool_address,
+            captured_at=timestamp,
+            discovery=discovery,
+        )
+        discovery_cache_age = 0.0
+
     positions = discovery.get("positions")
     if not isinstance(positions, list):
         raise ValueError("position discovery is missing positions")
@@ -376,6 +494,8 @@ def collect_phase2_position_observations(
     return Phase2PositionObservationResult(
         pool_address=pool_address,
         observed_at=timestamp,
+        discovery_cache_hit=discovery_cache_hit,
+        discovery_cache_age_seconds=discovery_cache_age,
         positions_found=positions_found,
         positions_returned=positions_returned,
         positions_selected=len(selected_positions),
@@ -419,6 +539,17 @@ def main() -> None:
         ),
     )
     parser.add_argument("--timeout-seconds", type=int, default=120)
+    parser.add_argument(
+        "--discovery-cache-seconds",
+        type=int,
+        default=int(
+            os.getenv("PIO_PHASE2_POSITION_DISCOVERY_CACHE_SECONDS", "3600")
+        ),
+        help=(
+            "Reuse a complete pool-position discovery for this many seconds; "
+            "set 0 to force full discovery every run"
+        ),
+    )
     parser.add_argument("--database")
     args = parser.parse_args()
 
@@ -434,6 +565,7 @@ def main() -> None:
         max_positions_per_run=args.max_positions_per_run,
         min_revisit_per_run=args.min_revisit_per_run,
         timeout_seconds=args.timeout_seconds,
+        discovery_cache_max_age_seconds=args.discovery_cache_seconds,
     )
     print(json.dumps(result.to_record(), indent=2))
     if result.failures or result.discovery_truncated:
