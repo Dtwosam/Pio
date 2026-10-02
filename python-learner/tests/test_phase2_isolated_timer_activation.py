@@ -147,6 +147,7 @@ def test_timer_activation_rolls_back_failed_active_verification(monkeypatch):
 
     assert report.applied is False
     assert report.failure_step == "VERIFY_ACTIVE"
+    assert report.timer_may_trigger_rpc_cycles is True
     assert report.rollback_performed is True
     assert report.rollback_succeeded is True
     assert report.timer_enabled is False
