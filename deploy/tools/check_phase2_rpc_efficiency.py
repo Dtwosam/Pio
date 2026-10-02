@@ -569,8 +569,10 @@ def inspect_rpc_efficiency(
         runner=runner,
     )
     timer_paused = not timer_active and not timer_enabled
-    pause_recommended = bool(repeated and timer_active and timer_enabled)
-    protected = bool(not repeated or timer_paused)
+    # Future recurring work is possible whenever the timer remains enabled,
+    # even if a point-in-time active query is transient or unusual.
+    pause_recommended = bool(repeated and timer_enabled)
+    protected = bool(not repeated or not timer_enabled)
 
     unsafe_cache = cache.symlink
     attention = bool(
