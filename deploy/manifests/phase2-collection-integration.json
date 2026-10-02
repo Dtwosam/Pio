@@ -80,6 +80,11 @@
       "pr": 44,
       "head": "75b15607757ce5b713f390f2480dda0a24cc3e77",
       "role": "mixed exploration and interval revisit cadence"
+    },
+    {
+      "pr": 718,
+      "head": "b40b915d5aa24db805522eccebf22056c7128c34",
+      "role": "complete position-discovery cache to avoid redundant pool-wide enumeration"
     }
   ],
   "integration_notes": [
@@ -87,10 +92,11 @@
     "calibration_queue keeps PR23 future-prestate classification and PR20 env-only RPC commands",
     "storage keeps PR12 position capture slots plus PR43 append-only observer attempt ledger and PR31 bounded-task attempt ledger",
     "quote and position observer failures are categorical and do not expose raw transport/RPC error text",
-    "neutral position collection reserves revisit capacity when budget permits so fee/reward intervals can accumulate without starving exploration"
+    "neutral position collection reserves revisit capacity when budget permits so fee/reward intervals can accumulate without starving exploration",
+    "complete, non-truncated pool-position discovery is cached operationally for one hour by default; position inspection throughput is unchanged and the cache can be disabled with PIO_PHASE2_POSITION_DISCOVERY_CACHE_SECONDS=0"
   ],
   "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER",
-  "deployment_target_ref": "7b306f05e842bffdcc6144de39d0346b97e2ab67",
+  "deployment_target_ref": "b40b915d5aa24db805522eccebf22056c7128c34",
   "deployment_base_ref": "45d7f6b2f44a2e621d1d8c34220dd61d3a413b9b",
   "deployment_files": [
     "python-learner/src/meteora_learner/calibration_queue.py",
@@ -120,7 +126,7 @@
     "python-learner/src/meteora_learner/phase2_calibration_reinspection.py": "513e15c7c433473466291182cdbf22c74ea332bc",
     "python-learner/src/meteora_learner/phase2_evidence_cycle.py": "87effbf19170b5b4ed64cd3be8803e0ef78d444a",
     "python-learner/src/meteora_learner/phase2_gate.py": "150bce004151d9487296405e0a64dbfc31638e1b",
-    "python-learner/src/meteora_learner/phase2_position_observation.py": "d57cab120570fe91e7a289b228caa1b09b5885d5",
+    "python-learner/src/meteora_learner/phase2_position_observation.py": "dc90962adf42acfc039b67818c9e446a0d0f3d27",
     "python-learner/src/meteora_learner/phase2_prestate_verification_runner.py": "071a5b201cb048a0bda7c2b7a4c9b7ebf70409bb",
     "python-learner/src/meteora_learner/phase2_research_quotes.py": "c85cc56ce9185bf476f9cef06d74fd17153155de",
     "python-learner/src/meteora_learner/position_ingest.py": "b2d36cad088001f214a7a2f97793ac72f267aeb3",
