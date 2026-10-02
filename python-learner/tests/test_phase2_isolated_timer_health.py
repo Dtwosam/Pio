@@ -321,3 +321,79 @@ def test_old_stage_outcomes_can_still_identify_rate_limit(
 
     assert report.consecutive_rpc_rate_limited == 1
     assert report.pause_recommended is True
+
+
+
+def test_malformed_latest_telemetry_breaks_rate_limit_streak(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    root = tmp_path / "data"
+    root.mkdir()
+    db = root / "pio.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE advanced_edge_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                edge_type TEXT NOT NULL,
+                pool_address TEXT NOT NULL,
+                as_of TEXT,
+                status TEXT NOT NULL,
+                qualified INTEGER NOT NULL,
+                evidence_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO advanced_edge_evidence(
+                edge_type, pool_address, as_of, status,
+                qualified, evidence_json
+            ) VALUES (?, ?, ?, ?, 0, ?)
+            """,
+            (
+                MODULE.PROGRESS_EDGE_TYPE,
+                POOL,
+                "2026-10-02T20:05:00+00:00",
+                "COLLECTION_FAILED",
+                json.dumps(
+                    {
+                        "rpc_rate_limited": True,
+                        "rpc_circuit_open": True,
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO advanced_edge_evidence(
+                edge_type, pool_address, as_of, status,
+                qualified, evidence_json
+            ) VALUES (?, ?, ?, ?, 0, ?)
+            """,
+            (
+                MODULE.PROGRESS_EDGE_TYPE,
+                POOL,
+                "2026-10-02T20:20:00+00:00",
+                "COLLECTION_FAILED",
+                "{not-json",
+            ),
+        )
+
+    env = env_file(tmp_path)
+    report = MODULE.inspect_timer_health(
+        env_file=env,
+        data_root=root,
+        rate_limit_streak_threshold=1,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.cycles[0].as_of == "2026-10-02T20:20:00+00:00"
+    assert report.cycles[0].rpc_rate_limited is False
+    assert report.consecutive_rpc_rate_limited == 0
+    assert report.pause_recommended is False
