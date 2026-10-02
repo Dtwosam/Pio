@@ -163,8 +163,19 @@ def _read_recent_cycles(
         try:
             payload = json.loads(str(evidence_json))
         except json.JSONDecodeError:
-            continue
+            payload = None
         if not isinstance(payload, dict):
+            cycles.append(
+                TimerHealthCycle(
+                    evidence_id=int(evidence_id),
+                    as_of=str(as_of),
+                    status=str(status),
+                    rpc_rate_limited=False,
+                    rpc_circuit_open=False,
+                    stages_failed=0,
+                    stages_skipped=0,
+                )
+            )
             continue
 
         rpc_rate_limited = payload.get("rpc_rate_limited")
