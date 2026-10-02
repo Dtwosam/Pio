@@ -167,7 +167,7 @@ def build_calibration_work_queue(database_path: str) -> CalibrationWorkQueue:
                         task_type="REINSPECT_TRANSACTION",
                         position_address=position,
                         signature=signature,
-                        instruction_index=ix,
+                        instruction_index=chain_ix,
                         reason=(
                             "stored transaction predates the current add request/event decoder "
                             "or uses an unsupported instruction"
