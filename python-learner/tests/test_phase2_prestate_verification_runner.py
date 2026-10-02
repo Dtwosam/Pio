@@ -2,6 +2,8 @@ import json
 import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 from meteora_learner.phase2_prestate_verification_runner import (
     run_phase2_prestate_verifications,
 )
