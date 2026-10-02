@@ -15,6 +15,7 @@ PROGRESS_EDGE_TYPE = "PHASE2_EVIDENCE_CYCLE_PROGRESS_V1"
 TIMER_UNIT = "pio-phase2-isolated-evidence-cycle.timer"
 
 SystemctlRunner = Callable[..., subprocess.CompletedProcess[str]]
+Now = Callable[[], datetime]
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,8 @@ class Phase2RateLimitAutopauseReport:
     consecutive_rpc_rate_limited: int
     rate_limit_streak_threshold: int
     repeated_provider_rejection: bool
+    latest_cycle_age_seconds: float | None
+    latest_cycle_recent: bool
     timer_enabled_before: bool
     timer_active_before: bool
     pause_recommended: bool
@@ -189,13 +192,17 @@ def autopause(
     history_limit: int = 8,
     rate_limit_streak_threshold: int = 2,
     max_cycle_gap_seconds: int = 2700,
+    max_latest_age_seconds: int = 2700,
     apply: bool = False,
+    now: Now = lambda: datetime.now(timezone.utc),
     runner: SystemctlRunner = subprocess.run,
 ) -> Phase2RateLimitAutopauseReport:
     if history_limit <= 0:
         raise ValueError("history_limit must be positive")
     if rate_limit_streak_threshold <= 0:
         raise ValueError("rate_limit_streak_threshold must be positive")
+    if max_latest_age_seconds <= 0:
+        raise ValueError("max_latest_age_seconds must be positive")
 
     database = Path(database_path).expanduser()
     database_ready = database.is_file() and not database.is_symlink()
@@ -211,9 +218,29 @@ def autopause(
     )
     repeated = streak >= rate_limit_streak_threshold
 
+    latest_age: float | None = None
+    latest_recent = False
+    if cycles:
+        try:
+            latest_age = (
+                now().astimezone(timezone.utc)
+                - _parse_time(cycles[0].as_of)
+            ).total_seconds()
+        except (TypeError, ValueError):
+            latest_age = None
+        latest_recent = bool(
+            latest_age is not None
+            and 0 <= latest_age <= max_latest_age_seconds
+        )
+
     enabled_before = _state(runner, "is-enabled")
     active_before = _state(runner, "is-active")
-    pause_recommended = bool(database_ready and repeated and enabled_before)
+    pause_recommended = bool(
+        database_ready
+        and repeated
+        and latest_recent
+        and enabled_before
+    )
 
     if not apply or not pause_recommended:
         return Phase2RateLimitAutopauseReport(
@@ -224,6 +251,8 @@ def autopause(
             consecutive_rpc_rate_limited=streak,
             rate_limit_streak_threshold=rate_limit_streak_threshold,
             repeated_provider_rejection=repeated,
+            latest_cycle_age_seconds=latest_age,
+            latest_cycle_recent=latest_recent,
             timer_enabled_before=enabled_before,
             timer_active_before=active_before,
             pause_recommended=pause_recommended,
@@ -256,6 +285,8 @@ def autopause(
             consecutive_rpc_rate_limited=streak,
             rate_limit_streak_threshold=rate_limit_streak_threshold,
             repeated_provider_rejection=True,
+            latest_cycle_age_seconds=latest_age,
+            latest_cycle_recent=latest_recent,
             timer_enabled_before=enabled_before,
             timer_active_before=active_before,
             pause_recommended=True,
@@ -282,6 +313,8 @@ def autopause(
         consecutive_rpc_rate_limited=streak,
         rate_limit_streak_threshold=rate_limit_streak_threshold,
         repeated_provider_rejection=True,
+        latest_cycle_age_seconds=latest_age,
+        latest_cycle_recent=latest_recent,
         timer_enabled_before=enabled_before,
         timer_active_before=active_before,
         pause_recommended=True,
@@ -314,6 +347,7 @@ def main() -> None:
     parser.add_argument("--history-limit", type=int, default=8)
     parser.add_argument("--rate-limit-streak-threshold", type=int, default=2)
     parser.add_argument("--max-cycle-gap-seconds", type=int, default=2700)
+    parser.add_argument("--max-latest-age-seconds", type=int, default=2700)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
 
@@ -322,6 +356,7 @@ def main() -> None:
         history_limit=args.history_limit,
         rate_limit_streak_threshold=args.rate_limit_streak_threshold,
         max_cycle_gap_seconds=args.max_cycle_gap_seconds,
+        max_latest_age_seconds=args.max_latest_age_seconds,
         apply=args.apply,
     )
     print(json.dumps(report.to_record(), indent=2))
