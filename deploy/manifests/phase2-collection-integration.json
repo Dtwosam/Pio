@@ -85,6 +85,11 @@
       "pr": 718,
       "head": "b40b915d5aa24db805522eccebf22056c7128c34",
       "role": "complete position-discovery cache to avoid redundant pool-wide enumeration"
+    },
+    {
+      "pr": 720,
+      "head": "0fe361068178fabfcf4306b3f7d31bf0bb52f8ab",
+      "role": "cycle-local RPC rate-limit circuit without healthy-throughput caps"
     }
   ],
   "integration_notes": [
