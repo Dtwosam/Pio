@@ -281,6 +281,37 @@ def run_event_prestate_session(
     )
 
 
+def _read_watch_record(
+    process: subprocess.Popen[str],
+) -> dict[str, Any]:
+    if process.stdout is None:
+        raise ValueError("watch process stdout is unavailable")
+    line = process.stdout.readline()
+    if not line:
+        raise ValueError("watch process ended before subscription readiness")
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "watch process returned invalid notification JSON"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ValueError("watch notification must be a JSON object")
+    return payload
+
+
+def _await_subscription_ready(
+    process: subprocess.Popen[str],
+    *,
+    pool_address: str,
+) -> None:
+    payload = _read_watch_record(process)
+    if payload.get("kind") != "SUBSCRIBED":
+        raise ValueError("watch process did not confirm subscription readiness")
+    if str(payload.get("account_address", "")) != pool_address:
+        raise ValueError("watch subscription address mismatch")
+
+
 def _notification_stream(
     process: subprocess.Popen[str],
 ) -> Iterator[dict[str, Any]]:
@@ -298,6 +329,8 @@ def _notification_stream(
             ) from exc
         if not isinstance(payload, dict):
             raise ValueError("watch notification must be a JSON object")
+        if payload.get("kind") != "ACCOUNT_CHANGE":
+            raise ValueError("unexpected watch notification kind")
         yield payload
 
 
@@ -376,6 +409,10 @@ def main() -> None:
         max_notifications=args.max_notifications,
     )
     try:
+        _await_subscription_ready(
+            watcher,
+            pool_address=args.pool,
+        )
         report = run_event_prestate_session(
             cache_path=cache_path,
             pool_address=args.pool,
