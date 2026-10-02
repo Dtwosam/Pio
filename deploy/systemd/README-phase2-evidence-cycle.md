@@ -84,3 +84,21 @@ The intended topology is:
    reconciliation/calibration.
 
 Installing unit files is not authorization to enable or start them.
+
+
+### Multi-pool stream coverage
+
+The detector pool set is explicit through
+`PIO_PHASE2_DETECTOR_POOLS=ADDRESS:SECONDS,...`. With the variable unset,
+the legacy two-pool coverage and cadences remain unchanged.
+
+For isolated operation, use one
+`pio-phase2-isolated-prestate-stream@<POOL>.service` instance per detector
+pool. The reviewed isolated detector unit declares both default stream
+instances as dependencies and pins the same default pool/cadence set. This
+keeps every scanned pool paired with event-driven prospective prestate
+coverage without reintroducing blind HTTP polling.
+
+The template's `%i` value is only the public pool address. RPC and WebSocket
+credentials continue to come from `/etc/pio/pio.env` and are never embedded
+in the instance name, argv, or unit text.
