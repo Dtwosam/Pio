@@ -27,9 +27,14 @@ def test_isolated_add_detector_unit_uses_isolated_runtime_and_existing_data():
     source = UNIT.read_text(encoding="utf-8")
 
     assert "Conflicts=pio-phase2-add-detector.service" in source
+    assert "After=network-online.target " in source
     assert (
-        "After=network-online.target "
-        "pio-phase2-isolated-prestate-stream.service"
+        "pio-phase2-isolated-prestate-stream@"
+        "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ.service"
+    ) in source
+    assert (
+        "pio-phase2-isolated-prestate-stream@"
+        "DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf.service"
     ) in source
     assert (
         "WorkingDirectory=/opt/pio-phase2-runtime/current"
@@ -46,6 +51,11 @@ def test_isolated_add_detector_unit_uses_isolated_runtime_and_existing_data():
     assert (
         "PIO_PHASE2_PRESTATE_CACHE_DB=/opt/pio/data/"
         "phase2-prestate-cache.db"
+    ) in source
+    assert (
+        "PIO_PHASE2_DETECTOR_POOLS="
+        "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ:120,"
+        "DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf:300"
     ) in source
     assert (
         "ExecStart=/opt/pio/python-learner/.venv/bin/python "
