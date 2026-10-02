@@ -11,7 +11,15 @@ use solana_client::rpc_config::RpcAccountInfoConfig;
 
 
 #[derive(Debug, Serialize)]
+struct SubscriptionReady {
+    kind: &'static str,
+    account_address: String,
+}
+
+
+#[derive(Debug, Serialize)]
 struct AccountChangeNotification {
+    kind: &'static str,
     account_address: String,
     slot: u64,
 }
@@ -54,12 +62,22 @@ fn watch_account_changes(
     )
     .context("failed to subscribe to account changes")?;
 
+    let ready = SubscriptionReady {
+        kind: "SUBSCRIBED",
+        account_address: account.to_string(),
+    };
+    println!("{}", serde_json::to_string(&ready)?);
+    io::stdout()
+        .flush()
+        .context("failed to flush subscription readiness")?;
+
     let mut emitted = 0usize;
     loop {
         let response = receiver
             .recv()
             .context("account change subscription ended")?;
         let notification = AccountChangeNotification {
+            kind: "ACCOUNT_CHANGE",
             account_address: account.to_string(),
             slot: response.context.slot,
         };
