@@ -66,6 +66,10 @@ def test_preparer_applies_compat_builds_and_validates(tmp_path, monkeypatch):
         executor.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         executor.chmod(executor.stat().st_mode | stat.S_IXUSR)
 
+        watcher = runtime / MODULE.CHECK.WATCH_EXECUTOR_RELATIVE
+        watcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        watcher.chmod(watcher.stat().st_mode | stat.S_IXUSR)
+
     monkeypatch.setattr(MODULE, "_build_executor", fake_build)
 
     report = MODULE.prepare_runtime(source_tree=source, prepare=True)

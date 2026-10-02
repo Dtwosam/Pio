@@ -11,8 +11,9 @@ import subprocess
 from typing import Any
 
 
-PINNED_SOURCE_HEAD = "97d33c062cc25ca27b197463ac09f39c06277043"
+PINNED_SOURCE_HEAD = "5f91a8bc25dd721ae42e01f09a2406a465a56b78"
 EXECUTOR_RELATIVE = Path("rust-executor/target/release/meteora-executor")
+WATCH_EXECUTOR_RELATIVE = Path("rust-executor/target/release/pio-phase2-account-watch")
 
 TRACKED_CONTRACT = {
     "python-learner/src/meteora_learner/calibration_queue.py":
@@ -31,6 +32,10 @@ TRACKED_CONTRACT = {
         "4686b2fc8da6b97225de7cfb248155f163a287c5",
     "python-learner/src/meteora_learner/phase2_rpc_guard.py":
         "36277db7d701e34bb765b5be97b0ad757d784899",
+    "python-learner/src/meteora_learner/phase2_event_prestate.py":
+        "c06e4e20b851ffe21730723cf873a623d1710d70",
+    "rust-executor/src/bin/pio-phase2-account-watch.rs":
+        "29ebea566a9ed4599b6dbe1a486a2ce509412995",
     "rust-executor/src/main.rs":
         "96ecb4479482d146abbecafc53466b93fa452d80",
     "rust-executor/src/state_reader.rs":
@@ -63,6 +68,9 @@ class IsolatedRuntimeReport:
     executor_path: str
     executor_exists: bool
     executor_executable: bool
+    watch_executor_path: str
+    watch_executor_exists: bool
+    watch_executor_executable: bool
     runtime_ready: bool
     production_tree_modified: bool
     rpc_called: bool
@@ -143,11 +151,22 @@ def inspect_runtime(source_tree: str | Path) -> IsolatedRuntimeReport:
     exists = executor.is_file() and not executor.is_symlink()
     executable = exists and os.access(executor, os.X_OK)
 
+    watch_executor = source / WATCH_EXECUTOR_RELATIVE
+    watch_exists = (
+        watch_executor.is_file()
+        and not watch_executor.is_symlink()
+    )
+    watch_executable = (
+        watch_exists
+        and os.access(watch_executor, os.X_OK)
+    )
+
     ready = bool(
         source_head == PINNED_SOURCE_HEAD
         and dirty_ok
         and all(item.matches for item in files)
         and executable
+        and watch_executable
     )
 
     return IsolatedRuntimeReport(
@@ -160,6 +179,9 @@ def inspect_runtime(source_tree: str | Path) -> IsolatedRuntimeReport:
         executor_path=str(executor),
         executor_exists=exists,
         executor_executable=executable,
+        watch_executor_path=str(watch_executor),
+        watch_executor_exists=watch_exists,
+        watch_executor_executable=watch_executable,
         runtime_ready=ready,
         production_tree_modified=False,
         rpc_called=False,
