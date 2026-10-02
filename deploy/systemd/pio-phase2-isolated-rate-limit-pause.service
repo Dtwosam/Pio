@@ -5,6 +5,7 @@ ConditionPathIsRegular=/opt/pio-phase2-runtime/current/deploy/tools/pause_phase2
 
 [Service]
 Type=oneshot
+TimeoutStartSec=60s
 User=root
 Group=root
 WorkingDirectory=/opt/pio-phase2-runtime/current
