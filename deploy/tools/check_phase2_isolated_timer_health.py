@@ -150,7 +150,7 @@ def _read_recent_cycles(
                 FROM advanced_edge_evidence
                 WHERE edge_type = ?
                   AND pool_address = ?
-                ORDER BY id DESC
+                ORDER BY as_of DESC, id DESC
                 LIMIT ?
                 """,
                 (PROGRESS_EDGE_TYPE, pool_address, limit),
