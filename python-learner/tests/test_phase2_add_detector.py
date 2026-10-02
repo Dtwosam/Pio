@@ -44,6 +44,10 @@ def _load_function(name):
     # import urllib.request/error populates these on the urllib package.
     namespace["urllib"].request = urllib.request
     namespace["urllib"].error = urllib.error
+    if name != "is_rate_limited_text":
+        namespace["is_rate_limited_text"] = _load_function(
+            "is_rate_limited_text"
+        )
 
     exec(compile(module, str(DETECTOR), "exec"), namespace)
     return namespace[name]
