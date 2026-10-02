@@ -694,3 +694,169 @@ def test_position_discovery_failure_does_not_echo_executor_stderr(tmp_path):
     assert "executor failed with status 1" in message
     assert secret not in message
     assert "discovery failed" not in message
+
+
+
+def test_observer_reuses_complete_discovery_within_cache_window(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    discovery_calls = 0
+    inspection_calls = 0
+
+    def runner(command, **kwargs):
+        nonlocal discovery_calls, inspection_calls
+        if command[1] == "discover-pool-positions-env":
+            discovery_calls += 1
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 2,
+                "positions_returned": 2,
+                "truncated": False,
+                "positions": [
+                    {"position_address": POSITIONS[0]},
+                    {"position_address": POSITIONS[1]},
+                ],
+            }
+        else:
+            inspection_calls += 1
+            payload = _snapshot(
+                command[2],
+                capture_slot=450700000 + inspection_calls,
+            )
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    first = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:00:00+00:00",
+        discovery_cache_max_age_seconds=3600,
+        runner=runner,
+    )
+    second = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:15:00+00:00",
+        discovery_cache_max_age_seconds=3600,
+        runner=runner,
+    )
+
+    assert discovery_calls == 1
+    assert first.discovery_cache_hit is False
+    assert second.discovery_cache_hit is True
+    assert second.discovery_cache_age_seconds == 900.0
+    assert second.positions_selected == 1
+    assert second.snapshots_saved == 1
+
+
+def test_observer_refreshes_discovery_after_cache_expiry(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    discovery_calls = 0
+
+    def runner(command, **kwargs):
+        nonlocal discovery_calls
+        if command[1] == "discover-pool-positions-env":
+            discovery_calls += 1
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 1,
+                "positions_returned": 1,
+                "truncated": False,
+                "positions": [{"position_address": POSITIONS[0]}],
+            }
+        else:
+            payload = _snapshot(
+                command[2],
+                capture_slot=450700000 + discovery_calls,
+            )
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:00:00+00:00",
+        discovery_cache_max_age_seconds=600,
+        runner=runner,
+    )
+    second = collect_phase2_position_observations(
+        storage,
+        pool_address=POOL,
+        executor_path="/executor",
+        max_positions_per_run=1,
+        observed_at="2026-09-26T15:15:00+00:00",
+        discovery_cache_max_age_seconds=600,
+        runner=runner,
+    )
+
+    assert discovery_calls == 2
+    assert second.discovery_cache_hit is False
+    assert second.discovery_cache_age_seconds == 0.0
+
+
+def test_observer_cache_can_be_disabled_without_reducing_capacity(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    discovery_calls = 0
+
+    def runner(command, **kwargs):
+        nonlocal discovery_calls
+        if command[1] == "discover-pool-positions-env":
+            discovery_calls += 1
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 1,
+                "positions_returned": 1,
+                "truncated": False,
+                "positions": [{"position_address": POSITIONS[0]}],
+            }
+        else:
+            payload = _snapshot(
+                command[2],
+                capture_slot=450700000 + discovery_calls,
+            )
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    for observed_at in (
+        "2026-09-26T15:00:00+00:00",
+        "2026-09-26T15:15:00+00:00",
+    ):
+        report = collect_phase2_position_observations(
+            storage,
+            pool_address=POOL,
+            executor_path="/executor",
+            max_positions_per_run=1,
+            observed_at=observed_at,
+            discovery_cache_max_age_seconds=0,
+            runner=runner,
+        )
+        assert report.discovery_cache_hit is False
+        assert report.positions_selected == 1
+
+    assert discovery_calls == 2
+
+
+def test_observer_rejects_symlinked_discovery_cache(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    target = tmp_path / "target.json"
+    target.write_text("{}", encoding="utf-8")
+    cache = tmp_path / "cache.json"
+    cache.symlink_to(target)
+
+    with pytest.raises(ValueError, match="not a regular file"):
+        collect_phase2_position_observations(
+            storage,
+            pool_address=POOL,
+            executor_path="/executor",
+            discovery_cache_path=cache,
+            discovery_cache_max_age_seconds=3600,
+            observed_at="2026-09-26T15:00:00+00:00",
+        )
