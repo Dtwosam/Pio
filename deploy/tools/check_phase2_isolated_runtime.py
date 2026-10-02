@@ -11,7 +11,7 @@ import subprocess
 from typing import Any
 
 
-PINNED_SOURCE_HEAD = "51a213e8af0aefef24a2fa0ba9fd2f6e0fdb0209"
+PINNED_SOURCE_HEAD = "99954e0cb23e0a97e2d79304104739b78bd93493"
 EXECUTOR_RELATIVE = Path("rust-executor/target/release/meteora-executor")
 WATCH_EXECUTOR_RELATIVE = Path("rust-executor/target/release/pio-phase2-account-watch")
 
@@ -23,7 +23,7 @@ TRACKED_CONTRACT = {
     "python-learner/src/meteora_learner/research_store.py":
         "d3ffb8815e6efa949b6bf7a6f33ba60099f68357",
     "python-learner/src/meteora_learner/phase2_evidence_cycle.py":
-        "5ee2e68d63fb8ae21766b13b63b0866cad2295ed",
+        "cd66398be75698aed032adb15f5e1a7739b0df72",
     "python-learner/src/meteora_learner/phase2_position_observation.py":
         "71855a97c0dfe1f7c8db5df6c336e99584623a7c",
     "python-learner/src/meteora_learner/phase2_calibration_reinspection.py":
