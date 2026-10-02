@@ -128,11 +128,30 @@ def build_calibration_work_queue(database_path: str) -> CalibrationWorkQueue:
                 )
                 continue
 
-            request = store.add_liquidity_request(signature, ix)
+            resolved_ix = store.resolve_add_instruction_index(
+                signature,
+                position_address=position,
+                pool_address=str(row["pool_address"]),
+                user_address=str(row["user_address"]),
+                preferred_instruction_index=ix,
+            )
+            chain_ix = resolved_ix if resolved_ix is not None else ix
+
+            request = store.add_liquidity_request(signature, chain_ix)
             events = store.load_transaction_events(
                 signature,
-                parent_ix_index=ix,
+                parent_ix_index=chain_ix,
             )
+
+            if request is None:
+                transaction_events = store.load_transaction_events(signature)
+                if any(
+                    item["event_type"] == "Rebalancing"
+                    and item["position_address"] == position
+                    for item in transaction_events
+                ):
+                    continue
+
             add_event = next(
                 (
                     item
