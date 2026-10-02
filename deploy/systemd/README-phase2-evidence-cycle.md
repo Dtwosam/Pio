@@ -54,3 +54,33 @@ unchanged for sealed Phase-7 source lineage.
 The stream is reconnectable rather than a polling loop. If an unbounded
 WebSocket session ends, the Python worker exits nonzero and systemd may restart
 it according to the unit policy.
+
+
+## Isolated add detector
+
+Use `pio-phase2-isolated-add-detector.service` with the isolated prestate
+stream instead of restarting the legacy `pio-phase2-add-detector.service`.
+
+The isolated detector preserves the existing detector cursor and evidence
+databases under `/opt/pio/data`, but executes the detector script and Rust
+executor from `/opt/pio-phase2-runtime/current`. The Python console script
+still comes from the existing virtual environment while `PYTHONPATH` points
+at the isolated reviewed learner source.
+
+The isolated unit conflicts with the legacy detector and only restarts after
+process failure. RPC credentials remain in `/etc/pio/pio.env`; they are not
+placed in argv or unit literals. The detector's reviewed rate-limit handling
+retains its cursor and stops the remaining batch after provider rejection
+rather than burning calls across the backlog.
+
+The intended topology is:
+
+1. `pio-phase2-isolated-prestate-stream.service` maintains prospective
+   prestates from account-change notifications.
+2. `pio-phase2-isolated-add-detector.service` discovers standalone adds and
+   consumes those prestates without advancing its cursor on failed batches.
+3. `pio-phase2-isolated-evidence-cycle.timer` periodically performs bounded
+   neutral observations, reinspection, strict verification, and local
+   reconciliation/calibration.
+
+Installing unit files is not authorization to enable or start them.
