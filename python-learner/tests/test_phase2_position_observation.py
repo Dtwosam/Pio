@@ -860,3 +860,47 @@ def test_observer_rejects_symlinked_discovery_cache(tmp_path):
             discovery_cache_max_age_seconds=3600,
             observed_at="2026-09-26T15:00:00+00:00",
         )
+
+
+
+def test_observer_never_reuses_truncated_discovery(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    discovery_calls = 0
+
+    def runner(command, **kwargs):
+        nonlocal discovery_calls
+        if command[1] == "discover-pool-positions-env":
+            discovery_calls += 1
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 5001,
+                "positions_returned": 1,
+                "truncated": True,
+                "positions": [{"position_address": POSITIONS[0]}],
+            }
+        else:
+            payload = _snapshot(
+                command[2],
+                capture_slot=450700000 + discovery_calls,
+            )
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(payload), stderr=""
+        )
+
+    for observed_at in (
+        "2026-09-26T15:00:00+00:00",
+        "2026-09-26T15:15:00+00:00",
+    ):
+        report = collect_phase2_position_observations(
+            storage,
+            pool_address=POOL,
+            executor_path="/executor",
+            max_positions_per_run=1,
+            observed_at=observed_at,
+            discovery_cache_max_age_seconds=3600,
+            runner=runner,
+        )
+        assert report.discovery_cache_hit is False
+        assert report.discovery_truncated is True
+
+    assert discovery_calls == 2
