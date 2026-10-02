@@ -355,6 +355,7 @@ def inspect_timer_health(
     )
     pause_recommended = bool(
         topology_ready
+        and latest_recent
         and rate_limit_streak >= rate_limit_streak_threshold
     )
     healthy = bool(
