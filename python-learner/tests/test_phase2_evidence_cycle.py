@@ -9,6 +9,7 @@ from meteora_learner.phase2_evidence_cycle import (
     persist_phase2_evidence_cycle_progress,
     run_phase2_read_only_evidence_cycle,
 )
+from meteora_learner.phase2_rpc import Phase2RpcRateLimited
 from meteora_learner.storage import Storage
 
 
@@ -496,3 +497,108 @@ def test_evidence_cycle_progress_rejects_boundary_crossing(
         build_phase2_evidence_cycle_progress(
             replace(report, promotion_gate_evaluated=True)
         )
+
+
+
+def test_evidence_cycle_opens_rpc_circuit_after_position_rate_limit(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+
+    def rate_limited_positions(*args, **kwargs):
+        calls.append("positions-rate-limited")
+        raise Phase2RpcRateLimited("executor RPC rate limited")
+
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.collect_phase2_position_observations",
+        rate_limited_positions,
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+
+    assert calls == [
+        "quotes",
+        "positions-rate-limited",
+        "reconciliation",
+        "evidence",
+        "queue",
+    ]
+    assert [stage.name for stage in report.stages] == [
+        "RESEARCH_QUOTES",
+        "POSITION_OBSERVATIONS",
+        "TRANSACTION_REINSPECTION",
+        "PRESTATE_VERIFICATION",
+        "RECONCILIATION_CORPUS",
+        "CALIBRATION_EVIDENCE",
+        "CALIBRATION_WORK_QUEUE",
+    ]
+    categories = {
+        stage.name: stage.failure_category
+        for stage in report.stages
+    }
+    assert categories["POSITION_OBSERVATIONS"] == "RPC_RATE_LIMITED"
+    assert categories["TRANSACTION_REINSPECTION"] == (
+        "RPC_RATE_LIMIT_CIRCUIT_OPEN"
+    )
+    assert categories["PRESTATE_VERIFICATION"] == (
+        "RPC_RATE_LIMIT_CIRCUIT_OPEN"
+    )
+    assert report.stages_failed == 3
+    assert report.reconciliation_corpus is not None
+    assert report.calibration_evidence is not None
+    assert report.work_queue is not None
+    assert report.detector_cursor_untouched is True
+    assert report.service_control_performed is False
+
+
+def test_evidence_cycle_opens_rpc_circuit_after_reinspection_rate_limit(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+
+    def rate_limited_reinspection(*args, **kwargs):
+        calls.append("reinspect-rate-limited")
+        raise Phase2RpcRateLimited("executor RPC rate limited")
+
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.run_phase2_calibration_reinspection",
+        rate_limited_reinspection,
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+
+    assert calls == [
+        "quotes",
+        "positions",
+        "reinspect-rate-limited",
+        "reconciliation",
+        "evidence",
+        "queue",
+    ]
+    categories = {
+        stage.name: stage.failure_category
+        for stage in report.stages
+    }
+    assert categories["TRANSACTION_REINSPECTION"] == "RPC_RATE_LIMITED"
+    assert categories["PRESTATE_VERIFICATION"] == (
+        "RPC_RATE_LIMIT_CIRCUIT_OPEN"
+    )
+    assert report.reconciliation_corpus is not None
+    assert report.calibration_evidence is not None
+    assert report.work_queue is not None
