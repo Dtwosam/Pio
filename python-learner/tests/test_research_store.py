@@ -236,3 +236,87 @@ def test_research_store_cutoff_selectors_return_empty_before_first_row(
         "pool",
         as_of="2026-09-22T09:00:00+00:00",
     ) == 0
+
+
+
+def test_resolve_add_instruction_index_maps_api_index_to_chain_parent(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_chain_transaction_events(
+        {
+            "signature": "sig",
+            "slot": 120,
+            "block_time": 1700000000,
+            "succeeded": True,
+            "add_requests": [],
+            "events": [
+                {
+                    "event_index": 0,
+                    "parent_ix_index": 5,
+                    "event": {
+                        "event_type": "AddLiquidity",
+                        "event": {
+                            "lb_pair": "pool",
+                            "from": "user",
+                            "position": "position",
+                            "amount_x": "1",
+                            "amount_y": "2",
+                            "active_bin_id": 5,
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    store = ResearchStore(storage.path)
+
+    assert store.resolve_add_instruction_index(
+        "sig",
+        position_address="position",
+        pool_address="pool",
+        user_address="user",
+        preferred_instruction_index=2,
+    ) == 5
+
+
+def test_resolve_add_instruction_index_fails_closed_when_matching_parents_ambiguous(
+    tmp_path,
+):
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_chain_transaction_events(
+        {
+            "signature": "sig",
+            "slot": 120,
+            "block_time": 1700000000,
+            "succeeded": True,
+            "add_requests": [],
+            "events": [
+                {
+                    "event_index": index,
+                    "parent_ix_index": parent_ix,
+                    "event": {
+                        "event_type": "AddLiquidity",
+                        "event": {
+                            "lb_pair": "pool",
+                            "from": "user",
+                            "position": "position",
+                            "amount_x": "1",
+                            "amount_y": "2",
+                            "active_bin_id": 5,
+                        },
+                    },
+                }
+                for index, parent_ix in enumerate((5, 7))
+            ],
+        }
+    )
+
+    store = ResearchStore(storage.path)
+
+    assert store.resolve_add_instruction_index(
+        "sig",
+        position_address="position",
+        pool_address="pool",
+        user_address="user",
+        preferred_instruction_index=2,
+    ) is None
