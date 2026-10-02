@@ -6,6 +6,7 @@ import pytest
 from meteora_learner.phase2_position_observation import (
     collect_phase2_position_observations,
 )
+from meteora_learner.phase2_rpc import Phase2RpcRateLimited
 from meteora_learner.storage import Storage
 
 
@@ -904,3 +905,58 @@ def test_observer_never_reuses_truncated_discovery(tmp_path):
         assert report.discovery_truncated is True
 
     assert discovery_calls == 2
+
+
+
+def test_observer_stops_stage_after_first_rpc_rate_limit(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    inspected = []
+    secret = "https://secret.example.invalid/?api-key=hidden"
+
+    def runner(command, **kwargs):
+        if command[1] == "discover-pool-positions-env":
+            payload = {
+                "pool_address": POOL,
+                "positions_found": 2,
+                "positions_returned": 2,
+                "truncated": False,
+                "positions": [
+                    {"position_address": POSITIONS[0]},
+                    {"position_address": POSITIONS[1]},
+                ],
+            }
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps(payload), ""
+            )
+
+        inspected.append(command[2])
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            f"HTTP 429 Too Many Requests at {secret}",
+        )
+
+    with pytest.raises(Phase2RpcRateLimited) as excinfo:
+        collect_phase2_position_observations(
+            storage,
+            pool_address=POOL,
+            executor_path="/executor",
+            max_positions_per_run=2,
+            observed_at="2026-09-26T15:00:00+00:00",
+            discovery_cache_max_age_seconds=0,
+            runner=runner,
+        )
+
+    assert str(excinfo.value) == "executor RPC rate limited"
+    assert secret not in str(excinfo.value)
+    assert inspected == [POSITIONS[0]]
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT position_address, succeeded, failure_category
+            FROM phase2_position_observation_attempts
+            ORDER BY id
+            """
+        ).fetchall()
+    assert rows == [(POSITIONS[0], 0, "RPC_RATE_LIMITED")]
