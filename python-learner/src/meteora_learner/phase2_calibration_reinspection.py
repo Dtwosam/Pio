@@ -8,6 +8,10 @@ import subprocess
 from typing import Any, Callable, Sequence
 
 from .calibration_queue import build_calibration_work_queue
+from .phase2_rpc_guard import (
+    Phase2RpcRateLimited,
+    raise_for_executor_failure,
+)
 from .settings import Settings
 from .storage import Storage, utc_now_iso
 from .transaction_event_ingest import ingest_transaction_events
@@ -67,10 +71,7 @@ def _run_executor_json(
         check=False,
         timeout=timeout_seconds,
     )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"executor failed with status {completed.returncode}"
-        )
+    raise_for_executor_failure(completed)
     try:
         return json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
@@ -152,6 +153,9 @@ def run_phase2_calibration_reinspection(
         except subprocess.TimeoutExpired:
             fail(signature, "EXECUTOR_TIMEOUT")
             continue
+        except Phase2RpcRateLimited:
+            fail(signature, "RPC_RATE_LIMITED")
+            raise
         except RuntimeError:
             fail(signature, "EXECUTOR_FAILED")
             continue
