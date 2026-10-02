@@ -75,12 +75,15 @@ class Phase2TimerHealthReport:
     detector_state_ready: bool
     detector_active_enabled: bool
     streams_active: bool
+    timer_active: bool
+    timer_enabled: bool
     timer_active_enabled: bool
     legacy_collectors_quiescent: bool
     evidence_service_active: bool
     cycles: tuple[TimerHealthCycle, ...]
     latest_cycle_age_seconds: float | None
     latest_cycle_recent: bool
+    latest_cycle_failed: bool
     consecutive_rpc_rate_limited: int
     rate_limit_streak_threshold: int
     pause_recommended: bool
@@ -282,9 +285,9 @@ def inspect_timer_health(
     )
 
     timer = base_states.get(TIMER_UNIT)
-    timer_active_enabled = bool(
-        timer and timer.active and timer.enabled
-    )
+    timer_active = bool(timer and timer.active)
+    timer_enabled = bool(timer and timer.enabled)
+    timer_active_enabled = timer_active and timer_enabled
     evidence_service = base_states.get(EVIDENCE_SERVICE)
     evidence_service_active = bool(
         evidence_service and evidence_service.active
@@ -335,6 +338,9 @@ def inspect_timer_health(
         )
 
     rate_limit_streak = _consecutive_rate_limits(cycles)
+    latest_failed = bool(
+        cycles and cycles[0].status == "COLLECTION_FAILED"
+    )
 
     topology_ready = bool(
         base.runtime_ready
@@ -354,6 +360,7 @@ def inspect_timer_health(
     healthy = bool(
         topology_ready
         and latest_recent
+        and not latest_failed
         and rate_limit_streak == 0
     )
 
@@ -365,12 +372,15 @@ def inspect_timer_health(
         detector_state_ready=detector_state_ready,
         detector_active_enabled=detector_active_enabled,
         streams_active=streams_active,
+        timer_active=timer_active,
+        timer_enabled=timer_enabled,
         timer_active_enabled=timer_active_enabled,
         legacy_collectors_quiescent=legacy_clear,
         evidence_service_active=evidence_service_active,
         cycles=cycles,
         latest_cycle_age_seconds=latest_age,
         latest_cycle_recent=latest_recent,
+        latest_cycle_failed=latest_failed,
         consecutive_rpc_rate_limited=rate_limit_streak,
         rate_limit_streak_threshold=rate_limit_streak_threshold,
         pause_recommended=pause_recommended,
