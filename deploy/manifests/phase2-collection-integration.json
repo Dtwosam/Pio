@@ -85,6 +85,11 @@
       "pr": 718,
       "head": "b40b915d5aa24db805522eccebf22056c7128c34",
       "role": "complete position-discovery cache to avoid redundant pool-wide enumeration"
+    },
+    {
+      "pr": 726,
+      "head": "ef4a8543004422a6dd24f1291edccde5f4d3eb60",
+      "role": "cycle-local Solana RPC rate-limit circuit and secret-safe 429 classification"
     }
   ],
   "integration_notes": [
@@ -94,10 +99,11 @@
     "quote and position observer failures are categorical and do not expose raw transport/RPC error text",
     "neutral position collection reserves revisit capacity when budget permits so fee/reward intervals can accumulate without starving exploration",
     "complete, non-truncated pool-position discovery is cached operationally for one hour by default; position inspection throughput is unchanged and the cache can be disabled with PIO_PHASE2_POSITION_DISCOVERY_CACHE_SECONDS=0",
-    "confirmed Solana RPC rate-limit responses stop the current network stage and skip later Solana RPC stages in the same cycle while database-only reconciliation and calibration continue"
+    "confirmed Solana RPC rate-limit responses stop the current network stage and skip later Solana RPC stages in the same cycle while database-only reconciliation and calibration continue",
+    "confirmed Solana RPC rate limits stop only remaining Solana RPC work for the current bounded cycle; successful calls are not throttled and local reconciliation/calibration still run"
   ],
   "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER",
-  "deployment_target_ref": "ff61d82ce560fcb5d2087b01e05364b35501dcc6",
+  "deployment_target_ref": "ef4a8543004422a6dd24f1291edccde5f4d3eb60",
   "deployment_base_ref": "45d7f6b2f44a2e621d1d8c34220dd61d3a413b9b",
   "deployment_files": [
     "python-learner/src/meteora_learner/calibration_queue.py",
