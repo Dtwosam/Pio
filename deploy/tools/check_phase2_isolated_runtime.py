@@ -11,7 +11,7 @@ import subprocess
 from typing import Any
 
 
-PINNED_SOURCE_HEAD = "9c42ae216cec5ac7faf83471f8663b46a5d0bf64"
+PINNED_SOURCE_HEAD = "97d33c062cc25ca27b197463ac09f39c06277043"
 EXECUTOR_RELATIVE = Path("rust-executor/target/release/meteora-executor")
 
 TRACKED_CONTRACT = {
