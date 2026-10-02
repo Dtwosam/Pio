@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+from dataclasses import asdict, dataclass
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+from typing import Any
+
+
+PINNED_SOURCE_HEAD = "f36d989dcc0c7d98e738a718647723511c81ab39"
+EXECUTOR_RELATIVE = Path("rust-executor/target/release/meteora-executor")
+
+TRACKED_CONTRACT = {
+    "python-learner/src/meteora_learner/calibration_queue.py":
+        "d0c5721cac805dbd80ecacef21f81ac654185212",
+    "python-learner/src/meteora_learner/composition_prestate.py":
+        "85ab78d188fec772278771bfcb1091cab8c3304c",
+    "python-learner/src/meteora_learner/research_store.py":
+        "d3ffb8815e6efa949b6bf7a6f33ba60099f68357",
+    "python-learner/src/meteora_learner/phase2_evidence_cycle.py":
+        "87effbf19170b5b4ed64cd3be8803e0ef78d444a",
+    "rust-executor/src/main.rs":
+        "96ecb4479482d146abbecafc53466b93fa452d80",
+    "rust-executor/src/state_reader.rs":
+        "30d1435af1329bca07f73d6639539b43503e84e9",
+}
+
+EXPECTED_DIRTY_PATHS = {
+    "python-learner/src/meteora_learner/calibration_queue.py",
+    "python-learner/src/meteora_learner/composition_prestate.py",
+    "python-learner/src/meteora_learner/research_store.py",
+}
+
+
+@dataclass(frozen=True)
+class RuntimeFile:
+    path: str
+    expected_blob: str
+    current_blob: str | None
+    matches: bool
+
+
+@dataclass(frozen=True)
+class IsolatedRuntimeReport:
+    source_tree: str
+    source_head: str | None
+    source_head_matches: bool
+    dirty_paths: tuple[str, ...]
+    dirty_paths_match_expected: bool
+    files: tuple[RuntimeFile, ...]
+    executor_path: str
+    executor_exists: bool
+    executor_executable: bool
+    runtime_ready: bool
+    production_tree_modified: bool
+    rpc_called: bool
+    service_control_performed: bool
+
+    def to_record(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _git_blob_sha(path: Path) -> str | None:
+    if path.is_symlink() or not path.is_file():
+        return None
+    payload = path.read_bytes()
+    header = f"blob {len(payload)}\0".encode()
+    return hashlib.sha1(header + payload).hexdigest()
+
+
+def _run_git(source: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(source),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _head(source: Path) -> str | None:
+    proc = _run_git(source, "rev-parse", "HEAD")
+    if proc.returncode != 0:
+        return None
+    value = proc.stdout.strip()
+    return value or None
+
+
+def _dirty_paths(source: Path) -> tuple[str, ...]:
+    proc = _run_git(
+        source,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=no",
+    )
+    if proc.returncode != 0:
+        raise ValueError("cannot inspect isolated runtime Git status")
+    paths = []
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        raw = line[3:].strip()
+        if " -> " in raw:
+            raw = raw.split(" -> ", 1)[1]
+        paths.append(raw)
+    return tuple(sorted(set(paths)))
+
+
+def inspect_runtime(source_tree: str | Path) -> IsolatedRuntimeReport:
+    source = Path(source_tree).resolve()
+    if source == Path("/opt/pio").resolve():
+        raise ValueError("isolated runtime source must not be /opt/pio")
+    if not source.is_dir() or not (source / ".git").exists():
+        raise ValueError(f"isolated runtime Git tree is missing: {source}")
+
+    source_head = _head(source)
+    dirty = _dirty_paths(source)
+    dirty_ok = set(dirty) == EXPECTED_DIRTY_PATHS
+
+    files = tuple(
+        RuntimeFile(
+            path=relative,
+            expected_blob=expected,
+            current_blob=_git_blob_sha(source / relative),
+            matches=_git_blob_sha(source / relative) == expected,
+        )
+        for relative, expected in sorted(TRACKED_CONTRACT.items())
+    )
+
+    executor = source / EXECUTOR_RELATIVE
+    exists = executor.is_file() and not executor.is_symlink()
+    executable = exists and os.access(executor, os.X_OK)
+
+    ready = bool(
+        source_head == PINNED_SOURCE_HEAD
+        and dirty_ok
+        and all(item.matches for item in files)
+        and executable
+    )
+
+    return IsolatedRuntimeReport(
+        source_tree=str(source),
+        source_head=source_head,
+        source_head_matches=source_head == PINNED_SOURCE_HEAD,
+        dirty_paths=dirty,
+        dirty_paths_match_expected=dirty_ok,
+        files=files,
+        executor_path=str(executor),
+        executor_exists=exists,
+        executor_executable=executable,
+        runtime_ready=ready,
+        production_tree_modified=False,
+        rpc_called=False,
+        service_control_performed=False,
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate a pinned side-built Phase-2 runtime without touching "
+            "the production checkout or making RPC calls."
+        )
+    )
+    parser.add_argument("--source-tree", required=True)
+    args = parser.parse_args()
+
+    report = inspect_runtime(args.source_tree)
+    print(json.dumps(report.to_record(), indent=2))
+    if not report.runtime_ready:
+        raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    main()
