@@ -73,6 +73,8 @@ class Phase2RpcEfficiencyReport:
     consecutive_rpc_rate_limited_cycles: int
     rate_limit_streak_threshold: int
     repeated_provider_rejection: bool
+    latest_cycle_age_seconds: float | None
+    latest_cycle_recent: bool
     timer_active: bool
     timer_enabled: bool
     timer_paused: bool
@@ -498,6 +500,7 @@ def inspect_rpc_efficiency(
     cycle_history_limit: int = 8,
     rate_limit_streak_threshold: int = 2,
     max_cycle_gap_seconds: int = 2700,
+    max_latest_age_seconds: int = 2700,
     now: Now = lambda: datetime.now(timezone.utc),
     runner: SystemctlRunner = subprocess.run,
 ) -> Phase2RpcEfficiencyReport:
@@ -507,6 +510,8 @@ def inspect_rpc_efficiency(
         raise ValueError("cycle_history_limit must be positive")
     if rate_limit_streak_threshold <= 0:
         raise ValueError("rate_limit_streak_threshold must be positive")
+    if max_latest_age_seconds <= 0:
+        raise ValueError("max_latest_age_seconds must be positive")
 
     current = now().astimezone(timezone.utc)
     root = Path(data_root).expanduser()
@@ -558,6 +563,20 @@ def inspect_rpc_efficiency(
     )
     repeated = streak >= rate_limit_streak_threshold
 
+    latest_cycle_age: float | None = None
+    latest_cycle_recent = False
+    if cycles:
+        try:
+            latest_cycle_age = (
+                current - _parse_time(cycles[0].as_of)
+            ).total_seconds()
+        except (TypeError, ValueError):
+            latest_cycle_age = None
+        latest_cycle_recent = bool(
+            latest_cycle_age is not None
+            and 0 <= latest_cycle_age <= max_latest_age_seconds
+        )
+
     timer_active = _systemctl_state(
         "is-active",
         "active",
@@ -571,8 +590,14 @@ def inspect_rpc_efficiency(
     timer_paused = not timer_active and not timer_enabled
     # Future recurring work is possible whenever the timer remains enabled,
     # even if a point-in-time active query is transient or unusual.
-    pause_recommended = bool(repeated and timer_enabled)
-    protected = bool(not repeated or not timer_enabled)
+    pause_recommended = bool(
+        repeated and latest_cycle_recent and timer_enabled
+    )
+    protected = bool(
+        not repeated
+        or not latest_cycle_recent
+        or not timer_enabled
+    )
 
     unsafe_cache = cache.symlink
     attention = bool(
@@ -593,6 +618,8 @@ def inspect_rpc_efficiency(
         consecutive_rpc_rate_limited_cycles=streak,
         rate_limit_streak_threshold=rate_limit_streak_threshold,
         repeated_provider_rejection=repeated,
+        latest_cycle_age_seconds=latest_cycle_age,
+        latest_cycle_recent=latest_cycle_recent,
         timer_active=timer_active,
         timer_enabled=timer_enabled,
         timer_paused=timer_paused,
@@ -621,6 +648,7 @@ def main() -> None:
     parser.add_argument("--cycle-history-limit", type=int, default=8)
     parser.add_argument("--rate-limit-streak-threshold", type=int, default=2)
     parser.add_argument("--max-cycle-gap-seconds", type=int, default=2700)
+    parser.add_argument("--max-latest-age-seconds", type=int, default=2700)
     args = parser.parse_args()
 
     report = inspect_rpc_efficiency(
@@ -630,6 +658,7 @@ def main() -> None:
         cycle_history_limit=args.cycle_history_limit,
         rate_limit_streak_threshold=args.rate_limit_streak_threshold,
         max_cycle_gap_seconds=args.max_cycle_gap_seconds,
+        max_latest_age_seconds=args.max_latest_age_seconds,
     )
     print(json.dumps(report.to_record(), indent=2))
     if report.attention_required:
