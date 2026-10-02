@@ -11,7 +11,7 @@ import subprocess
 from typing import Any
 
 
-PINNED_SOURCE_HEAD = "6e8654a71de9cc6c34c4e71d19266fda715386d7"
+PINNED_SOURCE_HEAD = "161b52788c6028d0f8fd05de847665c4add4e4a6"
 EXECUTOR_RELATIVE = Path("rust-executor/target/release/meteora-executor")
 WATCH_EXECUTOR_RELATIVE = Path("rust-executor/target/release/pio-phase2-account-watch")
 
@@ -38,6 +38,18 @@ TRACKED_CONTRACT = {
         "53678b7b33c73ac81fa476a8cf99fa6d149e5d77",
     "scripts/phase2-add-detector.py":
         "a7a6a888e7833fab73ffd564b1ec40195b185f33",
+    "deploy/tools/autopause_phase2_isolated_timer.py":
+        "a2b1feeef9a5abd7cb1340a34bce97900b156105",
+    "deploy/systemd/pio-phase2-isolated-prestate-stream@.service":
+        "4270a0c7b3aec8844ae9f06c6a073aa7b9d247af",
+    "deploy/systemd/pio-phase2-isolated-add-detector.service":
+        "fdb5334cca2174421e084813b42052f5399c435b",
+    "deploy/systemd/pio-phase2-isolated-evidence-cycle.service":
+        "3a82fc92e9785f6dcbde8cfd9c3458a71e34c8e3",
+    "deploy/systemd/pio-phase2-isolated-evidence-cycle.timer":
+        "e6781b6e7f4d235ec170d7f08d8f9c25414100ef",
+    "deploy/systemd/pio-phase2-isolated-rate-limit-pause.service":
+        "07e8d4a58243537bea74226da4ab6548bf212496",
     "rust-executor/src/bin/pio-phase2-account-watch.rs":
         "29ebea566a9ed4599b6dbe1a486a2ce509412995",
     "rust-executor/src/main.rs":

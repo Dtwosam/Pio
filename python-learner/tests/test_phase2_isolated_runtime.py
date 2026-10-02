@@ -111,3 +111,25 @@ def test_runtime_checker_requires_executable_event_watch_binary(
     assert report.watch_executor_exists is True
     assert report.watch_executor_executable is False
     assert report.runtime_ready is False
+
+
+
+def test_runtime_contract_pins_operational_autopause_surface():
+    required = {
+        "deploy/tools/autopause_phase2_isolated_timer.py":
+            "a2b1feeef9a5abd7cb1340a34bce97900b156105",
+        "deploy/systemd/pio-phase2-isolated-prestate-stream@.service":
+            "4270a0c7b3aec8844ae9f06c6a073aa7b9d247af",
+        "deploy/systemd/pio-phase2-isolated-add-detector.service":
+            "fdb5334cca2174421e084813b42052f5399c435b",
+        "deploy/systemd/pio-phase2-isolated-evidence-cycle.service":
+            "3a82fc92e9785f6dcbde8cfd9c3458a71e34c8e3",
+        "deploy/systemd/pio-phase2-isolated-evidence-cycle.timer":
+            "e6781b6e7f4d235ec170d7f08d8f9c25414100ef",
+        "deploy/systemd/pio-phase2-isolated-rate-limit-pause.service":
+            "07e8d4a58243537bea74226da4ab6548bf212496",
+    }
+
+    for relative, expected_blob in required.items():
+        assert MODULE.TRACKED_CONTRACT[relative] == expected_blob
+        assert MODULE._git_blob_sha(ROOT / relative) == expected_blob
