@@ -22,28 +22,27 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
-def make_runtime(tmp_path: Path) -> Path:
+def make_runtime(tmp_path: Path, monkeypatch) -> Path:
     source = tmp_path / "runtime"
     subprocess.run(
         ["git", "clone", "--quiet", str(ROOT), str(source)],
         check=True,
     )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=source,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    monkeypatch.setattr(MODULE, "PINNED_SOURCE_HEAD", head)
+
+    patch = ROOT / "deploy/patches/phase2-production-add-index-compat.patch"
     subprocess.run(
-        ["git", "checkout", "--quiet", MODULE.PINNED_SOURCE_HEAD],
+        ["git", "apply", "--whitespace=error-all", str(patch)],
         cwd=source,
         check=True,
     )
-
-    for relative, expected in MODULE.TRACKED_CONTRACT.items():
-        src = ROOT / relative
-        if MODULE._git_blob_sha(src) == expected:
-            dst = source / relative
-            shutil.copy2(src, dst)
-
-    for relative in MODULE.EXPECTED_DIRTY_PATHS:
-        src = ROOT / relative
-        dst = source / relative
-        shutil.copy2(src, dst)
 
     executor = source / MODULE.EXECUTOR_RELATIVE
     executor.parent.mkdir(parents=True, exist_ok=True)
@@ -57,8 +56,11 @@ def test_runtime_checker_rejects_live_production_path():
         MODULE.inspect_runtime("/opt/pio")
 
 
-def test_runtime_checker_fails_closed_on_unexpected_dirty_path(tmp_path):
-    source = make_runtime(tmp_path)
+def test_runtime_checker_fails_closed_on_unexpected_dirty_path(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_runtime(tmp_path, monkeypatch)
     extra = source / "rust-executor/src/main.rs"
     extra.write_text(extra.read_text(encoding="utf-8") + "\n// drift\n")
 
@@ -67,8 +69,8 @@ def test_runtime_checker_fails_closed_on_unexpected_dirty_path(tmp_path):
     assert report.runtime_ready is False
 
 
-def test_runtime_checker_requires_executable_binary(tmp_path):
-    source = make_runtime(tmp_path)
+def test_runtime_checker_requires_executable_binary(tmp_path, monkeypatch):
+    source = make_runtime(tmp_path, monkeypatch)
     executor = source / MODULE.EXECUTOR_RELATIVE
     executor.chmod(0o644)
 
