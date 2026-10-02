@@ -11,7 +11,7 @@ import subprocess
 from typing import Any
 
 
-PINNED_SOURCE_HEAD = "f36d989dcc0c7d98e738a718647723511c81ab39"
+PINNED_SOURCE_HEAD = "85fda664b3a7665d33afc1d1a9ba7fd849a0d97a"
 EXECUTOR_RELATIVE = Path("rust-executor/target/release/meteora-executor")
 
 TRACKED_CONTRACT = {
@@ -22,7 +22,15 @@ TRACKED_CONTRACT = {
     "python-learner/src/meteora_learner/research_store.py":
         "d3ffb8815e6efa949b6bf7a6f33ba60099f68357",
     "python-learner/src/meteora_learner/phase2_evidence_cycle.py":
-        "87effbf19170b5b4ed64cd3be8803e0ef78d444a",
+        "3517a7aa99e6627f535bd2ea63f6813720d2a8af",
+    "python-learner/src/meteora_learner/phase2_position_observation.py":
+        "71855a97c0dfe1f7c8db5df6c336e99584623a7c",
+    "python-learner/src/meteora_learner/phase2_calibration_reinspection.py":
+        "189fc19d7b77d3bad5d8a1739378b223f6abcb1d",
+    "python-learner/src/meteora_learner/phase2_prestate_verification_runner.py":
+        "4686b2fc8da6b97225de7cfb248155f163a287c5",
+    "python-learner/src/meteora_learner/phase2_rpc_guard.py":
+        "36277db7d701e34bb765b5be97b0ad757d784899",
     "rust-executor/src/main.rs":
         "96ecb4479482d146abbecafc53466b93fa452d80",
     "rust-executor/src/state_reader.rs":
