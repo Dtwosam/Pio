@@ -100,6 +100,11 @@
       "pr": 730,
       "head": "c2486021e39b65719b9e03dfd357ac90027e5698",
       "role": "failure-only exponential restart backoff for event-driven prestate stream"
+    },
+    {
+      "pr": 746,
+      "head": "6b090a6018da1997c90158b2043ea40639b47d48",
+      "role": "secret-safe persisted RPC rate-limit and circuit outcome telemetry"
     }
   ],
   "integration_notes": [
@@ -113,10 +118,11 @@
     "prospective prestates can be maintained from pool account-change notifications: one initial baseline plus one refresh after observed changes, preserving the existing prestate cache schema without continuous successful HTTP polling",
     "the pool account WebSocket watcher is a separate Rust binary so the historically pinned meteora-executor main.rs remains byte-for-byte unchanged",
     "the account-change subscription requests a zero-length account data slice because the prestate trigger needs only notification slot metadata",
-    "the event-driven prestate stream is supervised with backoff only after child exit; healthy streams are not throttled and stable runs reset the reconnect failure streak"
+    "the event-driven prestate stream is supervised with backoff only after child exit; healthy streams are not throttled and stable runs reset the reconnect failure streak",
+    "bounded evidence progress persists per-stage failure categories plus rpc_rate_limited/rpc_circuit_open booleans without raw RPC error text"
   ],
   "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER",
-  "deployment_target_ref": "00b03d9f7505f50a1d4b9fea9001a29db6855628",
+  "deployment_target_ref": "99954e0cb23e0a97e2d79304104739b78bd93493",
   "deployment_base_ref": "45d7f6b2f44a2e621d1d8c34220dd61d3a413b9b",
   "deployment_files": [
     "python-learner/src/meteora_learner/calibration_queue.py",
@@ -148,7 +154,7 @@
     "python-learner/src/meteora_learner/composition_prestate.py": "feb13b8ea90af0875f85f6a4b955ee145193d4e4",
     "python-learner/src/meteora_learner/composition_reconciliation.py": "4114c1e617d017c0ec79144558d6b7a8599140fa",
     "python-learner/src/meteora_learner/phase2_calibration_reinspection.py": "189fc19d7b77d3bad5d8a1739378b223f6abcb1d",
-    "python-learner/src/meteora_learner/phase2_evidence_cycle.py": "3517a7aa99e6627f535bd2ea63f6813720d2a8af",
+    "python-learner/src/meteora_learner/phase2_evidence_cycle.py": "cd66398be75698aed032adb15f5e1a7739b0df72",
     "python-learner/src/meteora_learner/phase2_gate.py": "150bce004151d9487296405e0a64dbfc31638e1b",
     "python-learner/src/meteora_learner/phase2_position_observation.py": "71855a97c0dfe1f7c8db5df6c336e99584623a7c",
     "python-learner/src/meteora_learner/phase2_prestate_verification_runner.py": "4686b2fc8da6b97225de7cfb248155f163a287c5",
