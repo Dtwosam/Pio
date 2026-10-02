@@ -134,3 +134,120 @@ def test_phase2_work_queue_commands_keep_rpc_url_out_of_argv():
     for command in (inspect, verify):
         assert '"$RPC_URL"' not in command
         assert '"$SOLANA_RPC_URL"' not in command
+
+
+
+def test_queue_uses_resolved_chain_parent_index(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_position_events([add_row()])
+    storage.save_chain_transaction_events(
+        {
+            "signature": "sig",
+            "slot": 120,
+            "block_time": 1700000000,
+            "succeeded": True,
+            "add_requests": [
+                {
+                    "instruction_index": 5,
+                    "instruction_type": "add_liquidity_by_strategy",
+                    "requested_amount_x": "1",
+                    "requested_amount_y": "2",
+                    "observed_active_id": 5,
+                    "max_active_bin_slippage": 1,
+                    "min_bin_id": 4,
+                    "max_bin_id": 6,
+                    "strategy_variant": 6,
+                    "strategy_favor_x": False,
+                    "explicit_distribution": [],
+                    "weighted_distribution": [],
+                }
+            ],
+            "events": [
+                {
+                    "event_index": 0,
+                    "parent_ix_index": 5,
+                    "event": {
+                        "event_type": "AddLiquidity",
+                        "event": {
+                            "lb_pair": "pool",
+                            "from": "user",
+                            "position": "position",
+                            "amount_x": "1",
+                            "amount_y": "2",
+                            "active_bin_id": 5,
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    queue = build_calibration_work_queue(str(storage.path))
+
+    assert queue.stale_decode_tasks == 0
+    future = next(
+        item
+        for item in queue.items
+        if item.task_type == "NEED_FUTURE_PRESTATE_SAMPLE"
+    )
+    assert future.instruction_index == 5
+
+
+def test_queue_does_not_reinspect_rebalance_owned_internal_add(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    storage.save_position_events([add_row()])
+    storage.save_chain_transaction_events(
+        {
+            "signature": "sig",
+            "slot": 120,
+            "block_time": 1700000000,
+            "succeeded": True,
+            "add_requests": [],
+            "events": [
+                {
+                    "event_index": 0,
+                    "parent_ix_index": 5,
+                    "event": {
+                        "event_type": "AddLiquidity",
+                        "event": {
+                            "lb_pair": "pool",
+                            "from": "user",
+                            "position": "position",
+                            "amount_x": "1",
+                            "amount_y": "2",
+                            "active_bin_id": 5,
+                        },
+                    },
+                },
+                {
+                    "event_index": 1,
+                    "parent_ix_index": 4,
+                    "event": {
+                        "event_type": "Rebalancing",
+                        "event": {
+                            "lb_pair": "pool",
+                            "position": "position",
+                            "owner": "user",
+                            "active_bin_id": 5,
+                            "old_min_id": 4,
+                            "old_max_id": 6,
+                            "new_min_id": 4,
+                            "new_max_id": 6,
+                            "x_withdrawn_amount": "0",
+                            "x_added_amount": "1",
+                            "y_withdrawn_amount": "0",
+                            "y_added_amount": "2",
+                            "x_fee_amount": "0",
+                            "y_fee_amount": "0",
+                            "reward_one": "0",
+                            "reward_two": "0",
+                        },
+                    },
+                },
+            ],
+        }
+    )
+
+    queue = build_calibration_work_queue(str(storage.path))
+
+    assert queue.stale_decode_tasks == 0
