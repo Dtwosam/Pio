@@ -45,9 +45,11 @@ together: the former performs bounded evidence work, while the latter maintains
 prospective prestates. Do not run the legacy prestate watcher at the same time;
 the isolated stream unit declares a systemd conflict with it.
 
-`SOLANA_WS_URL` may be supplied explicitly. When it is absent, the executor
-derives `wss://` from `SOLANA_RPC_URL` without placing the credential-bearing
-URL in argv or emitted notification records.
+`SOLANA_WS_URL` may be supplied explicitly. The standalone
+`pio-phase2-account-watch` binary derives `wss://` from `SOLANA_RPC_URL` when
+needed, without placing the credential-bearing URL in argv or emitted
+notification records. The canonical `meteora-executor` remains byte-for-byte
+unchanged for sealed Phase-7 source lineage.
 
 The stream is reconnectable rather than a polling loop. If an unbounded
 WebSocket session ends, the Python worker exits nonzero and systemd may restart
