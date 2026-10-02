@@ -141,6 +141,8 @@ def test_timer_readiness_verifies_receipt_and_immutable_progress_row(
     assert report.receipt_fresh is True
     assert report.evidence_row_present is True
     assert report.evidence_row_matches_receipt is True
+    assert report.latest_progress_evidence_id == 123
+    assert report.receipt_is_latest_for_pool is True
     assert report.evidence_row_non_qualified is True
     assert report.evidence_row_no_promotion is True
     assert report.read_only is True
@@ -284,3 +286,108 @@ def test_timer_readiness_rejects_promoting_evidence_row(
 
     assert report.evidence_row_no_promotion is False
     assert report.timer_ready is False
+
+
+
+def test_timer_readiness_rejects_receipt_older_than_latest_pool_progress(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    create_database(data)
+    with sqlite3.connect(data / "pio.db") as conn:
+        conn.execute(
+            """
+            INSERT INTO advanced_edge_evidence(
+                id, edge_type, pool_address, as_of,
+                status, qualified, evidence_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                124,
+                MODULE.PROGRESS_EDGE_TYPE,
+                "pool",
+                "2026-10-02T19:05:00+00:00",
+                "COLLECTION_FAILED",
+                0,
+                json.dumps(
+                    {
+                        "qualified": False,
+                        "promotion_gate_evaluated": False,
+                        "phase_promotion_performed": False,
+                        "live_authorized": False,
+                        "actionable": False,
+                        "rpc_rate_limited": True,
+                    }
+                ),
+            ),
+        )
+    receipt_path = receipt(tmp_path, release, evidence_id=123)
+
+    report = MODULE.inspect_timer_readiness(
+        runtime_root=runtime_root,
+        data_root=data,
+        receipt_path=receipt_path,
+        now=lambda: datetime(
+            2026, 10, 2, 19, 10, tzinfo=timezone.utc
+        ),
+    )
+
+    assert report.evidence_row_matches_receipt is True
+    assert report.latest_progress_evidence_id == 124
+    assert report.receipt_is_latest_for_pool is False
+    assert report.timer_ready is False
+
+
+def test_timer_readiness_ignores_newer_progress_for_other_pool(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    create_database(data)
+    with sqlite3.connect(data / "pio.db") as conn:
+        conn.execute(
+            """
+            INSERT INTO advanced_edge_evidence(
+                id, edge_type, pool_address, as_of,
+                status, qualified, evidence_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                124,
+                MODULE.PROGRESS_EDGE_TYPE,
+                "other-pool",
+                "2026-10-02T19:05:00+00:00",
+                "COLLECTION_FAILED",
+                0,
+                json.dumps(
+                    {
+                        "qualified": False,
+                        "promotion_gate_evaluated": False,
+                        "phase_promotion_performed": False,
+                        "live_authorized": False,
+                        "actionable": False,
+                    }
+                ),
+            ),
+        )
+    receipt_path = receipt(tmp_path, release, evidence_id=123)
+
+    report = MODULE.inspect_timer_readiness(
+        runtime_root=runtime_root,
+        data_root=data,
+        receipt_path=receipt_path,
+        now=lambda: datetime(
+            2026, 10, 2, 19, 10, tzinfo=timezone.utc
+        ),
+    )
+
+    assert report.latest_progress_evidence_id == 123
+    assert report.receipt_is_latest_for_pool is True
+    assert report.timer_ready is True
