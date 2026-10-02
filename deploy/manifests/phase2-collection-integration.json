@@ -85,6 +85,11 @@
       "pr": 718,
       "head": "b40b915d5aa24db805522eccebf22056c7128c34",
       "role": "complete position-discovery cache to avoid redundant pool-wide enumeration"
+    },
+    {
+      "pr": 724,
+      "head": "1c215eb465407b4421146e226cd96149ee87cc10",
+      "role": "cycle-local Solana RPC rate-limit circuit"
     }
   ],
   "integration_notes": [
@@ -97,7 +102,7 @@
     "confirmed Solana RPC rate-limit responses stop the current network stage and skip later Solana RPC stages in the same cycle while database-only reconciliation and calibration continue"
   ],
   "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER",
-  "deployment_target_ref": "057c6172e96dc55692d8f77e4e9f55180a73590b",
+  "deployment_target_ref": "97d33c062cc25ca27b197463ac09f39c06277043",
   "deployment_base_ref": "45d7f6b2f44a2e621d1d8c34220dd61d3a413b9b",
   "deployment_files": [
     "python-learner/src/meteora_learner/calibration_queue.py",
