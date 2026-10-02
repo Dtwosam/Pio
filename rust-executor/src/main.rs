@@ -1,3 +1,4 @@
+mod account_watch;
 mod blockhash;
 mod confirmation;
 mod controlled_live;
@@ -137,6 +138,40 @@ RPC_URL is accepted as a compatibility fallback",
             let snapshot =
                 state_reader::inspect_pool(&rpc_url, &pool_address, array_radius).await?;
             println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        }
+        "watch-account-env" => {
+            let account_address =
+                args.next().context("ACCOUNT_ADDRESS is required")?;
+            let max_notifications: usize = args
+                .next()
+                .as_deref()
+                .unwrap_or("0")
+                .parse()
+                .context("MAX_NOTIFICATIONS must be a non-negative integer")?;
+            if args.next().is_some() {
+                anyhow::bail!(
+                    "watch-account-env accepts at most two arguments"
+                );
+            }
+
+            let ws_url = match std::env::var("SOLANA_WS_URL") {
+                Ok(value) => account_watch::derive_ws_url(&value)?,
+                Err(_) => {
+                    let rpc_url = std::env::var("SOLANA_RPC_URL")
+                        .or_else(|_| std::env::var("RPC_URL"))
+                        .context(
+                            "SOLANA_WS_URL or SOLANA_RPC_URL environment variable is required; \
+RPC_URL is accepted as a compatibility fallback",
+                        )?;
+                    account_watch::derive_ws_url(&rpc_url)?
+                }
+            };
+
+            account_watch::watch_account_changes(
+                &ws_url,
+                &account_address,
+                max_notifications,
+            )?;
         }
         "verify-position-closed" => {
             let rpc_url = args.next().context("RPC_URL is required")?;
