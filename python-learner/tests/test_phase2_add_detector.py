@@ -36,6 +36,10 @@ def _load_function(name):
         "RPC": "https://rpc.invalid",
         "RUST": "/executor",
         "ROOT": "/opt/pio",
+        "DEFAULT_POOLS": {
+            "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ": 120.0,
+            "DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf": 300.0,
+        },
         "os": os,
         "subprocess": subprocess,
         "RpcRateLimited": RuntimeError,
@@ -354,3 +358,35 @@ def test_detector_rate_limit_paths_are_secret_safe_and_abort_batch():
         any(isinstance(child, ast.Break) for child in ast.walk(handler))
         for handler in handlers
     )
+
+
+
+def test_detector_pool_config_preserves_legacy_defaults():
+    parse = _load_function("parse_detector_pools")
+
+    pools = parse("")
+
+    assert pools == {
+        "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ": 120.0,
+        "DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf": 300.0,
+    }
+
+
+def test_detector_pool_config_accepts_explicit_pool_cadences():
+    parse = _load_function("parse_detector_pools")
+
+    pools = parse("pool-a:15,pool-b:90.5")
+
+    assert pools == {"pool-a": 15.0, "pool-b": 90.5}
+
+
+def test_detector_pool_config_rejects_invalid_or_duplicate_entries():
+    parse = _load_function("parse_detector_pools")
+    import pytest
+
+    with pytest.raises(ValueError, match="ADDRESS:SECONDS"):
+        parse("pool-without-interval")
+    with pytest.raises(ValueError, match="positive"):
+        parse("pool-a:0")
+    with pytest.raises(ValueError, match="duplicate"):
+        parse("pool-a:10,pool-a:20")
