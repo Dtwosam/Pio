@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import importlib.util
 import json
 from pathlib import Path
@@ -131,6 +132,7 @@ def test_autopause_disables_only_timer_after_two_recent_rate_limits(tmp_path):
     report = MODULE.autopause(
         database_path=db,
         apply=True,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
         runner=runner,
     )
 
@@ -166,6 +168,7 @@ def test_autopause_does_not_limit_healthy_timer_after_single_rejection(tmp_path)
     report = MODULE.autopause(
         database_path=db,
         apply=True,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
         runner=runner,
     )
 
@@ -202,6 +205,7 @@ def test_autopause_malformed_latest_telemetry_breaks_old_rate_limit_streak(
     report = MODULE.autopause(
         database_path=db,
         apply=True,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
         runner=runner,
     )
 
@@ -246,6 +250,7 @@ def test_autopause_uses_latest_pool_only(tmp_path):
     report = MODULE.autopause(
         database_path=db,
         apply=True,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
         runner=runner,
     )
 
@@ -281,3 +286,34 @@ def test_onfailure_unit_is_local_secret_free_and_pinned():
     assert contract["pio-phase2-isolated-rate-limit-pause.service"] == (
         INSTALL.git_blob_sha(PAUSE_SERVICE)
     )
+
+
+
+def test_autopause_does_not_pause_on_stale_rate_limit_streak(tmp_path):
+    db = tmp_path / "pio.db"
+    init_db(db)
+    add_cycle(
+        db,
+        as_of="2026-10-02T18:30:00+00:00",
+        rate_limited=True,
+    )
+    add_cycle(
+        db,
+        as_of="2026-10-02T18:15:00+00:00",
+        rate_limited=True,
+    )
+    state, runner = stateful_runner(active=True, enabled=True)
+
+    report = MODULE.autopause(
+        database_path=db,
+        apply=True,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
+        runner=runner,
+    )
+
+    assert report.consecutive_rpc_rate_limited == 2
+    assert report.repeated_provider_rejection is True
+    assert report.latest_cycle_recent is False
+    assert report.pause_recommended is False
+    assert report.applied is False
+    assert state["enabled"] is True
