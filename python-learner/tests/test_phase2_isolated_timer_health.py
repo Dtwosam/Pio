@@ -80,15 +80,28 @@ def unit(name, *, active=False, enabled=False):
     )
 
 
-def install_base(monkeypatch, tmp_path: Path):
+def install_base(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    detector_active: bool = True,
+    streams_active: bool = True,
+):
     streams = tuple(
         name
         for name in MODULE.ACTIVATION.NEW_INACTIVE_UNITS
         if name.startswith("pio-phase2-isolated-prestate-stream@")
     )
     states = [
-        unit(MODULE.DETECTOR_UNIT, active=True, enabled=True),
-        *[unit(name, active=True, enabled=False) for name in streams],
+        unit(
+            MODULE.DETECTOR_UNIT,
+            active=detector_active,
+            enabled=True,
+        ),
+        *[
+            unit(name, active=streams_active, enabled=False)
+            for name in streams
+        ],
         unit(MODULE.EVIDENCE_SERVICE, active=False, enabled=False),
         unit(MODULE.TIMER_UNIT, active=True, enabled=True),
         *[
@@ -168,8 +181,21 @@ def cycle(*, at, status="COLLECTION_SUCCESS", limited=False):
     }
 
 
-def inspect(tmp_path, monkeypatch, cycles, *, threshold=2):
-    install_base(monkeypatch, tmp_path)
+def inspect(
+    tmp_path,
+    monkeypatch,
+    cycles,
+    *,
+    threshold=2,
+    detector_active=True,
+    streams_active=True,
+):
+    install_base(
+        monkeypatch,
+        tmp_path,
+        detector_active=detector_active,
+        streams_active=streams_active,
+    )
     root = write_db(tmp_path, cycles)
     env = env_file(tmp_path)
     return MODULE.inspect_timer_health(
@@ -397,3 +423,34 @@ def test_malformed_latest_telemetry_breaks_rate_limit_streak(
     assert report.cycles[0].rpc_rate_limited is False
     assert report.consecutive_rpc_rate_limited == 0
     assert report.pause_recommended is False
+
+
+
+def test_rate_limit_pause_is_not_blocked_by_degraded_sibling_collectors(
+    tmp_path,
+    monkeypatch,
+):
+    report = inspect(
+        tmp_path,
+        monkeypatch,
+        [
+            cycle(
+                at="2026-10-02T20:20:00+00:00",
+                status="COLLECTION_FAILED",
+                limited=True,
+            ),
+            cycle(
+                at="2026-10-02T20:05:00+00:00",
+                status="COLLECTION_FAILED",
+                limited=True,
+            ),
+        ],
+        detector_active=False,
+        streams_active=False,
+    )
+
+    assert report.detector_active_enabled is False
+    assert report.streams_active is False
+    assert report.collection_healthy is False
+    assert report.consecutive_rpc_rate_limited == 2
+    assert report.pause_recommended is True
