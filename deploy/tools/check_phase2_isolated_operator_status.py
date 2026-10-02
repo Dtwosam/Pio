@@ -42,7 +42,8 @@ class Phase2OperatorStatusReport:
     collection_running: bool
     provider_rate_limit_incident: bool
     provider_rate_limit_paused: bool
-    rejected_future_timer_cycles_blocked: bool
+    future_timer_cycles_paused: bool
+    rate_limit_waste_guard_satisfied: bool
     discovery_cache_reusable_now: bool
     collector_attempts_are_not_provider_credits: bool
     provider_credit_count_available: bool
@@ -144,9 +145,10 @@ def inspect_operator_status(
         state = "COLLECTION_ATTENTION"
 
     attention = state != "HEALTHY"
-    rejected_future_blocked = bool(
+    future_timer_cycles_paused = bool(not efficiency.timer_enabled)
+    waste_guard_satisfied = bool(
         not rate_limit_incident
-        or not efficiency.timer_enabled
+        or future_timer_cycles_paused
     )
 
     return Phase2OperatorStatusReport(
@@ -156,7 +158,8 @@ def inspect_operator_status(
         collection_running=collection_running,
         provider_rate_limit_incident=rate_limit_incident,
         provider_rate_limit_paused=rate_limit_paused,
-        rejected_future_timer_cycles_blocked=rejected_future_blocked,
+        future_timer_cycles_paused=future_timer_cycles_paused,
+        rate_limit_waste_guard_satisfied=waste_guard_satisfied,
         discovery_cache_reusable_now=bool(
             efficiency.discovery_cache.reusable_now
         ),
