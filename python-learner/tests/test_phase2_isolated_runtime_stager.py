@@ -166,3 +166,33 @@ def test_stager_rejects_live_production_paths():
 
     with pytest.raises(ValueError, match="must not be inside /opt/pio"):
         MODULE._destination("/opt/pio/phase2-runtime")
+
+
+
+def test_stager_rejects_symlinked_source_and_destination(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_ready_runtime(tmp_path, monkeypatch)
+    source_link = tmp_path / "source-link"
+    source_link.symlink_to(source, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="source tree must not be a symlink"):
+        MODULE.stage_runtime(
+            source_tree=source_link,
+            destination_root=tmp_path / "runtime-root",
+        )
+
+    real_destination = tmp_path / "real-runtime-root"
+    real_destination.mkdir()
+    destination_link = tmp_path / "runtime-link"
+    destination_link.symlink_to(real_destination, target_is_directory=True)
+
+    with pytest.raises(
+        ValueError,
+        match="destination root must not be a symlink",
+    ):
+        MODULE.stage_runtime(
+            source_tree=source,
+            destination_root=destination_link,
+        )
