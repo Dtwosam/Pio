@@ -3,6 +3,7 @@ Description=Pio Phase 2 isolated bounded evidence collection
 After=network-online.target
 Wants=network-online.target
 ConditionPathIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
+ConditionPathExists=/opt/pio-phase2-runtime/control/current/deploy/tools/check_phase2_isolated_runtime.py
 
 [Service]
 Type=oneshot
@@ -11,7 +12,9 @@ Group=pio
 WorkingDirectory=/opt/pio-phase2-runtime/current
 EnvironmentFile=/etc/pio/pio.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=GIT_OPTIONAL_LOCKS=0
 Environment=PYTHONPATH=/opt/pio-phase2-runtime/current/python-learner/src
+ExecStartPre=/usr/bin/python3 /opt/pio-phase2-runtime/control/current/deploy/tools/check_phase2_isolated_runtime.py --source-tree /opt/pio-phase2-runtime/current
 ExecStart=/opt/pio/python-learner/.venv/bin/python -m meteora_learner.phase2_evidence_cycle --database /opt/pio/data/pio.db --executor /opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor --persist-progress
 NoNewPrivileges=true
 PrivateTmp=true
