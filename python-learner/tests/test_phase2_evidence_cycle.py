@@ -685,3 +685,39 @@ def test_persisted_progress_keeps_rate_limit_category_without_raw_error_text(
     ] in evidence["stage_outcomes"]
     encoded = json.dumps(evidence)
     assert secret not in encoded
+
+
+
+def test_terminal_prestate_rate_limit_still_marks_circuit_open(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    calls = []
+    install_successes(monkeypatch, calls)
+
+    def rate_limited_prestates(*args, **kwargs):
+        calls.append("prestates-rate-limited")
+        raise Phase2RpcRateLimited("RPC_RATE_LIMITED")
+
+    monkeypatch.setattr(
+        "meteora_learner.phase2_evidence_cycle.run_phase2_prestate_verifications",
+        rate_limited_prestates,
+    )
+
+    report = run_phase2_read_only_evidence_cycle(
+        storage,
+        pool_address="pool",
+        executor_path="/executor",
+        now=lambda: "2026-09-26T19:00:00+00:00",
+    )
+    progress = build_phase2_evidence_cycle_progress(report)
+
+    assert report.stages_skipped == 0
+    assert progress.rpc_rate_limited is True
+    assert progress.rpc_circuit_open is True
+    assert (
+        "PRESTATE_VERIFICATION",
+        "FAILED",
+        "RPC_RATE_LIMITED",
+    ) in progress.stage_outcomes
