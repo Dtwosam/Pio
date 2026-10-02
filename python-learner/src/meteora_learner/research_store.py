@@ -496,6 +496,47 @@ class ResearchStore:
             conn.close()
         return dict(row) if row is not None else None
 
+    def resolve_add_instruction_index(
+        self,
+        signature: str,
+        *,
+        position_address: str,
+        pool_address: str | None = None,
+        user_address: str | None = None,
+        preferred_instruction_index: int | None = None,
+    ) -> int | None:
+        """Resolve a Data API add-event index to the decoded chain parent index."""
+        events = self.load_transaction_events(signature)
+        matches = []
+        for event in events:
+            if event["event_type"] != "AddLiquidity":
+                continue
+            if str(event.get("position_address") or "") != position_address:
+                continue
+            if (
+                pool_address is not None
+                and str(event.get("lb_pair") or "") != pool_address
+            ):
+                continue
+            if (
+                user_address is not None
+                and str(event.get("from_address") or "") != user_address
+            ):
+                continue
+            matches.append(event)
+
+        parent_indices = sorted(
+            {int(event["parent_ix_index"]) for event in matches}
+        )
+        if (
+            preferred_instruction_index is not None
+            and preferred_instruction_index in parent_indices
+        ):
+            return preferred_instruction_index
+        if len(parent_indices) == 1:
+            return parent_indices[0]
+        return None
+
     def pool_capture_before_slot(
         self,
         pool_address: str,
