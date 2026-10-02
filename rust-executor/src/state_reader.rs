@@ -577,45 +577,104 @@ fn position_dependencies_match(
         && probe_upper_bin_id == snapshot_upper_bin_id
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PositionDependencyHint {
+    pool: Pubkey,
+    lower_bin_id: i32,
+    upper_bin_id: i32,
+}
+
 pub async fn inspect_position(
     rpc_url: &str,
     position_address: &str,
+) -> Result<PositionChainSnapshot> {
+    inspect_position_with_optional_hint(
+        rpc_url,
+        position_address,
+        None,
+    )
+    .await
+}
+
+pub async fn inspect_position_with_dependencies(
+    rpc_url: &str,
+    position_address: &str,
+    pool_address: &str,
+    lower_bin_id: i32,
+    upper_bin_id: i32,
+) -> Result<PositionChainSnapshot> {
+    let pool = Pubkey::from_str(pool_address)
+        .context("invalid hinted pool address")?;
+    // Validate the range before any RPC call.
+    position_bin_array_indexes(lower_bin_id, upper_bin_id)?;
+    inspect_position_with_optional_hint(
+        rpc_url,
+        position_address,
+        Some(PositionDependencyHint {
+            pool,
+            lower_bin_id,
+            upper_bin_id,
+        }),
+    )
+    .await
+}
+
+async fn inspect_position_with_optional_hint(
+    rpc_url: &str,
+    position_address: &str,
+    initial_hint: Option<PositionDependencyHint>,
 ) -> Result<PositionChainSnapshot> {
     let position_key =
         Pubkey::from_str(position_address).context("invalid position address")?;
     let rpc = RpcClient::new(rpc_url.to_string());
 
-    // The first position read is only a probe so we can derive the pool and bin
-    // array addresses. The authoritative position, pool, clock and arrays are
-    // refetched together in one getMultipleAccounts response. If a mutation
-    // changes the position's pool/range between probe and batch, retry instead
-    // of emitting a mixed-context reconciliation snapshot.
+    // Discovery already decoded the position's pool/range. Use that metadata as
+    // the first dependency hint when available so the common stable case can go
+    // straight to the authoritative single-slot getMultipleAccounts snapshot.
+    // The position is still included in that batch and its dependencies are
+    // verified. A stale hint falls back to the original probe/retry path.
+    let mut dependency_hint = initial_hint;
     let mut final_response = None;
     let mut final_indexes = Vec::new();
     let mut final_pubkeys = Vec::new();
 
     for _attempt in 0..3 {
-        let probe_account = rpc
-            .get_account(&position_key)
-            .await
-            .with_context(|| {
-                format!("failed to probe position account {position_key}")
-            })?;
-        if probe_account.owner != commons::dlmm::ID {
-            anyhow::bail!("position account is not owned by Meteora DLMM");
-        }
-        let probe_state: PositionV2 =
-            pod_read_unaligned_skip_disc(&probe_account.data)
-                .context("failed to decode probe PositionV2")?;
+        let (probe_pool, probe_lower_bin_id, probe_upper_bin_id) =
+            if let Some(hint) = dependency_hint.take() {
+                (
+                    hint.pool,
+                    hint.lower_bin_id,
+                    hint.upper_bin_id,
+                )
+            } else {
+                let probe_account = rpc
+                    .get_account(&position_key)
+                    .await
+                    .with_context(|| {
+                        format!("failed to probe position account {position_key}")
+                    })?;
+                if probe_account.owner != commons::dlmm::ID {
+                    anyhow::bail!("position account is not owned by Meteora DLMM");
+                }
+                let probe_state: PositionV2 =
+                    pod_read_unaligned_skip_disc(&probe_account.data)
+                        .context("failed to decode probe PositionV2")?;
+                (
+                    probe_state.lb_pair,
+                    probe_state.lower_bin_id,
+                    probe_state.upper_bin_id,
+                )
+            };
+
         let indexes = position_bin_array_indexes(
-            probe_state.lower_bin_id,
-            probe_state.upper_bin_id,
+            probe_lower_bin_id,
+            probe_upper_bin_id,
         )?;
         let pubkeys: Vec<Pubkey> = indexes
             .iter()
             .map(|index| {
                 derive_bin_array_pda(
-                    probe_state.lb_pair,
+                    probe_pool,
                     i64::from(*index),
                 )
                 .0
@@ -623,7 +682,7 @@ pub async fn inspect_position(
             .collect();
 
         let accounts_to_fetch: Vec<Pubkey> = [
-            vec![position_key, probe_state.lb_pair, CLOCK_ID],
+            vec![position_key, probe_pool, CLOCK_ID],
             pubkeys.clone(),
         ]
         .concat();
@@ -650,9 +709,9 @@ pub async fn inspect_position(
                 .context("failed to decode final PositionV2")?;
 
         if !position_dependencies_match(
-            probe_state.lb_pair,
-            probe_state.lower_bin_id,
-            probe_state.upper_bin_id,
+            probe_pool,
+            probe_lower_bin_id,
+            probe_upper_bin_id,
             snapshot_state.lb_pair,
             snapshot_state.lower_bin_id,
             snapshot_state.upper_bin_id,
