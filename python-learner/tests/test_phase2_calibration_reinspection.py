@@ -7,6 +7,7 @@ import pytest
 from meteora_learner.phase2_calibration_reinspection import (
     run_phase2_calibration_reinspection,
 )
+from meteora_learner.phase2_rpc_guard import Phase2RpcRateLimited
 from meteora_learner.storage import Storage
 
 
@@ -268,3 +269,53 @@ def test_reinspection_failed_signature_does_not_starve_unseen_work(
     assert second.selected_signatures == ("sig-b",)
     assert second.signatures_succeeded == 1
     assert attempted == ["sig-a", "sig-b"]
+
+
+
+def test_reinspection_stops_remaining_signatures_after_rpc_rate_limit(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    install_queue(
+        monkeypatch,
+        (
+            item("INSPECT_TRANSACTION", "sig-a"),
+            item("INSPECT_TRANSACTION", "sig-b"),
+            item("INSPECT_TRANSACTION", "sig-c"),
+        ),
+    )
+    attempted = []
+
+    def runner(command, **kwargs):
+        attempted.append(command[2])
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            "status code: 429 from https://rpc.invalid/?api-key=secret",
+        )
+
+    with pytest.raises(Phase2RpcRateLimited) as excinfo:
+        run_phase2_calibration_reinspection(
+            storage,
+            executor_path="/executor",
+            max_tasks=3,
+            observed_at="2026-09-26T18:00:00+00:00",
+            runner=runner,
+        )
+
+    assert str(excinfo.value) == "RPC_RATE_LIMITED"
+    assert attempted == ["sig-a"]
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT task_key, succeeded, outcome_category
+            FROM phase2_collection_task_attempts
+            WHERE stage = 'TRANSACTION_REINSPECTION'
+            ORDER BY id
+            """
+        ).fetchall()
+    assert rows == [
+        ("sig-a", 0, "RPC_RATE_LIMITED"),
+    ]
