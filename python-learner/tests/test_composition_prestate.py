@@ -200,3 +200,29 @@ def test_legacy_multi_slot_capture_is_not_exact_prestate_evidence(tmp_path):
         "no single-context strict-prior pre-add pool capture "
         "with matching active bin"
     )
+
+
+
+def test_prestate_candidate_uses_resolved_chain_parent_index(tmp_path):
+    storage = Storage(tmp_path / "pio.db")
+    seed_ready_add(storage)
+    with storage.connect() as conn:
+        conn.execute(
+            "UPDATE position_event_history SET ix_index = 2 WHERE signature = 'sig'"
+        )
+        conn.execute(
+            "UPDATE chain_add_liquidity_requests "
+            "SET instruction_index = 5 WHERE signature = 'sig'"
+        )
+        conn.execute(
+            "UPDATE chain_transaction_events "
+            "SET parent_ix_index = 5 WHERE signature = 'sig'"
+        )
+
+    report = build_composition_prestate_candidates(
+        str(storage.path),
+        position_address="position",
+    )
+
+    assert report.verification_ready == 1
+    assert report.candidates[0].parent_ix_index == 5
