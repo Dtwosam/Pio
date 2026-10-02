@@ -1,7 +1,7 @@
 [Unit]
 Description=Pio Phase 2 isolated read-only add detector
-After=network-online.target pio-phase2-isolated-prestate-stream.service
-Wants=network-online.target pio-phase2-isolated-prestate-stream.service
+After=network-online.target pio-phase2-isolated-prestate-stream@54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ.service pio-phase2-isolated-prestate-stream@DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf.service
+Wants=network-online.target pio-phase2-isolated-prestate-stream@54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ.service pio-phase2-isolated-prestate-stream@DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf.service
 Conflicts=pio-phase2-add-detector.service
 ConditionPathIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
 ConditionPathIsExecutable=/opt/pio/python-learner/.venv/bin/python
@@ -20,6 +20,7 @@ Environment=PIO_PHASE2_EXECUTOR=/opt/pio-phase2-runtime/current/rust-executor/ta
 Environment=PIO_PHASE2_PIO_CLI=/opt/pio/python-learner/.venv/bin/pio
 Environment=PIO_PHASE2_DETECTOR_STATE_PATH=/opt/pio/data/phase2-add-detector-state.json
 Environment=PIO_PHASE2_PRESTATE_CACHE_DB=/opt/pio/data/phase2-prestate-cache.db
+Environment=PIO_PHASE2_DETECTOR_POOLS=54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ:120,DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf:300
 ExecStart=/opt/pio/python-learner/.venv/bin/python /opt/pio-phase2-runtime/current/scripts/phase2-add-detector.py
 Restart=on-failure
 RestartSec=5s

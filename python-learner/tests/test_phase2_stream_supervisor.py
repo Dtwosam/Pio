@@ -80,3 +80,20 @@ def test_isolated_stream_service_uses_failure_only_supervisor():
     assert "-m meteora_learner.phase2_stream_supervisor" in service
     assert "-m meteora_learner.phase2_event_prestate" not in service
     assert "Restart=on-failure" in service
+
+
+
+def test_template_stream_service_pins_instance_as_pool_without_polling():
+    root = Path(__file__).resolve().parents[2]
+    service = (
+        root
+        / "deploy/systemd/pio-phase2-isolated-prestate-stream@.service"
+    ).read_text(encoding="utf-8")
+
+    assert "-m meteora_learner.phase2_stream_supervisor" in service
+    assert "--pool %i" in service
+    assert "Restart=on-failure" in service
+    assert "Conflicts=pio-phase2-prestate-watch.service" in service
+    assert "SOLANA_RPC_URL=" not in service
+    assert "http://" not in service
+    assert "https://" not in service
