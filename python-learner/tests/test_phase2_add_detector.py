@@ -44,6 +44,7 @@ def _load_function(name):
         "subprocess": subprocess,
         "RpcRateLimited": RuntimeError,
         "log": lambda *args, **kwargs: None,
+        "save_state": lambda state: None,
     }
     # import urllib.request/error populates these on the urllib package.
     namespace["urllib"].request = urllib.request
@@ -118,36 +119,36 @@ def test_detector_has_resolved_run_wrapper():
     assert keywords["check"] == "False"
 
 
-def test_detector_cursor_is_fail_closed():
-    branch = next(
+def test_detector_cursor_advances_only_after_completed_signature():
+    advance = _load_function("advance_cursor")
+    state = {"cursors": {"pool": "old"}}
+
+    advance(state, "pool", "completed")
+
+    assert state["cursors"]["pool"] == "completed"
+    assert 'retained_cursor=state["cursors"].get(pool)' in SOURCE
+
+    # The batch-level all-or-nothing cursor assignment is intentionally gone.
+    # A failed signature is retried, while the completed prefix is retained.
+    assert 'state["cursors"][pool] = rows[0]["signature"]' not in SOURCE
+
+    inspect_handlers = [
         node
         for node in ast.walk(TREE)
-        if isinstance(node, ast.If)
-        and isinstance(node.test, ast.Name)
-        and node.test.id == "batch_failed"
-    )
-
-    # A failed batch must not contain an assignment advancing the pool cursor.
-    assert not any(
-        _cursor_assignment(node)
-        for statement in branch.body
-        for node in ast.walk(statement)
-    )
-
-    # Cursor advancement must exist only in the successful else branch.
+        if isinstance(node, ast.ExceptHandler)
+        and isinstance(node.type, ast.Name)
+        and node.type.id == "Exception"
+        and any(
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id == "error_category"
+            for child in ast.walk(node)
+        )
+    ]
     assert any(
-        _cursor_assignment(node)
-        for statement in branch.orelse
-        for node in ast.walk(statement)
+        any(isinstance(child, ast.Break) for child in ast.walk(handler))
+        for handler in inspect_handlers
     )
-
-    failed_source = "\n".join(
-        ast.get_source_segment(SOURCE, statement) or ""
-        for statement in branch.body
-    )
-
-    assert '"BATCH_RETRY"' in failed_source
-    assert "retained_cursor=cursor" in failed_source
 
 
 def test_detector_pagination_reaches_retained_cursor_without_skipping(monkeypatch):
@@ -492,3 +493,69 @@ def test_detector_pending_retry_passes_prestate_coordinates_back_to_processor():
     assert '"target_slot": item.get("target_slot")' in SOURCE
     assert '"active_bin_id": item.get("active_bin_id")' in SOURCE
     assert '"PENDING_PRESTATE"' in SOURCE
+
+
+
+def test_detector_success_path_has_no_fixed_rpc_sleep(monkeypatch):
+    rpc_signatures = _load_function("rpc_signatures")
+    sleeps = []
+    pages = [
+        [
+            {"signature": "sig-2"},
+            {"signature": "sig-1"},
+        ],
+        [],
+    ]
+
+    def fake_urlopen(request, timeout):
+        return _Response(json.dumps({"result": pages.pop(0)}))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(time, "sleep", lambda value: sleeps.append(value))
+
+    rows = rpc_signatures(
+        "pool-address",
+        until="cursor",
+        limit=2,
+    )
+
+    assert [row["signature"] for row in rows] == ["sig-2", "sig-1"]
+    assert sleeps == []
+
+    inspect_transaction = _load_function("inspect_transaction")
+
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps({"signature": command[-1]}),
+            "",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    inspect_transaction("sig-a")
+    inspect_transaction("sig-b")
+
+    assert sleeps == []
+
+
+def test_detector_rate_limit_cooldown_escalates_only_after_rejection():
+    cooldown = _load_function("rate_limit_cooldown_seconds")
+
+    assert cooldown(0) == 0.0
+    assert cooldown(1) == 60.0
+    assert cooldown(2) == 120.0
+    assert cooldown(3) == 300.0
+    assert cooldown(4) == 600.0
+    assert cooldown(5) == 900.0
+    assert cooldown(100) == 900.0
+
+
+def test_detector_has_global_rejection_cooldown_and_baseline_recovery():
+    assert '"RPC_COOLDOWN"' in SOURCE
+    assert "mono < rpc_cooldown_until" in SOURCE
+    assert '"BASELINE_RECOVERED"' in SOURCE
+    assert 'operation="baseline_recovery"' in SOURCE
+    assert 'operation="pending_candidate"' in SOURCE
+    assert 'operation="inspect_transaction"' in SOURCE
+    assert "clear_rate_limit_cooldown()" in SOURCE
