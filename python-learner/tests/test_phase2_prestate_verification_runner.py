@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from meteora_learner.phase2_prestate_verification_runner import (
     run_phase2_prestate_verifications,
 )
+from meteora_learner.phase2_rpc import Phase2RpcRateLimited
 from meteora_learner.storage import Storage
 
 
@@ -338,3 +339,54 @@ def test_prestate_failed_candidate_does_not_starve_unseen_work(
     assert second.candidates_selected == 1
     assert second.verdicts_ingested == 1
     assert called == ["sig-b"]
+
+
+
+def test_prestate_runner_stops_after_first_rpc_rate_limit(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    install_inputs(
+        monkeypatch,
+        items=(
+            work_item(signature="sig-a", ix=1),
+            work_item(signature="sig-b", ix=2),
+        ),
+        candidates=(
+            candidate(signature="sig-a", ix=1),
+            candidate(signature="sig-b", ix=2),
+        ),
+    )
+    called = []
+    secret = "https://secret.example.invalid/?api-key=hidden"
+
+    def runner(command, **kwargs):
+        called.append(command[2])
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            f"HTTP 429 Too Many Requests at {secret}",
+        )
+
+    with pytest.raises(Phase2RpcRateLimited) as excinfo:
+        run_phase2_prestate_verifications(
+            storage,
+            executor_path="/executor",
+            runner=runner,
+        )
+
+    assert str(excinfo.value) == "executor RPC rate limited"
+    assert secret not in str(excinfo.value)
+    assert called == ["sig-a"]
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT task_key, succeeded, outcome_category
+            FROM phase2_collection_task_attempts
+            WHERE stage = 'PRESTATE_VERIFICATION'
+            ORDER BY id
+            """
+        ).fetchall()
+    assert rows == [("sig-a:1", 0, "RPC_RATE_LIMITED")]
