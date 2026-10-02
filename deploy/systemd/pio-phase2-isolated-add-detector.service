@@ -1,0 +1,34 @@
+[Unit]
+Description=Pio Phase 2 isolated read-only add detector
+After=network-online.target pio-phase2-isolated-prestate-stream.service
+Wants=network-online.target pio-phase2-isolated-prestate-stream.service
+Conflicts=pio-phase2-add-detector.service
+ConditionPathIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
+ConditionPathIsExecutable=/opt/pio/python-learner/.venv/bin/python
+ConditionPathIsExecutable=/opt/pio/python-learner/.venv/bin/pio
+
+[Service]
+Type=simple
+User=pio
+Group=pio
+WorkingDirectory=/opt/pio-phase2-runtime/current
+EnvironmentFile=/etc/pio/pio.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/pio-phase2-runtime/current/python-learner/src
+Environment=PIO_PHASE2_RUNTIME_ROOT=/opt/pio-phase2-runtime/current
+Environment=PIO_PHASE2_EXECUTOR=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
+Environment=PIO_PHASE2_PIO_CLI=/opt/pio/python-learner/.venv/bin/pio
+Environment=PIO_PHASE2_DETECTOR_STATE_PATH=/opt/pio/data/phase2-add-detector-state.json
+Environment=PIO_PHASE2_PRESTATE_CACHE_DB=/opt/pio/data/phase2-prestate-cache.db
+ExecStart=/opt/pio/python-learner/.venv/bin/python /opt/pio-phase2-runtime/current/scripts/phase2-add-detector.py
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/pio-phase2-runtime/current
+ReadWritePaths=/opt/pio/data
+
+[Install]
+WantedBy=multi-user.target
