@@ -58,3 +58,31 @@ The top-level `state` is intentionally categorical:
 
 Collector attempt counts are explicitly not Helius/provider credit counts.
 Pio does not infer provider billing from local attempts.
+
+
+## Recovery after automatic rate-limit pause
+
+When the aggregate status reports `RATE_LIMIT_PAUSED`, recurring evidence
+collection is protected from additional timer-triggered RPC work. Do not
+re-enable the timer based only on elapsed time.
+
+Use this sequence from the current control checkout:
+
+1. Run the read-only smoke-readiness gate:
+   `python3 deploy/tools/check_phase2_isolated_smoke_readiness.py`
+2. After the provider/quota condition is known to be restored, run one deliberate
+   bounded smoke:
+   `python3 deploy/tools/run_phase2_isolated_smoke.py --apply`
+3. Require the smoke receipt to contain no failed/skipped stages and no
+   `RPC_RATE_LIMITED` / `RPC_CIRCUIT_OPEN` outcome.
+4. Run the read-only timer readiness gate:
+   `python3 deploy/tools/check_phase2_isolated_timer_readiness.py`
+5. Only when that gate is green, explicitly re-enable the recurring timer:
+   `python3 deploy/tools/activate_phase2_isolated_timer.py --apply`
+6. Re-run
+   `python3 deploy/tools/check_phase2_isolated_operator_status.py`.
+
+This recovery path intentionally spends at most the RPC work of one bounded
+manual smoke before recurring collection is restored. It does not infer provider
+recovery from time alone and does not use local collector-attempt counts as a
+proxy for Helius billing.
