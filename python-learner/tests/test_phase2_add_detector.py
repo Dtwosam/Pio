@@ -390,3 +390,105 @@ def test_detector_pool_config_rejects_invalid_or_duplicate_entries():
         parse("pool-a:0")
     with pytest.raises(ValueError, match="duplicate"):
         parse("pool-a:10,pool-a:20")
+
+
+
+def _load_candidate_processor(**overrides):
+    nodes = [
+        _function("pending_record"),
+        _function("process_candidate"),
+    ]
+    module = ast.Module(body=nodes, type_ignores=[])
+    ast.fix_missing_locations(module)
+
+    namespace = {
+        "now": lambda: "2026-10-02T16:00:00+00:00",
+        "promote_prestate": lambda *args, **kwargs: {"ok": True},
+        "collect_history": lambda position: None,
+        "composition_prestate": lambda position: {"candidates": []},
+        "verify_prestate": lambda candidate: {"eligible": True, "reasons": []},
+        "reconcile": lambda position: {
+            "eligible_samples": 1,
+            "exact_samples": 1,
+            "mismatched_samples": 0,
+        },
+        "phase2_evidence": lambda: None,
+        "log": lambda *args, **kwargs: None,
+        "RpcRateLimited": RuntimeError,
+        "error_category": lambda exc: type(exc).__name__.upper(),
+    }
+    namespace.update(overrides)
+    exec(compile(module, str(DETECTOR), "exec"), namespace)
+    return namespace["process_candidate"]
+
+
+def test_detector_keeps_add_pending_until_cached_prestate_exists():
+    calls = []
+
+    def promote(pool, *, target_slot, active_bin_id):
+        calls.append(("promote", pool, target_slot, active_bin_id))
+        return None
+
+    def history(_position):
+        calls.append(("history",))
+        raise AssertionError("history must not run without cached prestate")
+
+    process_candidate = _load_candidate_processor(
+        promote_prestate=promote,
+        collect_history=history,
+    )
+    state = {"pending": {}, "processed": []}
+
+    process_candidate(
+        state,
+        "pool",
+        "sig",
+        {
+            "position": "position",
+            "target_slot": 123,
+            "active_bin_id": 7,
+        },
+    )
+
+    assert calls == [("promote", "pool", 123, 7)]
+    assert state["processed"] == []
+    assert state["pending"]["sig:position"] == {
+        "pool": "pool",
+        "signature": "sig",
+        "position": "position",
+        "reason": "NO_CACHED_PRESTATE",
+        "last_attempt": "2026-10-02T16:00:00+00:00",
+        "target_slot": 123,
+        "active_bin_id": 7,
+    }
+
+
+def test_detector_pending_metadata_survives_history_lag_after_prestate():
+    process_candidate = _load_candidate_processor(
+        promote_prestate=lambda *args, **kwargs: {"cached": True},
+        composition_prestate=lambda position: {"candidates": []},
+    )
+    state = {"pending": {}, "processed": []}
+
+    process_candidate(
+        state,
+        "pool",
+        "sig",
+        {
+            "position": "position",
+            "target_slot": 456,
+            "active_bin_id": 11,
+        },
+    )
+
+    pending = state["pending"]["sig:position"]
+    assert pending["reason"] == "Meteora history has not exposed target add yet"
+    assert pending["target_slot"] == 456
+    assert pending["active_bin_id"] == 11
+    assert state["processed"] == []
+
+
+def test_detector_pending_retry_passes_prestate_coordinates_back_to_processor():
+    assert '"target_slot": item.get("target_slot")' in SOURCE
+    assert '"active_bin_id": item.get("active_bin_id")' in SOURCE
+    assert '"PENDING_PRESTATE"' in SOURCE
