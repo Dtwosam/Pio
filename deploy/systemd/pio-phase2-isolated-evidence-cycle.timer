@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Pio isolated Phase 2 evidence cycle periodically
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Persistent=true
+Unit=pio-phase2-isolated-evidence-cycle.service
+
+[Install]
+WantedBy=timers.target
