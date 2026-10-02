@@ -217,12 +217,27 @@ def _read_recent_cycles(
 
 def _consecutive_rate_limits(
     cycles: tuple[TimerHealthCycle, ...],
+    *,
+    max_gap_seconds: int,
 ) -> int:
+    if max_gap_seconds <= 0:
+        raise ValueError("max_gap_seconds must be positive")
+
     count = 0
+    previous_time: datetime | None = None
     for cycle in cycles:
         if not cycle.rpc_rate_limited:
             break
+        try:
+            cycle_time = _parse_time(cycle.as_of)
+        except (TypeError, ValueError):
+            break
+        if previous_time is not None:
+            gap = (previous_time - cycle_time).total_seconds()
+            if gap < 0 or gap > max_gap_seconds:
+                break
         count += 1
+        previous_time = cycle_time
     return count
 
 
@@ -348,7 +363,10 @@ def inspect_timer_health(
             and 0 <= latest_age <= max_cycle_age_seconds
         )
 
-    rate_limit_streak = _consecutive_rate_limits(cycles)
+    rate_limit_streak = _consecutive_rate_limits(
+        cycles,
+        max_gap_seconds=max_cycle_age_seconds,
+    )
     latest_failed = bool(
         cycles and cycles[0].status == "COLLECTION_FAILED"
     )
