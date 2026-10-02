@@ -454,3 +454,32 @@ def test_rate_limit_pause_is_not_blocked_by_degraded_sibling_collectors(
     assert report.collection_healthy is False
     assert report.consecutive_rpc_rate_limited == 2
     assert report.pause_recommended is True
+
+
+
+def test_old_rate_limit_incident_does_not_extend_current_streak(
+    tmp_path,
+    monkeypatch,
+):
+    report = inspect(
+        tmp_path,
+        monkeypatch,
+        [
+            cycle(
+                at="2026-10-02T20:20:00+00:00",
+                status="COLLECTION_FAILED",
+                limited=True,
+            ),
+            cycle(
+                at="2026-10-02T18:00:00+00:00",
+                status="COLLECTION_FAILED",
+                limited=True,
+            ),
+        ],
+        threshold=2,
+    )
+
+    assert report.latest_cycle_recent is True
+    assert report.consecutive_rpc_rate_limited == 1
+    assert report.pause_recommended is False
+    assert report.collection_healthy is False
