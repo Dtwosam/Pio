@@ -9,6 +9,10 @@ from pathlib import Path
 import subprocess
 from typing import Any, Callable, Sequence
 
+from .phase2_rpc import (
+    Phase2RpcRateLimited,
+    raise_for_executor_failure,
+)
 from .position_ingest import ingest_position_snapshot
 from .reconciliation_corpus import build_reconciliation_corpus
 from .settings import Settings
@@ -89,10 +93,7 @@ def _run_executor_json(
         check=False,
         timeout=timeout_seconds,
     )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"executor failed with status {completed.returncode}"
-        )
+    raise_for_executor_failure(completed)
     try:
         return json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
@@ -417,6 +418,9 @@ def collect_phase2_position_observations(
         except subprocess.TimeoutExpired:
             fail(position_address, "EXECUTOR_TIMEOUT")
             continue
+        except Phase2RpcRateLimited:
+            fail(position_address, "RPC_RATE_LIMITED")
+            raise
         except RuntimeError:
             fail(position_address, "EXECUTOR_FAILED")
             continue
