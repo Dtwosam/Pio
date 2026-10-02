@@ -21,6 +21,7 @@ from .phase2_prestate_verification_runner import (
     run_phase2_prestate_verifications,
 )
 from .phase2_research_quotes import collect_phase2_research_quotes
+from .phase2_rpc import Phase2RpcRateLimited
 from .reconciliation_corpus import build_reconciliation_corpus
 from .settings import Settings
 from .storage import Storage, utc_now_iso
@@ -135,8 +136,10 @@ def run_phase2_read_only_evidence_cycle(
     """
     Run one bounded, read-only Phase-2 evidence collection step.
 
-    The stages are intentionally independent: a failure in one stage is recorded
-    categorically and does not suppress later read-only collection. The cycle
+    Ordinary stage failures are isolated so later read-only collection can
+    continue. A confirmed RPC rate-limit response is different: it opens a
+    cycle-local circuit that skips later RPC stages rather than spending more
+    rejected requests. Local reconciliation/calibration still runs. The cycle
     never promotes a phase, selects an action, moves capital, touches the
     detector cursor, or controls services.
     """
@@ -145,6 +148,7 @@ def run_phase2_read_only_evidence_cycle(
 
     started_at = now()
     stages: list[Phase2EvidenceCycleStage] = []
+    rpc_circuit_open = False
 
     try:
         quotes = collect_phase2_research_quotes(
@@ -182,6 +186,15 @@ def run_phase2_read_only_evidence_cycle(
             observed_at=now(),
             runner=runner,
         )
+    except Phase2RpcRateLimited:
+        rpc_circuit_open = True
+        stages.append(
+            _stage(
+                name="POSITION_OBSERVATIONS",
+                status="FAILED",
+                failure_category="RPC_RATE_LIMITED",
+            )
+        )
     except Exception:
         stages.append(
             _stage(
@@ -203,63 +216,99 @@ def run_phase2_read_only_evidence_cycle(
             )
         )
 
-    try:
-        reinspection = run_phase2_calibration_reinspection(
-            storage,
-            executor_path=executor_path,
-            max_tasks=max_reinspection_tasks,
-            timeout_seconds=reinspection_timeout_seconds,
-            observed_at=now(),
-            runner=runner,
-        )
-    except Exception:
+    if rpc_circuit_open:
         stages.append(
             _stage(
                 name="TRANSACTION_REINSPECTION",
                 status="FAILED",
-                failure_category="REINSPECTION_STAGE_FAILED",
+                failure_category="RPC_RATE_LIMIT_CIRCUIT_OPEN",
             )
         )
     else:
-        stages.append(
-            _stage(
-                name="TRANSACTION_REINSPECTION",
-                status=(
-                    "PARTIAL"
-                    if reinspection.signatures_failed
-                    else "SUCCESS"
-                ),
-                result=reinspection,
+        try:
+            reinspection = run_phase2_calibration_reinspection(
+                storage,
+                executor_path=executor_path,
+                max_tasks=max_reinspection_tasks,
+                timeout_seconds=reinspection_timeout_seconds,
+                observed_at=now(),
+                runner=runner,
             )
-        )
+        except Phase2RpcRateLimited:
+            rpc_circuit_open = True
+            stages.append(
+                _stage(
+                    name="TRANSACTION_REINSPECTION",
+                    status="FAILED",
+                    failure_category="RPC_RATE_LIMITED",
+                )
+            )
+        except Exception:
+            stages.append(
+                _stage(
+                    name="TRANSACTION_REINSPECTION",
+                    status="FAILED",
+                    failure_category="REINSPECTION_STAGE_FAILED",
+                )
+            )
+        else:
+            stages.append(
+                _stage(
+                    name="TRANSACTION_REINSPECTION",
+                    status=(
+                        "PARTIAL"
+                        if reinspection.signatures_failed
+                        else "SUCCESS"
+                    ),
+                    result=reinspection,
+                )
+            )
 
-    try:
-        verification = run_phase2_prestate_verifications(
-            storage,
-            executor_path=executor_path,
-            max_tasks=max_prestate_tasks,
-            timeout_seconds=prestate_timeout_seconds,
-            observed_at=now(),
-            runner=runner,
-        )
-    except Exception:
+    if rpc_circuit_open:
         stages.append(
             _stage(
                 name="PRESTATE_VERIFICATION",
                 status="FAILED",
-                failure_category="PRESTATE_STAGE_FAILED",
+                failure_category="RPC_RATE_LIMIT_CIRCUIT_OPEN",
             )
         )
     else:
-        stages.append(
-            _stage(
-                name="PRESTATE_VERIFICATION",
-                status=(
-                    "PARTIAL" if verification.failures else "SUCCESS"
-                ),
-                result=verification,
+        try:
+            verification = run_phase2_prestate_verifications(
+                storage,
+                executor_path=executor_path,
+                max_tasks=max_prestate_tasks,
+                timeout_seconds=prestate_timeout_seconds,
+                observed_at=now(),
+                runner=runner,
             )
-        )
+        except Phase2RpcRateLimited:
+            rpc_circuit_open = True
+            stages.append(
+                _stage(
+                    name="PRESTATE_VERIFICATION",
+                    status="FAILED",
+                    failure_category="RPC_RATE_LIMITED",
+                )
+            )
+        except Exception:
+            stages.append(
+                _stage(
+                    name="PRESTATE_VERIFICATION",
+                    status="FAILED",
+                    failure_category="PRESTATE_STAGE_FAILED",
+                )
+            )
+        else:
+            stages.append(
+                _stage(
+                    name="PRESTATE_VERIFICATION",
+                    status=(
+                        "PARTIAL" if verification.failures else "SUCCESS"
+                    ),
+                    result=verification,
+                )
+            )
 
     reconciliation_record = None
     try:
