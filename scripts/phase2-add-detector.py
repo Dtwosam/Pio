@@ -693,11 +693,52 @@ def save_state(state):
     tmp.replace(STATE_PATH)
 
 
+def pending_record(pool, signature, position, reason, add):
+    record = {
+        "pool": pool,
+        "signature": signature,
+        "position": position,
+        "reason": reason,
+        "last_attempt": now(),
+    }
+    if add.get("target_slot") is not None:
+        record["target_slot"] = int(add["target_slot"])
+    if add.get("active_bin_id") is not None:
+        record["active_bin_id"] = int(add["active_bin_id"])
+    return record
+
+
 def process_candidate(state, pool, signature, add):
     position = str(add["position"])
     key = f"{signature}:{position}"
 
     try:
+        target_slot = add.get("target_slot")
+        active_bin_id = add.get("active_bin_id")
+        if target_slot is not None and active_bin_id is not None:
+            promoted = promote_prestate(
+                pool,
+                target_slot=int(target_slot),
+                active_bin_id=int(active_bin_id),
+            )
+            if promoted is None:
+                state["pending"][key] = pending_record(
+                    pool,
+                    signature,
+                    position,
+                    "NO_CACHED_PRESTATE",
+                    add,
+                )
+                log(
+                    "PENDING_PRESTATE",
+                    pool=pool,
+                    signature=signature,
+                    position=position,
+                    target_slot=int(target_slot),
+                    active_bin_id=int(active_bin_id),
+                )
+                return
+
         collect_history(position)
 
         report = composition_prestate(position)
@@ -712,13 +753,13 @@ def process_candidate(state, pool, signature, add):
         )
 
         if candidate is None:
-            state["pending"][key] = {
-                "pool": pool,
-                "signature": signature,
-                "position": position,
-                "reason": "Meteora history has not exposed target add yet",
-                "last_attempt": now(),
-            }
+            state["pending"][key] = pending_record(
+                pool,
+                signature,
+                position,
+                "Meteora history has not exposed target add yet",
+                add,
+            )
             log(
                 "PENDING_HISTORY",
                 pool=pool,
@@ -785,13 +826,13 @@ def process_candidate(state, pool, signature, add):
             )
 
     except RpcRateLimited:
-        state["pending"][key] = {
-            "pool": pool,
-            "signature": signature,
-            "position": position,
-            "reason": "RPC_RATE_LIMITED",
-            "last_attempt": now(),
-        }
+        state["pending"][key] = pending_record(
+            pool,
+            signature,
+            position,
+            "RPC_RATE_LIMITED",
+            add,
+        )
 
         log(
             "CANDIDATE_ERROR",
@@ -804,13 +845,13 @@ def process_candidate(state, pool, signature, add):
 
     except Exception as exc:
         category = error_category(exc)
-        state["pending"][key] = {
-            "pool": pool,
-            "signature": signature,
-            "position": position,
-            "reason": category,
-            "last_attempt": now(),
-        }
+        state["pending"][key] = pending_record(
+            pool,
+            signature,
+            position,
+            category,
+            add,
+        )
 
         log(
             "CANDIDATE_ERROR",
@@ -879,6 +920,8 @@ while True:
                     item["signature"],
                     {
                         "position": item["position"],
+                        "target_slot": item.get("target_slot"),
+                        "active_bin_id": item.get("active_bin_id"),
                     },
                 )
             except RpcRateLimited:
@@ -966,12 +1009,9 @@ while True:
 
                     target_slot = int(tx["slot"])
                     active_bin_id = int(add["active_bin_id"])
-
-                    promote_prestate(
-                        pool,
-                        target_slot=target_slot,
-                        active_bin_id=active_bin_id,
-                    )
+                    candidate_add = dict(add)
+                    candidate_add["target_slot"] = target_slot
+                    candidate_add["active_bin_id"] = active_bin_id
 
                     log(
                         "STANDALONE_ADD",
@@ -990,7 +1030,7 @@ while True:
                         state,
                         pool,
                         signature,
-                        add,
+                        candidate_add,
                     )
 
             if batch_failed:
