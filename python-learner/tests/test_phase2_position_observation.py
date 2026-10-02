@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from meteora_learner.phase2_position_observation import (
+    _position_inspection_args,
     collect_phase2_position_observations,
 )
 from meteora_learner.phase2_rpc_guard import Phase2RpcRateLimited
@@ -70,8 +71,20 @@ def test_observer_uses_env_only_executor_commands_and_saves_all_positions(tmp_pa
                 "positions_returned": 2,
                 "truncated": False,
                 "positions": [
-                    {"position_address": POSITIONS[0]},
-                    {"position_address": POSITIONS[1]},
+                    {
+                        "position_address": POSITIONS[0],
+                        "pool_address": POOL,
+                        "owner": "owner-a",
+                        "lower_bin_id": -1,
+                        "upper_bin_id": 1,
+                    },
+                    {
+                        "position_address": POSITIONS[1],
+                        "pool_address": POOL,
+                        "owner": "owner-b",
+                        "lower_bin_id": -2,
+                        "upper_bin_id": 2,
+                    },
                 ],
             }
         else:
@@ -102,9 +115,23 @@ def test_observer_uses_env_only_executor_commands_and_saves_all_positions(tmp_pa
     assert result.reconciliation_progress.reward_intervals_seen == 0
     assert commands[0][1] == "discover-pool-positions-env"
     assert commands[0][3] == "5000"
-    assert [item[1] for item in commands[1:]] == [
-        "inspect-position-env",
-        "inspect-position-env",
+    assert commands[1:] == [
+        [
+            "/executor",
+            "inspect-position-env",
+            POSITIONS[0],
+            POOL,
+            "-1",
+            "1",
+        ],
+        [
+            "/executor",
+            "inspect-position-env",
+            POSITIONS[1],
+            POOL,
+            "-2",
+            "2",
+        ],
     ]
     with storage.connect() as conn:
         rows = conn.execute(
@@ -963,3 +990,58 @@ def test_observer_stops_remaining_position_calls_after_rpc_rate_limit(tmp_path):
     assert rows == [
         (POSITIONS[0], 0, "RPC_RATE_LIMITED"),
     ]
+
+
+
+def test_position_inspection_args_use_complete_matching_discovery_hint():
+    item = {
+        "position_address": "position",
+        "pool_address": POOL,
+        "lower_bin_id": -5,
+        "upper_bin_id": 7,
+    }
+
+    assert _position_inspection_args(
+        item,
+        pool_address=POOL,
+    ) == (
+        "inspect-position-env",
+        "position",
+        POOL,
+        "-5",
+        "7",
+    )
+
+
+@pytest.mark.parametrize(
+    "item",
+    (
+        {"position_address": "position"},
+        {
+            "position_address": "position",
+            "pool_address": "other-pool",
+            "lower_bin_id": -5,
+            "upper_bin_id": 7,
+        },
+        {
+            "position_address": "position",
+            "pool_address": POOL,
+            "lower_bin_id": "bad",
+            "upper_bin_id": 7,
+        },
+        {
+            "position_address": "position",
+            "pool_address": POOL,
+            "lower_bin_id": 8,
+            "upper_bin_id": 7,
+        },
+    ),
+)
+def test_position_inspection_args_fall_back_when_hint_is_not_safe(item):
+    assert _position_inspection_args(
+        item,
+        pool_address=POOL,
+    ) == (
+        "inspect-position-env",
+        "position",
+    )
