@@ -90,14 +90,36 @@ def build_composition_prestate_candidates(
     candidates: list[CompositionPrestateCandidate] = []
     for row in history:
         signature = str(row["signature"])
-        parent_ix_index = int(row["ix_index"])
+        history_ix_index = int(row["ix_index"])
         pool_address = str(row["pool_address"])
+        resolved_ix_index = store.resolve_add_instruction_index(
+            signature,
+            position_address=position_address,
+            pool_address=pool_address,
+            user_address=str(row["user_address"]),
+            preferred_instruction_index=history_ix_index,
+        )
+        parent_ix_index = (
+            resolved_ix_index
+            if resolved_ix_index is not None
+            else history_ix_index
+        )
         tx = store.transaction_snapshot(signature)
         request = store.add_liquidity_request(signature, parent_ix_index)
         chain_events = store.load_transaction_events(
             signature,
             parent_ix_index=parent_ix_index,
         )
+
+        if request is None:
+            transaction_events = store.load_transaction_events(signature)
+            if any(
+                item["event_type"] == "Rebalancing"
+                and item["position_address"] == position_address
+                for item in transaction_events
+            ):
+                continue
+
         add_event = next(
             (
                 item
