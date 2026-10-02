@@ -102,6 +102,20 @@ def parse_detector_pools(value=None):
 POOLS = parse_detector_pools()
 
 
+def rate_limit_cooldown_seconds(consecutive_rate_limits):
+    if consecutive_rate_limits <= 0:
+        return 0.0
+    schedule = (
+        60.0,
+        120.0,
+        300.0,
+        600.0,
+        900.0,
+    )
+    index = min(consecutive_rate_limits - 1, len(schedule) - 1)
+    return schedule[index]
+
+
 class RpcRateLimited(RuntimeError):
     pass
 
@@ -315,30 +329,13 @@ def rpc_signatures(pool, *, until=None, limit=250):
             accumulated_rows=len(all_rows),
         )
 
-        time.sleep(2.0)
-
     raise RuntimeError(
         f"signature backlog exceeded {max_pages} pages; cursor retained"
     )
 
 def inspect_transaction(signature):
-    # Transaction decoding can lag behind the high-frequency prestate
-    # watcher, so pace these heavier RPC calls conservatively.
-    min_interval = 1.25
-
-    last = getattr(
-        inspect_transaction,
-        "_last_call_monotonic",
-        0.0,
-    )
-
-    remaining = min_interval - (
-        time.monotonic() - last
-    )
-
-    if remaining > 0:
-        time.sleep(remaining)
-
+    # Healthy useful work is not success-throttled. Provider rejection is
+    # handled by explicit 429 backoff below and by the detector-wide cooldown.
     retry_delays = (
         2.0,
         4.0,
@@ -350,10 +347,6 @@ def inspect_transaction(signature):
         1,
         len(retry_delays) + 2,
     ):
-        inspect_transaction._last_call_monotonic = (
-            time.monotonic()
-        )
-
         proc = subprocess.run(
             [
                 RUST,
@@ -623,6 +616,7 @@ def verify_prestate(candidate):
         )
 
     proof = json.loads(proc.stdout)
+    clear_rate_limit_cooldown()
 
     ingest = run(
         [
@@ -691,6 +685,11 @@ def save_state(state):
     tmp = STATE_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2))
     tmp.replace(STATE_PATH)
+
+
+def advance_cursor(state, pool, signature):
+    state["cursors"][pool] = signature
+    save_state(state)
 
 
 def pending_record(pool, signature, position, reason, add):
@@ -862,6 +861,34 @@ def process_candidate(state, pool, signature, add):
         )
 
 
+rate_limit_streak = 0
+rpc_cooldown_until = 0.0
+
+
+def enter_rate_limit_cooldown(*, operation, pool=None):
+    global rate_limit_streak, rpc_cooldown_until
+
+    rate_limit_streak += 1
+    delay = rate_limit_cooldown_seconds(rate_limit_streak)
+    rpc_cooldown_until = time.monotonic() + delay
+
+    fields = {
+        "operation": operation,
+        "consecutive_rate_limits": rate_limit_streak,
+        "sleep_seconds": delay,
+    }
+    if pool is not None:
+        fields["pool"] = pool
+    log("RPC_COOLDOWN", **fields)
+    return delay
+
+
+def clear_rate_limit_cooldown():
+    global rate_limit_streak, rpc_cooldown_until
+    rate_limit_streak = 0
+    rpc_cooldown_until = 0.0
+
+
 state = load_state()
 
 for pool in POOLS:
@@ -889,6 +916,18 @@ for pool in POOLS:
             pool=pool,
             cursor=state["cursors"][pool],
         )
+    except RpcRateLimited:
+        enter_rate_limit_cooldown(
+            operation="baseline",
+            pool=pool,
+        )
+        log(
+            "ERROR",
+            pool=pool,
+            operation="baseline",
+            category="RPC_RATE_LIMITED",
+        )
+        break
     except Exception as exc:
         log(
             "ERROR",
@@ -896,6 +935,8 @@ for pool in POOLS:
             operation="baseline",
             category=error_category(exc),
         )
+    else:
+        clear_rate_limit_cooldown()
 
 
 next_poll = {pool: 0.0 for pool in POOLS}
@@ -903,6 +944,11 @@ next_pending_retry = 0.0
 
 while True:
     mono = time.monotonic()
+
+    if mono < rpc_cooldown_until:
+        remaining = rpc_cooldown_until - mono
+        time.sleep(min(1.0, max(0.25, remaining)))
+        continue
 
     # Retry candidates when the Meteora Data API was behind the chain.
     if mono >= next_pending_retry:
@@ -926,12 +972,19 @@ while True:
                 )
             except RpcRateLimited:
                 save_state(state)
+                enter_rate_limit_cooldown(
+                    operation="pending_candidate",
+                    pool=item["pool"],
+                )
                 log(
                     "PENDING_RETRY_PAUSED",
                     category="RPC_RATE_LIMITED",
                 )
                 break
             save_state(state)
+
+    if time.monotonic() < rpc_cooldown_until:
+        continue
 
     for pool, interval in POOLS.items():
         if mono < next_poll[pool]:
@@ -942,6 +995,39 @@ while True:
         cursor = state["cursors"].get(pool)
 
         if not cursor:
+            try:
+                rows = rpc_signatures(pool, limit=1)
+            except RpcRateLimited:
+                enter_rate_limit_cooldown(
+                    operation="baseline_recovery",
+                    pool=pool,
+                )
+                log(
+                    "ERROR",
+                    pool=pool,
+                    operation="baseline_recovery",
+                    category="RPC_RATE_LIMITED",
+                )
+                break
+            except Exception as exc:
+                log(
+                    "ERROR",
+                    pool=pool,
+                    operation="baseline_recovery",
+                    category=error_category(exc),
+                )
+                continue
+
+            clear_rate_limit_cooldown()
+            state["cursors"][pool] = (
+                rows[0]["signature"] if rows else None
+            )
+            save_state(state)
+            log(
+                "BASELINE_RECOVERED",
+                pool=pool,
+                cursor=state["cursors"][pool],
+            )
             continue
 
         try:
@@ -950,6 +1036,8 @@ while True:
                 until=cursor,
                 limit=1000,
             )
+
+            clear_rate_limit_cooldown()
 
             if not rows:
                 continue
@@ -967,13 +1055,19 @@ while True:
 
             # Oldest -> newest.
             for row in reversed(rows):
-                if row.get("err") is not None:
-                    continue
-
                 signature = row["signature"]
+
+                if row.get("err") is not None:
+                    advance_cursor(
+                        state,
+                        pool,
+                        signature,
+                    )
+                    continue
 
                 try:
                     tx, raw = inspect_transaction(signature)
+                    clear_rate_limit_cooldown()
                 except RpcRateLimited:
                     batch_failed = True
                     rate_limited_batch = True
@@ -992,7 +1086,7 @@ while True:
                         signature=signature,
                         category=error_category(exc),
                     )
-                    continue
+                    break
 
                 adds = standalone_adds(tx, pool)
 
@@ -1033,18 +1127,39 @@ while True:
                         candidate_add,
                     )
 
+                advance_cursor(
+                    state,
+                    pool,
+                    signature,
+                )
+
             if batch_failed:
                 log(
                     "BATCH_RETRY",
                     pool=pool,
-                    retained_cursor=cursor,
+                    retained_cursor=state["cursors"].get(pool),
                     attempted_signatures=len(rows),
                     rate_limited=rate_limited_batch,
                 )
-            else:
-                state["cursors"][pool] = rows[0]["signature"]
-                save_state(state)
+                if rate_limited_batch:
+                    enter_rate_limit_cooldown(
+                        operation="inspect_transaction",
+                        pool=pool,
+                    )
+                    break
 
+        except RpcRateLimited:
+            enter_rate_limit_cooldown(
+                operation="scan",
+                pool=pool,
+            )
+            log(
+                "ERROR",
+                pool=pool,
+                operation="scan",
+                category="RPC_RATE_LIMITED",
+            )
+            break
         except Exception as exc:
             log(
                 "ERROR",
