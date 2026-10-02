@@ -5,7 +5,10 @@ use anchor_client::solana_sdk::commitment_config::CommitmentConfig;
 use anchor_client::solana_sdk::pubkey::Pubkey;
 use anyhow::{Context, Result};
 use serde::Serialize;
-use solana_account_decoder_client_types::UiAccountEncoding;
+use solana_account_decoder_client_types::{
+    UiAccountEncoding,
+    UiDataSliceConfig,
+};
 use solana_client::pubsub_client::PubsubClient;
 use solana_client::rpc_config::RpcAccountInfoConfig;
 
@@ -43,6 +46,19 @@ fn derive_ws_url(rpc_url: &str) -> Result<String> {
 }
 
 
+fn account_subscription_config() -> RpcAccountInfoConfig {
+    RpcAccountInfoConfig {
+        encoding: Some(UiAccountEncoding::Base64),
+        data_slice: Some(UiDataSliceConfig {
+            offset: 0,
+            length: 0,
+        }),
+        commitment: Some(CommitmentConfig::confirmed()),
+        ..RpcAccountInfoConfig::default()
+    }
+}
+
+
 fn watch_account_changes(
     ws_url: &str,
     account_address: &str,
@@ -50,11 +66,7 @@ fn watch_account_changes(
 ) -> Result<()> {
     let account = Pubkey::from_str(account_address)
         .context("invalid account address")?;
-    let config = RpcAccountInfoConfig {
-        encoding: Some(UiAccountEncoding::Base64),
-        commitment: Some(CommitmentConfig::confirmed()),
-        ..RpcAccountInfoConfig::default()
-    };
+    let config = account_subscription_config();
     let (_subscription, receiver) = PubsubClient::account_subscribe(
         ws_url,
         &account,
@@ -168,5 +180,17 @@ mod tests {
     fn rejects_unsupported_or_empty_urls() {
         assert!(derive_ws_url("").is_err());
         assert!(derive_ws_url("ftp://example.invalid").is_err());
+    }
+
+    #[test]
+    fn subscription_requests_no_account_data_bytes() {
+        let config = account_subscription_config();
+        let slice = config.data_slice.expect("data slice");
+        assert_eq!(slice.offset, 0);
+        assert_eq!(slice.length, 0);
+        assert_eq!(
+            config.commitment,
+            Some(CommitmentConfig::confirmed())
+        );
     }
 }
