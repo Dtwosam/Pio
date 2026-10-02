@@ -391,7 +391,11 @@ def main() -> None:
                 watcher.wait(timeout=5)
 
     print(json.dumps(report.to_record(), indent=2))
-    if args.max_notifications == 0 and watcher.returncode not in (0, None):
+    if args.max_notifications == 0:
+        # An unbounded production stream is not expected to end. Exit nonzero
+        # even after a clean websocket close so systemd reconnects.
+        raise SystemExit(2)
+    if watcher.returncode not in (0, None):
         raise SystemExit(2)
 
 
