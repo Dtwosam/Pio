@@ -76,6 +76,10 @@ def make_ready_runtime(tmp_path: Path, monkeypatch) -> Path:
     executor.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     executor.chmod(executor.stat().st_mode | stat.S_IXUSR)
 
+    watcher = source / MODULE.CHECK.WATCH_EXECUTOR_RELATIVE
+    watcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    watcher.chmod(watcher.stat().st_mode | stat.S_IXUSR)
+
     monkeypatch.setattr(MODULE.CHECK, "PINNED_SOURCE_HEAD", head)
     monkeypatch.setattr(MODULE.CHECK, "TRACKED_CONTRACT", contract)
     return source
