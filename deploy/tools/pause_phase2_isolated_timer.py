@@ -96,8 +96,8 @@ def pause_timer(
         runner=runner,
     )
 
-    active_before = health.timer_active_enabled
-    enabled_before = health.timer_active_enabled
+    active_before = health.timer_active
+    enabled_before = health.timer_enabled
 
     if not health.pause_recommended:
         return Phase2TimerPauseReport(
