@@ -364,8 +364,12 @@ def inspect_timer_health(
         and timer_active_enabled
         and legacy_clear
     )
+    # Pausing the recurring evidence timer is a narrower safety action
+    # than declaring the entire collection topology healthy. If sibling
+    # collectors are degraded during an RPC-provider incident, they must not
+    # prevent us from stopping additional rejected timer cycles.
     pause_recommended = bool(
-        topology_ready
+        timer_active_enabled
         and latest_recent
         and rate_limit_streak >= rate_limit_streak_threshold
     )
