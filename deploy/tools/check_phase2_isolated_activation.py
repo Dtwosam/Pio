@@ -99,6 +99,9 @@ class Phase2IsolatedActivationReport:
     env_keys: tuple[ActivationEnvKey, ...]
     position_pool_matches_detector_topology: bool
     detector_pool_count: int
+    detector_state_valid: bool
+    detector_cursor_pools: int
+    detector_cursors_complete: bool
     data_root: str
     data_files: tuple[ActivationDataFile, ...]
     unit_states: tuple[ActivationUnitState, ...]
@@ -159,6 +162,42 @@ def _detector_pools(unit_path: Path) -> set[str]:
                 pools.add(address)
         return pools
     return set()
+
+
+def _detector_state_status(
+    path: Path,
+    *,
+    detector_pools: set[str],
+) -> tuple[bool, int, bool]:
+    if path.is_symlink() or not path.is_file():
+        return False, 0, False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False, 0, False
+    if not isinstance(payload, dict):
+        return False, 0, False
+    cursors = payload.get("cursors")
+    processed = payload.get("processed")
+    pending = payload.get("pending")
+    if (
+        not isinstance(cursors, dict)
+        or not isinstance(processed, list)
+        or not isinstance(pending, dict)
+    ):
+        return False, 0, False
+
+    cursor_count = sum(
+        1
+        for pool in detector_pools
+        if isinstance(cursors.get(pool), str)
+        and bool(cursors[pool].strip())
+    )
+    complete = bool(
+        detector_pools
+        and cursor_count == len(detector_pools)
+    )
+    return True, cursor_count, complete
 
 
 def _systemctl_value(
@@ -288,6 +327,14 @@ def inspect_activation(
         )
         for name in REQUIRED_DATA_FILES
     )
+    (
+        detector_state_valid,
+        detector_cursor_pools,
+        detector_cursors_complete,
+    ) = _detector_state_status(
+        data_path / "phase2-add-detector-state.json",
+        detector_pools=detector_pools,
+    )
 
     units = tuple(
         _unit_state(unit, runner=runner)
@@ -306,6 +353,8 @@ def inspect_activation(
             and not item.symlink
             for item in data_files
         )
+        and detector_state_valid
+        and detector_cursors_complete
         and all(item.ready for item in units)
     )
 
@@ -319,6 +368,9 @@ def inspect_activation(
         env_keys=env_keys,
         position_pool_matches_detector_topology=pool_matches,
         detector_pool_count=len(detector_pools),
+        detector_state_valid=detector_state_valid,
+        detector_cursor_pools=detector_cursor_pools,
+        detector_cursors_complete=detector_cursors_complete,
         data_root=str(data_path),
         data_files=data_files,
         unit_states=units,
