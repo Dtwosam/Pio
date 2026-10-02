@@ -39,7 +39,7 @@ UNIT_CONTRACT = {
     "pio-phase2-isolated-evidence-cycle.timer":
         "e6781b6e7f4d235ec170d7f08d8f9c25414100ef",
     "pio-phase2-isolated-rate-limit-pause.service":
-        "4f3540118072e8608550b6c9f71b2b89f39c00ed",
+        "975ff531569cef7aa90c3f7f7055c4df550598ec",
 }
 
 
