@@ -117,7 +117,7 @@ def test_runtime_checker_requires_executable_event_watch_binary(
 def test_runtime_contract_pins_operational_autopause_surface():
     required = {
         "deploy/tools/autopause_phase2_isolated_timer.py":
-            "362677c1dd0bcbb584caed70be0e1dfc90d28724",
+            "a2b1feeef9a5abd7cb1340a34bce97900b156105",
         "deploy/systemd/pio-phase2-isolated-prestate-stream@.service":
             "4270a0c7b3aec8844ae9f06c6a073aa7b9d247af",
         "deploy/systemd/pio-phase2-isolated-add-detector.service":
