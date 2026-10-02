@@ -1,0 +1,147 @@
+diff --git a/python-learner/src/meteora_learner/calibration_queue.py b/python-learner/src/meteora_learner/calibration_queue.py
+index d22786a..d0c5721 100644
+--- a/python-learner/src/meteora_learner/calibration_queue.py
++++ b/python-learner/src/meteora_learner/calibration_queue.py
+@@ -128,11 +128,30 @@ def add_item(item: CalibrationWorkItem) -> None:
+                 )
+                 continue
+ 
+-            request = store.add_liquidity_request(signature, ix)
++            resolved_ix = store.resolve_add_instruction_index(
++                signature,
++                position_address=position,
++                pool_address=str(row["pool_address"]),
++                user_address=str(row["user_address"]),
++                preferred_instruction_index=ix,
++            )
++            chain_ix = resolved_ix if resolved_ix is not None else ix
++
++            request = store.add_liquidity_request(signature, chain_ix)
+             events = store.load_transaction_events(
+                 signature,
+-                parent_ix_index=ix,
++                parent_ix_index=chain_ix,
+             )
++
++            if request is None:
++                transaction_events = store.load_transaction_events(signature)
++                if any(
++                    item["event_type"] == "Rebalancing"
++                    and item["position_address"] == position
++                    for item in transaction_events
++                ):
++                    continue
++
+             add_event = next(
+                 (
+                     item
+@@ -148,7 +167,7 @@ def add_item(item: CalibrationWorkItem) -> None:
+                         task_type="REINSPECT_TRANSACTION",
+                         position_address=position,
+                         signature=signature,
+-                        instruction_index=ix,
++                        instruction_index=chain_ix,
+                         reason=(
+                             "stored transaction predates the current add request/event decoder "
+                             "or uses an unsupported instruction"
+diff --git a/python-learner/src/meteora_learner/composition_prestate.py b/python-learner/src/meteora_learner/composition_prestate.py
+index feb13b8..85ab78d 100644
+--- a/python-learner/src/meteora_learner/composition_prestate.py
++++ b/python-learner/src/meteora_learner/composition_prestate.py
+@@ -90,14 +90,36 @@ def build_composition_prestate_candidates(
+     candidates: list[CompositionPrestateCandidate] = []
+     for row in history:
+         signature = str(row["signature"])
+-        parent_ix_index = int(row["ix_index"])
++        history_ix_index = int(row["ix_index"])
+         pool_address = str(row["pool_address"])
++        resolved_ix_index = store.resolve_add_instruction_index(
++            signature,
++            position_address=position_address,
++            pool_address=pool_address,
++            user_address=str(row["user_address"]),
++            preferred_instruction_index=history_ix_index,
++        )
++        parent_ix_index = (
++            resolved_ix_index
++            if resolved_ix_index is not None
++            else history_ix_index
++        )
+         tx = store.transaction_snapshot(signature)
+         request = store.add_liquidity_request(signature, parent_ix_index)
+         chain_events = store.load_transaction_events(
+             signature,
+             parent_ix_index=parent_ix_index,
+         )
++
++        if request is None:
++            transaction_events = store.load_transaction_events(signature)
++            if any(
++                item["event_type"] == "Rebalancing"
++                and item["position_address"] == position_address
++                for item in transaction_events
++            ):
++                continue
++
+         add_event = next(
+             (
+                 item
+diff --git a/python-learner/src/meteora_learner/research_store.py b/python-learner/src/meteora_learner/research_store.py
+index c9b9de5..d3ffb88 100644
+--- a/python-learner/src/meteora_learner/research_store.py
++++ b/python-learner/src/meteora_learner/research_store.py
+@@ -496,6 +496,54 @@ def add_liquidity_request(
+             conn.close()
+         return dict(row) if row is not None else None
+ 
++    def resolve_add_instruction_index(
++        self,
++        signature: str,
++        *,
++        position_address: str,
++        pool_address: str | None = None,
++        user_address: str | None = None,
++        preferred_instruction_index: int | None = None,
++    ) -> int | None:
++        """
++        Resolve a Meteora API add-event index to the on-chain parent instruction.
++
++        The Data API ixIndex is not guaranteed to equal Solana outer instruction
++        index for routed/CPI transactions. Prefer an exact matching parent index;
++        otherwise resolve only when exactly one decoded AddLiquidity event matches
++        the same signature, position, pool, and user.
++        """
++        events = self.load_transaction_events(signature)
++        matches = []
++        for event in events:
++            if event["event_type"] != "AddLiquidity":
++                continue
++            if str(event.get("position_address") or "") != position_address:
++                continue
++            if (
++                pool_address is not None
++                and str(event.get("lb_pair") or "") != pool_address
++            ):
++                continue
++            if (
++                user_address is not None
++                and str(event.get("from_address") or "") != user_address
++            ):
++                continue
++            matches.append(event)
++
++        parent_indices = sorted(
++            {int(event["parent_ix_index"]) for event in matches}
++        )
++        if (
++            preferred_instruction_index is not None
++            and preferred_instruction_index in parent_indices
++        ):
++            return preferred_instruction_index
++        if len(parent_indices) == 1:
++            return parent_indices[0]
++        return None
++
+     def pool_capture_before_slot(
+         self,
+         pool_address: str,
