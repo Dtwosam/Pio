@@ -48,6 +48,8 @@ class Phase2TimerReadinessReport:
     progress_evidence_id: int | None
     evidence_row_present: bool
     evidence_row_matches_receipt: bool
+    latest_progress_evidence_id: int | None
+    receipt_is_latest_for_pool: bool
     evidence_row_non_qualified: bool
     evidence_row_no_promotion: bool
     timer_ready: bool
@@ -133,6 +135,36 @@ def _read_progress_row(
     }
 
 
+def _latest_progress_id(
+    database_path: Path,
+    *,
+    pool_address: str,
+) -> int | None:
+    if (
+        not pool_address
+        or database_path.is_symlink()
+        or not database_path.is_file()
+    ):
+        return None
+    uri = f"file:{database_path.resolve()}?mode=ro"
+    try:
+        with sqlite3.connect(uri, uri=True) as conn:
+            row = conn.execute(
+                """
+                SELECT id
+                FROM advanced_edge_evidence
+                WHERE edge_type = ?
+                  AND pool_address = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (PROGRESS_EDGE_TYPE, pool_address),
+            ).fetchone()
+    except sqlite3.Error:
+        return None
+    return int(row[0]) if row is not None else None
+
+
 def inspect_timer_readiness(
     *,
     runtime_root: str | Path = "/opt/pio-phase2-runtime",
@@ -208,10 +240,20 @@ def inspect_timer_readiness(
     )
     row_present = row is not None
     row_matches = False
+    latest_progress_id: int | None = None
+    receipt_is_latest = False
     row_non_qualified = False
     row_no_promotion = False
 
     if row is not None and payload is not None:
+        latest_progress_id = _latest_progress_id(
+            Path(data_root) / "pio.db",
+            pool_address=str(row["pool_address"]),
+        )
+        receipt_is_latest = (
+            latest_progress_id is not None
+            and latest_progress_id == evidence_id
+        )
         row_matches = bool(
             row["id"] == evidence_id
             and row["edge_type"] == PROGRESS_EDGE_TYPE
@@ -241,6 +283,7 @@ def inspect_timer_readiness(
         and stages_valid
         and row_present
         and row_matches
+        and receipt_is_latest
         and row_non_qualified
         and row_no_promotion
     )
@@ -256,6 +299,8 @@ def inspect_timer_readiness(
         progress_evidence_id=evidence_id,
         evidence_row_present=row_present,
         evidence_row_matches_receipt=row_matches,
+        latest_progress_evidence_id=latest_progress_id,
+        receipt_is_latest_for_pool=receipt_is_latest,
         evidence_row_non_qualified=row_non_qualified,
         evidence_row_no_promotion=row_no_promotion,
         timer_ready=ready,
