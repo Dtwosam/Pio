@@ -181,6 +181,41 @@ def _save_discovery_cache(
             temp.unlink()
 
 
+def _position_inspection_args(
+    item: dict[str, Any],
+    *,
+    pool_address: str,
+) -> tuple[str, ...]:
+    position_address = str(item.get("position_address", "")).strip()
+    if not position_address:
+        raise ValueError("position discovery entry is missing position_address")
+
+    discovered_pool = str(item.get("pool_address", "")).strip()
+    lower_raw = item.get("lower_bin_id")
+    upper_raw = item.get("upper_bin_id")
+    if (
+        discovered_pool == pool_address
+        and lower_raw is not None
+        and upper_raw is not None
+    ):
+        try:
+            lower_bin_id = int(lower_raw)
+            upper_bin_id = int(upper_raw)
+        except (TypeError, ValueError):
+            pass
+        else:
+            if lower_bin_id <= upper_bin_id:
+                return (
+                    "inspect-position-env",
+                    position_address,
+                    discovered_pool,
+                    str(lower_bin_id),
+                    str(upper_bin_id),
+                )
+
+    return ("inspect-position-env", position_address)
+
+
 def _require_single_capture_slot(snapshot: dict[str, Any]) -> int:
     start_raw = snapshot.get("capture_slot_start")
     end_raw = snapshot.get("capture_slot_end")
@@ -411,7 +446,10 @@ def collect_phase2_position_observations(
         try:
             snapshot = _run_executor_json(
                 executor_path,
-                ("inspect-position-env", position_address),
+                _position_inspection_args(
+                    item,
+                    pool_address=pool_address,
+                ),
                 timeout_seconds=timeout_seconds,
                 runner=runner,
             )
