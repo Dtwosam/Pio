@@ -93,7 +93,7 @@
     },
     {
       "pr": 728,
-      "head": "305818f63ba81d51b86d8d0df451e66fc2fc3b34",
+      "head": "8cf55a650af9b7b1f3ad93910ac98bf3e406fd52",
       "role": "event-driven prestate refresh via standalone pool account watcher binary"
     }
   ],
@@ -106,10 +106,11 @@
     "complete, non-truncated pool-position discovery is cached operationally for one hour by default; position inspection throughput is unchanged and the cache can be disabled with PIO_PHASE2_POSITION_DISCOVERY_CACHE_SECONDS=0",
     "confirmed Solana RPC rate-limit responses stop the current network stage and skip later Solana RPC stages in the same cycle while database-only reconciliation and calibration continue",
     "prospective prestates can be maintained from pool account-change notifications: one initial baseline plus one refresh after observed changes, preserving the existing prestate cache schema without continuous successful HTTP polling",
-    "the pool account WebSocket watcher is a separate Rust binary so the historically pinned meteora-executor main.rs remains byte-for-byte unchanged"
+    "the pool account WebSocket watcher is a separate Rust binary so the historically pinned meteora-executor main.rs remains byte-for-byte unchanged",
+    "the account-change subscription requests a zero-length account data slice because the prestate trigger needs only notification slot metadata"
   ],
   "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER",
-  "deployment_target_ref": "305818f63ba81d51b86d8d0df451e66fc2fc3b34",
+  "deployment_target_ref": "8cf55a650af9b7b1f3ad93910ac98bf3e406fd52",
   "deployment_base_ref": "45d7f6b2f44a2e621d1d8c34220dd61d3a413b9b",
   "deployment_files": [
     "python-learner/src/meteora_learner/calibration_queue.py",
@@ -153,7 +154,7 @@
     "rust-executor/src/main.rs": "96ecb4479482d146abbecafc53466b93fa452d80",
     "python-learner/src/meteora_learner/phase2_rpc_guard.py": "36277db7d701e34bb765b5be97b0ad757d784899",
     "python-learner/src/meteora_learner/phase2_event_prestate.py": "c06e4e20b851ffe21730723cf873a623d1710d70",
-    "rust-executor/src/bin/pio-phase2-account-watch.rs": "da66d5571f9a38253784a70a714cc1ff27f68bab"
+    "rust-executor/src/bin/pio-phase2-account-watch.rs": "29ebea566a9ed4599b6dbe1a486a2ce509412995"
   },
   "deployment_base_file_blobs": {
     "python-learner/src/meteora_learner/calibration_queue.py": "daacbd260b4ce5175742232f4a03065e94eaaf97",
