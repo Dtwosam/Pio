@@ -39,6 +39,7 @@ def test_rate_limit_pause_service_is_local_only_and_not_enableable():
     text = PAUSE_SERVICE.read_text(encoding="utf-8")
 
     assert "Type=oneshot" in text
+    assert "TimeoutStartSec=60s" in text
     assert "User=root" in text
     assert "Group=root" in text
     assert "PrivateNetwork=true" in text
@@ -69,7 +70,7 @@ def test_installer_pins_failure_hook_units_exactly():
     )
     assert contract[
         "pio-phase2-isolated-rate-limit-pause.service"
-    ] == "4f3540118072e8608550b6c9f71b2b89f39c00ed"
+    ] == "975ff531569cef7aa90c3f7f7055c4df550598ec"
 
     assert MODULE.git_blob_sha(EVIDENCE_SERVICE) == contract[
         "pio-phase2-isolated-evidence-cycle.service"
