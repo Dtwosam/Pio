@@ -4,6 +4,7 @@ After=network-online.target
 Wants=network-online.target
 Conflicts=pio-phase2-prestate-watch.service
 ConditionPathIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
+ConditionPathIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/pio-phase2-account-watch
 
 [Service]
 Type=simple
@@ -13,7 +14,7 @@ WorkingDirectory=/opt/pio-phase2-runtime/current
 EnvironmentFile=/etc/pio/pio.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONPATH=/opt/pio-phase2-runtime/current/python-learner/src
-ExecStart=/opt/pio/python-learner/.venv/bin/python -m meteora_learner.phase2_event_prestate --executor /opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor --cache-database /opt/pio/data/phase2-prestate-cache.db
+ExecStart=/opt/pio/python-learner/.venv/bin/python -m meteora_learner.phase2_event_prestate --executor /opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor --watch-executor /opt/pio-phase2-runtime/current/rust-executor/target/release/pio-phase2-account-watch --cache-database /opt/pio/data/phase2-prestate-cache.db
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true
