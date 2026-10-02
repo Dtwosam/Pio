@@ -73,10 +73,10 @@ def sha256(path: Path) -> str:
 
 def _source_tree(value: str | Path) -> Path:
     source = Path(value).resolve()
-    if not source.is_dir():
-        raise ValueError(f"source tree is missing: {source}")
     if source == Path("/opt/pio").resolve():
         raise ValueError("compatibility patch must not be applied directly to /opt/pio")
+    if not source.is_dir():
+        raise ValueError(f"source tree is missing: {source}")
     return source
 
 
