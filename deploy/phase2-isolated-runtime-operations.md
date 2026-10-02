@@ -25,3 +25,64 @@ provider rate-limit evidence.
 This separation prevents a runtime self-validation loop from interfering with
 the emergency pause path while keeping all deployment mutations behind the
 reviewed control checkout.
+
+
+## Zero-RPC operator status
+
+Use the control checkout to inspect the whole isolated Phase-2 operating state
+without spending provider credits:
+
+```bash
+python3 deploy/tools/check_phase2_isolated_operator_status.py
+```
+
+The aggregate status combines the running timer-health view with the local
+RPC-efficiency/autopause view. It reads only local files, SQLite, safe
+non-secret environment metadata, and systemd state. It does not call RPC,
+write the database, or control services.
+
+The top-level `state` is intentionally categorical:
+
+- `HEALTHY`: topology is complete, the timer is running, the latest cycle is
+  fresh, and there is no active provider-rate-limit incident.
+- `RATE_LIMIT_PAUSE_REQUIRED`: repeated fresh provider rejection is present
+  while the recurring timer can still schedule more cycles.
+- `RATE_LIMIT_PAUSED`: repeated fresh provider rejection is present and the
+  recurring timer is already disabled/inactive.
+- `TOPOLOGY_NOT_READY`: runtime, installed-unit, environment, detector,
+  stream, data-state, or legacy-collector isolation checks are not all ready.
+- `TIMER_NOT_RUNNING`: the non-rate-limited topology is ready but the bounded
+  recurring evidence timer is not both active and enabled.
+- `COLLECTION_ATTENTION`: topology/timer are running but recent collection is
+  stale, failed, or otherwise not healthy.
+
+Collector attempt counts are explicitly not Helius/provider credit counts.
+Pio does not infer provider billing from local attempts.
+
+
+## Recovery after automatic rate-limit pause
+
+When the aggregate status reports `RATE_LIMIT_PAUSED`, recurring evidence
+collection is protected from additional timer-triggered RPC work. Do not
+re-enable the timer based only on elapsed time.
+
+Use this sequence from the current control checkout:
+
+1. Run the read-only smoke-readiness gate:
+   `python3 deploy/tools/check_phase2_isolated_smoke_readiness.py`
+2. After the provider/quota condition is known to be restored, run one deliberate
+   bounded smoke:
+   `python3 deploy/tools/run_phase2_isolated_smoke.py --apply`
+3. Require the smoke receipt to contain no failed/skipped stages and no
+   `RPC_RATE_LIMITED` / `RPC_CIRCUIT_OPEN` outcome.
+4. Run the read-only timer readiness gate:
+   `python3 deploy/tools/check_phase2_isolated_timer_readiness.py`
+5. Only when that gate is green, explicitly re-enable the recurring timer:
+   `python3 deploy/tools/activate_phase2_isolated_timer.py --apply`
+6. Re-run
+   `python3 deploy/tools/check_phase2_isolated_operator_status.py`.
+
+This recovery path intentionally spends at most the RPC work of one bounded
+manual smoke before recurring collection is restored. It does not infer provider
+recovery from time alone and does not use local collector-attempt counts as a
+proxy for Helius billing.
