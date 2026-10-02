@@ -54,6 +54,7 @@ NEW_INACTIVE_UNITS = (
     "pio-phase2-isolated-prestate-stream@DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf.service",
     "pio-phase2-isolated-evidence-cycle.service",
     "pio-phase2-isolated-evidence-cycle.timer",
+    "pio-phase2-isolated-rate-limit-pause.service",
 )
 
 MUST_BE_DISABLED = (

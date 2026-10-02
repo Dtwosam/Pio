@@ -1,0 +1,20 @@
+[Unit]
+Description=Pio Phase 2 pause recurring evidence after repeated RPC rate limits
+After=pio-phase2-isolated-evidence-cycle.service
+ConditionPathIsRegular=/opt/pio-phase2-runtime/current/deploy/tools/pause_phase2_isolated_timer.py
+
+[Service]
+Type=oneshot
+TimeoutStartSec=60s
+User=root
+Group=root
+WorkingDirectory=/opt/pio-phase2-runtime/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/pio/python-learner/.venv/bin/python /opt/pio-phase2-runtime/current/deploy/tools/pause_phase2_isolated_timer.py --apply
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectSystem=true
+RestrictAddressFamilies=AF_UNIX
+ReadOnlyPaths=/opt/pio-phase2-runtime/current /opt/pio/data /etc/pio/pio.env
