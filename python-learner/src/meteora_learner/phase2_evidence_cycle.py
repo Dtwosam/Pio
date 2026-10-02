@@ -554,7 +554,10 @@ def build_phase2_evidence_cycle_progress(
             for stage in report.stages
         ),
         rpc_circuit_open=any(
-            stage.failure_category == "RPC_CIRCUIT_OPEN"
+            stage.failure_category in {
+                "RPC_RATE_LIMITED",
+                "RPC_CIRCUIT_OPEN",
+            }
             for stage in report.stages
         ),
         reconciliation=_compact_reconciliation(
