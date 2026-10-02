@@ -93,10 +93,11 @@
     "storage keeps PR12 position capture slots plus PR43 append-only observer attempt ledger and PR31 bounded-task attempt ledger",
     "quote and position observer failures are categorical and do not expose raw transport/RPC error text",
     "neutral position collection reserves revisit capacity when budget permits so fee/reward intervals can accumulate without starving exploration",
-    "complete, non-truncated pool-position discovery is cached operationally for one hour by default; position inspection throughput is unchanged and the cache can be disabled with PIO_PHASE2_POSITION_DISCOVERY_CACHE_SECONDS=0"
+    "complete, non-truncated pool-position discovery is cached operationally for one hour by default; position inspection throughput is unchanged and the cache can be disabled with PIO_PHASE2_POSITION_DISCOVERY_CACHE_SECONDS=0",
+    "confirmed Solana RPC rate-limit responses stop the current network stage and skip later Solana RPC stages in the same cycle while database-only reconciliation and calibration continue"
   ],
   "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER",
-  "deployment_target_ref": "b40b915d5aa24db805522eccebf22056c7128c34",
+  "deployment_target_ref": "ff61d82ce560fcb5d2087b01e05364b35501dcc6",
   "deployment_base_ref": "45d7f6b2f44a2e621d1d8c34220dd61d3a413b9b",
   "deployment_files": [
     "python-learner/src/meteora_learner/calibration_queue.py",
@@ -110,6 +111,7 @@
     "python-learner/src/meteora_learner/phase2_position_observation.py",
     "python-learner/src/meteora_learner/phase2_prestate_verification_runner.py",
     "python-learner/src/meteora_learner/phase2_research_quotes.py",
+    "python-learner/src/meteora_learner/phase2_rpc_guard.py",
     "python-learner/src/meteora_learner/position_ingest.py",
     "python-learner/src/meteora_learner/reconciliation.py",
     "python-learner/src/meteora_learner/reconciliation_corpus.py",
@@ -123,18 +125,19 @@
     "python-learner/src/meteora_learner/cli.py": "38fb5c01c9cd92a2befa68ee57530e280829307c",
     "python-learner/src/meteora_learner/composition_prestate.py": "feb13b8ea90af0875f85f6a4b955ee145193d4e4",
     "python-learner/src/meteora_learner/composition_reconciliation.py": "4114c1e617d017c0ec79144558d6b7a8599140fa",
-    "python-learner/src/meteora_learner/phase2_calibration_reinspection.py": "513e15c7c433473466291182cdbf22c74ea332bc",
-    "python-learner/src/meteora_learner/phase2_evidence_cycle.py": "87effbf19170b5b4ed64cd3be8803e0ef78d444a",
+    "python-learner/src/meteora_learner/phase2_calibration_reinspection.py": "189fc19d7b77d3bad5d8a1739378b223f6abcb1d",
+    "python-learner/src/meteora_learner/phase2_evidence_cycle.py": "3517a7aa99e6627f535bd2ea63f6813720d2a8af",
     "python-learner/src/meteora_learner/phase2_gate.py": "150bce004151d9487296405e0a64dbfc31638e1b",
-    "python-learner/src/meteora_learner/phase2_position_observation.py": "dc90962adf42acfc039b67818c9e446a0d0f3d27",
-    "python-learner/src/meteora_learner/phase2_prestate_verification_runner.py": "071a5b201cb048a0bda7c2b7a4c9b7ebf70409bb",
+    "python-learner/src/meteora_learner/phase2_position_observation.py": "71855a97c0dfe1f7c8db5df6c336e99584623a7c",
+    "python-learner/src/meteora_learner/phase2_prestate_verification_runner.py": "4686b2fc8da6b97225de7cfb248155f163a287c5",
     "python-learner/src/meteora_learner/phase2_research_quotes.py": "c85cc56ce9185bf476f9cef06d74fd17153155de",
     "python-learner/src/meteora_learner/position_ingest.py": "b2d36cad088001f214a7a2f97793ac72f267aeb3",
     "python-learner/src/meteora_learner/reconciliation.py": "ffa388e223baa1bdb6aa4375d5f09f33d20827f3",
     "python-learner/src/meteora_learner/reconciliation_corpus.py": "ad0f1ea02ad684028e48374f4a07079946ddb0d1",
     "python-learner/src/meteora_learner/research_store.py": "c9b9de5838d95a86bddffa6166b4d7a62e91cf16",
     "python-learner/src/meteora_learner/storage.py": "39bcc99413df357b89d261e854861e9e4a3fff23",
-    "rust-executor/src/main.rs": "96ecb4479482d146abbecafc53466b93fa452d80"
+    "rust-executor/src/main.rs": "96ecb4479482d146abbecafc53466b93fa452d80",
+    "python-learner/src/meteora_learner/phase2_rpc_guard.py": "36277db7d701e34bb765b5be97b0ad757d784899"
   },
   "deployment_base_file_blobs": {
     "python-learner/src/meteora_learner/calibration_queue.py": "daacbd260b4ce5175742232f4a03065e94eaaf97",
@@ -153,7 +156,8 @@
     "python-learner/src/meteora_learner/reconciliation_corpus.py": "aca05f30643648887e53b4a18624acdb03e9e458",
     "python-learner/src/meteora_learner/research_store.py": "16a86b63272ad48f4c185b39ecc2e0c14276ff9f",
     "python-learner/src/meteora_learner/storage.py": "0436cb1cadd073702ae7dad702fc4eb4241845d6",
-    "rust-executor/src/main.rs": "f82b0460eebd06ea99e6a7a56a90817eed027c6f"
+    "rust-executor/src/main.rs": "f82b0460eebd06ea99e6a7a56a90817eed027c6f",
+    "python-learner/src/meteora_learner/phase2_rpc_guard.py": null
   },
   "deployment_source_tree_required": true,
   "deployment_guard_apply_locked": true
