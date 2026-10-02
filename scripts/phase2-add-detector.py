@@ -48,6 +48,40 @@ POOLS = {
 }
 
 
+class RpcRateLimited(RuntimeError):
+    pass
+
+
+def is_rate_limited_text(value):
+    text = str(value or "").casefold()
+    return any(
+        marker in text
+        for marker in (
+            "429 too many requests",
+            "http 429",
+            "http status 429",
+            "status code: 429",
+            "status code 429",
+            "too many requests",
+            "rate limit",
+            "rate-limit",
+            "ratelimit",
+        )
+    )
+
+
+def error_category(exc):
+    if isinstance(exc, RpcRateLimited):
+        return "RPC_RATE_LIMITED"
+    if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+        return "RPC_RATE_LIMITED"
+    if is_rate_limited_text(exc):
+        return "RPC_RATE_LIMITED"
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "EXECUTOR_TIMEOUT"
+    return type(exc).__name__.upper()
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -124,11 +158,10 @@ def rpc_signatures(pool, *, until=None, limit=250):
                     reply = json.load(response)
 
             except urllib.error.HTTPError as exc:
-                if (
-                    exc.code != 429
-                    or attempt > len(retry_delays)
-                ):
+                if exc.code != 429:
                     raise
+                if attempt > len(retry_delays):
+                    raise RpcRateLimited("RPC_RATE_LIMITED") from None
 
                 delay = retry_delays[attempt - 1]
 
@@ -164,25 +197,29 @@ def rpc_signatures(pool, *, until=None, limit=250):
                     else None
                 )
 
-                if (
-                    code == 429
-                    and attempt <= len(retry_delays)
-                ):
-                    delay = retry_delays[attempt - 1]
+                if code == 429:
+                    if attempt <= len(retry_delays):
+                        delay = retry_delays[attempt - 1]
 
-                    log(
-                        "RPC_BACKOFF",
-                        operation="getSignaturesForAddress",
-                        pool=pool,
-                        page=page_number,
-                        attempt=attempt,
-                        sleep_seconds=delay,
-                    )
+                        log(
+                            "RPC_BACKOFF",
+                            operation="getSignaturesForAddress",
+                            pool=pool,
+                            page=page_number,
+                            attempt=attempt,
+                            sleep_seconds=delay,
+                        )
 
-                    time.sleep(delay)
-                    continue
+                        time.sleep(delay)
+                        continue
+                    raise RpcRateLimited("RPC_RATE_LIMITED")
 
-                raise RuntimeError(error)
+                category = (
+                    f"RPC_ERROR_{code}"
+                    if code is not None
+                    else "RPC_RESPONSE_ERROR"
+                )
+                raise RuntimeError(category)
 
             page = reply.get("result") or []
             break
@@ -286,33 +323,27 @@ def inspect_transaction(signature):
             + (proc.stdout or "")
         )
 
-        rate_limited = (
-            "429" in error_text
-            or "too many requests" in error_text.lower()
-            or "rate limit" in error_text.lower()
-            or "ratelimit" in error_text.lower()
-        )
+        rate_limited = is_rate_limited_text(error_text)
 
-        if (
-            rate_limited
-            and attempt <= len(retry_delays)
-        ):
-            delay = retry_delays[attempt - 1]
+        if rate_limited:
+            if attempt <= len(retry_delays):
+                delay = retry_delays[attempt - 1]
 
-            log(
-                "RPC_BACKOFF",
-                operation="inspect_transaction",
-                signature=signature,
-                attempt=attempt,
-                sleep_seconds=delay,
-            )
+                log(
+                    "RPC_BACKOFF",
+                    operation="inspect_transaction",
+                    signature=signature,
+                    attempt=attempt,
+                    sleep_seconds=delay,
+                )
 
-            time.sleep(delay)
-            continue
+                time.sleep(delay)
+                continue
+            raise RpcRateLimited("RPC_RATE_LIMITED")
 
         raise RuntimeError(
-            "inspect-transaction-events failed: "
-            + error_text.strip()[:1000]
+            "inspect-transaction-events failed with status "
+            f"{proc.returncode}"
         )
 
     raise RuntimeError(
@@ -530,9 +561,11 @@ def verify_prestate(candidate):
     # The verifier may return nonzero for an ineligible proof while still
     # returning a useful JSON proof. Preserve that proof if present.
     if not proc.stdout.strip():
+        error_text = (proc.stderr or "") + "\n" + (proc.stdout or "")
+        if is_rate_limited_text(error_text):
+            raise RpcRateLimited("RPC_RATE_LIMITED")
         raise RuntimeError(
-            f"verify-prestate produced no proof: "
-            f"{proc.stderr.strip()[:1000]}"
+            "verify-prestate produced no proof"
         )
 
     proof = json.loads(proc.stdout)
@@ -697,12 +730,12 @@ def process_candidate(state, pool, signature, add):
                 evidence_gaps=evidence.get("evidence_gaps"),
             )
 
-    except Exception as exc:
+    except RpcRateLimited:
         state["pending"][key] = {
             "pool": pool,
             "signature": signature,
             "position": position,
-            "reason": f"{type(exc).__name__}: {exc}",
+            "reason": "RPC_RATE_LIMITED",
             "last_attempt": now(),
         }
 
@@ -711,7 +744,26 @@ def process_candidate(state, pool, signature, add):
             pool=pool,
             signature=signature,
             position=position,
-            error=f"{type(exc).__name__}: {exc}",
+            category="RPC_RATE_LIMITED",
+        )
+        raise
+
+    except Exception as exc:
+        category = error_category(exc)
+        state["pending"][key] = {
+            "pool": pool,
+            "signature": signature,
+            "position": position,
+            "reason": category,
+            "last_attempt": now(),
+        }
+
+        log(
+            "CANDIDATE_ERROR",
+            pool=pool,
+            signature=signature,
+            position=position,
+            category=category,
         )
 
 
@@ -747,7 +799,7 @@ for pool in POOLS:
             "ERROR",
             pool=pool,
             operation="baseline",
-            error=f"{type(exc).__name__}: {exc}",
+            category=error_category(exc),
         )
 
 
@@ -766,14 +818,22 @@ while True:
                 state["pending"].pop(key, None)
                 continue
 
-            process_candidate(
-                state,
-                item["pool"],
-                item["signature"],
-                {
-                    "position": item["position"],
-                },
-            )
+            try:
+                process_candidate(
+                    state,
+                    item["pool"],
+                    item["signature"],
+                    {
+                        "position": item["position"],
+                    },
+                )
+            except RpcRateLimited:
+                save_state(state)
+                log(
+                    "PENDING_RETRY_PAUSED",
+                    category="RPC_RATE_LIMITED",
+                )
+                break
             save_state(state)
 
     for pool, interval in POOLS.items():
@@ -806,6 +866,7 @@ while True:
             )
 
             batch_failed = False
+            rate_limited_batch = False
 
             # Oldest -> newest.
             for row in reversed(rows):
@@ -816,13 +877,23 @@ while True:
 
                 try:
                     tx, raw = inspect_transaction(signature)
+                except RpcRateLimited:
+                    batch_failed = True
+                    rate_limited_batch = True
+                    log(
+                        "INSPECT_ERROR",
+                        pool=pool,
+                        signature=signature,
+                        category="RPC_RATE_LIMITED",
+                    )
+                    break
                 except Exception as exc:
                     batch_failed = True
                     log(
                         "INSPECT_ERROR",
                         pool=pool,
                         signature=signature,
-                        error=f"{type(exc).__name__}: {exc}",
+                        category=error_category(exc),
                     )
                     continue
 
@@ -874,6 +945,7 @@ while True:
                     pool=pool,
                     retained_cursor=cursor,
                     attempted_signatures=len(rows),
+                    rate_limited=rate_limited_batch,
                 )
             else:
                 state["cursors"][pool] = rows[0]["signature"]
@@ -884,7 +956,7 @@ while True:
                 "ERROR",
                 pool=pool,
                 operation="scan",
-                error=f"{type(exc).__name__}: {exc}",
+                category=error_category(exc),
             )
 
     time.sleep(0.25)
