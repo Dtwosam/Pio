@@ -11,7 +11,7 @@ import subprocess
 from typing import Any
 
 
-PINNED_SOURCE_HEAD = "c1ef897d16e4c21c67f589e93418e0840f10e072"
+PINNED_SOURCE_HEAD = "161b52788c6028d0f8fd05de847665c4add4e4a6"
 EXECUTOR_RELATIVE = Path("rust-executor/target/release/meteora-executor")
 WATCH_EXECUTOR_RELATIVE = Path("rust-executor/target/release/pio-phase2-account-watch")
 
@@ -39,7 +39,7 @@ TRACKED_CONTRACT = {
     "scripts/phase2-add-detector.py":
         "a7a6a888e7833fab73ffd564b1ec40195b185f33",
     "deploy/tools/autopause_phase2_isolated_timer.py":
-        "362677c1dd0bcbb584caed70be0e1dfc90d28724",
+        "a2b1feeef9a5abd7cb1340a34bce97900b156105",
     "deploy/systemd/pio-phase2-isolated-prestate-stream@.service":
         "4270a0c7b3aec8844ae9f06c6a073aa7b9d247af",
     "deploy/systemd/pio-phase2-isolated-add-detector.service":
