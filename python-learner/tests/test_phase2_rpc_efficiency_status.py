@@ -352,3 +352,48 @@ def test_status_flags_symlinked_cache_without_following_it(tmp_path):
     assert report.discovery_cache.regular_file is False
     assert report.discovery_cache.reusable_now is False
     assert report.attention_required is True
+
+
+
+def test_status_treats_enabled_inactive_timer_as_future_rpc_work(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    db = data / "pio.db"
+    init_db(db)
+    env = tmp_path / "pio.env"
+    write_env(env)
+
+    with sqlite3.connect(db) as conn:
+        for as_of in (
+            "2026-10-02T20:30:00+00:00",
+            "2026-10-02T20:15:00+00:00",
+        ):
+            conn.execute(
+                """
+                INSERT INTO advanced_edge_evidence(
+                    edge_type, pool_address, as_of, status, qualified,
+                    evidence_json
+                ) VALUES (?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    MODULE.PROGRESS_EDGE_TYPE,
+                    POOL,
+                    as_of,
+                    "COLLECTION_FAILED",
+                    json.dumps({"rpc_rate_limited": True}),
+                ),
+            )
+
+    report = MODULE.inspect_rpc_efficiency(
+        data_root=data,
+        env_file=env,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
+        runner=runner_state(active=False, enabled=True),
+    )
+
+    assert report.timer_active is False
+    assert report.timer_enabled is True
+    assert report.timer_paused is False
+    assert report.pause_recommended is True
+    assert report.protected_from_future_timer_cycles is False
+    assert report.attention_required is True
