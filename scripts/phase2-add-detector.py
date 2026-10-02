@@ -58,10 +58,48 @@ MAIN_STORAGE = Storage(SETTINGS.database_path)
 RPC = os.environ["SOLANA_RPC_URL"]
 
 # Operational polling cadence, not an evidence threshold.
-POOLS = {
+DEFAULT_POOLS = {
     "54Vp27uLaw4wNLo5n7r4fcC6zLamoQc28xBARjss4EUJ": 120.0,
     "DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf": 300.0,
 }
+
+
+def parse_detector_pools(value=None):
+    raw = value
+    if raw is None:
+        raw = os.getenv("PIO_PHASE2_DETECTOR_POOLS")
+    if raw is None or not str(raw).strip():
+        return dict(DEFAULT_POOLS)
+
+    pools = {}
+    for item in str(raw).split(","):
+        entry = item.strip()
+        address, separator, interval_raw = entry.partition(":")
+        address = address.strip()
+        interval_raw = interval_raw.strip()
+
+        if not separator or not address or not interval_raw:
+            raise ValueError(
+                "PIO_PHASE2_DETECTOR_POOLS entries must be ADDRESS:SECONDS"
+            )
+        if address in pools:
+            raise ValueError(
+                f"duplicate Phase-2 detector pool: {address}"
+            )
+
+        interval = float(interval_raw)
+        if not interval > 0:
+            raise ValueError(
+                "Phase-2 detector poll intervals must be positive"
+            )
+        pools[address] = interval
+
+    if not pools:
+        raise ValueError("at least one Phase-2 detector pool is required")
+    return pools
+
+
+POOLS = parse_detector_pools()
 
 
 class RpcRateLimited(RuntimeError):
