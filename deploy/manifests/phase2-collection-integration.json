@@ -90,6 +90,11 @@
       "pr": 724,
       "head": "1c215eb465407b4421146e226cd96149ee87cc10",
       "role": "cycle-local Solana RPC rate-limit circuit"
+    },
+    {
+      "pr": 728,
+      "head": "1c81a10b9bd68f14df26db9a5464959ea0753adb",
+      "role": "event-driven prestate baseline refresh from pool account WebSocket changes"
     }
   ],
   "integration_notes": [
@@ -99,10 +104,11 @@
     "quote and position observer failures are categorical and do not expose raw transport/RPC error text",
     "neutral position collection reserves revisit capacity when budget permits so fee/reward intervals can accumulate without starving exploration",
     "complete, non-truncated pool-position discovery is cached operationally for one hour by default; position inspection throughput is unchanged and the cache can be disabled with PIO_PHASE2_POSITION_DISCOVERY_CACHE_SECONDS=0",
-    "confirmed Solana RPC rate-limit responses stop the current network stage and skip later Solana RPC stages in the same cycle while database-only reconciliation and calibration continue"
+    "confirmed Solana RPC rate-limit responses stop the current network stage and skip later Solana RPC stages in the same cycle while database-only reconciliation and calibration continue",
+    "prospective prestates can be maintained from pool account-change notifications: one initial baseline plus one refresh after observed changes, preserving the existing prestate cache schema without continuous successful HTTP polling"
   ],
   "deployment_scope": "MANUAL_EVIDENCE_CYCLE_SOURCE_EXCEPT_STATE_READER",
-  "deployment_target_ref": "97d33c062cc25ca27b197463ac09f39c06277043",
+  "deployment_target_ref": "1c81a10b9bd68f14df26db9a5464959ea0753adb",
   "deployment_base_ref": "45d7f6b2f44a2e621d1d8c34220dd61d3a413b9b",
   "deployment_files": [
     "python-learner/src/meteora_learner/calibration_queue.py",
@@ -122,6 +128,8 @@
     "python-learner/src/meteora_learner/reconciliation_corpus.py",
     "python-learner/src/meteora_learner/research_store.py",
     "python-learner/src/meteora_learner/storage.py",
+    "python-learner/src/meteora_learner/phase2_event_prestate.py",
+    "rust-executor/src/account_watch.rs",
     "rust-executor/src/main.rs"
   ],
   "deployment_target_file_blobs": {
@@ -141,8 +149,10 @@
     "python-learner/src/meteora_learner/reconciliation_corpus.py": "ad0f1ea02ad684028e48374f4a07079946ddb0d1",
     "python-learner/src/meteora_learner/research_store.py": "c9b9de5838d95a86bddffa6166b4d7a62e91cf16",
     "python-learner/src/meteora_learner/storage.py": "39bcc99413df357b89d261e854861e9e4a3fff23",
-    "rust-executor/src/main.rs": "96ecb4479482d146abbecafc53466b93fa452d80",
-    "python-learner/src/meteora_learner/phase2_rpc_guard.py": "36277db7d701e34bb765b5be97b0ad757d784899"
+    "rust-executor/src/main.rs": "e06c72638414a8c6c9396ef5ba2b45e2161329e7",
+    "python-learner/src/meteora_learner/phase2_rpc_guard.py": "36277db7d701e34bb765b5be97b0ad757d784899",
+    "python-learner/src/meteora_learner/phase2_event_prestate.py": "bc8fd2a6bd2e2ba4f0dc1259b0e896c0bd4a0845",
+    "rust-executor/src/account_watch.rs": "69ee4b7a3b63fdcf5882695deb885605b9de0d4f"
   },
   "deployment_base_file_blobs": {
     "python-learner/src/meteora_learner/calibration_queue.py": "daacbd260b4ce5175742232f4a03065e94eaaf97",
@@ -162,7 +172,9 @@
     "python-learner/src/meteora_learner/research_store.py": "16a86b63272ad48f4c185b39ecc2e0c14276ff9f",
     "python-learner/src/meteora_learner/storage.py": "0436cb1cadd073702ae7dad702fc4eb4241845d6",
     "rust-executor/src/main.rs": "f82b0460eebd06ea99e6a7a56a90817eed027c6f",
-    "python-learner/src/meteora_learner/phase2_rpc_guard.py": null
+    "python-learner/src/meteora_learner/phase2_rpc_guard.py": null,
+    "python-learner/src/meteora_learner/phase2_event_prestate.py": null,
+    "rust-executor/src/account_watch.rs": null
   },
   "deployment_source_tree_required": true,
   "deployment_guard_apply_locked": true
