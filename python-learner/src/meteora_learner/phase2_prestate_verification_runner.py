@@ -12,6 +12,10 @@ from .composition_prestate import (
     build_composition_prestate_candidates,
     ingest_prestate_verification,
 )
+from .phase2_rpc import (
+    Phase2RpcRateLimited,
+    raise_for_executor_failure,
+)
 from .settings import Settings
 from .storage import Storage, utc_now_iso
 
@@ -61,10 +65,7 @@ def _run_executor_json(
         check=False,
         timeout=timeout_seconds,
     )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"executor failed with status {completed.returncode}"
-        )
+    raise_for_executor_failure(completed)
     try:
         return json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
@@ -220,6 +221,9 @@ def run_phase2_prestate_verifications(
         except subprocess.TimeoutExpired:
             fail(item, "EXECUTOR_TIMEOUT")
             continue
+        except Phase2RpcRateLimited:
+            fail(item, "RPC_RATE_LIMITED")
+            raise
         except RuntimeError:
             fail(item, "EXECUTOR_FAILED")
             continue
