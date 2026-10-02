@@ -1137,7 +1137,7 @@ while True:
                 log(
                     "BATCH_RETRY",
                     pool=pool,
-                    retained_cursor=cursor,
+                    retained_cursor=state["cursors"].get(pool),
                     attempted_signatures=len(rows),
                     rate_limited=rate_limited_batch,
                 )
