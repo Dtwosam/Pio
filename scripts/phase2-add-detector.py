@@ -323,12 +323,7 @@ def inspect_transaction(signature):
             + (proc.stdout or "")
         )
 
-        rate_limited = (
-            "429" in error_text
-            or "too many requests" in error_text.lower()
-            or "rate limit" in error_text.lower()
-            or "ratelimit" in error_text.lower()
-        )
+        rate_limited = is_rate_limited_text(error_text)
 
         if rate_limited:
             if attempt <= len(retry_delays):
