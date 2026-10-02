@@ -251,12 +251,23 @@ def collect_phase2_position_observations(
         positions_for_cache = discovery.get("positions")
         if not isinstance(positions_for_cache, list):
             raise ValueError("position discovery is missing positions")
-        _save_discovery_cache(
-            cache_file,
-            pool_address=pool_address,
-            captured_at=timestamp,
-            discovery=discovery,
+        found_for_cache = int(
+            discovery.get("positions_found", len(positions_for_cache))
         )
+        returned_for_cache = int(
+            discovery.get("positions_returned", len(positions_for_cache))
+        )
+        complete_discovery = (
+            not bool(discovery.get("truncated"))
+            and found_for_cache <= returned_for_cache
+        )
+        if complete_discovery:
+            _save_discovery_cache(
+                cache_file,
+                pool_address=pool_address,
+                captured_at=timestamp,
+                discovery=discovery,
+            )
         discovery_cache_age = 0.0
 
     positions = discovery.get("positions")
