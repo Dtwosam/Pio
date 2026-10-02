@@ -1,9 +1,14 @@
+from io import StringIO
 import json
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 from meteora_learner.phase2_event_prestate import (
+    _await_subscription_ready,
+    _notification_stream,
+    _start_watch_process,
     capture_pool_snapshot,
     run_event_prestate_session,
 )
@@ -254,3 +259,59 @@ def test_pool_capture_uses_secret_safe_rpc_rate_limit_signal():
 
     assert str(excinfo.value) == "RPC_RATE_LIMITED"
     assert secret not in str(excinfo.value)
+
+
+
+def test_watch_handshake_precedes_account_change_stream():
+    process = SimpleNamespace(
+        stdout=StringIO(
+            '{"kind":"SUBSCRIBED","account_address":"pool"}\n'
+            '{"kind":"ACCOUNT_CHANGE","account_address":"pool","slot":101}\n'
+        )
+    )
+
+    _await_subscription_ready(process, pool_address=POOL)
+    assert list(_notification_stream(process)) == [
+        {
+            "kind": "ACCOUNT_CHANGE",
+            "account_address": POOL,
+            "slot": 101,
+        }
+    ]
+
+
+def test_watch_handshake_rejects_wrong_subscription_address():
+    process = SimpleNamespace(
+        stdout=StringIO(
+            '{"kind":"SUBSCRIBED","account_address":"other"}\n'
+        )
+    )
+
+    with pytest.raises(ValueError, match="subscription address mismatch"):
+        _await_subscription_ready(process, pool_address=POOL)
+
+
+def test_watch_process_uses_dedicated_binary_without_rpc_url_in_argv(
+    monkeypatch,
+):
+    seen = {}
+
+    def fake_popen(command, **kwargs):
+        seen["command"] = command
+        seen["kwargs"] = kwargs
+        return SimpleNamespace(stdout=StringIO(""))
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    _start_watch_process(
+        watch_executor_path="/runtime/pio-phase2-account-watch",
+        pool_address=POOL,
+        max_notifications=7,
+    )
+
+    assert seen["command"] == [
+        "/runtime/pio-phase2-account-watch",
+        POOL,
+        "7",
+    ]
+    assert all("RPC" not in value for value in seen["command"])
