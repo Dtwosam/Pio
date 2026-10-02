@@ -21,6 +21,7 @@ from .phase2_prestate_verification_runner import (
     run_phase2_prestate_verifications,
 )
 from .phase2_research_quotes import collect_phase2_research_quotes
+from .phase2_rpc_guard import Phase2RpcRateLimited
 from .reconciliation_corpus import build_reconciliation_corpus
 from .settings import Settings
 from .storage import Storage, utc_now_iso
@@ -45,6 +46,7 @@ class Phase2EvidenceCycleProgress:
     stages_successful: int
     stages_partial: int
     stages_failed: int
+    stages_skipped: int
     stage_statuses: tuple[tuple[str, str], ...]
     reconciliation: dict[str, Any] | None
     calibration: dict[str, Any] | None
@@ -79,6 +81,7 @@ class Phase2ReadOnlyEvidenceCycleReport:
     stages_successful: int
     stages_partial: int
     stages_failed: int
+    stages_skipped: int
     stages: tuple[Phase2EvidenceCycleStage, ...]
     reconciliation_corpus: dict[str, Any] | None
     calibration_evidence: dict[str, Any] | None
@@ -135,16 +138,18 @@ def run_phase2_read_only_evidence_cycle(
     """
     Run one bounded, read-only Phase-2 evidence collection step.
 
-    The stages are intentionally independent: a failure in one stage is recorded
-    categorically and does not suppress later read-only collection. The cycle
-    never promotes a phase, selects an action, moves capital, touches the
-    detector cursor, or controls services.
+    Ordinary stage failures are isolated so later read-only collection can
+    continue. A confirmed Solana RPC rate-limit response opens a cycle-local
+    circuit and skips only the remaining Solana RPC stages; local reconciliation
+    and calibration still run. The cycle never promotes a phase, selects an
+    action, moves capital, touches the detector cursor, or controls services.
     """
     if not pool_address.strip():
         raise ValueError("pool_address is required")
 
     started_at = now()
     stages: list[Phase2EvidenceCycleStage] = []
+    rpc_circuit_open = False
 
     try:
         quotes = collect_phase2_research_quotes(
@@ -182,6 +187,15 @@ def run_phase2_read_only_evidence_cycle(
             observed_at=now(),
             runner=runner,
         )
+    except Phase2RpcRateLimited:
+        rpc_circuit_open = True
+        stages.append(
+            _stage(
+                name="POSITION_OBSERVATIONS",
+                status="FAILED",
+                failure_category="RPC_RATE_LIMITED",
+            )
+        )
     except Exception:
         stages.append(
             _stage(
@@ -203,63 +217,99 @@ def run_phase2_read_only_evidence_cycle(
             )
         )
 
-    try:
-        reinspection = run_phase2_calibration_reinspection(
-            storage,
-            executor_path=executor_path,
-            max_tasks=max_reinspection_tasks,
-            timeout_seconds=reinspection_timeout_seconds,
-            observed_at=now(),
-            runner=runner,
-        )
-    except Exception:
+    if rpc_circuit_open:
         stages.append(
             _stage(
                 name="TRANSACTION_REINSPECTION",
-                status="FAILED",
-                failure_category="REINSPECTION_STAGE_FAILED",
+                status="SKIPPED",
+                failure_category="RPC_CIRCUIT_OPEN",
             )
         )
     else:
-        stages.append(
-            _stage(
-                name="TRANSACTION_REINSPECTION",
-                status=(
-                    "PARTIAL"
-                    if reinspection.signatures_failed
-                    else "SUCCESS"
-                ),
-                result=reinspection,
+        try:
+            reinspection = run_phase2_calibration_reinspection(
+                storage,
+                executor_path=executor_path,
+                max_tasks=max_reinspection_tasks,
+                timeout_seconds=reinspection_timeout_seconds,
+                observed_at=now(),
+                runner=runner,
             )
-        )
+        except Phase2RpcRateLimited:
+            rpc_circuit_open = True
+            stages.append(
+                _stage(
+                    name="TRANSACTION_REINSPECTION",
+                    status="FAILED",
+                    failure_category="RPC_RATE_LIMITED",
+                )
+            )
+        except Exception:
+            stages.append(
+                _stage(
+                    name="TRANSACTION_REINSPECTION",
+                    status="FAILED",
+                    failure_category="REINSPECTION_STAGE_FAILED",
+                )
+            )
+        else:
+            stages.append(
+                _stage(
+                    name="TRANSACTION_REINSPECTION",
+                    status=(
+                        "PARTIAL"
+                        if reinspection.signatures_failed
+                        else "SUCCESS"
+                    ),
+                    result=reinspection,
+                )
+            )
 
-    try:
-        verification = run_phase2_prestate_verifications(
-            storage,
-            executor_path=executor_path,
-            max_tasks=max_prestate_tasks,
-            timeout_seconds=prestate_timeout_seconds,
-            observed_at=now(),
-            runner=runner,
-        )
-    except Exception:
+    if rpc_circuit_open:
         stages.append(
             _stage(
                 name="PRESTATE_VERIFICATION",
-                status="FAILED",
-                failure_category="PRESTATE_STAGE_FAILED",
+                status="SKIPPED",
+                failure_category="RPC_CIRCUIT_OPEN",
             )
         )
     else:
-        stages.append(
-            _stage(
-                name="PRESTATE_VERIFICATION",
-                status=(
-                    "PARTIAL" if verification.failures else "SUCCESS"
-                ),
-                result=verification,
+        try:
+            verification = run_phase2_prestate_verifications(
+                storage,
+                executor_path=executor_path,
+                max_tasks=max_prestate_tasks,
+                timeout_seconds=prestate_timeout_seconds,
+                observed_at=now(),
+                runner=runner,
             )
-        )
+        except Phase2RpcRateLimited:
+            rpc_circuit_open = True
+            stages.append(
+                _stage(
+                    name="PRESTATE_VERIFICATION",
+                    status="FAILED",
+                    failure_category="RPC_RATE_LIMITED",
+                )
+            )
+        except Exception:
+            stages.append(
+                _stage(
+                    name="PRESTATE_VERIFICATION",
+                    status="FAILED",
+                    failure_category="PRESTATE_STAGE_FAILED",
+                )
+            )
+        else:
+            stages.append(
+                _stage(
+                    name="PRESTATE_VERIFICATION",
+                    status=(
+                        "PARTIAL" if verification.failures else "SUCCESS"
+                    ),
+                    result=verification,
+                )
+            )
 
     reconciliation_record = None
     try:
@@ -354,6 +404,9 @@ def run_phase2_read_only_evidence_cycle(
         ),
         stages_failed=sum(
             item.status == "FAILED" for item in stages
+        ),
+        stages_skipped=sum(
+            item.status == "SKIPPED" for item in stages
         ),
         stages=tuple(stages),
         reconciliation_corpus=reconciliation_record,
@@ -456,7 +509,7 @@ def build_phase2_evidence_cycle_progress(
 
     if report.stages_failed:
         overall_status = "FAILED"
-    elif report.stages_partial:
+    elif report.stages_partial or report.stages_skipped:
         overall_status = "PARTIAL"
     else:
         overall_status = "SUCCESS"
@@ -480,6 +533,7 @@ def build_phase2_evidence_cycle_progress(
         stages_successful=report.stages_successful,
         stages_partial=report.stages_partial,
         stages_failed=report.stages_failed,
+        stages_skipped=report.stages_skipped,
         stage_statuses=tuple(
             (stage.name, stage.status)
             for stage in report.stages
@@ -595,7 +649,7 @@ def main() -> None:
             )
         )
     print(json.dumps(output, indent=2))
-    if report.stages_partial or report.stages_failed:
+    if report.stages_partial or report.stages_failed or report.stages_skipped:
         raise SystemExit(2)
 
 

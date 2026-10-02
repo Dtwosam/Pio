@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from meteora_learner.phase2_prestate_verification_runner import (
     run_phase2_prestate_verifications,
 )
+from meteora_learner.phase2_rpc_guard import Phase2RpcRateLimited
 from meteora_learner.storage import Storage
 
 
@@ -338,3 +339,60 @@ def test_prestate_failed_candidate_does_not_starve_unseen_work(
     assert second.candidates_selected == 1
     assert second.verdicts_ingested == 1
     assert called == ["sig-b"]
+
+
+
+def test_prestate_stops_remaining_verifications_after_rpc_rate_limit(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "pio.db")
+    items = (
+        work_item(signature="sig-a", ix=1, position="position-a"),
+        work_item(signature="sig-b", ix=2, position="position-b"),
+    )
+    candidates = (
+        candidate(signature="sig-a", ix=1),
+        candidate(signature="sig-b", ix=2),
+    )
+    install_inputs(
+        monkeypatch,
+        items=items,
+        candidates=candidates,
+    )
+    attempted = []
+
+    def runner(command, **kwargs):
+        attempted.append(command[2])
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            "HTTP status 429 at https://rpc.invalid/?api-key=secret",
+        )
+
+    import pytest
+
+    with pytest.raises(Phase2RpcRateLimited) as excinfo:
+        run_phase2_prestate_verifications(
+            storage,
+            executor_path="/executor",
+            max_tasks=2,
+            observed_at="2026-09-26T18:00:00+00:00",
+            runner=runner,
+        )
+
+    assert str(excinfo.value) == "RPC_RATE_LIMITED"
+    assert attempted == ["sig-a"]
+    with storage.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT task_key, succeeded, outcome_category
+            FROM phase2_collection_task_attempts
+            WHERE stage = 'PRESTATE_VERIFICATION'
+            ORDER BY id
+            """
+        ).fetchall()
+    assert rows == [
+        ("sig-a:1", 0, "RPC_RATE_LIMITED"),
+    ]
