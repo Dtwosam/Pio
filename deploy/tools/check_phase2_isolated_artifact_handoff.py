@@ -169,6 +169,10 @@ def _default_execution_receipt(preview: Path) -> Path:
     return preview.with_name(f"{preview.name}.execution.json")
 
 
+def _artifact_exists_or_symlink(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
 def _result(
     *,
     state: str,
@@ -398,6 +402,19 @@ def inspect_artifact_handoff(
                 artifact_root=root,
                 lifecycle_state=str(lifecycle.state),
             )
+            if _artifact_exists_or_symlink(suggested):
+                return inspect_artifact_handoff(
+                    artifact_root=root,
+                    preview_path=suggested,
+                    runtime_root=runtime_root,
+                    unit_destination=unit_destination,
+                    env_file=env_file,
+                    data_root=data_root,
+                    receipt_path=receipt_path,
+                    max_receipt_age_seconds=max_receipt_age_seconds,
+                    source_tree=source_tree,
+                    repository_url=common["repository_url"],
+                )
             return _result(
                 state="NEXT_MUTATION_PREVIEW_REQUIRED",
                 next_action="SAVE_NEXT_REVIEWED_MUTATION_PREVIEW",
@@ -444,7 +461,7 @@ def inspect_artifact_handoff(
             artifact_root=root,
             lifecycle_state=str(lifecycle.state),
         )
-        if candidate.exists():
+        if _artifact_exists_or_symlink(candidate):
             effective_preview = candidate
         else:
             return _result(
@@ -464,7 +481,7 @@ def inspect_artifact_handoff(
 
     if effective_preview is not None:
         auto_receipt = _default_execution_receipt(effective_preview)
-        if auto_receipt.exists():
+        if _artifact_exists_or_symlink(auto_receipt):
             return inspect_artifact_handoff(
                 artifact_root=root,
                 preview_path=effective_preview,
@@ -477,6 +494,22 @@ def inspect_artifact_handoff(
                 max_receipt_age_seconds=max_receipt_age_seconds,
                 source_tree=source_tree,
                 repository_url=common["repository_url"],
+            )
+
+        if lifecycle.next_mutation_flag is None:
+            return _result(
+                state="ORPHANED_MUTATION_PREVIEW_REVIEW_REQUIRED",
+                next_action="REVIEW_PREVIEW_WITHOUT_PENDING_MUTATION",
+                next_tool="check_phase2_isolated_mutation_freshness.py",
+                next_parameters={
+                    "preview": str(effective_preview),
+                    **common,
+                },
+                next_mutation_flag=None,
+                lifecycle=lifecycle,
+                preview_path=effective_preview,
+                attention_required=True,
+                blockers=("NO_MUTATION_PENDING_FOR_PREVIEW",),
             )
 
         try:
