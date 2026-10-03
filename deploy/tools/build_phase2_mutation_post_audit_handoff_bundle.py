@@ -347,14 +347,14 @@ def _publish_directory_noreplace(source: Path, destination: Path) -> None:
             "portable handoff bundle publication identity mismatch"
         )
 
-    parent_fd = os.open(
+    directory_fd = os.open(
         destination.parent,
         os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
     )
     try:
-        os.fsync(parent_fd)
+        os.fsync(directory_fd)
     finally:
-        os.close(parent_fd)
+        os.close(directory_fd)
 
     current = os.stat(destination, follow_symlinks=False)
     if (
