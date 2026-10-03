@@ -189,8 +189,9 @@ def test_catalog_source_identity_matches_reviewed_git_head():
 
     assert len(commit) >= 40
     assert len(tool_sha) == 64
+    assert tool_sha == MODULE._CATALOG_TOOL_SHA256_AT_LOAD
     assert tool_sha == MODULE.hashlib.sha256(
-        MODULE.CATALOG_TOOL.read_bytes()
+        MODULE._CATALOG_TOOL_BYTES_AT_LOAD
     ).hexdigest()
 
 
@@ -323,3 +324,34 @@ def test_save_catalog_snapshot_digest_comes_from_exact_payload_not_path_reread(
     payload = output.read_text(encoding="utf-8").encode("utf-8")
     assert saved.artifact_sha256 == MODULE.hashlib.sha256(payload).hexdigest()
     assert saved.bytes_written == len(payload)
+
+
+
+def test_catalog_source_identity_never_rereads_loaded_tool_bytes(monkeypatch):
+    real_read_bytes = Path.read_bytes
+
+    def reject_tool_reread(path):
+        if path.resolve() == MODULE._CATALOG_TOOL_PATH_AT_LOAD:
+            raise AssertionError(
+                "executed catalog tool path must not be reread for identity"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_tool_reread)
+
+    commit, tool_sha = MODULE._catalog_source_identity()
+
+    assert len(commit) >= 40
+    assert tool_sha == MODULE._CATALOG_TOOL_SHA256_AT_LOAD
+
+
+def test_catalog_tool_is_executed_from_descriptor_captured_bytes():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_tool(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_CATALOG_TOOL_BYTES_AT_LOAD" in source
+    assert "CATALOG_TOOL.read_bytes()" not in source
