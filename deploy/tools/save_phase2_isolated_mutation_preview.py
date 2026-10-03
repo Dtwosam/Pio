@@ -18,6 +18,7 @@ from typing import Any
 TOOLS_DIR = Path(__file__).resolve().parent
 RENDER_TOOL = TOOLS_DIR / "render_phase2_isolated_mutation_command.py"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_COMMIT = re.compile(r"^[0-9a-f]{40,64}$")
 
 PROTECTED_ROOTS = (
     Path("/opt/pio"),
@@ -50,6 +51,9 @@ class Phase2SavedMutationPreview:
     replaced_existing: bool
     format_version: int
     fingerprint_schema: str
+    reviewed_source_commit: str
+    deploy_surface_sha256: str
+    deploy_surface_files: int
     preflight_fingerprint: str
     mutation_fingerprint: str
     mutation_tool_sha256: str
@@ -97,6 +101,13 @@ def _preview_boundary_ok(report: Any) -> bool:
         == RENDER.MUTATION_PREVIEW_FORMAT_VERSION
         and getattr(report, "fingerprint_schema", None)
         == RENDER.MUTATION_FINGERPRINT_SCHEMA
+        and isinstance(getattr(report, "reviewed_source_commit", None), str)
+        and _COMMIT.fullmatch(getattr(report, "reviewed_source_commit"))
+        and isinstance(getattr(report, "deploy_surface_sha256", None), str)
+        and _SHA256.fullmatch(getattr(report, "deploy_surface_sha256"))
+        and isinstance(getattr(report, "deploy_surface_files", None), int)
+        and not isinstance(getattr(report, "deploy_surface_files", None), bool)
+        and getattr(report, "deploy_surface_files") > 0
         and getattr(report, "preflight_succeeded", False)
         and getattr(report, "mutation_rendered", False)
         and not getattr(report, "mutation_executed", True)
@@ -205,6 +216,9 @@ def save_mutation_preview(
         replaced_existing=replaced,
         format_version=int(preview.format_version),
         fingerprint_schema=str(preview.fingerprint_schema),
+        reviewed_source_commit=str(preview.reviewed_source_commit),
+        deploy_surface_sha256=str(preview.deploy_surface_sha256),
+        deploy_surface_files=int(preview.deploy_surface_files),
         preflight_fingerprint=str(preview.preflight_fingerprint),
         mutation_fingerprint=str(preview.mutation_fingerprint),
         mutation_tool_sha256=str(preview.mutation_tool_sha256),
