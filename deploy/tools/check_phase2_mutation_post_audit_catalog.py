@@ -219,6 +219,10 @@ def _positive_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _nonnegative_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _validate_catalog_record(
     catalog: Any,
 ) -> tuple[int, int, bool, bool]:
@@ -226,14 +230,34 @@ def _validate_catalog_record(
         raise ValueError("post-audit catalog snapshot catalog schema is invalid")
     _assert_credential_minimal(catalog)
 
+    artifact_directory = catalog.get("artifact_directory")
+    pattern = catalog.get("pattern")
+    if not isinstance(artifact_directory, str) or not artifact_directory:
+        raise ValueError("post-audit catalog snapshot artifact directory is invalid")
+    if (
+        not isinstance(pattern, str)
+        or not pattern
+        or "/" in pattern
+        or "\\" in pattern
+    ):
+        raise ValueError("post-audit catalog snapshot pattern is invalid")
+
     seen = catalog.get("artifacts_seen")
     verified = catalog.get("artifacts_verified")
     failed = catalog.get("artifacts_failed")
-    if not _positive_int(seen) or verified != seen or failed != 0:
+    duplicate_artifacts = catalog.get("duplicate_artifact_hashes")
+    duplicate_receipts = catalog.get("duplicate_receipt_hashes")
+    if (
+        not _positive_int(seen)
+        or not _positive_int(verified)
+        or verified != seen
+        or not _nonnegative_int(failed)
+        or failed != 0
+    ):
         raise ValueError("post-audit catalog snapshot verification counts are invalid")
-    if catalog.get("duplicate_artifact_hashes") != 0:
+    if not _nonnegative_int(duplicate_artifacts) or duplicate_artifacts != 0:
         raise ValueError("post-audit catalog snapshot has duplicate artifact identities")
-    if catalog.get("duplicate_receipt_hashes") != 0:
+    if not _nonnegative_int(duplicate_receipts) or duplicate_receipts != 0:
         raise ValueError("post-audit catalog snapshot has duplicate receipt identities")
     if catalog.get("catalog_stable_during_scan") is not True:
         raise ValueError("post-audit catalog snapshot was not built from a stable scan")
