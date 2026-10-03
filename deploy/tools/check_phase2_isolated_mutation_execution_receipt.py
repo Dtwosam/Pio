@@ -26,6 +26,39 @@ _TERMINAL_STATUSES = frozenset(
     }
 )
 
+_EXPECTED_POST_STATES: dict[str, tuple[str, ...]] = {
+    "SOURCE_BOOTSTRAP_REQUIRED": (
+        "SOURCE_PREPARATION_REQUIRED",
+    ),
+    "SOURCE_PREPARATION_REQUIRED": (
+        "RUNTIME_STAGING_READY",
+    ),
+    "RUNTIME_STAGING_READY": (
+        "SYSTEMD_UNITS_NOT_READY",
+        "DETECTOR_ACTIVATION_READY",
+        "ACTIVE_TOPOLOGY_NOT_READY",
+    ),
+    "SYSTEMD_UNITS_NOT_READY": (
+        "DETECTOR_ACTIVATION_READY",
+        "ACTIVE_TOPOLOGY_NOT_READY",
+    ),
+    "DETECTOR_ACTIVATION_READY": (
+        "SMOKE_REQUIRED",
+        "ACTIVE_TOPOLOGY_NOT_READY",
+    ),
+    "SMOKE_REQUIRED": (
+        "TIMER_ACTIVATION_READY",
+    ),
+    "TIMER_ACTIVATION_READY": (
+        "RUNNING_HEALTHY",
+        "RUNNING_ATTENTION_REQUIRED",
+        "RATE_LIMIT_PAUSE_REQUIRED",
+    ),
+    "RATE_LIMIT_PAUSE_REQUIRED": (
+        "RATE_LIMIT_PAUSED",
+    ),
+}
+
 
 def _load(path: Path, name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
@@ -61,6 +94,8 @@ class Phase2MutationReceiptAudit:
     lifecycle_attention_required: bool
     lifecycle_blockers: tuple[str, ...]
     state_changed: bool
+    expected_post_states: tuple[str, ...]
+    post_state_expected: bool
     mutation_launched: bool
     mutation_completed: bool
     mutation_succeeded: bool
@@ -390,6 +425,12 @@ def audit_mutation_execution_receipt(
     prior_tool = str(prior_tool_raw) if prior_tool_raw is not None else ""
     current_state = str(lifecycle.state)
     state_changed = bool(prior_state and current_state != prior_state)
+    expected_post_states = _EXPECTED_POST_STATES.get(prior_state, ())
+    post_state_expected = bool(
+        state_changed
+        and expected_post_states
+        and current_state in expected_post_states
+    )
 
     receipt_integrity_valid = True
     audit_integrity_valid = bool(
@@ -403,13 +444,14 @@ def audit_mutation_execution_receipt(
         terminal
         and status == "COMPLETED"
         and mutation_succeeded
-        and state_changed
+        and post_state_expected
     )
     verified = bool(
         audit_integrity_valid
         and terminal
         and status == "COMPLETED"
         and mutation_succeeded
+        and post_state_expected
         and progress_observed
     )
 
@@ -441,6 +483,8 @@ def audit_mutation_execution_receipt(
         lifecycle_attention_required=bool(lifecycle.attention_required),
         lifecycle_blockers=tuple(str(item) for item in lifecycle.blockers),
         state_changed=state_changed,
+        expected_post_states=expected_post_states,
+        post_state_expected=post_state_expected,
         mutation_launched=bool(receipt["mutation_launched"]),
         mutation_completed=bool(receipt["mutation_completed"]),
         mutation_succeeded=mutation_succeeded,
