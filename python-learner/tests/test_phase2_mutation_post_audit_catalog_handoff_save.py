@@ -361,3 +361,44 @@ def test_save_catalog_handoff_digest_uses_exact_payload_not_path_reread(
     payload = output.read_text(encoding="utf-8").encode("utf-8")
     assert saved.artifact_sha256 == MODULE.hashlib.sha256(payload).hexdigest()
     assert saved.bytes_written == len(payload)
+
+
+
+def test_save_catalog_handoff_detects_path_replacement_after_publish(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        MODULE.HANDOFF,
+        "inspect_phase2_post_audit_catalog_handoff",
+        lambda **kwargs: good_handoff(),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_handoff_source_identity",
+        lambda: ("c" * 40, "d" * 64),
+    )
+    output = tmp_path / "handoff.json"
+    replacement_bytes = b"replacement catalog handoff\n"
+    real_fsync = MODULE.os.fsync
+    replaced = False
+
+    def fsync_then_replace(fd):
+        nonlocal replaced
+        real_fsync(fd)
+        if not replaced and stat.S_ISDIR(MODULE.os.fstat(fd).st_mode):
+            replaced = True
+            replacement = tmp_path / "replacement-handoff.json"
+            replacement.write_bytes(replacement_bytes)
+            replacement.chmod(0o600)
+            MODULE.os.replace(replacement, output)
+
+    monkeypatch.setattr(MODULE.os, "fsync", fsync_then_replace)
+
+    with pytest.raises(ValueError, match="path changed after publish"):
+        MODULE.save_phase2_post_audit_catalog_handoff_snapshot(
+            snapshot_path=tmp_path / "catalog.json",
+            output_path=output,
+        )
+
+    assert output.read_bytes() == replacement_bytes
