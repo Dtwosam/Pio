@@ -213,4 +213,31 @@ def load_live_outcome_evidence_report(
             raise ValueError(
                 "live-outcome transition-cost evidence cannot claim full economics"
             )
+
+    entry_shortfall = report.get("transition_entry_shortfall_evidence")
+    if entry_shortfall is not None:
+        if not isinstance(entry_shortfall, dict):
+            raise ValueError(
+                "live-outcome transition entry-shortfall evidence must be an object"
+            )
+        required = (
+            ("research_only", True),
+            ("policy_actionable", False),
+            ("execution_wired", False),
+            ("transition_pairs_inferred", False),
+            ("explicit_transition_links_required", True),
+            ("successor_enter_only", True),
+            ("request_event_match_required", True),
+            ("quote_backed", True),
+            ("exit_execution_shortfall_included", False),
+            ("market_impact_included", False),
+            ("opportunity_cost_included", False),
+            ("full_transition_economics_included", False),
+        )
+        for field, expected in required:
+            if entry_shortfall.get(field) is not expected:
+                raise ValueError(
+                    "live-outcome transition entry-shortfall evidence "
+                    f"requires {field}={expected!r}"
+                )
     return report
