@@ -16,7 +16,12 @@ from typing import Any, Callable
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 FRESHNESS_TOOL = TOOLS_DIR / "check_phase2_isolated_mutation_freshness.py"
+FRESHNESS_TOOL_RELATIVE = (
+    "deploy/tools/check_phase2_isolated_mutation_freshness.py"
+)
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 _MAX_MUTATION_TOOL_BYTES = 4 * 1024 * 1024
@@ -40,17 +45,129 @@ _PROTECTED_PREVIEW_ROOTS = (
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+def _assert_file_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after capture") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after capture")
+
+
+def _capture_regular_file(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int,
+    required_mode: int | None = None,
+) -> tuple[Path, bytes, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > max_bytes:
+            raise ValueError(f"{label} size is invalid")
+        if (
+            required_mode is not None
+            and stat.S_IMODE(before.st_mode) != required_mode
+        ):
+            raise ValueError(
+                f"{label} permissions must be {required_mode:04o}"
+            )
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_file_path_stable(resolved, before, label=label)
+    return resolved, encoded, before
+
+
+def _load_captured_freshness(
+    path: Path,
+    name: str,
+) -> tuple[Any, Path, bytes, os.stat_result]:
+    label = "reviewed mutation freshness tool"
+    resolved, encoded, opened = _capture_regular_file(
+        path,
+        label=label,
+        max_bytes=_MAX_TOOL_BYTES,
+    )
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed Phase-2 tool: {path}")
+        raise ValueError(f"cannot load reviewed Phase-2 tool: {resolved}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(encoded, str(resolved), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_file_path_stable(resolved, opened, label=label)
+    return module, resolved, encoded, opened
 
 
-FRESH = _load(FRESHNESS_TOOL, "phase2_fresh_mutation_executor_guard")
+(
+    FRESH,
+    _FRESHNESS_TOOL_PATH_AT_LOAD,
+    _FRESHNESS_TOOL_BYTES_AT_LOAD,
+    _FRESHNESS_TOOL_STAT_AT_LOAD,
+) = _load_captured_freshness(
+    FRESHNESS_TOOL,
+    "phase2_fresh_mutation_executor_guard",
+)
+_FRESHNESS_TOOL_SHA256_AT_LOAD = hashlib.sha256(
+    _FRESHNESS_TOOL_BYTES_AT_LOAD
+).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -90,26 +207,72 @@ def _under(path: Path, root: Path) -> bool:
         return False
 
 
-def _private_preview(value: str | Path) -> Path:
-    raw = Path(value).expanduser()
-    if raw.is_symlink():
-        raise ValueError("mutation preview must not be a symlink")
-    path = raw.resolve(strict=True)
-    if not path.is_file():
-        raise ValueError("mutation preview must be a regular file")
+def _capture_private_preview(
+    value: str | Path,
+) -> tuple[Path, bytes, os.stat_result]:
+    path, encoded, opened = _capture_regular_file(
+        Path(value),
+        label="mutation preview",
+        max_bytes=_MAX_PREVIEW_BYTES,
+        required_mode=0o600,
+    )
     if any(_under(path, root.resolve()) for root in _PROTECTED_PREVIEW_ROOTS):
         raise ValueError("mutation preview is inside a protected production path")
-    size = path.stat().st_size
-    if size <= 0 or size > _MAX_PREVIEW_BYTES:
-        raise ValueError("mutation preview size is invalid")
-    mode = stat.S_IMODE(path.stat().st_mode)
-    if mode != 0o600:
-        raise ValueError("mutation preview permissions must be 0600")
-    return path
+    return path, encoded, opened
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _freshness_source_identity() -> tuple[str, str]:
+    raw = Path(FRESHNESS_TOOL).expanduser()
+    if raw.is_symlink():
+        raise ValueError("reviewed mutation freshness tool is missing or symlinked")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(
+            "reviewed mutation freshness tool is missing or symlinked"
+        ) from exc
+    if resolved != _FRESHNESS_TOOL_PATH_AT_LOAD:
+        raise ValueError("mutation freshness tool path changed after module load")
+    _assert_file_path_stable(
+        _FRESHNESS_TOOL_PATH_AT_LOAD,
+        _FRESHNESS_TOOL_STAT_AT_LOAD,
+        label="reviewed mutation freshness tool",
+    )
+
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if head.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = head.stdout.strip()
+    if len(commit) not in {40, 64}:
+        raise ValueError("reviewed source commit is invalid")
+
+    historical = subprocess.run(
+        ["git", "show", f"{commit}:{FRESHNESS_TOOL_RELATIVE}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+    if historical.returncode != 0:
+        raise ValueError(
+            "mutation freshness tool is not present at reviewed source commit"
+        )
+    if historical.stdout != _FRESHNESS_TOOL_BYTES_AT_LOAD:
+        raise ValueError(
+            "mutation freshness tool bytes do not match reviewed source commit"
+        )
+
+    _assert_file_path_stable(
+        _FRESHNESS_TOOL_PATH_AT_LOAD,
+        _FRESHNESS_TOOL_STAT_AT_LOAD,
+        label="reviewed mutation freshness tool",
+    )
+    return commit, _FRESHNESS_TOOL_SHA256_AT_LOAD
 
 
 def _expected_sha256(value: str) -> str:
@@ -337,16 +500,27 @@ def execute_fresh_mutation_preview(
     if timeout_seconds <= 0 or timeout_seconds > 3600:
         raise ValueError("timeout_seconds must be between 1 and 3600")
 
-    path = _private_preview(preview_path)
+    path, preview_bytes, preview_stat = _capture_private_preview(
+        preview_path
+    )
     expected = _expected_sha256(expected_preview_sha256)
-    initial_sha = _sha256(path)
+    initial_sha = hashlib.sha256(preview_bytes).hexdigest()
     if initial_sha != expected:
         raise ValueError("mutation preview SHA256 does not match explicit expectation")
 
+    freshness_source_before = _freshness_source_identity()
     freshness = FRESH.check_mutation_preview_freshness(
         preview_path=path,
         timeout_seconds=min(timeout_seconds, 300),
         **handoff_kwargs,
+    )
+    freshness_source_after = _freshness_source_identity()
+    if freshness_source_after != freshness_source_before:
+        raise ValueError("reviewed mutation freshness source changed during review")
+    _assert_file_path_stable(
+        path,
+        preview_stat,
+        label="mutation preview",
     )
     if not getattr(freshness, "preview_current", False):
         raise ValueError(
@@ -402,7 +576,12 @@ def execute_fresh_mutation_preview(
                 "reviewed deploy surface file count changed after freshness review"
             )
 
-        final_sha = _sha256(path)
+        final_sha = initial_sha
+        _assert_file_path_stable(
+            path,
+            preview_stat,
+            label="mutation preview",
+        )
         unchanged = final_sha == initial_sha == expected
         if not unchanged:
             raise ValueError("mutation preview changed during freshness review")
@@ -422,6 +601,16 @@ def execute_fresh_mutation_preview(
             mutation_tool_path,
             mutation_tool_stat,
         )
+        _assert_file_path_stable(
+            path,
+            preview_stat,
+            label="mutation preview",
+        )
+        freshness_source_before_launch = _freshness_source_identity()
+        if freshness_source_before_launch != freshness_source_before:
+            raise ValueError(
+                "reviewed mutation freshness source changed before launch"
+            )
 
         if not execute:
             return Phase2FreshMutationExecution(
