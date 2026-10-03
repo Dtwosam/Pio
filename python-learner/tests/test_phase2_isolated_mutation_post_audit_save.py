@@ -97,8 +97,9 @@ def test_saver_writes_private_verified_audit_atomically(
         "SOURCE_PREPARATION_REQUIRED"
     )
     assert payload["audit_payload_sha256"] == report.audit_payload_sha256
-    expected_tool_sha = hashlib.sha256(
-        MODULE.AUDIT_TOOL.read_bytes()
+    expected_tool_sha = MODULE._AUDIT_TOOL_SHA256_AT_LOAD
+    assert expected_tool_sha == hashlib.sha256(
+        MODULE._AUDIT_TOOL_BYTES_AT_LOAD
     ).hexdigest()
     assert payload["audit_tool_sha256"] == expected_tool_sha
     assert report.audit_tool_sha256 == expected_tool_sha
@@ -321,3 +322,89 @@ def test_saver_digest_comes_from_exact_published_payload_not_path_reread(
     payload = output.read_text(encoding="utf-8").encode("utf-8")
     assert saved.artifact_sha256 == MODULE.hashlib.sha256(payload).hexdigest()
     assert saved.bytes_written == len(payload)
+
+
+
+def test_saver_source_identity_matches_exact_executed_audit_bytes():
+    (
+        commit,
+        audit_sha,
+        deploy_surface_sha,
+        deploy_surface_files,
+    ) = MODULE._source_identity()
+
+    assert len(commit) >= 40
+    assert audit_sha == MODULE._AUDIT_TOOL_SHA256_AT_LOAD
+    assert audit_sha == hashlib.sha256(
+        MODULE._AUDIT_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+    assert len(deploy_surface_sha) == 64
+    assert deploy_surface_files > 0
+
+
+def test_saver_never_rereads_loaded_audit_or_renderer_tool_bytes(monkeypatch):
+    real_read_bytes = Path.read_bytes
+    source_identity = MODULE.RENDER._deploy_surface_identity()
+
+    monkeypatch.setattr(
+        MODULE.RENDER,
+        "_deploy_surface_identity",
+        lambda: source_identity,
+    )
+
+    def reject_tool_reread(path):
+        resolved = path.resolve()
+        if resolved in {
+            MODULE._AUDIT_TOOL_PATH_AT_LOAD,
+            MODULE._RENDER_TOOL_PATH_AT_LOAD,
+        }:
+            raise AssertionError(
+                "saver identity must use captured dependency bytes"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_tool_reread)
+
+    identity = MODULE._source_identity()
+
+    assert identity[1] == MODULE._AUDIT_TOOL_SHA256_AT_LOAD
+
+
+def test_saver_dependencies_are_executed_from_descriptor_captured_bytes():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_tool(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_AUDIT_TOOL_BYTES_AT_LOAD" in source
+    assert "_RENDER_TOOL_BYTES_AT_LOAD" in source
+    assert "AUDIT_TOOL.read_bytes()" not in source
+    assert "RENDER_TOOL.read_bytes()" not in source
+
+
+def test_saver_rejects_source_identity_change_during_audit(
+    tmp_path,
+    monkeypatch,
+):
+    execution_receipt = receipt(tmp_path)
+    install(monkeypatch, verified_audit(execution_receipt))
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64, "2" * 64, 10),
+            ("b" * 40, "3" * 64, "4" * 64, 10),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(ValueError, match="source changed during audit"):
+        MODULE.save_verified_mutation_post_audit(
+            execution_receipt_path=execution_receipt,
+        )
+
+    assert not (tmp_path / "execution.json.post-audit.json").exists()
