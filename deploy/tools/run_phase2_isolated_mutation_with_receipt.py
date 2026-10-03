@@ -264,7 +264,7 @@ def run_mutation_with_receipt(
     *,
     preview_path: str | Path,
     expected_preview_sha256: str,
-    receipt_path: str | Path | None = None,
+    execution_receipt_path: str | Path | None = None,
     execute: bool = False,
     timeout_seconds: int = 1800,
     runner: Runner = subprocess.run,
@@ -283,7 +283,7 @@ def run_mutation_with_receipt(
 
     receipt = _receipt_path(
         preview_path=preview_path,
-        receipt_path=receipt_path,
+        receipt_path=execution_receipt_path,
     )
 
     if not execute:
@@ -436,7 +436,7 @@ def main() -> None:
     report = run_mutation_with_receipt(
         preview_path=args.preview,
         expected_preview_sha256=args.expected_preview_sha256,
-        receipt_path=args.execution_receipt,
+        execution_receipt_path=args.execution_receipt,
         execute=args.execute,
         timeout_seconds=args.timeout_seconds,
         runtime_root=args.runtime_root,
