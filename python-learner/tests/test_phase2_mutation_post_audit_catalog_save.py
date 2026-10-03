@@ -192,3 +192,36 @@ def test_catalog_source_identity_matches_reviewed_git_head():
     assert tool_sha == MODULE.hashlib.sha256(
         MODULE.CATALOG_TOOL.read_bytes()
     ).hexdigest()
+
+
+
+def test_save_catalog_snapshot_rejects_source_change_during_build(
+    tmp_path,
+    monkeypatch,
+):
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    monkeypatch.setattr(
+        MODULE.CATALOG,
+        "build_phase2_post_audit_catalog",
+        lambda **kwargs: good_catalog(tmp_path),
+    )
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_catalog_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(ValueError, match="source changed during snapshot build"):
+        MODULE.save_phase2_post_audit_catalog_snapshot(
+            artifact_directory=artifact_dir,
+            output_path=tmp_path / "catalog.json",
+        )
+
+    assert not (tmp_path / "catalog.json").exists()
