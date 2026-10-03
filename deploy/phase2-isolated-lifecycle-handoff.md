@@ -233,6 +233,10 @@ to freshly reverify the archive against the saved handoff evidence.
 The check compares immutable identities rather than paths:
 
 - the saved snapshot is statically verified first;
+- the supplied archive is read once into a bounded byte snapshot; its SHA-256
+  and tar/member verification are computed from those exact same bytes;
+- the archive path must remain the same regular 0600 file identity throughout
+  verification or the check fails closed;
 - the supplied archive is fully reverified, including its reconstructed portable
   bundle;
 - the archive SHA-256 must match the SHA recorded in the snapshot;
