@@ -124,11 +124,17 @@ def install_build_verifiers(monkeypatch):
 
 
 def install_verify_verifiers(monkeypatch):
+    def snapshot_sha(kwargs):
+        return hashlib.sha256(
+            Path(kwargs["snapshot_path"]).read_bytes()
+        ).hexdigest()
+
     monkeypatch.setattr(
         VERIFY.HANDOFF_VERIFY,
         "verify_phase2_post_audit_catalog_handoff_snapshot",
         lambda **kwargs: Report(
             handoff_snapshot_verified=True,
+            snapshot_sha256=snapshot_sha(kwargs),
             **valid_boundary(),
         ),
     )
@@ -137,6 +143,7 @@ def install_verify_verifiers(monkeypatch):
         "verify_phase2_post_audit_catalog_snapshot",
         lambda **kwargs: Report(
             snapshot_verified=True,
+            snapshot_sha256=snapshot_sha(kwargs),
             **valid_boundary(),
         ),
     )
@@ -145,6 +152,7 @@ def install_verify_verifiers(monkeypatch):
         "freshly_reverify_phase2_post_audit_catalog",
         lambda **kwargs: Report(
             fresh_reverification_verified=True,
+            snapshot_sha256=snapshot_sha(kwargs),
             **valid_boundary(),
         ),
     )
@@ -355,3 +363,85 @@ def test_builder_does_not_clobber_destination_created_during_publish(
         "concurrent-owner"
     )
     assert {item.name for item in output.iterdir()} == {"sentinel.txt"}
+
+
+
+def test_verifier_rejects_child_snapshot_identity_drift(
+    tmp_path,
+    monkeypatch,
+):
+    output, _, _ = build_bundle(tmp_path, monkeypatch)
+    install_verify_verifiers(monkeypatch)
+
+    original = (
+        VERIFY.HANDOFF_VERIFY
+        .verify_phase2_post_audit_catalog_handoff_snapshot
+    )
+
+    def mismatched_handoff(**kwargs):
+        report = original(**kwargs)
+        return Report(
+            **{
+                **report.__dict__,
+                "snapshot_sha256": "0" * 64,
+            }
+        )
+
+    monkeypatch.setattr(
+        VERIFY.HANDOFF_VERIFY,
+        "verify_phase2_post_audit_catalog_handoff_snapshot",
+        mismatched_handoff,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="handoff snapshot changed during verification",
+    ):
+        VERIFY.verify_phase2_portable_handoff_bundle(
+            bundle_directory=output,
+            repository_root=ROOT,
+        )
+
+
+def test_verifier_rejects_snapshot_path_swap_during_nested_verification(
+    tmp_path,
+    monkeypatch,
+):
+    output, _, _ = build_bundle(tmp_path, monkeypatch)
+    install_verify_verifiers(monkeypatch)
+    handoff = output / "handoff.snapshot.json"
+    original = (
+        VERIFY.HANDOFF_VERIFY
+        .verify_phase2_post_audit_catalog_handoff_snapshot
+    )
+
+    def swap_handoff(**kwargs):
+        report = original(**kwargs)
+        replacement = output / "replacement.json"
+        replacement.write_bytes(handoff.read_bytes())
+        replacement.chmod(0o600)
+        handoff.unlink()
+        replacement.rename(handoff)
+        return report
+
+    monkeypatch.setattr(
+        VERIFY.HANDOFF_VERIFY,
+        "verify_phase2_post_audit_catalog_handoff_snapshot",
+        swap_handoff,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="handoff snapshot path changed after read",
+    ):
+        VERIFY.verify_phase2_portable_handoff_bundle(
+            bundle_directory=output,
+            repository_root=ROOT,
+        )
+
+
+def test_bundle_verifier_source_has_no_split_path_content_reads():
+    source = VERIFY_TOOL.read_text(encoding="utf-8")
+
+    assert ".read_text(" not in source
+    assert ".read_bytes(" not in source
