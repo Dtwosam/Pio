@@ -361,3 +361,77 @@ def test_archive_verifier_fails_closed_if_path_is_replaced_after_snapshot(
             archive_path=archive_path,
             repository_root=ROOT,
         )
+
+
+
+def test_archive_builder_publish_race_never_overwrites_destination(
+    tmp_path,
+    monkeypatch,
+):
+    root, bundle_sha = make_bundle(tmp_path)
+    monkeypatch.setattr(
+        ARCHIVE.BUNDLE,
+        "verify_phase2_portable_handoff_bundle",
+        lambda **kwargs: bundle_report(root, bundle_sha),
+    )
+    output = tmp_path / "portable.tar"
+    competitor = b"concurrent archive evidence\n"
+    real_link = ARCHIVE.os.link
+    raced = False
+
+    def competing_publish(source, destination, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            destination = Path(destination)
+            destination.write_bytes(competitor)
+            destination.chmod(0o600)
+        return real_link(source, destination, **kwargs)
+
+    monkeypatch.setattr(ARCHIVE.os, "link", competing_publish)
+
+    with pytest.raises(
+        ValueError,
+        match="output appeared before publish",
+    ):
+        ARCHIVE.build_phase2_portable_bundle_archive(
+            bundle_directory=root,
+            output_path=output,
+            repository_root=ROOT,
+        )
+
+    assert output.read_bytes() == competitor
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert not list(tmp_path.glob(".portable.tar.*.tmp"))
+
+
+def test_archive_builder_digest_uses_exact_prepublished_tar_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    root, bundle_sha = make_bundle(tmp_path)
+    monkeypatch.setattr(
+        ARCHIVE.BUNDLE,
+        "verify_phase2_portable_handoff_bundle",
+        lambda **kwargs: bundle_report(root, bundle_sha),
+    )
+    output = tmp_path / "portable.tar"
+    original_read_bytes = Path.read_bytes
+
+    def forbid_output_reread(self):
+        if self == output:
+            raise AssertionError("published archive path must not be reread for digest")
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", forbid_output_reread)
+
+    report = ARCHIVE.build_phase2_portable_bundle_archive(
+        bundle_directory=root,
+        output_path=output,
+        repository_root=ROOT,
+    )
+
+    published = original_read_bytes(output)
+    assert report.archive_sha256 == hashlib.sha256(published).hexdigest()
+    assert report.archive_size == len(published)
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
