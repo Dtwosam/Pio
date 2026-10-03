@@ -265,9 +265,35 @@ def _atomic_write_new(path: Path, payload: dict[str, Any]) -> tuple[str, int]:
             raise ValueError(
                 "catalog handoff snapshot output appeared before publish"
             )
-        os.replace(temp_path, path)
+
+        temp_stat = os.stat(temp_path, follow_symlinks=False)
+        try:
+            os.link(
+                temp_path,
+                path,
+                follow_symlinks=False,
+            )
+        except FileExistsError as exc:
+            raise ValueError(
+                "catalog handoff snapshot output appeared before publish"
+            ) from exc
+        published_stat = os.stat(path, follow_symlinks=False)
+        if (
+            published_stat.st_dev != temp_stat.st_dev
+            or published_stat.st_ino != temp_stat.st_ino
+            or not stat.S_ISREG(published_stat.st_mode)
+            or stat.S_IMODE(published_stat.st_mode) != 0o600
+        ):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            raise ValueError(
+                "catalog handoff snapshot publication identity mismatch"
+            )
+
+        temp_path.unlink()
         temp_path = None
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
         directory_fd = os.open(
             path.parent,
