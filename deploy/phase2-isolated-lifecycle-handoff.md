@@ -141,3 +141,22 @@ evidence as a blocker. The fresh verifier must also report the exact same
 snapshot path and SHA-256 as the static verifier, so a snapshot changed between
 the two reads fails closed. Without `--artifact-directory`, the handoff remains
 a static historical snapshot check.
+
+
+## Immutable combined handoff evidence
+
+After a historical catalog handoff is verified, it may be frozen as private
+evidence with
+`deploy/tools/save_phase2_mutation_post_audit_catalog_handoff.py`.
+
+The saver reruns the reviewed combined handoff, requires verified historical
+lineage, preserves any current attention/blocker state, and writes a create-only
+`PHASE2_MUTATION_POST_AUDIT_CATALOG_HANDOFF_SNAPSHOT_V1` artifact at mode
+`0600`. The output must be outside protected production paths.
+
+The saved handoff records the current lifecycle recommendation as historical
+evidence only. Both the embedded handoff and the save report keep
+`authorizes_next_action=false` and
+`requires_fresh_separate_mutation_authorization=true`. A later operator action
+must still come from a fresh current lifecycle/preflight/authorization chain;
+the saved handoff can never be replayed as mutation authority.
