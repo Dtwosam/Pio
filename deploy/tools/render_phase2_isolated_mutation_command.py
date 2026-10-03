@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -43,6 +44,8 @@ class Phase2ReviewedMutationCommand:
     mutation_command: str | None
     mutation_rendered: bool
     mutation_executed: bool
+    preflight_fingerprint: str
+    mutation_fingerprint: str | None
     preflight: dict[str, Any]
     lifecycle: dict[str, Any]
     read_only: bool
@@ -66,6 +69,17 @@ def _preflight_boundary_ok(report: Any) -> bool:
         and not getattr(report, "production_tree_modified", True)
         and not getattr(report, "mutation_flag_appended", True)
     )
+
+
+def _fingerprint(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def render_reviewed_mutation_command(
@@ -103,6 +117,19 @@ def render_reviewed_mutation_command(
         mutation_argv = (*argv, mutation_flag)
         mutation_command = shlex.join(mutation_argv)
 
+    preflight_record = preflight.to_record()
+    preflight_fingerprint = _fingerprint(preflight_record)
+    mutation_fingerprint = (
+        _fingerprint(
+            {
+                "preflight_fingerprint": preflight_fingerprint,
+                "mutation_argv": mutation_argv,
+            }
+        )
+        if mutation_argv is not None
+        else None
+    )
+
     return Phase2ReviewedMutationCommand(
         state=str(preflight.state),
         next_action=str(preflight.next_action),
@@ -116,7 +143,9 @@ def render_reviewed_mutation_command(
         mutation_command=mutation_command,
         mutation_rendered=mutation_argv is not None,
         mutation_executed=False,
-        preflight=preflight.to_record(),
+        preflight_fingerprint=preflight_fingerprint,
+        mutation_fingerprint=mutation_fingerprint,
+        preflight=preflight_record,
         lifecycle=preflight.lifecycle,
         read_only=True,
         rpc_called=False,
