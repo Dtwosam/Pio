@@ -278,3 +278,48 @@ def test_save_handoff_snapshot_rejects_protected_output(
             snapshot_path=tmp_path / "catalog.json",
             output_path="/opt/pio/data/handoff.json",
         )
+
+
+
+def test_save_catalog_handoff_publish_race_never_overwrites_destination(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        MODULE.HANDOFF,
+        "inspect_phase2_post_audit_catalog_handoff",
+        lambda **kwargs: good_handoff(),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_handoff_source_identity",
+        lambda: ("c" * 40, "d" * 64),
+    )
+    output = tmp_path / "handoff.json"
+    competitor = b"concurrent catalog evidence\n"
+    real_link = MODULE.os.link
+    raced = False
+
+    def competing_publish(source, destination, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            destination = Path(destination)
+            destination.write_bytes(competitor)
+            destination.chmod(0o600)
+        return real_link(source, destination, **kwargs)
+
+    monkeypatch.setattr(MODULE.os, "link", competing_publish)
+
+    with pytest.raises(
+        ValueError,
+        match="output appeared before publish",
+    ):
+        MODULE.save_phase2_post_audit_catalog_handoff_snapshot(
+            snapshot_path=tmp_path / "catalog.json",
+            output_path=output,
+        )
+
+    assert output.read_bytes() == competitor
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert not list(tmp_path.glob(".handoff.json.*.tmp"))
