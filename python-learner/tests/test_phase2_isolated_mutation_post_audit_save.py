@@ -102,6 +102,16 @@ def test_saver_writes_private_verified_audit_atomically(
     ).hexdigest()
     assert payload["audit_tool_sha256"] == expected_tool_sha
     assert report.audit_tool_sha256 == expected_tool_sha
+    assert payload["audit_source_commit"] == report.audit_source_commit
+    assert len(report.audit_source_commit) in {40, 64}
+    assert payload["audit_deploy_surface_sha256"] == (
+        report.audit_deploy_surface_sha256
+    )
+    assert len(report.audit_deploy_surface_sha256) == 64
+    assert payload["audit_deploy_surface_files"] == (
+        report.audit_deploy_surface_files
+    )
+    assert report.audit_deploy_surface_files > 0
     assert report.artifact_write_performed is True
     assert report.rpc_called is False
     assert report.database_write_performed is False
