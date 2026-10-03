@@ -78,6 +78,7 @@ class Phase2MutationPostAuditVerification:
     artifact_path: str
     artifact_sha256: str
     artifact_format_valid: bool
+    audit_payload_sha256: str
     audit_payload_sha256_matches: bool
     audit_source_commit: str
     audit_source_commit_present: bool
@@ -86,6 +87,7 @@ class Phase2MutationPostAuditVerification:
     audit_deploy_surface_files_matches: bool
     audit_tool_sha256_matches: bool
     execution_receipt_path: str
+    execution_receipt_sha256: str
     execution_receipt_override_used: bool
     execution_receipt_sha256_matches: bool
     execution_receipt_valid: bool
@@ -94,6 +96,12 @@ class Phase2MutationPostAuditVerification:
     preview_sha256_matches: bool
     preview_identity_matches: bool
     mutation_argv_sha256_matches: bool
+    prior_state: str
+    current_state: str
+    current_next_action: str
+    current_next_tool: str | None
+    current_next_parameters: dict[str, Any]
+    current_next_mutation_flag: str | None
     postcondition_record_valid: bool
     static_audit_verified: bool
     read_only: bool
@@ -566,6 +574,7 @@ def verify_saved_mutation_post_audit(
         artifact_path=str(artifact_file),
         artifact_sha256=artifact_sha,
         artifact_format_valid=format_valid,
+        audit_payload_sha256=str(artifact["audit_payload_sha256"]),
         audit_payload_sha256_matches=audit_payload_matches,
         audit_source_commit=resolved_commit,
         audit_source_commit_present=commit_present,
@@ -574,6 +583,7 @@ def verify_saved_mutation_post_audit(
         audit_deploy_surface_files_matches=deploy_files_matches,
         audit_tool_sha256_matches=tool_sha_matches,
         execution_receipt_path=str(receipt_file),
+        execution_receipt_sha256=str(artifact["execution_receipt_sha256"]),
         execution_receipt_override_used=receipt_override_used,
         execution_receipt_sha256_matches=receipt_sha_matches,
         execution_receipt_valid=receipt_valid,
@@ -582,6 +592,22 @@ def verify_saved_mutation_post_audit(
         preview_sha256_matches=preview_sha_matches,
         preview_identity_matches=preview_identity_matches,
         mutation_argv_sha256_matches=argv_matches,
+        prior_state=str(audit.get("prior_state", "")),
+        current_state=str(audit.get("current_state", "")),
+        current_next_action=str(audit.get("current_next_action", "")),
+        current_next_tool=(
+            str(audit["current_next_tool"])
+            if audit.get("current_next_tool") is not None
+            else None
+        ),
+        current_next_parameters=dict(
+            audit.get("current_next_parameters", {})
+        ),
+        current_next_mutation_flag=(
+            str(audit["current_next_mutation_flag"])
+            if audit.get("current_next_mutation_flag") is not None
+            else None
+        ),
         postcondition_record_valid=postcondition_valid,
         static_audit_verified=static_verified,
         read_only=True,
