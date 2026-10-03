@@ -90,11 +90,23 @@ def completed_receipt(preview_path: Path, *, succeeded=True, exit_code=0):
     }
 
 
-def lifecycle(state="SOURCE_PREPARATION_REQUIRED", *, boundary_ok=True):
+def lifecycle(
+    state="SOURCE_PREPARATION_REQUIRED",
+    *,
+    boundary_ok=True,
+    next_parameters=None,
+    next_mutation_flag="--prepare",
+):
     return SimpleNamespace(
         state=state,
         next_action="PREPARE_PINNED_RUNTIME",
         next_tool="prepare_phase2_isolated_runtime.py",
+        next_parameters=(
+            {"source_tree": "/tmp/pio-phase2-build/pinned"}
+            if next_parameters is None
+            else next_parameters
+        ),
+        next_mutation_flag=next_mutation_flag,
         attention_required=True,
         blockers=("PINNED_SOURCE_NOT_PREPARED",),
         read_only=boundary_ok,
@@ -151,6 +163,10 @@ def test_audit_verifies_successful_mutation_and_observed_progress(
     assert report.post_mutation_progress_observed is True
     assert report.post_mutation_verified is True
     assert report.current_state == "SOURCE_PREPARATION_REQUIRED"
+    assert report.current_next_parameters == {
+        "source_tree": "/tmp/pio-phase2-build/pinned"
+    }
+    assert report.current_next_mutation_flag == "--prepare"
     assert report.rpc_called is False
     assert report.mutation_executed is False
 
@@ -390,3 +406,64 @@ def test_postcondition_contract_never_allows_same_state(prior_state, allowed):
     assert allowed
     assert prior_state not in allowed
     assert len(allowed) == len(set(allowed))
+
+
+
+def test_audit_rejects_sensitive_lifecycle_handoff_parameter(
+    tmp_path,
+    monkeypatch,
+):
+    preview, receipt = artifacts(tmp_path)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(
+            next_parameters={
+                "rpc_url": "https://rpc.invalid/?api-key=secret",
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="sensitive field"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
+def test_audit_rejects_unreviewed_next_mutation_flag(
+    tmp_path,
+    monkeypatch,
+):
+    preview, receipt = artifacts(tmp_path)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(next_mutation_flag="--force"),
+    )
+
+    with pytest.raises(ValueError, match="next mutation flag is invalid"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
+def test_audit_allows_monitoring_handoff_without_mutation_flag(
+    tmp_path,
+    monkeypatch,
+):
+    preview, receipt = artifacts(tmp_path)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(
+            state="SOURCE_PREPARATION_REQUIRED",
+            next_parameters={"source_tree": "/tmp/pinned"},
+            next_mutation_flag=None,
+        ),
+    )
+
+    report = MODULE.audit_mutation_execution_receipt(
+        execution_receipt_path=receipt,
+    )
+
+    assert report.current_next_parameters == {
+        "source_tree": "/tmp/pinned",
+    }
+    assert report.current_next_mutation_flag is None
