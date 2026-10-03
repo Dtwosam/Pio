@@ -15,6 +15,10 @@ from .live_transition_cost_evidence import (
     LiveTransitionCostEvidenceReport,
     build_live_transition_cost_evidence,
 )
+from .live_transition_entry_shortfall import (
+    LiveTransitionEntryShortfallEvidenceReport,
+    build_live_transition_entry_shortfall_evidence,
+)
 from .research_store import ResearchStore
 
 
@@ -103,6 +107,9 @@ class LiveOutcomeEvidenceReport:
     samples: tuple[LiveOutcomeEvidenceSample, ...]
     action_cost_evidence: LiveActionCostEvidenceReport | None = None
     transition_cost_evidence: LiveTransitionCostEvidenceReport | None = None
+    transition_entry_shortfall_evidence: (
+        LiveTransitionEntryShortfallEvidenceReport | None
+    ) = None
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
@@ -232,6 +239,9 @@ def build_live_outcome_evidence(
         database_path,
         action_cost_evidence=action_cost_evidence,
     )
+    transition_entry_shortfall_evidence = (
+        build_live_transition_entry_shortfall_evidence(database_path)
+    )
 
     if not samples:
         return LiveOutcomeEvidenceReport(
@@ -260,6 +270,9 @@ def build_live_outcome_evidence(
             samples=(),
             action_cost_evidence=action_cost_evidence,
             transition_cost_evidence=transition_cost_evidence,
+            transition_entry_shortfall_evidence=(
+                transition_entry_shortfall_evidence
+            ),
         )
 
     realized = [item.realized_return_bps for item in samples]
@@ -313,4 +326,7 @@ def build_live_outcome_evidence(
         samples=samples,
         action_cost_evidence=action_cost_evidence,
         transition_cost_evidence=transition_cost_evidence,
+        transition_entry_shortfall_evidence=(
+            transition_entry_shortfall_evidence
+        ),
     )
