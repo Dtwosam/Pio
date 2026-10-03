@@ -254,3 +254,104 @@ def test_runner_rejects_invalid_timeout(monkeypatch):
 
     with pytest.raises(ValueError, match="between 1 and 300"):
         MODULE.run_next_read_only_preflight(timeout_seconds=0)
+
+
+
+def test_runner_rejects_nested_rpc_boundary_crossing(monkeypatch):
+    install(monkeypatch, preview())
+
+    def runner(command, **kwargs):
+        return completed(
+            command,
+            payload={
+                "read_only": True,
+                "details": {
+                    "activation": {
+                        "rpc_called": True,
+                    },
+                },
+            },
+        )
+
+    with pytest.raises(ValueError, match="crossed the read-only boundary"):
+        MODULE.run_next_read_only_preflight(runner=runner)
+
+
+def test_runner_rejects_nested_read_only_false(monkeypatch):
+    install(monkeypatch, preview())
+
+    def runner(command, **kwargs):
+        return completed(
+            command,
+            payload={
+                "read_only": True,
+                "details": {
+                    "smoke": {
+                        "read_only": False,
+                    },
+                },
+            },
+        )
+
+    with pytest.raises(ValueError, match="crossed the read-only boundary"):
+        MODULE.run_next_read_only_preflight(runner=runner)
+
+
+def test_runner_allows_historical_nested_applied_state(monkeypatch):
+    install(monkeypatch, preview())
+
+    def runner(command, **kwargs):
+        return completed(
+            command,
+            payload={
+                "read_only": True,
+                "rpc_called": False,
+                "history": {
+                    "previous_release": {
+                        "applied": True,
+                    },
+                },
+            },
+        )
+
+    report = MODULE.run_next_read_only_preflight(runner=runner)
+
+    assert report.exit_code == 0
+    assert report.result_json_valid is True
+    assert report.failure_category is None
+
+
+def test_runner_rejects_top_level_current_applied_state(monkeypatch):
+    install(monkeypatch, preview())
+
+    def runner(command, **kwargs):
+        return completed(
+            command,
+            payload={
+                "read_only": True,
+                "rpc_called": False,
+                "applied": True,
+            },
+        )
+
+    with pytest.raises(ValueError, match="crossed the read-only boundary"):
+        MODULE.run_next_read_only_preflight(runner=runner)
+
+
+def test_nested_boundary_helper_scans_lists_and_tuples():
+    assert MODULE._nested_boundary_ok(
+        {
+            "items": [
+                {"read_only": True, "rpc_called": False},
+                {"nested": ({"service_control_performed": False},)},
+            ]
+        }
+    )
+    assert not MODULE._nested_boundary_ok(
+        {
+            "items": [
+                {"read_only": True},
+                {"nested": [{"daemon_reload_performed": True}]},
+            ]
+        }
+    )

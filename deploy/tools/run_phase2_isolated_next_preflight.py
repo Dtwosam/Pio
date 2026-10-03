@@ -93,25 +93,43 @@ def _preview_boundary_ok(report: Any) -> bool:
     )
 
 
+_EXPLICIT_BOUNDARY_FLAGS = (
+    "rpc_called",
+    "database_write_performed",
+    "service_control_performed",
+    "daemon_reload_performed",
+    "production_tree_modified",
+)
+
+_TOP_LEVEL_MUTATION_FLAGS = (
+    "applied",
+    "prepared",
+    "build_requested",
+    "build_succeeded",
+)
+
+
+def _nested_boundary_ok(value: Any) -> bool:
+    if isinstance(value, dict):
+        if "read_only" in value and not bool(value["read_only"]):
+            return False
+        if any(bool(value.get(key, False)) for key in _EXPLICIT_BOUNDARY_FLAGS):
+            return False
+        return all(_nested_boundary_ok(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_nested_boundary_ok(item) for item in value)
+    return True
+
+
 def _result_boundary_ok(result: Any) -> bool:
+    if not _nested_boundary_ok(result):
+        return False
     if not isinstance(result, dict):
         return True
-
-    if "read_only" in result and not bool(result["read_only"]):
-        return False
-
-    must_be_false = (
-        "rpc_called",
-        "database_write_performed",
-        "service_control_performed",
-        "daemon_reload_performed",
-        "production_tree_modified",
-        "applied",
-        "prepared",
-        "build_requested",
-        "build_succeeded",
+    return not any(
+        bool(result.get(key, False))
+        for key in _TOP_LEVEL_MUTATION_FLAGS
     )
-    return not any(bool(result.get(key, False)) for key in must_be_false)
 
 
 def _reviewed_argv(preview: Any) -> tuple[str, ...] | None:
