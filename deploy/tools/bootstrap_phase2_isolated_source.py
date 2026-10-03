@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
@@ -50,6 +51,37 @@ class PinnedSourceBootstrapReport:
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _validated_repository_url(value: str) -> tuple[str, str]:
+    raw = value.strip()
+    if not raw:
+        raise ValueError("repository URL is required")
+
+    parsed = urlsplit(raw)
+    if parsed.scheme in {"http", "https"}:
+        if (
+            parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "credential-bearing or query-bearing repository URLs are not allowed"
+            )
+        host = parsed.hostname or ""
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        safe = urlunsplit(
+            (parsed.scheme, host, parsed.path, "", "")
+        )
+        return raw, safe
+
+    # Local paths and SSH-style Git remotes are supported for offline tests or
+    # operator environments. Never preserve URL query/fragment material.
+    if "?" in raw or "#" in raw:
+        raise ValueError("repository URL query/fragment is not allowed")
+    return raw, raw
 
 
 def _protected_roots() -> tuple[Path, ...]:
@@ -109,6 +141,9 @@ def inspect_pinned_source(
     repository_url: str = DEFAULT_REPOSITORY_URL,
 ) -> PinnedSourceBootstrapReport:
     target = _destination(destination)
+    _raw_repository_url, safe_repository_url = _validated_repository_url(
+        repository_url
+    )
     observed_head: str | None = None
     tracked_clean = False
 
@@ -133,7 +168,7 @@ def inspect_pinned_source(
     ready = status in {"READY_CREATE", "ALREADY_PINNED"}
     return PinnedSourceBootstrapReport(
         destination=str(target),
-        repository_url=repository_url,
+        repository_url=safe_repository_url,
         pinned_source_head=CHECK.PINNED_SOURCE_HEAD,
         observed_source_head=observed_head,
         tracked_clean=tracked_clean,
