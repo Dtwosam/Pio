@@ -240,3 +240,36 @@ and never stores the structured mutation result itself.
 By default the receipt is written beside the saved preview as
 `<preview>.execution.json`. Receipt paths inside Pio production, runtime,
 configuration, data, or systemd roots are rejected.
+
+
+## Mutation receipt post-audit
+
+Use
+`deploy/tools/check_phase2_isolated_mutation_execution_receipt.py --execution-receipt <file>`
+after a receipt-backed mutation attempt.
+
+The audit is local and read-only. It makes no RPC calls and performs no
+database or service mutation.
+
+It verifies:
+
+- the execution receipt is private `0600`, regular, credential-minimal, and
+  structurally consistent with its PENDING/terminal outcome model;
+- the original saved mutation preview is still present and private;
+- the preview bytes still match the SHA-256 recorded in the receipt;
+- reviewed source/deploy-surface identity, mutation fingerprint, mutation-tool
+  digest, and mutation-argv digest match between preview and receipt;
+- the current Phase-2 state through the existing zero-RPC lifecycle handoff.
+
+The report separates three concepts:
+
+- `audit_integrity_valid`: the receipt/preview evidence chain is intact;
+- `mutation_succeeded`: the launched reviewed mutation returned a successful
+  structured result;
+- `post_mutation_verified`: the evidence chain is intact, the mutation
+  completed successfully, and the lifecycle state has moved away from the
+  preview's pre-mutation state.
+
+A valid audit chain does not turn a failed, aborted, unknown, or PENDING
+mutation into a success. Those outcomes remain explicit and the command exits
+non-zero.
