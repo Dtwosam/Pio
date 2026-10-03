@@ -184,6 +184,19 @@ def _load_json_object_bytes(payload: bytes) -> dict[str, Any]:
     return value
 
 
+def _load_json_object(path: Path) -> dict[str, Any]:
+    """
+    Backward-compatible safe loader for reviewed sibling tools.
+
+    New verification code should prefer one captured byte snapshot end-to-end.
+    This wrapper still uses the no-follow bounded reader and path-stability check.
+    """
+    payload, opened = _read_snapshot_bytes(path)
+    value = _load_json_object_bytes(payload)
+    _assert_snapshot_path_stable(path, opened)
+    return value
+
+
 def _canonical_sha256(value: Any) -> str:
     encoded = json.dumps(
         value,
