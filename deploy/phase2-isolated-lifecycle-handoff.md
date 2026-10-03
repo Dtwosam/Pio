@@ -137,5 +137,7 @@ When the current post-audit archive is locally available, pass
 require the live evidence identity set to match the immutable snapshot. This
 freshness check ignores artifact path relocation as identity, but it treats
 missing, unexpected, unverified, duplicate, or lifecycle-metadata-changed
-evidence as a blocker. Without `--artifact-directory`, the handoff remains a
-static historical snapshot check.
+evidence as a blocker. The fresh verifier must also report the exact same
+snapshot path and SHA-256 as the static verifier, so a snapshot changed between
+the two reads fails closed. Without `--artifact-directory`, the handoff remains
+a static historical snapshot check.
