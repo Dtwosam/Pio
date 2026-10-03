@@ -264,6 +264,12 @@ def save_phase2_post_audit_catalog_snapshot(
     repository_root: str | Path = CATALOG.VERIFY.REPO_ROOT,
 ) -> Phase2SavedPostAuditCatalog:
     output = _output_path(output_path)
+    artifact_root = Path(artifact_directory).expanduser().resolve(strict=True)
+    if output.parent == artifact_root and Path(output.name).match(pattern):
+        raise ValueError(
+            "post-audit catalog snapshot output must not match the catalog pattern"
+        )
+
     source_before = _catalog_source_identity()
     catalog = CATALOG.build_phase2_post_audit_catalog(
         artifact_directory=artifact_directory,
