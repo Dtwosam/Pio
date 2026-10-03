@@ -288,3 +288,38 @@ def test_save_catalog_snapshot_publish_race_never_overwrites_destination(
     assert output.read_bytes() == competitor
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert not list(tmp_path.glob(".catalog.json.*.tmp"))
+
+
+
+def test_save_catalog_snapshot_digest_comes_from_exact_payload_not_path_reread(
+    tmp_path,
+    monkeypatch,
+):
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    monkeypatch.setattr(
+        MODULE.CATALOG,
+        "build_phase2_post_audit_catalog",
+        lambda **kwargs: good_catalog(tmp_path),
+    )
+    output = tmp_path / "catalog.json"
+
+    real_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path):
+        if path == output:
+            raise AssertionError(
+                "published catalog destination must not be reopened for digesting"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    saved = MODULE.save_phase2_post_audit_catalog_snapshot(
+        artifact_directory=artifact_dir,
+        output_path=output,
+    )
+
+    payload = output.read_text(encoding="utf-8").encode("utf-8")
+    assert saved.artifact_sha256 == MODULE.hashlib.sha256(payload).hexdigest()
+    assert saved.bytes_written == len(payload)
