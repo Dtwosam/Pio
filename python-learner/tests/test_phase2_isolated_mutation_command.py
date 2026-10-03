@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import shlex
 from pathlib import Path
@@ -88,6 +89,10 @@ def test_renderer_appends_apply_only_after_successful_preflight(monkeypatch):
     assert shlex.split(rendered.mutation_command) == list(
         rendered.mutation_argv
     )
+    tool = Path(rendered.mutation_argv[1])
+    assert rendered.mutation_tool_sha256 == hashlib.sha256(
+        tool.read_bytes()
+    ).hexdigest()
 
 
 def test_renderer_supports_prepare_boundary(monkeypatch):
@@ -259,6 +264,7 @@ def test_renderer_has_no_mutation_fingerprint_when_no_command(monkeypatch):
 
     assert rendered.preflight_fingerprint
     assert rendered.mutation_fingerprint is None
+    assert rendered.mutation_tool_sha256 is None
     assert rendered.mutation_rendered is False
 
 
@@ -292,3 +298,41 @@ def test_fingerprint_kind_is_domain_separated():
     mutation = MODULE._fingerprint("mutation", payload)
 
     assert preflight != mutation
+
+
+
+def test_mutation_fingerprint_changes_when_reviewed_tool_bytes_change(
+    monkeypatch,
+):
+    report = preflight()
+    install(monkeypatch, report)
+
+    monkeypatch.setattr(
+        MODULE,
+        "_mutation_tool_sha256",
+        lambda _argv: "1" * 64,
+    )
+    first = MODULE.render_reviewed_mutation_command()
+
+    monkeypatch.setattr(
+        MODULE,
+        "_mutation_tool_sha256",
+        lambda _argv: "2" * 64,
+    )
+    second = MODULE.render_reviewed_mutation_command()
+
+    assert first.preflight_fingerprint == second.preflight_fingerprint
+    assert first.mutation_tool_sha256 != second.mutation_tool_sha256
+    assert first.mutation_fingerprint != second.mutation_fingerprint
+
+
+def test_mutation_tool_digest_rejects_symlink(tmp_path):
+    target = tmp_path / "tool.py"
+    target.write_text("print('safe')\n", encoding="utf-8")
+    link = tmp_path / "tool-link.py"
+    link.symlink_to(target)
+
+    with pytest.raises(ValueError, match="missing or symlinked"):
+        MODULE._mutation_tool_sha256(
+            (sys.executable, str(link), "--apply")
+        )
