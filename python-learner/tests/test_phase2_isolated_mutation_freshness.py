@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -239,7 +240,7 @@ def test_freshness_rejects_oversized_preview(tmp_path, monkeypatch):
     path.write_bytes(b"{" + b" " * MODULE._MAX_PREVIEW_BYTES + b"}")
     install(monkeypatch, current())
 
-    with pytest.raises(ValueError, match="too large"):
+    with pytest.raises(ValueError, match="size is invalid"):
         MODULE.check_mutation_preview_freshness(preview_path=path)
 
 
@@ -407,3 +408,98 @@ def test_freshness_rejects_invalid_prior_surface_file_count(
 
     with pytest.raises(ValueError, match="surface file count is invalid"):
         MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+
+def test_freshness_renderer_source_matches_exact_executed_bytes():
+    commit, renderer_sha = MODULE._renderer_source_identity()
+
+    assert len(commit) >= 40
+    assert renderer_sha == MODULE._RENDER_TOOL_SHA256_AT_LOAD
+    assert renderer_sha == hashlib.sha256(
+        MODULE._RENDER_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+
+
+def test_freshness_never_rereads_loaded_renderer_tool_bytes(monkeypatch):
+    real_read_bytes = Path.read_bytes
+
+    def reject_renderer_reread(path):
+        if path.resolve() == MODULE._RENDER_TOOL_PATH_AT_LOAD:
+            raise AssertionError(
+                "executed freshness renderer path must not be reread"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_renderer_reread)
+
+    commit, renderer_sha = MODULE._renderer_source_identity()
+
+    assert len(commit) >= 40
+    assert renderer_sha == MODULE._RENDER_TOOL_SHA256_AT_LOAD
+
+
+def test_freshness_renderer_is_executed_from_descriptor_captured_bytes():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_regular_file(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_RENDER_TOOL_BYTES_AT_LOAD" in source
+    assert "RENDER_TOOL.read_bytes()" not in source
+
+
+def test_freshness_rejects_renderer_change_during_render(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(tmp_path)
+    install(monkeypatch, current())
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_renderer_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(ValueError, match="renderer changed during render"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+def test_freshness_rejects_preview_path_replacement_during_render(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(tmp_path)
+    report = current()
+
+    def replace_preview(**kwargs):
+        path.unlink()
+        path.write_text(
+            json.dumps(prior_payload(state="REPLACED")),
+            encoding="utf-8",
+        )
+        return report
+
+    monkeypatch.setattr(
+        MODULE.RENDER,
+        "render_reviewed_mutation_command",
+        replace_preview,
+    )
+
+    with pytest.raises(ValueError, match="preview path changed after capture"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+def test_freshness_parses_preview_from_captured_bytes_not_path_read():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "json.loads(encoded.decode(" in source
+    assert "path.read_text(" not in source
