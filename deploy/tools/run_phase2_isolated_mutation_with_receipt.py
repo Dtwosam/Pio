@@ -17,7 +17,12 @@ from typing import Any, Callable
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 EXECUTOR_TOOL = TOOLS_DIR / "execute_phase2_isolated_mutation_preview.py"
+EXECUTOR_TOOL_RELATIVE = (
+    "deploy/tools/execute_phase2_isolated_mutation_preview.py"
+)
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
 _PROTECTED_ROOTS = (
     Path("/opt/pio"),
     Path("/opt/pio/data"),
@@ -29,17 +34,116 @@ _PROTECTED_ROOTS = (
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+def _assert_tool_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after load") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after load")
+
+
+def _capture_tool(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[Path, bytes, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_TOOL_BYTES:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_tool_path_stable(resolved, before, label=label)
+    return resolved, encoded, before
+
+
+def _load_captured(
+    path: Path,
+    name: str,
+) -> tuple[Any, Path, bytes, os.stat_result]:
+    label = "reviewed mutation execution tool"
+    resolved, encoded, opened = _capture_tool(path, label=label)
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed Phase-2 tool: {path}")
+        raise ValueError(f"cannot load reviewed Phase-2 tool: {resolved}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(encoded, str(resolved), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_tool_path_stable(resolved, opened, label=label)
+    return module, resolved, encoded, opened
 
 
-EXEC = _load(EXECUTOR_TOOL, "phase2_mutation_receipt_executor")
+(
+    EXEC,
+    _EXECUTOR_TOOL_PATH_AT_LOAD,
+    _EXECUTOR_TOOL_BYTES_AT_LOAD,
+    _EXECUTOR_TOOL_STAT_AT_LOAD,
+) = _load_captured(
+    EXECUTOR_TOOL,
+    "phase2_mutation_receipt_executor",
+)
+_EXECUTOR_TOOL_SHA256_AT_LOAD = hashlib.sha256(
+    _EXECUTOR_TOOL_BYTES_AT_LOAD
+).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -99,6 +203,58 @@ def _receipt_path(
     if parent.is_symlink() or not parent.is_dir():
         raise ValueError("mutation execution receipt parent must be an existing directory")
     return path
+
+
+def _run_git(*args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+
+
+def _executor_source_identity() -> tuple[str, str]:
+    raw = Path(EXECUTOR_TOOL).expanduser()
+    if raw.is_symlink():
+        raise ValueError("reviewed mutation execution tool is missing or symlinked")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(
+            "reviewed mutation execution tool is missing or symlinked"
+        ) from exc
+    if resolved != _EXECUTOR_TOOL_PATH_AT_LOAD:
+        raise ValueError("mutation execution tool path changed after module load")
+    _assert_tool_path_stable(
+        _EXECUTOR_TOOL_PATH_AT_LOAD,
+        _EXECUTOR_TOOL_STAT_AT_LOAD,
+        label="reviewed mutation execution tool",
+    )
+
+    head = _run_git("rev-parse", "HEAD")
+    if head.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = head.stdout.decode("utf-8").strip()
+    if not commit:
+        raise ValueError("reviewed source commit is invalid")
+
+    historical = _run_git("show", f"{commit}:{EXECUTOR_TOOL_RELATIVE}")
+    if historical.returncode != 0:
+        raise ValueError(
+            "mutation execution tool is not present at reviewed source commit"
+        )
+    if historical.stdout != _EXECUTOR_TOOL_BYTES_AT_LOAD:
+        raise ValueError(
+            "mutation execution tool bytes do not match reviewed source commit"
+        )
+
+    _assert_tool_path_stable(
+        _EXECUTOR_TOOL_PATH_AT_LOAD,
+        _EXECUTOR_TOOL_STAT_AT_LOAD,
+        label="reviewed mutation execution tool",
+    )
+    return commit, _EXECUTOR_TOOL_SHA256_AT_LOAD
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -312,6 +468,7 @@ def run_mutation_with_receipt(
     now: Callable[[], str] = _utc_now,
     **handoff_kwargs: Any,
 ) -> Phase2MutationReceiptRun:
+    source_before = _executor_source_identity()
     ready = EXEC.execute_fresh_mutation_preview(
         preview_path=preview_path,
         expected_preview_sha256=expected_preview_sha256,
@@ -319,6 +476,9 @@ def run_mutation_with_receipt(
         timeout_seconds=timeout_seconds,
         **handoff_kwargs,
     )
+    source_after_ready = _executor_source_identity()
+    if source_after_ready != source_before:
+        raise ValueError("reviewed mutation execution source changed during readiness")
     if ready.execution_requested or ready.mutation_executed or not ready.preview_current:
         raise ValueError("mutation execution readiness crossed the non-mutating boundary")
 
@@ -360,6 +520,11 @@ def run_mutation_with_receipt(
 
     execution = None
     try:
+        source_before_execute = _executor_source_identity()
+        if source_before_execute != source_before:
+            raise ValueError(
+                "reviewed mutation execution source changed before launch"
+            )
         execution = EXEC.execute_fresh_mutation_preview(
             preview_path=preview_path,
             expected_preview_sha256=expected_preview_sha256,
@@ -368,6 +533,11 @@ def run_mutation_with_receipt(
             runner=tracked_runner,
             **handoff_kwargs,
         )
+        source_after_execute = _executor_source_identity()
+        if source_after_execute != source_before:
+            raise ValueError(
+                "reviewed mutation execution source changed during execution"
+            )
     except Exception:
         status = (
             "OUTCOME_UNKNOWN_AFTER_LAUNCH"
