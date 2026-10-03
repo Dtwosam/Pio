@@ -354,6 +354,117 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
+def _fsync_regular_file(path: Path, *, label: str) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely for fsync") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_ARTIFACT_BYTES:
+            raise ValueError(f"{label} size is invalid")
+        if stat.S_IMODE(before.st_mode) != 0o600:
+            raise ValueError(f"{label} permissions must be 0600")
+        os.fsync(fd)
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or not stat.S_ISREG(after.st_mode)
+            or stat.S_IMODE(after.st_mode) != 0o600
+        ):
+            raise ValueError(f"{label} changed while fsyncing")
+    finally:
+        os.close(fd)
+
+    current = os.stat(path, follow_symlinks=False)
+    if (
+        current.st_dev != before.st_dev
+        or current.st_ino != before.st_ino
+        or current.st_size != before.st_size
+        or not stat.S_ISREG(current.st_mode)
+        or stat.S_IMODE(current.st_mode) != 0o600
+    ):
+        raise ValueError(f"{label} path changed after fsync")
+
+
+def _fsync_private_directory(path: Path, *, label: str) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely for fsync") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISDIR(before.st_mode):
+            raise ValueError(f"{label} must be a directory")
+        if stat.S_IMODE(before.st_mode) != 0o700:
+            raise ValueError(f"{label} permissions must be 0700")
+        os.fsync(fd)
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or not stat.S_ISDIR(after.st_mode)
+            or stat.S_IMODE(after.st_mode) != 0o700
+        ):
+            raise ValueError(f"{label} changed while fsyncing")
+    finally:
+        os.close(fd)
+
+    current = os.stat(path, follow_symlinks=False)
+    if (
+        current.st_dev != before.st_dev
+        or current.st_ino != before.st_ino
+        or not stat.S_ISDIR(current.st_mode)
+        or stat.S_IMODE(current.st_mode) != 0o700
+    ):
+        raise ValueError(f"{label} path changed after fsync")
+
+
+def _fsync_bundle_tree(root: Path) -> None:
+    audit_root = root / POST_AUDIT_DIR
+    files = [
+        root / HANDOFF_NAME,
+        root / CATALOG_NAME,
+        root / MANIFEST_NAME,
+        *sorted(
+            (
+                path
+                for path in audit_root.iterdir()
+                if path.is_file() and not path.is_symlink()
+            ),
+            key=lambda path: path.name,
+        ),
+    ]
+    if not files or len(files) < 4:
+        raise ValueError("portable handoff bundle is incomplete before fsync")
+
+    for path in files:
+        _fsync_regular_file(
+            path,
+            label=f"portable handoff bundle file {path.name}",
+        )
+
+    _fsync_private_directory(
+        audit_root,
+        label="portable handoff bundle post-audit directory",
+    )
+    _fsync_private_directory(
+        root,
+        label="portable handoff bundle temp directory",
+    )
+
+
 def _publish_directory_noreplace(source: Path, destination: Path) -> None:
     """
     Atomically publish a completed private directory without replacing a peer.
@@ -591,6 +702,7 @@ def build_phase2_portable_handoff_bundle(
                 raise ValueError("copied post-audit artifact hash mismatch")
 
         _write_json(temp / MANIFEST_NAME, manifest)
+        _fsync_bundle_tree(temp)
 
         if output.exists() or output.is_symlink():
             raise ValueError("portable handoff bundle output appeared before publish")
