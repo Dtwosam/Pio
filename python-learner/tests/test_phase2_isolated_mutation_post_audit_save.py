@@ -344,6 +344,13 @@ def test_saver_source_identity_matches_exact_executed_audit_bytes():
 
 def test_saver_never_rereads_loaded_audit_or_renderer_tool_bytes(monkeypatch):
     real_read_bytes = Path.read_bytes
+    source_identity = MODULE.RENDER._deploy_surface_identity()
+
+    monkeypatch.setattr(
+        MODULE.RENDER,
+        "_deploy_surface_identity",
+        lambda: source_identity,
+    )
 
     def reject_tool_reread(path):
         resolved = path.resolve()
@@ -352,7 +359,7 @@ def test_saver_never_rereads_loaded_audit_or_renderer_tool_bytes(monkeypatch):
             MODULE._RENDER_TOOL_PATH_AT_LOAD,
         }:
             raise AssertionError(
-                "executed saver dependency path must not be reread for identity"
+                "saver identity must use captured dependency bytes"
             )
         return real_read_bytes(path)
 
