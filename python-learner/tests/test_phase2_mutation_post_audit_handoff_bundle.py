@@ -564,3 +564,81 @@ def test_bundle_builder_snapshot_inputs_use_descriptor_bound_io():
     assert "snapshot_sha256" in source
     assert "shutil.copyfile(handoff_path" not in source
     assert "shutil.copyfile(catalog_path" not in source
+
+
+
+def test_builder_fsyncs_completed_tree_before_publication(
+    tmp_path,
+    monkeypatch,
+):
+    handoff, catalog, artifacts, _ = inputs(tmp_path)
+    install_build_verifiers(monkeypatch)
+    events = []
+    real_file_fsync = BUILD._fsync_regular_file
+    real_dir_fsync = BUILD._fsync_private_directory
+
+    def record_file(path, *, label):
+        events.append(("file", Path(path).name))
+        return real_file_fsync(path, label=label)
+
+    def record_dir(path, *, label):
+        events.append(("dir", Path(path).name))
+        return real_dir_fsync(path, label=label)
+
+    monkeypatch.setattr(BUILD, "_fsync_regular_file", record_file)
+    monkeypatch.setattr(BUILD, "_fsync_private_directory", record_dir)
+
+    BUILD.build_phase2_portable_handoff_bundle(
+        handoff_snapshot_path=handoff,
+        catalog_snapshot_path=catalog,
+        artifact_directory=artifacts,
+        output_directory=tmp_path / "bundle",
+        repository_root=ROOT,
+    )
+
+    kinds = [kind for kind, _name in events]
+    assert kinds[:-2] == ["file"] * (len(events) - 2)
+    assert kinds[-2:] == ["dir", "dir"]
+    assert {name for kind, name in events if kind == "file"} >= {
+        "handoff.snapshot.json",
+        "catalog.snapshot.json",
+        "manifest.json",
+    }
+    assert events[-2][1] == "post-audits"
+
+
+def test_builder_never_publishes_when_durability_barrier_fails(
+    tmp_path,
+    monkeypatch,
+):
+    handoff, catalog, artifacts, _ = inputs(tmp_path)
+    install_build_verifiers(monkeypatch)
+    output = tmp_path / "bundle"
+    published = False
+
+    def fail_fsync(_root):
+        raise ValueError("simulated durability failure")
+
+    def forbidden_publish(_source, _destination):
+        nonlocal published
+        published = True
+        raise AssertionError("publish must not run after fsync failure")
+
+    monkeypatch.setattr(BUILD, "_fsync_bundle_tree", fail_fsync)
+    monkeypatch.setattr(
+        BUILD,
+        "_publish_directory_noreplace",
+        forbidden_publish,
+    )
+
+    with pytest.raises(ValueError, match="simulated durability failure"):
+        BUILD.build_phase2_portable_handoff_bundle(
+            handoff_snapshot_path=handoff,
+            catalog_snapshot_path=catalog,
+            artifact_directory=artifacts,
+            output_directory=output,
+            repository_root=ROOT,
+        )
+
+    assert published is False
+    assert not output.exists()
