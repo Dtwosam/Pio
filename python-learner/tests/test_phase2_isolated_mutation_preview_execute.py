@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -155,6 +156,13 @@ def test_executor_uses_exact_reviewed_argv_without_shell(
         seen["kwargs"] = kwargs
         assert "SOLANA_RPC_URL" not in kwargs["env"]
         assert "HELIUS_API_KEY" not in kwargs["env"]
+
+        inherited = kwargs["pass_fds"]
+        assert len(inherited) == 1
+        tool_fd = inherited[0]
+        captured = os.pread(tool_fd, tool.stat().st_size, 0)
+        assert captured == tool.read_bytes()
+
         return subprocess.CompletedProcess(
             command,
             0,
@@ -177,7 +185,17 @@ def test_executor_uses_exact_reviewed_argv_without_shell(
         runner=runner,
     )
 
-    assert seen["command"] == list(freshness.current_preview["mutation_argv"])
+    reviewed_argv = list(freshness.current_preview["mutation_argv"])
+    command = seen["command"]
+    tool_fd = seen["kwargs"]["pass_fds"][0]
+    assert command[:3] == [
+        sys.executable,
+        "-c",
+        MODULE._EXACT_TOOL_BOOTSTRAP,
+    ]
+    assert command[3] == str(tool_fd)
+    assert command[4] == str(tool.resolve())
+    assert command[5:] == reviewed_argv[2:]
     assert "shell" not in seen["kwargs"]
     assert report.execution_requested is True
     assert report.mutation_executed is True
@@ -317,3 +335,95 @@ def test_executor_rejects_preview_change_during_freshness(
             preview_path=path,
             expected_preview_sha256=digest,
         )
+
+
+
+def test_capture_keeps_reviewed_inode_bytes_after_path_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    tool = tmp_path / "reviewed-tool.py"
+    original = b"print('captured')\n"
+    replacement = b"print('replacement')\n"
+    tool.write_bytes(original)
+
+    monkeypatch.setattr(MODULE, "TOOLS_DIR", tmp_path)
+    monkeypatch.setattr(
+        MODULE.FRESH.RENDER.RUNNER,
+        "REVIEWED_PREFLIGHT_TOOLS",
+        frozenset({tool.name}),
+    )
+
+    argv = (sys.executable, str(tool), "--apply")
+    path, encoded, opened, fd = MODULE._capture_mutation_tool(argv)
+    try:
+        assert encoded == original
+        tool.unlink()
+        tool.write_bytes(replacement)
+
+        assert os.pread(fd, len(original), 0) == original
+        with pytest.raises(ValueError, match="path changed after capture"):
+            MODULE._assert_mutation_tool_path_stable(path, opened)
+    finally:
+        os.close(fd)
+
+
+def test_captured_bootstrap_executes_descriptor_bytes_not_replaced_path(
+    tmp_path,
+    monkeypatch,
+):
+    tool = tmp_path / "reviewed-tool.py"
+    tool.write_text(
+        "import json,sys\n"
+        "print(json.dumps({'version':'captured','file':__file__,"
+        "'args':sys.argv[1:]}))\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(MODULE, "TOOLS_DIR", tmp_path)
+    monkeypatch.setattr(
+        MODULE.FRESH.RENDER.RUNNER,
+        "REVIEWED_PREFLIGHT_TOOLS",
+        frozenset({tool.name}),
+    )
+
+    argv = (sys.executable, str(tool), "--value", "7", "--apply")
+    path, _encoded, _opened, fd = MODULE._capture_mutation_tool(argv)
+    try:
+        command = MODULE._captured_mutation_command(
+            argv=argv,
+            tool_path=path,
+            tool_fd=fd,
+        )
+
+        tool.unlink()
+        tool.write_text(
+            "import json\n"
+            "print(json.dumps({'version':'replacement'}))\n",
+            encoding="utf-8",
+        )
+
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            pass_fds=(fd,),
+        )
+    finally:
+        os.close(fd)
+
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert payload["version"] == "captured"
+    assert payload["file"] == str(path)
+    assert payload["args"] == ["--value", "7", "--apply"]
+
+
+def test_executor_never_launches_mutation_tool_path_directly():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "pass_fds=(mutation_tool_fd,)" in source
+    assert "_EXACT_TOOL_BOOTSTRAP" in source
+    assert "runner(\n        list(argv)," not in source
+    assert "Path(argv[1]).resolve().read_bytes()" not in source
