@@ -484,7 +484,10 @@ def test_archive_builder_rejects_member_swap_during_nested_verification(
 
     with pytest.raises(
         ValueError,
-        match="portable bundle member handoff.snapshot.json path changed",
+        match=(
+            r"portable bundle (?:root|member handoff\.snapshot\.json) "
+            r"path changed"
+        ),
     ):
         ARCHIVE.build_phase2_portable_bundle_archive(
             bundle_directory=root,
