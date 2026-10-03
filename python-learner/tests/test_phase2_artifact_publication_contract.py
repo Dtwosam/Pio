@@ -160,3 +160,29 @@ def test_portable_bundle_directory_publication_requires_rename_noreplace():
     assert "publication is unavailable" in source
     assert "path changed after publish" in source
     assert "os.fsync(directory_fd)" in source
+
+
+
+def test_portable_bundle_tree_is_fsynced_before_atomic_publication():
+    relative = "deploy/tools/build_phase2_mutation_post_audit_handoff_bundle.py"
+
+    file_node, file_source = _function(relative, "_fsync_regular_file")
+    dir_node, dir_source = _function(relative, "_fsync_private_directory")
+    build_node, build_source = _function(
+        relative,
+        "build_phase2_portable_handoff_bundle",
+    )
+
+    assert _has_attr_call(file_node, "os", "fsync")
+    assert "O_NOFOLLOW" in file_source
+    assert "stat.S_IMODE(before.st_mode) != 0o600" in file_source
+
+    assert _has_attr_call(dir_node, "os", "fsync")
+    assert "O_NOFOLLOW" in dir_source
+    assert "stat.S_IMODE(before.st_mode) != 0o700" in dir_source
+
+    assert "_fsync_bundle_tree(temp)" in build_source
+    assert "_publish_directory_noreplace(temp, output)" in build_source
+    assert build_source.index("_fsync_bundle_tree(temp)") < build_source.index(
+        "_publish_directory_noreplace(temp, output)"
+    )
