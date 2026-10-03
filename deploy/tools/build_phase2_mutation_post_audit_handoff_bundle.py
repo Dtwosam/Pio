@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 from dataclasses import asdict, dataclass
+import errno
 import hashlib
 import importlib.util
 import json
@@ -280,6 +282,92 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 
 
+def _publish_directory_noreplace(source: Path, destination: Path) -> None:
+    """
+    Atomically publish a completed private directory without replacing a peer.
+
+    Linux renameat2(RENAME_NOREPLACE) is required because plain os.replace()
+    can overwrite an empty directory created after the preflight exists check.
+    Failing closed is safer than silently degrading to clobber-prone behavior.
+    """
+    source_stat = os.stat(source, follow_symlinks=False)
+    if not stat.S_ISDIR(source_stat.st_mode):
+        raise ValueError("portable handoff bundle temp path is not a directory")
+    if stat.S_IMODE(source_stat.st_mode) != 0o700:
+        raise ValueError("portable handoff bundle temp directory permissions are not 0700")
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise ValueError(
+            "atomic no-clobber directory publication is unavailable"
+        )
+    renameat2.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    renameat2.restype = ctypes.c_int
+
+    at_fdcwd = -100
+    rename_noreplace = 1
+    result = renameat2(
+        at_fdcwd,
+        os.fsencode(source),
+        at_fdcwd,
+        os.fsencode(destination),
+        rename_noreplace,
+    )
+    if result != 0:
+        error = ctypes.get_errno()
+        if error == errno.EEXIST:
+            raise ValueError(
+                "portable handoff bundle output appeared before publish"
+            )
+        if error in {errno.ENOSYS, errno.EINVAL, errno.ENOTSUP}:
+            raise ValueError(
+                "atomic no-clobber directory publication is unavailable"
+            )
+        raise OSError(
+            error,
+            os.strerror(error),
+            str(destination),
+        )
+
+    published_stat = os.stat(destination, follow_symlinks=False)
+    if (
+        published_stat.st_dev != source_stat.st_dev
+        or published_stat.st_ino != source_stat.st_ino
+        or not stat.S_ISDIR(published_stat.st_mode)
+        or stat.S_IMODE(published_stat.st_mode) != 0o700
+    ):
+        raise ValueError(
+            "portable handoff bundle publication identity mismatch"
+        )
+
+    parent_fd = os.open(
+        destination.parent,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        os.fsync(parent_fd)
+    finally:
+        os.close(parent_fd)
+
+    current = os.stat(destination, follow_symlinks=False)
+    if (
+        current.st_dev != published_stat.st_dev
+        or current.st_ino != published_stat.st_ino
+        or not stat.S_ISDIR(current.st_mode)
+        or stat.S_IMODE(current.st_mode) != 0o700
+    ):
+        raise ValueError(
+            "portable handoff bundle path changed after publish"
+        )
+
+
 def build_phase2_portable_handoff_bundle(
     *,
     handoff_snapshot_path: str | Path,
@@ -402,7 +490,7 @@ def build_phase2_portable_handoff_bundle(
 
         if output.exists() or output.is_symlink():
             raise ValueError("portable handoff bundle output appeared before publish")
-        os.replace(temp, output)
+        _publish_directory_noreplace(temp, output)
         temp = None  # type: ignore[assignment]
     finally:
         if isinstance(temp, Path) and temp.exists():
