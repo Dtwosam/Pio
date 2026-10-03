@@ -100,3 +100,24 @@ The mutation fingerprint is omitted when no mutation command is rendered.
 These fingerprints are audit identifiers only; they do not authorize or
 execute a mutation and do not replace the underlying tool's own fail-closed
 preflight when a mutation is eventually run.
+
+
+## Stale mutation preview check
+
+Before using a previously saved mutation preview, run
+`deploy/tools/check_phase2_isolated_mutation_freshness.py --preview <file>`.
+
+The checker reruns the guarded read-only preflight and requires the saved and
+current preview to agree on:
+
+- lifecycle state, next action, and reviewed tool;
+- exact mutation argv;
+- `preflight_fingerprint`;
+- `mutation_fingerprint`.
+
+If the current preflight is no longer mutation-ready, or any of those values
+changed, the saved command is reported stale and the tool exits non-zero.
+
+The checker never executes the mutation. The underlying mutation tool must
+still perform its own fail-closed preflight when an explicitly authorized
+mutation is eventually run.
