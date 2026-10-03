@@ -467,3 +467,31 @@ def test_audit_allows_monitoring_handoff_without_mutation_flag(
         "source_tree": "/tmp/pinned",
     }
     assert report.current_next_mutation_flag is None
+
+
+
+def test_audit_uses_single_byte_snapshot_for_receipt_and_preview(
+    tmp_path,
+    monkeypatch,
+):
+    preview, receipt = artifacts(tmp_path)
+    install_lifecycle(monkeypatch, lifecycle())
+
+    def forbidden_loader(*args, **kwargs):
+        raise AssertionError("split JSON loader must not be used")
+
+    def forbidden_read_bytes(_self):
+        raise AssertionError("artifact path must not be reopened for hashing")
+
+    monkeypatch.setattr(MODULE, "_load_json_object", forbidden_loader)
+    monkeypatch.setattr(Path, "read_bytes", forbidden_read_bytes)
+
+    report = MODULE.audit_mutation_execution_receipt(
+        execution_receipt_path=receipt,
+    )
+
+    assert report.receipt_integrity_valid is True
+    assert report.preview_sha256_matches is True
+    assert report.preview_identity_matches is True
+    assert report.mutation_argv_sha256_matches is True
+    assert report.audit_integrity_valid is True
