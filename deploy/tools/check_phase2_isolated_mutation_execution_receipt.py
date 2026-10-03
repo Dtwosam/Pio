@@ -147,8 +147,9 @@ def _assert_credential_minimal(value: Any) -> None:
                     "rpc_url",
                     "rpc_endpoint",
                     "authorization",
-                    "secret",
-                    "credential",
+                    "secret_key",
+                    "password",
+                    "credential_value",
                 )
             ):
                 raise ValueError("execution receipt contains a sensitive field")
@@ -292,6 +293,12 @@ def _validate_preview_chain(
     identity_matches = bool(
         payload.get("format_version") == 2
         and payload.get("fingerprint_schema") == "PHASE2_MUTATION_PREVIEW_V2"
+        and isinstance(payload.get("state"), str)
+        and bool(payload.get("state"))
+        and isinstance(payload.get("next_action"), str)
+        and bool(payload.get("next_action"))
+        and isinstance(payload.get("next_tool"), str)
+        and bool(payload.get("next_tool"))
         and payload.get("reviewed_source_commit")
         == receipt["reviewed_source_commit"]
         and payload.get("deploy_surface_sha256")
