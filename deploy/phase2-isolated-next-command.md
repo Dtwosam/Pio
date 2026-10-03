@@ -165,3 +165,41 @@ and `/etc/systemd/system`.
 
 Saving the preview is only an audit-artifact write. It does not execute the
 rendered mutation, make RPC calls, write the Pio database, or control systemd.
+
+
+## Fresh preview execution
+
+Use `deploy/tools/execute_phase2_isolated_mutation_preview.py` only after a
+V2 mutation preview has been saved with the atomic saver.
+
+The executor requires both:
+
+- `--preview <file>`, pointing at a private `0600` saved preview outside
+  production/runtime/config roots; and
+- `--expected-preview-sha256 <sha256>`, copied from the saver output.
+
+Without `--execute`, the tool performs only the freshness and identity checks.
+It does not launch the mutation.
+
+With `--execute`, the executor:
+
+1. verifies the saved preview bytes match the explicit expected SHA-256;
+2. reruns the complete guarded freshness check;
+3. requires the same reviewed source commit, deploy-surface digest and file
+   count, exact mutation argv, mutation fingerprint, and mutation-tool digest;
+4. recomputes the mutation tool and deploy-surface identity immediately before
+   launch;
+5. verifies the preview file did not change during review;
+6. launches the exact current reviewed argv directly, never through a shell;
+7. removes direct Solana/Jupiter/Helius credentials from the child environment
+   (tools that need RPC load the reviewed env file themselves);
+8. never returns raw child stderr; structured JSON output is redacted if it
+   contains credential-bearing fields or URL query material.
+
+The `--execute` flag is the explicit mutation boundary. A broad repository
+build request does not substitute for that flag and does not authorize a
+production mutation.
+
+The underlying mutation tool still performs its own fail-closed preflight. A
+fresh preview is therefore necessary but not sufficient for a successful
+mutation.
