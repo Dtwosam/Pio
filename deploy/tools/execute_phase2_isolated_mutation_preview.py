@@ -19,6 +19,7 @@ TOOLS_DIR = Path(__file__).resolve().parent
 FRESHNESS_TOOL = TOOLS_DIR / "check_phase2_isolated_mutation_freshness.py"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PREVIEW_BYTES = 2 * 1024 * 1024
+_MAX_MUTATION_TOOL_BYTES = 4 * 1024 * 1024
 _MUTATION_FLAGS = frozenset({"--apply", "--prepare"})
 _SENSITIVE_ENV_KEYS = frozenset(
     {
@@ -147,8 +148,119 @@ def _reviewed_mutation_argv(freshness: Any) -> tuple[str, ...]:
     return argv
 
 
-def _tool_sha256(argv: tuple[str, ...]) -> str:
-    return hashlib.sha256(Path(argv[1]).resolve().read_bytes()).hexdigest()
+def _assert_mutation_tool_path_stable(
+    path: Path,
+    opened: os.stat_result,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError("current mutation tool path changed after capture") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError("current mutation tool path changed after capture")
+
+
+def _capture_mutation_tool(
+    argv: tuple[str, ...],
+) -> tuple[Path, bytes, os.stat_result, int]:
+    raw = Path(argv[1])
+    if raw.is_symlink():
+        raise ValueError("current mutation tool is missing or symlinked")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("current mutation tool is missing or symlinked") from exc
+    try:
+        resolved.relative_to(TOOLS_DIR.resolve())
+    except ValueError as exc:
+        raise ValueError("current mutation tool resolves outside reviewed tools") from exc
+    if resolved.name not in FRESH.RENDER.RUNNER.REVIEWED_PREFLIGHT_TOOLS:
+        raise ValueError("current mutation tool is not allowlisted")
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError("current mutation tool cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("current mutation tool must be a regular file")
+        if (
+            before.st_size <= 0
+            or before.st_size > _MAX_MUTATION_TOOL_BYTES
+        ):
+            raise ValueError("current mutation tool size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError("current mutation tool changed while reading")
+        if len(encoded) != before.st_size:
+            raise ValueError("current mutation tool changed while reading")
+        os.lseek(fd, 0, os.SEEK_SET)
+        _assert_mutation_tool_path_stable(resolved, before)
+        return resolved, encoded, before, fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+_EXACT_TOOL_BOOTSTRAP = (
+    "import os,sys\n"
+    "fd=int(sys.argv[1]); path=sys.argv[2]\n"
+    "chunks=[]\n"
+    "while True:\n"
+    "    chunk=os.read(fd,1024*1024)\n"
+    "    if not chunk: break\n"
+    "    chunks.append(chunk)\n"
+    "source=b''.join(chunks)\n"
+    "sys.argv=[path,*sys.argv[3:]]\n"
+    "scope={'__name__':'__main__','__file__':path,"
+    "'__package__':None,'__cached__':None}\n"
+    "exec(compile(source,path,'exec'),scope,scope)\n"
+)
+
+
+def _captured_mutation_command(
+    *,
+    argv: tuple[str, ...],
+    tool_path: Path,
+    tool_fd: int,
+) -> list[str]:
+    return [
+        sys.executable,
+        "-c",
+        _EXACT_TOOL_BOOTSTRAP,
+        str(tool_fd),
+        str(tool_path),
+        *argv[2:],
+    ]
 
 
 def _scrubbed_env() -> dict[str, str]:
@@ -242,66 +354,117 @@ def execute_fresh_mutation_preview(
         )
 
     argv = _reviewed_mutation_argv(freshness)
-    current_tool_sha = _tool_sha256(argv)
-    expected_tool_sha = getattr(freshness, "current_mutation_tool_sha256", None)
-    if (
-        not isinstance(expected_tool_sha, str)
-        or not _SHA256.fullmatch(expected_tool_sha)
-        or current_tool_sha != expected_tool_sha
-    ):
-        raise ValueError("mutation tool bytes changed after freshness review")
+    (
+        mutation_tool_path,
+        mutation_tool_bytes,
+        mutation_tool_stat,
+        mutation_tool_fd,
+    ) = _capture_mutation_tool(argv)
+    try:
+        current_tool_sha = hashlib.sha256(mutation_tool_bytes).hexdigest()
+        expected_tool_sha = getattr(
+            freshness,
+            "current_mutation_tool_sha256",
+            None,
+        )
+        if (
+            not isinstance(expected_tool_sha, str)
+            or not _SHA256.fullmatch(expected_tool_sha)
+            or current_tool_sha != expected_tool_sha
+        ):
+            raise ValueError("mutation tool bytes changed after freshness review")
 
-    source_commit, deploy_sha, deploy_files = FRESH.RENDER._deploy_surface_identity()
-    if source_commit != getattr(freshness, "current_reviewed_source_commit", None):
-        raise ValueError("reviewed source commit changed after freshness review")
-    if deploy_sha != getattr(freshness, "current_deploy_surface_sha256", None):
-        raise ValueError("reviewed deploy surface changed after freshness review")
-    if deploy_files != getattr(freshness, "current_deploy_surface_files", None):
-        raise ValueError("reviewed deploy surface file count changed after freshness review")
+        source_commit, deploy_sha, deploy_files = (
+            FRESH.RENDER._deploy_surface_identity()
+        )
+        if source_commit != getattr(
+            freshness,
+            "current_reviewed_source_commit",
+            None,
+        ):
+            raise ValueError(
+                "reviewed source commit changed after freshness review"
+            )
+        if deploy_sha != getattr(
+            freshness,
+            "current_deploy_surface_sha256",
+            None,
+        ):
+            raise ValueError(
+                "reviewed deploy surface changed after freshness review"
+            )
+        if deploy_files != getattr(
+            freshness,
+            "current_deploy_surface_files",
+            None,
+        ):
+            raise ValueError(
+                "reviewed deploy surface file count changed after freshness review"
+            )
 
-    final_sha = _sha256(path)
-    unchanged = final_sha == initial_sha == expected
-    if not unchanged:
-        raise ValueError("mutation preview changed during freshness review")
+        final_sha = _sha256(path)
+        unchanged = final_sha == initial_sha == expected
+        if not unchanged:
+            raise ValueError("mutation preview changed during freshness review")
 
-    mutation_fp = getattr(freshness, "current_mutation_fingerprint", None)
-    if not isinstance(mutation_fp, str) or not _SHA256.fullmatch(mutation_fp):
-        raise ValueError("current mutation fingerprint is invalid")
+        mutation_fp = getattr(
+            freshness,
+            "current_mutation_fingerprint",
+            None,
+        )
+        if (
+            not isinstance(mutation_fp, str)
+            or not _SHA256.fullmatch(mutation_fp)
+        ):
+            raise ValueError("current mutation fingerprint is invalid")
 
-    if not execute:
-        return Phase2FreshMutationExecution(
-            preview_path=str(path),
-            preview_sha256=final_sha,
-            expected_preview_sha256=expected,
-            preview_sha256_matches=True,
-            freshness_status=str(freshness.status),
-            preview_current=True,
-            reviewed_source_commit=str(source_commit),
-            deploy_surface_sha256=str(deploy_sha),
-            deploy_surface_files=int(deploy_files),
-            mutation_fingerprint=mutation_fp,
-            mutation_tool_sha256=current_tool_sha,
-            mutation_argv=argv,
-            execution_requested=False,
-            mutation_executed=False,
-            exit_code=None,
-            result_json_valid=False,
-            result_secret_safe=True,
-            result=None,
-            failure_category=None,
-            preview_unchanged_before_execution=True,
-            shell_used=False,
-            raw_stderr_exposed=False,
+        _assert_mutation_tool_path_stable(
+            mutation_tool_path,
+            mutation_tool_stat,
         )
 
-    completed = runner(
-        list(argv),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=timeout_seconds,
-        env=_scrubbed_env(),
-    )
+        if not execute:
+            return Phase2FreshMutationExecution(
+                preview_path=str(path),
+                preview_sha256=final_sha,
+                expected_preview_sha256=expected,
+                preview_sha256_matches=True,
+                freshness_status=str(freshness.status),
+                preview_current=True,
+                reviewed_source_commit=str(source_commit),
+                deploy_surface_sha256=str(deploy_sha),
+                deploy_surface_files=int(deploy_files),
+                mutation_fingerprint=mutation_fp,
+                mutation_tool_sha256=current_tool_sha,
+                mutation_argv=argv,
+                execution_requested=False,
+                mutation_executed=False,
+                exit_code=None,
+                result_json_valid=False,
+                result_secret_safe=True,
+                result=None,
+                failure_category=None,
+                preview_unchanged_before_execution=True,
+                shell_used=False,
+                raw_stderr_exposed=False,
+            )
+
+        command = _captured_mutation_command(
+            argv=argv,
+            tool_path=mutation_tool_path,
+            tool_fd=mutation_tool_fd,
+        )
+        completed = runner(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_seconds,
+            env=_scrubbed_env(),
+            pass_fds=(mutation_tool_fd,),
+        )
+    finally:
+        os.close(mutation_tool_fd)
 
     parsed: dict[str, Any] | list[Any] | None = None
     json_valid = False
