@@ -391,3 +391,58 @@ def test_deploy_surface_identity_rejects_tracked_local_change(tmp_path):
 
     with pytest.raises(ValueError, match="tracked local changes"):
         MODULE._deploy_surface_identity(root)
+
+
+
+def test_renderer_runner_source_identity_matches_exact_executed_bytes():
+    commit, _surface_sha, _surface_files = MODULE._deploy_surface_identity()
+    runner_sha = MODULE._runner_source_identity(commit)
+
+    assert runner_sha == MODULE._RUNNER_TOOL_SHA256_AT_LOAD
+    assert runner_sha == hashlib.sha256(
+        MODULE._RUNNER_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+
+
+def test_renderer_runner_identity_never_rereads_loaded_runner(monkeypatch):
+    commit, _surface_sha, _surface_files = MODULE._deploy_surface_identity()
+    real_read_bytes = Path.read_bytes
+
+    def reject_runner_reread(path):
+        if path.resolve() == MODULE._RUNNER_TOOL_PATH_AT_LOAD:
+            raise AssertionError(
+                "executed preflight runner path must not be reread for identity"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_runner_reread)
+
+    assert MODULE._runner_source_identity(commit) == (
+        MODULE._RUNNER_TOOL_SHA256_AT_LOAD
+    )
+
+
+def test_renderer_runner_is_executed_from_descriptor_captured_bytes():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_runner(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_RUNNER_TOOL_BYTES_AT_LOAD" in source
+    assert "RUNNER_TOOL.read_bytes()" not in source
+
+
+def test_renderer_rejects_runner_identity_change_during_preflight(monkeypatch):
+    report = preflight()
+    install(monkeypatch, report)
+    identities = iter(("1" * 64, "2" * 64))
+    monkeypatch.setattr(
+        MODULE,
+        "_runner_source_identity",
+        lambda _commit: next(identities),
+    )
+
+    with pytest.raises(ValueError, match="runner changed during preflight"):
+        MODULE.render_reviewed_mutation_command()
