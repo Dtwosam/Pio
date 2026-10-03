@@ -23,24 +23,41 @@ The handoff is read-only. It:
 
 A normal deployment progresses through these states:
 
-1. `RUNTIME_NOT_READY`
+1. `SOURCE_BOOTSTRAP_REQUIRED`
+   - next action: `BOOTSTRAP_PINNED_SOURCE`
+   - tool: `bootstrap_phase2_isolated_source.py`
+2. `SOURCE_PREPARATION_REQUIRED`
+   - next action: `PREPARE_PINNED_RUNTIME`
+   - tool: `prepare_phase2_isolated_runtime.py`
+3. `RUNTIME_STAGING_READY`
    - next action: `STAGE_REVIEWED_RUNTIME`
    - tool: `stage_phase2_isolated_runtime.py`
-2. `SYSTEMD_UNITS_NOT_READY`
+4. `SYSTEMD_UNITS_NOT_READY`
    - next action: `INSTALL_REVIEWED_UNITS`
    - tool: `install_phase2_isolated_systemd_units.py`
-3. `DETECTOR_ACTIVATION_READY`
+5. `DETECTOR_ACTIVATION_READY`
    - next action: `ACTIVATE_PRESTATE_STREAMS_AND_DETECTOR`
    - tool: `activate_phase2_isolated_detector.py`
-4. `SMOKE_REQUIRED`
+6. `SMOKE_REQUIRED`
    - next action: `RUN_ONE_SHOT_SMOKE`
    - tool: `run_phase2_isolated_smoke.py`
-5. `TIMER_ACTIVATION_READY`
+7. `TIMER_ACTIVATION_READY`
    - next action: `ACTIVATE_EVIDENCE_TIMER`
    - tool: `activate_phase2_isolated_timer.py`
-6. `RUNNING_HEALTHY`
+8. `RUNNING_HEALTHY`
    - next action: `MONITOR_ZERO_RPC_STATUS`
    - tool: `check_phase2_isolated_operator_status.py`
+
+The default build source is
+`/opt/pio-phase2-build/<PINNED_SOURCE_HEAD>`. The handoff checks that source
+without fetching or modifying it. A missing source produces
+`SOURCE_BOOTSTRAP_REQUIRED`; an exact tracked-clean pinned source produces
+`SOURCE_PREPARATION_REQUIRED`; and a fully prepared source that passes the
+reviewed runtime contract produces `RUNTIME_STAGING_READY`.
+
+If the build source exists but is neither the exact clean pin nor a fully
+prepared reviewed runtime, the handoff returns
+`SOURCE_CONFLICT_REVIEW_REQUIRED` rather than overwriting it.
 
 If prerequisites are incomplete, the handoff returns a categorical blocker list
 rather than guessing a mutation.
@@ -57,3 +74,11 @@ If a running timer still requires the reviewed pause action, the handoff returns
 `autopause_phase2_isolated_timer.py`.
 
 A fresh one-shot smoke remains required before a paused timer can be resumed.
+
+## Source inspection
+
+The handoff accepts `--source-tree` to inspect a non-default side build path.
+It also accepts `--repository-url` only for the bootstrap preflight's
+secret-safe URL validation. The lifecycle handoff itself never fetches Git
+objects. Network access remains exclusive to an explicit
+`bootstrap_phase2_isolated_source.py --apply` operator action.
