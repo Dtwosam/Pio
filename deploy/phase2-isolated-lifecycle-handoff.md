@@ -160,3 +160,12 @@ evidence only. Both the embedded handoff and the save report keep
 `requires_fresh_separate_mutation_authorization=true`. A later operator action
 must still come from a fresh current lifecycle/preflight/authorization chain;
 the saved handoff can never be replayed as mutation authority.
+
+
+Saved combined handoff artifacts can later be checked with
+`deploy/tools/check_phase2_mutation_post_audit_catalog_handoff_snapshot.py`.
+That verifier is static and zero-RPC: it validates the artifact schema,
+canonical payload hash, recorded Git ancestry, and exact historical handoff-tool
+bytes. It deliberately does **not** rerun the current lifecycle. Therefore a
+verified saved handoff remains historical evidence only and still cannot
+authorize the recorded next action.
