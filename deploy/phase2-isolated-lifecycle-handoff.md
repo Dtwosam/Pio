@@ -105,3 +105,29 @@ path `/etc/pio/pio.env`, but never reads out or returns
 For unit installation, `next_parameters.source_tree` resolves the staged
 `current` symlink to its reviewed release directory because the unit installer
 intentionally rejects a symlink as its source tree.
+
+
+## Historical post-audit evidence handoff
+
+When an immutable
+`PHASE2_MUTATION_POST_AUDIT_CATALOG_SNAPSHOT_V1` artifact is available, use
+`deploy/tools/check_phase2_mutation_post_audit_catalog_handoff.py` to view
+historical mutation evidence and the current lifecycle state in one zero-RPC
+report.
+
+The authorities remain deliberately separate:
+
+- the catalog snapshot proves only historical evidence lineage;
+- the snapshot always remains `historical_snapshot_only=true` and
+  `historical_authorizes_next_action=false`;
+- `current_state`, `current_next_action`, `current_next_tool`,
+  `current_next_parameters`, and `current_next_mutation_flag` come only from
+  the fresh lifecycle handoff;
+- `snapshot_influenced_current_action=false` is invariant;
+- the combined report itself sets `authorizes_next_action=false` and
+  `requires_fresh_separate_mutation_authorization=true`.
+
+An invalid historical snapshot raises attention and an explicit historical
+lineage blocker, but it does not replace or derive the current lifecycle
+advice. Conversely, later lifecycle changes may change the current next step
+without changing the saved historical snapshot identity.
