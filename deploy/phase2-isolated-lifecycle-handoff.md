@@ -82,3 +82,26 @@ It also accepts `--repository-url` only for the bootstrap preflight's
 secret-safe URL validation. The lifecycle handoff itself never fetches Git
 objects. Network access remains exclusive to an explicit
 `bootstrap_phase2_isolated_source.py --apply` operator action.
+
+
+## Next-step parameter contract
+
+The handoff returns two additional fields:
+
+- `next_parameters`: only non-secret parameters expected by the reviewed next
+  tool, such as source paths, runtime roots, systemd destination paths, receipt
+  paths, and numeric freshness limits.
+- `next_mutation_flag`: the explicit flag required to cross the next tool's
+  mutation boundary, normally `--apply` or, for runtime preparation,
+  `--prepare`. It is `null` for read-only review/monitoring steps.
+
+The handoff never executes the next tool and never appends the mutation flag on
+the operator's behalf.
+
+Environment values are not included. In particular, the handoff may report the
+path `/etc/pio/pio.env`, but never reads out or returns
+`SOLANA_RPC_URL`, RPC credentials, or API keys.
+
+For unit installation, `next_parameters.source_tree` resolves the staged
+`current` symlink to its reviewed release directory because the unit installer
+intentionally rejects a symlink as its source tree.

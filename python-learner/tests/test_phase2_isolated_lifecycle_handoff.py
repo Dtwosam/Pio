@@ -34,6 +34,7 @@ def activation(
 ):
     return Result(
         runtime_ready=runtime_ready,
+        runtime_current="/opt/pio-phase2-runtime/current",
         installed_units_exact=installed_units_exact,
         activation_ready=activation_ready,
         env_file_regular=True,
@@ -113,9 +114,15 @@ def timer(*, ready=False):
     )
 
 
-def source_bootstrap(*, status="READY_CREATE", read_only=True):
+def source_bootstrap(
+    *,
+    status="READY_CREATE",
+    read_only=True,
+    repository_url="https://github.com/Dtwosam/Pio.git",
+):
     return Result(
         status=status,
+        repository_url=repository_url,
         read_only=read_only,
         rpc_called=False,
         database_write_performed=False,
@@ -200,6 +207,11 @@ def test_handoff_bootstraps_missing_pinned_source_before_runtime_staging(
     assert report.source_status == "READY_CREATE"
     assert report.source_runtime_ready is False
     assert report.blockers == ("PINNED_SOURCE_MISSING",)
+    assert report.next_parameters == {
+        "destination": "/tmp/pio-phase2-build/pinned",
+        "repository_url": "https://github.com/Dtwosam/Pio.git",
+    }
+    assert report.next_mutation_flag == "--apply"
     assert report.smoke_readiness is None
     assert report.operator_status is None
 
@@ -221,6 +233,10 @@ def test_handoff_prepares_clean_pinned_source_before_staging(monkeypatch):
     assert report.next_tool == "prepare_phase2_isolated_runtime.py"
     assert report.source_status == "ALREADY_PINNED"
     assert report.blockers == ("PINNED_SOURCE_NOT_PREPARED",)
+    assert report.next_parameters == {
+        "source_tree": "/tmp/pio-phase2-build/pinned",
+    }
+    assert report.next_mutation_flag == "--prepare"
 
 
 def test_handoff_stages_fully_prepared_source(monkeypatch):
@@ -240,6 +256,11 @@ def test_handoff_stages_fully_prepared_source(monkeypatch):
     assert report.source_status == "PREPARED_RUNTIME_READY"
     assert report.source_runtime_ready is True
     assert report.blockers == ()
+    assert report.next_parameters == {
+        "source_tree": "/tmp/pio-phase2-build/pinned",
+        "destination_root": "/opt/pio-phase2-runtime",
+    }
+    assert report.next_mutation_flag == "--apply"
 
 
 def test_handoff_surfaces_pinned_source_conflict(monkeypatch):
@@ -260,6 +281,10 @@ def test_handoff_surfaces_pinned_source_conflict(monkeypatch):
     assert report.next_action == "REVIEW_PINNED_SOURCE_CONFLICT"
     assert report.next_tool == "bootstrap_phase2_isolated_source.py"
     assert report.blockers == ("CONFLICT_SOURCE_DRIFT",)
+    assert report.next_parameters["destination"] == (
+        "/tmp/pio-phase2-build/pinned"
+    )
+    assert report.next_mutation_flag is None
 
 
 def test_handoff_installs_units_after_runtime_is_ready(monkeypatch):
@@ -273,6 +298,12 @@ def test_handoff_installs_units_after_runtime_is_ready(monkeypatch):
     assert report.state == "SYSTEMD_UNITS_NOT_READY"
     assert report.next_action == "INSTALL_REVIEWED_UNITS"
     assert report.next_tool == "install_phase2_isolated_systemd_units.py"
+    assert report.next_parameters == {
+        "source_tree": "/opt/pio-phase2-runtime/current",
+        "runtime_root": "/opt/pio-phase2-runtime",
+        "destination": "/etc/systemd/system",
+    }
+    assert report.next_mutation_flag == "--apply"
 
 
 def test_handoff_activates_detector_topology_when_preflight_is_ready(
@@ -290,6 +321,13 @@ def test_handoff_activates_detector_topology_when_preflight_is_ready(
     assert report.state == "DETECTOR_ACTIVATION_READY"
     assert report.next_action == "ACTIVATE_PRESTATE_STREAMS_AND_DETECTOR"
     assert report.blockers == ()
+    assert report.next_parameters == {
+        "runtime_root": "/opt/pio-phase2-runtime",
+        "unit_destination": "/etc/systemd/system",
+        "env_file": "/etc/pio/pio.env",
+        "data_root": "/opt/pio/data",
+    }
+    assert report.next_mutation_flag == "--apply"
 
 
 def test_handoff_requires_one_shot_smoke_before_timer(monkeypatch):
@@ -307,6 +345,10 @@ def test_handoff_requires_one_shot_smoke_before_timer(monkeypatch):
     assert report.next_action == "RUN_ONE_SHOT_SMOKE"
     assert report.next_tool == "run_phase2_isolated_smoke.py"
     assert "SMOKE_RECEIPT_INVALID" in report.blockers
+    assert report.next_parameters["receipt"] == (
+        "/opt/pio/data/phase2-isolated-smoke-receipt.json"
+    )
+    assert report.next_mutation_flag == "--apply"
 
 
 def test_handoff_activates_timer_only_after_fresh_smoke(monkeypatch):
@@ -325,6 +367,8 @@ def test_handoff_activates_timer_only_after_fresh_smoke(monkeypatch):
     assert report.next_tool == "activate_phase2_isolated_timer.py"
     assert report.timer_ready is True
     assert report.blockers == ()
+    assert report.next_parameters["max_receipt_age_seconds"] == 1800
+    assert report.next_mutation_flag == "--apply"
 
 
 def test_handoff_reports_healthy_running_system(monkeypatch):
@@ -344,6 +388,8 @@ def test_handoff_reports_healthy_running_system(monkeypatch):
     assert report.next_action == "MONITOR_ZERO_RPC_STATUS"
     assert report.attention_required is False
     assert report.collection_running is True
+    assert report.next_parameters["env_file"] == "/etc/pio/pio.env"
+    assert report.next_mutation_flag is None
 
 
 def test_handoff_keeps_timer_paused_during_active_provider_incident(
@@ -368,6 +414,7 @@ def test_handoff_keeps_timer_paused_during_active_provider_incident(
     )
     assert report.next_tool == "check_phase2_isolated_operator_status.py"
     assert report.blockers == ("ACTIVE_PROVIDER_RATE_LIMIT_INCIDENT",)
+    assert report.next_mutation_flag is None
 
 
 def test_handoff_surfaces_manual_autopause_when_repeated_rejection_is_live(
@@ -390,6 +437,10 @@ def test_handoff_surfaces_manual_autopause_when_repeated_rejection_is_live(
     assert report.state == "RATE_LIMIT_PAUSE_REQUIRED"
     assert report.next_action == "RUN_RATE_LIMIT_AUTOPAUSE"
     assert report.next_tool == "autopause_phase2_isolated_timer.py"
+    assert report.next_parameters == {
+        "database": "/opt/pio/data/pio.db",
+    }
+    assert report.next_mutation_flag == "--apply"
 
 
 def test_handoff_rejects_underlying_boundary_crossing(monkeypatch):
@@ -434,3 +485,24 @@ def test_handoff_rejects_source_runtime_boundary_crossing(monkeypatch):
         MODULE.inspect_lifecycle_handoff(
             source_tree="/tmp/pio-phase2-build/pinned"
         )
+
+
+
+def test_handoff_next_parameters_never_expose_env_values(monkeypatch):
+    install(
+        monkeypatch,
+        activation_report=activation(activation_ready=True),
+        smoke_report=smoke(smoke_ready=False),
+        operator_report=operator(),
+    )
+    secret = "https://rpc.invalid/?api-key=super-secret"
+
+    report = MODULE.inspect_lifecycle_handoff(
+        env_file="/etc/pio/pio.env",
+    )
+
+    encoded = str(report.next_parameters)
+    assert "SOLANA_RPC_URL" not in encoded
+    assert "super-secret" not in encoded
+    assert secret not in encoded
+    assert report.next_parameters["env_file"] == "/etc/pio/pio.env"
