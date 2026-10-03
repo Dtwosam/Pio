@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -78,6 +80,20 @@ def install_reports(monkeypatch, snapshot, lifecycle):
         MODULE.LIFECYCLE,
         "inspect_lifecycle_handoff",
         lambda **kwargs: lifecycle,
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_catalog_snapshot",
+        lambda snapshot_path: (
+            Path(str(snapshot_path)),
+            str(snapshot.snapshot_sha256),
+            object(),
+        ),
+    )
+    monkeypatch.setattr(
+        MODULE.CATALOG_VERIFY,
+        "_assert_snapshot_path_stable",
+        lambda *args, **kwargs: None,
     )
 
 
@@ -400,3 +416,75 @@ def test_fresh_snapshot_identity_change_blocks_combined_lineage(monkeypatch):
         "FRESH_REVERIFICATION_SNAPSHOT_IDENTITY_MISMATCH"
         in report.blockers
     )
+
+
+
+def test_handoff_rejects_child_snapshot_identity_drift(monkeypatch):
+    install_reports(
+        monkeypatch,
+        snapshot_report(),
+        lifecycle_report(),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_catalog_snapshot",
+        lambda snapshot_path: (
+            Path(str(snapshot_path)),
+            "9" * 64,
+            object(),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="orchestrator byte snapshot"):
+        MODULE.inspect_phase2_post_audit_catalog_handoff(
+            snapshot_path="/archive/catalog.json",
+        )
+
+
+def test_handoff_rejects_snapshot_replacement_during_lifecycle(
+    tmp_path,
+    monkeypatch,
+):
+    snapshot_path = tmp_path / "catalog.json"
+    snapshot_bytes = b'{"catalog":"reviewed"}'
+    snapshot_path.write_bytes(snapshot_bytes)
+    snapshot_path.chmod(0o600)
+
+    original_capture = MODULE._capture_catalog_snapshot
+    original_assert_stable = MODULE.CATALOG_VERIFY._assert_snapshot_path_stable
+    snapshot = snapshot_report()
+    snapshot.snapshot_path = str(snapshot_path)
+    snapshot.snapshot_sha256 = hashlib.sha256(snapshot_bytes).hexdigest()
+    install_reports(
+        monkeypatch,
+        snapshot,
+        lifecycle_report(),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_catalog_snapshot",
+        original_capture,
+    )
+    monkeypatch.setattr(
+        MODULE.CATALOG_VERIFY,
+        "_assert_snapshot_path_stable",
+        original_assert_stable,
+    )
+
+    def replace_during_lifecycle(**kwargs):
+        replacement = tmp_path / "replacement.json"
+        replacement.write_bytes(b'{"catalog":"replaced"}')
+        replacement.chmod(0o600)
+        os.replace(replacement, snapshot_path)
+        return lifecycle_report()
+
+    monkeypatch.setattr(
+        MODULE.LIFECYCLE,
+        "inspect_lifecycle_handoff",
+        replace_during_lifecycle,
+    )
+
+    with pytest.raises(ValueError, match="path changed during verification"):
+        MODULE.inspect_phase2_post_audit_catalog_handoff(
+            snapshot_path=snapshot_path,
+        )

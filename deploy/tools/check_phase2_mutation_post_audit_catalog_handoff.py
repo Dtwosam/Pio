@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -119,6 +120,14 @@ def _lifecycle_boundary_ok(report: Any) -> bool:
     )
 
 
+def _capture_catalog_snapshot(
+    snapshot_path: str | Path,
+) -> tuple[Path, str, Any]:
+    path = CATALOG_VERIFY._private_json_file(snapshot_path)
+    payload, opened_stat = CATALOG_VERIFY._read_snapshot_bytes(path)
+    return path, hashlib.sha256(payload).hexdigest(), opened_stat
+
+
 def inspect_phase2_post_audit_catalog_handoff(
     *,
     snapshot_path: str | Path,
@@ -135,10 +144,21 @@ def inspect_phase2_post_audit_catalog_handoff(
     repository_url: str = LIFECYCLE.BOOTSTRAP.DEFAULT_REPOSITORY_URL,
     runner: SystemctlRunner = subprocess.run,
 ) -> Phase2PostAuditCatalogHandoffReport:
+    (
+        captured_snapshot_path,
+        captured_snapshot_sha256,
+        captured_snapshot_stat,
+    ) = _capture_catalog_snapshot(snapshot_path)
+
     snapshot = CATALOG_VERIFY.verify_phase2_post_audit_catalog_snapshot(
-        snapshot_path=snapshot_path,
+        snapshot_path=str(captured_snapshot_path),
         repository_root=repository_root,
     )
+    if str(snapshot.snapshot_sha256) != captured_snapshot_sha256:
+        raise ValueError(
+            "historical post-audit catalog child verification does not match "
+            "the orchestrator byte snapshot"
+        )
     if not _snapshot_boundary_ok(snapshot):
         raise ValueError(
             "historical post-audit catalog snapshot crossed the evidence-only boundary"
@@ -148,7 +168,7 @@ def inspect_phase2_post_audit_catalog_handoff(
     fresh_requested = artifact_directory is not None
     if fresh_requested:
         freshness = CATALOG_FRESHNESS.freshly_reverify_phase2_post_audit_catalog(
-            snapshot_path=snapshot_path,
+            snapshot_path=str(captured_snapshot_path),
             artifact_directory=artifact_directory,
             pattern=artifact_pattern,
             repository_root=repository_root,
@@ -161,7 +181,8 @@ def inspect_phase2_post_audit_catalog_handoff(
     fresh_snapshot_identity_matches = (
         bool(
             str(freshness.snapshot_path) == str(snapshot.snapshot_path)
-            and str(freshness.snapshot_sha256) == str(snapshot.snapshot_sha256)
+            and str(freshness.snapshot_sha256) == captured_snapshot_sha256
+            and str(snapshot.snapshot_sha256) == captured_snapshot_sha256
         )
         if freshness is not None
         else None
@@ -182,6 +203,11 @@ def inspect_phase2_post_audit_catalog_handoff(
         raise ValueError(
             "current Phase-2 lifecycle handoff crossed the read-only boundary"
         )
+
+    CATALOG_VERIFY._assert_snapshot_path_stable(
+        captured_snapshot_path,
+        captured_snapshot_stat,
+    )
 
     blockers: list[str] = []
     if not bool(snapshot.snapshot_verified):
