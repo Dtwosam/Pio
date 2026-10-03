@@ -305,3 +305,30 @@ def test_historical_handoff_tool_hash_matches_current_head():
     ).read_bytes()
 
     assert historical == MODULE.hashlib.sha256(current).hexdigest()
+
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("historical_artifacts_seen", True),
+        ("historical_artifacts_verified", True),
+        ("historical_artifacts_seen", 0),
+        ("historical_artifacts_verified", 0),
+    ],
+)
+def test_verify_saved_handoff_snapshot_rejects_nonpositive_or_boolean_counts(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+):
+    handoff = good_handoff(**{field: value})
+    path = write_snapshot(tmp_path, handoff=handoff)
+    install_valid_lineage(monkeypatch)
+
+    with pytest.raises(ValueError, match="historical artifact counts"):
+        MODULE.verify_phase2_post_audit_catalog_handoff_snapshot(
+            snapshot_path=path,
+            repository_root=ROOT,
+        )
