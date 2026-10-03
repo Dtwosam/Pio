@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -345,3 +346,96 @@ def test_receipt_path_defaults_next_to_preview(tmp_path, monkeypatch):
     assert report.receipt_path == str(
         path.with_name(f"{path.name}.execution.json")
     )
+
+
+
+def test_pending_receipt_publish_does_not_clobber_racing_peer(
+    tmp_path,
+    monkeypatch,
+):
+    receipt = tmp_path / "receipt.json"
+    real_link = MODULE.os.link
+
+    def racing_link(source, destination, **kwargs):
+        Path(destination).write_text("peer\n", encoding="utf-8")
+        Path(destination).chmod(0o600)
+        return real_link(source, destination, **kwargs)
+
+    monkeypatch.setattr(MODULE.os, "link", racing_link)
+
+    with pytest.raises(ValueError, match="appeared before publish"):
+        MODULE._atomic_write_new_or_replace(
+            receipt,
+            {"status": "PENDING"},
+            allow_replace=False,
+        )
+
+    assert receipt.read_text(encoding="utf-8") == "peer\n"
+
+
+def test_receipt_digest_is_bound_to_exact_payload_without_destination_reread(
+    tmp_path,
+    monkeypatch,
+):
+    receipt = tmp_path / "receipt.json"
+    payload = {"status": "PENDING", "value": 7}
+    encoded = (
+        json.dumps(
+            payload,
+            sort_keys=True,
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    expected = hashlib.sha256(encoded).hexdigest()
+
+    def forbidden_read_bytes(_self):
+        raise AssertionError("published receipt must not be reread for digest")
+
+    monkeypatch.setattr(Path, "read_bytes", forbidden_read_bytes)
+
+    digest = MODULE._atomic_write_new_or_replace(
+        receipt,
+        payload,
+        allow_replace=False,
+    )
+
+    assert digest == expected
+    assert receipt.read_text(encoding="utf-8") == encoded.decode("utf-8")
+    assert stat.S_IMODE(receipt.stat().st_mode) == 0o600
+
+
+def test_terminal_receipt_replacement_remains_explicit_and_verified(tmp_path):
+    receipt = tmp_path / "receipt.json"
+    pending = {"status": "PENDING"}
+    final = {"status": "COMPLETED"}
+
+    MODULE._atomic_write_new_or_replace(
+        receipt,
+        pending,
+        allow_replace=False,
+    )
+    pending_inode = receipt.stat().st_ino
+
+    digest = MODULE._atomic_write_new_or_replace(
+        receipt,
+        final,
+        allow_replace=True,
+    )
+
+    encoded = (
+        json.dumps(
+            final,
+            sort_keys=True,
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    assert digest == hashlib.sha256(encoded).hexdigest()
+    assert receipt.read_bytes() == encoded
+    assert receipt.stat().st_ino != pending_inode
+    assert stat.S_IMODE(receipt.stat().st_mode) == 0o600
