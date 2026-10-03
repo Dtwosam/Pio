@@ -9,14 +9,21 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 from typing import Any
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 AUDIT_TOOL = TOOLS_DIR / "check_phase2_isolated_mutation_execution_receipt.py"
+AUDIT_TOOL_RELATIVE = (
+    "deploy/tools/check_phase2_isolated_mutation_execution_receipt.py"
+)
 RENDER_TOOL = TOOLS_DIR / "render_phase2_isolated_mutation_command.py"
+RENDER_TOOL_RELATIVE = "deploy/tools/render_phase2_isolated_mutation_command.py"
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
 _PROTECTED_ROOTS = (
     Path("/opt/pio"),
     Path("/opt/pio/data"),
@@ -27,18 +34,129 @@ _PROTECTED_ROOTS = (
 _ARTIFACT_TYPE = "PHASE2_MUTATION_POST_AUDIT_V1"
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+def _assert_tool_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after load") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after load")
+
+
+def _capture_tool(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[Path, bytes, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_TOOL_BYTES:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_tool_path_stable(resolved, before, label=label)
+    return resolved, encoded, before
+
+
+def _load_captured(
+    path: Path,
+    name: str,
+    *,
+    label: str,
+) -> tuple[Any, Path, bytes, os.stat_result]:
+    resolved, encoded, opened = _capture_tool(path, label=label)
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed Phase-2 tool: {path}")
+        raise ValueError(f"cannot load reviewed Phase-2 tool: {resolved}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(encoded, str(resolved), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_tool_path_stable(resolved, opened, label=label)
+    return module, resolved, encoded, opened
 
 
-AUDIT = _load(AUDIT_TOOL, "phase2_saved_mutation_post_audit")
-RENDER = _load(RENDER_TOOL, "phase2_saved_mutation_post_audit_surface")
+(
+    AUDIT,
+    _AUDIT_TOOL_PATH_AT_LOAD,
+    _AUDIT_TOOL_BYTES_AT_LOAD,
+    _AUDIT_TOOL_STAT_AT_LOAD,
+) = _load_captured(
+    AUDIT_TOOL,
+    "phase2_saved_mutation_post_audit",
+    label="reviewed mutation post-audit tool",
+)
+_AUDIT_TOOL_SHA256_AT_LOAD = hashlib.sha256(
+    _AUDIT_TOOL_BYTES_AT_LOAD
+).hexdigest()
+
+(
+    RENDER,
+    _RENDER_TOOL_PATH_AT_LOAD,
+    _RENDER_TOOL_BYTES_AT_LOAD,
+    _RENDER_TOOL_STAT_AT_LOAD,
+) = _load_captured(
+    RENDER_TOOL,
+    "phase2_saved_mutation_post_audit_surface",
+    label="reviewed mutation renderer tool",
+)
 
 
 @dataclass(frozen=True)
@@ -107,10 +225,79 @@ def _output_path(
     return path
 
 
-def _audit_tool_sha256() -> str:
-    if AUDIT_TOOL.is_symlink() or not AUDIT_TOOL.is_file():
-        raise ValueError("reviewed mutation post-audit tool is missing or symlinked")
-    return hashlib.sha256(AUDIT_TOOL.read_bytes()).hexdigest()
+def _run_git(*args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+
+
+def _source_identity() -> tuple[str, str, str, int]:
+    tool_contract = (
+        (
+            AUDIT_TOOL,
+            AUDIT_TOOL_RELATIVE,
+            _AUDIT_TOOL_PATH_AT_LOAD,
+            _AUDIT_TOOL_BYTES_AT_LOAD,
+            _AUDIT_TOOL_STAT_AT_LOAD,
+            "reviewed mutation post-audit tool",
+        ),
+        (
+            RENDER_TOOL,
+            RENDER_TOOL_RELATIVE,
+            _RENDER_TOOL_PATH_AT_LOAD,
+            _RENDER_TOOL_BYTES_AT_LOAD,
+            _RENDER_TOOL_STAT_AT_LOAD,
+            "reviewed mutation renderer tool",
+        ),
+    )
+
+    for current_path, _, loaded_path, _, loaded_stat, label in tool_contract:
+        raw = Path(current_path).expanduser()
+        if raw.is_symlink():
+            raise ValueError(f"{label} is missing or symlinked")
+        try:
+            resolved = raw.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError(f"{label} is missing or symlinked") from exc
+        if resolved != loaded_path:
+            raise ValueError(f"{label} path changed after module load")
+        _assert_tool_path_stable(loaded_path, loaded_stat, label=label)
+
+    head = _run_git("rev-parse", "HEAD")
+    if head.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = head.stdout.decode("utf-8").strip()
+    if not commit:
+        raise ValueError("reviewed source commit is invalid")
+
+    for _, relative, loaded_path, loaded_bytes, loaded_stat, label in tool_contract:
+        historical = _run_git("show", f"{commit}:{relative}")
+        if historical.returncode != 0:
+            raise ValueError(f"{label} is not present at reviewed source commit")
+        if historical.stdout != loaded_bytes:
+            raise ValueError(f"{label} bytes do not match reviewed source commit")
+        _assert_tool_path_stable(loaded_path, loaded_stat, label=label)
+
+    (
+        surface_commit,
+        deploy_surface_sha,
+        deploy_surface_files,
+    ) = RENDER._deploy_surface_identity()
+    if surface_commit != commit:
+        raise ValueError("mutation renderer source commit does not match saver source")
+
+    for _, _, loaded_path, _, loaded_stat, label in tool_contract:
+        _assert_tool_path_stable(loaded_path, loaded_stat, label=label)
+
+    return (
+        commit,
+        _AUDIT_TOOL_SHA256_AT_LOAD,
+        deploy_surface_sha,
+        deploy_surface_files,
+    )
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -286,22 +473,26 @@ def save_verified_mutation_post_audit(
         output_path=output_path,
     )
 
+    source_before = _source_identity()
     audit = AUDIT.audit_mutation_execution_receipt(
         execution_receipt_path=execution_receipt_path,
         **audit_kwargs,
     )
+    source_after = _source_identity()
+    if source_after != source_before:
+        raise ValueError("reviewed mutation post-audit source changed during audit")
     if not _audit_boundary_ok(audit):
         raise ValueError("mutation receipt post-audit is not fully verified")
 
     audit_record = audit.to_record()
     _assert_credential_minimal(audit_record)
     audit_payload_sha = _canonical_sha256(audit_record)
-    audit_tool_sha = _audit_tool_sha256()
     (
         audit_source_commit,
+        audit_tool_sha,
         audit_deploy_surface_sha,
         audit_deploy_surface_files,
-    ) = RENDER._deploy_surface_identity()
+    ) = source_before
 
     payload = {
         "format_version": 1,
