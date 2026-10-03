@@ -131,3 +131,11 @@ An invalid historical snapshot raises attention and an explicit historical
 lineage blocker, but it does not replace or derive the current lifecycle
 advice. Conversely, later lifecycle changes may change the current next step
 without changing the saved historical snapshot identity.
+
+When the current post-audit archive is locally available, pass
+`--artifact-directory <DIR>` to additionally re-verify every artifact and
+require the live evidence identity set to match the immutable snapshot. This
+freshness check ignores artifact path relocation as identity, but it treats
+missing, unexpected, unverified, duplicate, or lifecycle-metadata-changed
+evidence as a blocker. Without `--artifact-directory`, the handoff remains a
+static historical snapshot check.
