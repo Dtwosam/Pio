@@ -84,11 +84,7 @@ def _candidate_files(directory: Path, pattern: str) -> tuple[Path, ...]:
         raise ValueError("post-audit catalog pattern must be a simple filename glob")
     files = []
     for path in sorted(directory.glob(pattern), key=lambda item: item.name):
-        if path.is_symlink() or not path.is_file():
-            continue
-        if stat.S_IMODE(path.stat().st_mode) != 0o600:
-            continue
-        files.append(path.resolve())
+        files.append(path)
         if len(files) > _MAX_ARTIFACTS:
             raise ValueError("post-audit catalog exceeds artifact safety limit")
     return tuple(files)
@@ -202,7 +198,7 @@ def main() -> None:
         repository_root=args.repository_root,
     )
     print(json.dumps(report.to_record(), indent=2))
-    if report.artifacts_failed:
+    if not report.all_verified:
         raise SystemExit(2)
 
 
