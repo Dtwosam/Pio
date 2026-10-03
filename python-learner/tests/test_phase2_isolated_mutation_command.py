@@ -264,10 +264,31 @@ def test_renderer_has_no_mutation_fingerprint_when_no_command(monkeypatch):
 
 def test_fingerprint_uses_canonical_json_ordering():
     left = MODULE._fingerprint(
-        {"b": 2, "a": {"y": 4, "x": 3}}
+        "preflight",
+        {"b": 2, "a": {"y": 4, "x": 3}},
     )
     right = MODULE._fingerprint(
-        {"a": {"x": 3, "y": 4}, "b": 2}
+        "preflight",
+        {"a": {"x": 3, "y": 4}, "b": 2},
     )
 
     assert left == right
+
+
+def test_renderer_emits_versioned_fingerprint_contract(monkeypatch):
+    install(monkeypatch, preflight())
+
+    rendered = MODULE.render_reviewed_mutation_command()
+
+    assert rendered.format_version == MODULE.MUTATION_PREVIEW_FORMAT_VERSION == 1
+    assert rendered.fingerprint_schema == MODULE.MUTATION_FINGERPRINT_SCHEMA
+    assert rendered.fingerprint_schema == "PHASE2_MUTATION_PREVIEW_V1"
+
+
+def test_fingerprint_kind_is_domain_separated():
+    payload = {"same": "payload"}
+
+    preflight = MODULE._fingerprint("preflight", payload)
+    mutation = MODULE._fingerprint("mutation", payload)
+
+    assert preflight != mutation
