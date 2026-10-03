@@ -292,6 +292,7 @@ def _atomic_write_new(path: Path, payload: dict[str, Any]) -> tuple[str, int]:
         if (
             published_stat.st_dev != temp_stat.st_dev
             or published_stat.st_ino != temp_stat.st_ino
+            or published_stat.st_size != len(encoded)
             or not stat.S_ISREG(published_stat.st_mode)
             or stat.S_IMODE(published_stat.st_mode) != 0o600
         ):
@@ -314,18 +315,23 @@ def _atomic_write_new(path: Path, payload: dict[str, Any]) -> tuple[str, int]:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+
+        current = os.stat(path, follow_symlinks=False)
+        if (
+            current.st_dev != published_stat.st_dev
+            or current.st_ino != published_stat.st_ino
+            or current.st_size != len(encoded)
+            or not stat.S_ISREG(current.st_mode)
+            or stat.S_IMODE(current.st_mode) != 0o600
+        ):
+            raise ValueError("archive handoff snapshot path changed after publish")
     finally:
         if fd is not None:
             os.close(fd)
         if temp_path is not None and temp_path.exists():
             temp_path.unlink()
 
-    saved = path.read_bytes()
-    if saved != encoded:
-        raise ValueError("saved archive handoff snapshot bytes do not match")
-    if stat.S_IMODE(path.stat().st_mode) != 0o600:
-        raise ValueError("archive handoff snapshot permissions are not 0600")
-    return hashlib.sha256(saved).hexdigest(), len(saved)
+    return hashlib.sha256(encoded).hexdigest(), len(encoded)
 
 
 def save_phase2_portable_archive_current_handoff_snapshot(

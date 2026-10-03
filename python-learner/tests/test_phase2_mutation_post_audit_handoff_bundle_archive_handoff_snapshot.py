@@ -404,3 +404,86 @@ def test_saver_publish_race_never_overwrites_existing_destination(
     assert output.read_bytes() == competitor
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert not list(tmp_path.glob(".archive-handoff.snapshot.json.*.tmp"))
+
+
+
+def test_archive_handoff_saver_digest_uses_exact_payload_not_path_reread(
+    tmp_path,
+    monkeypatch,
+):
+    report = good_handoff()
+    monkeypatch.setattr(
+        SAVE.HANDOFF,
+        "inspect_phase2_portable_archive_current_handoff",
+        lambda **kwargs: report,
+    )
+    monkeypatch.setattr(
+        SAVE,
+        "_handoff_source_identity",
+        lambda: ("c" * 40, "d" * 64),
+    )
+    output = tmp_path / "archive-handoff.snapshot.json"
+
+    real_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path):
+        if path == output:
+            raise AssertionError(
+                "published archive handoff must not be reopened for digesting"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    saved = SAVE.save_phase2_portable_archive_current_handoff_snapshot(
+        archive_path="/archive/phase2-handoff.tar",
+        output_path=output,
+        repository_root=ROOT,
+    )
+
+    payload = output.read_text(encoding="utf-8").encode("utf-8")
+    assert saved.artifact_sha256 == SAVE.hashlib.sha256(payload).hexdigest()
+    assert saved.bytes_written == len(payload)
+
+
+
+def test_archive_handoff_saver_detects_path_replacement_after_publish(
+    tmp_path,
+    monkeypatch,
+):
+    report = good_handoff()
+    monkeypatch.setattr(
+        SAVE.HANDOFF,
+        "inspect_phase2_portable_archive_current_handoff",
+        lambda **kwargs: report,
+    )
+    monkeypatch.setattr(
+        SAVE,
+        "_handoff_source_identity",
+        lambda: ("c" * 40, "d" * 64),
+    )
+    output = tmp_path / "archive-handoff.snapshot.json"
+    replacement_bytes = b"replacement archive handoff\n"
+    real_fsync = SAVE.os.fsync
+    replaced = False
+
+    def fsync_then_replace(fd):
+        nonlocal replaced
+        real_fsync(fd)
+        if not replaced and stat.S_ISDIR(SAVE.os.fstat(fd).st_mode):
+            replaced = True
+            replacement = tmp_path / "replacement-archive-handoff.json"
+            replacement.write_bytes(replacement_bytes)
+            replacement.chmod(0o600)
+            SAVE.os.replace(replacement, output)
+
+    monkeypatch.setattr(SAVE.os, "fsync", fsync_then_replace)
+
+    with pytest.raises(ValueError, match="path changed after publish"):
+        SAVE.save_phase2_portable_archive_current_handoff_snapshot(
+            archive_path="/archive/phase2-handoff.tar",
+            output_path=output,
+            repository_root=ROOT,
+        )
+
+    assert output.read_bytes() == replacement_bytes
