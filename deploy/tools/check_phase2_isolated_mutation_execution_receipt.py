@@ -91,6 +91,8 @@ class Phase2MutationReceiptAudit:
     current_state: str
     current_next_action: str
     current_next_tool: str | None
+    current_next_parameters: dict[str, Any]
+    current_next_mutation_flag: str | None
     lifecycle_attention_required: bool
     lifecycle_blockers: tuple[str, ...]
     state_changed: bool
@@ -424,6 +426,23 @@ def audit_mutation_execution_receipt(
     prior_tool_raw = preview.get("next_tool")
     prior_tool = str(prior_tool_raw) if prior_tool_raw is not None else ""
     current_state = str(lifecycle.state)
+    next_parameters_raw = getattr(lifecycle, "next_parameters", {})
+    if not isinstance(next_parameters_raw, dict):
+        raise ValueError("Phase-2 lifecycle next_parameters is invalid")
+    current_next_parameters = dict(next_parameters_raw)
+    _assert_credential_minimal(current_next_parameters)
+    next_mutation_raw = getattr(lifecycle, "next_mutation_flag", None)
+    if next_mutation_raw is not None and next_mutation_raw not in {
+        "--apply",
+        "--prepare",
+    }:
+        raise ValueError("Phase-2 lifecycle next mutation flag is invalid")
+    current_next_mutation_flag = (
+        str(next_mutation_raw)
+        if next_mutation_raw is not None
+        else None
+    )
+
     state_changed = bool(prior_state and current_state != prior_state)
     expected_post_states = _EXPECTED_POST_STATES.get(prior_state, ())
     post_state_expected = bool(
@@ -480,6 +499,8 @@ def audit_mutation_execution_receipt(
             if lifecycle.next_tool is not None
             else None
         ),
+        current_next_parameters=current_next_parameters,
+        current_next_mutation_flag=current_next_mutation_flag,
         lifecycle_attention_required=bool(lifecycle.attention_required),
         lifecycle_blockers=tuple(str(item) for item in lifecycle.blockers),
         state_changed=state_changed,
