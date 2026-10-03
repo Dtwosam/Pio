@@ -128,6 +128,7 @@ def _atomic_write_new_or_replace(
         ).encode("utf-8")
         + b"\n"
     )
+    payload_sha256 = hashlib.sha256(encoded).hexdigest()
 
     if path.is_symlink():
         raise ValueError("mutation execution receipt must not be a symlink")
@@ -138,6 +139,7 @@ def _atomic_write_new_or_replace(
 
     fd: int | None = None
     temp_path: Path | None = None
+    temp_stat: os.stat_result | None = None
     try:
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{path.name}.",
@@ -151,16 +153,48 @@ def _atomic_write_new_or_replace(
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
+            temp_stat = os.fstat(handle.fileno())
+
+        assert temp_stat is not None
+        if (
+            not stat.S_ISREG(temp_stat.st_mode)
+            or temp_stat.st_size != len(encoded)
+            or stat.S_IMODE(temp_stat.st_mode) != 0o600
+        ):
+            raise ValueError(
+                "mutation execution receipt temp payload changed before publish"
+            )
 
         if path.is_symlink():
             raise ValueError("mutation execution receipt became a symlink")
         if path.exists() and not path.is_file():
             raise ValueError("mutation execution receipt changed type during write")
-        if path.exists() and not allow_replace:
-            raise ValueError("mutation execution receipt appeared before publish")
-        os.replace(temp_path, path)
-        temp_path = None
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+        if allow_replace:
+            os.replace(temp_path, path)
+            temp_path = None
+        else:
+            try:
+                os.link(
+                    temp_path,
+                    path,
+                    follow_symlinks=False,
+                )
+            except FileExistsError as exc:
+                raise ValueError(
+                    "mutation execution receipt appeared before publish"
+                ) from exc
+
+            published = os.stat(path, follow_symlinks=False)
+            if (
+                published.st_dev != temp_stat.st_dev
+                or published.st_ino != temp_stat.st_ino
+            ):
+                raise ValueError(
+                    "mutation execution receipt publication identity mismatch"
+                )
+            temp_path.unlink()
+            temp_path = None
 
         directory_fd = os.open(
             path.parent,
@@ -170,18 +204,25 @@ def _atomic_write_new_or_replace(
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+
+        current = os.stat(path, follow_symlinks=False)
+        if (
+            current.st_dev != temp_stat.st_dev
+            or current.st_ino != temp_stat.st_ino
+            or not stat.S_ISREG(current.st_mode)
+            or current.st_size != len(encoded)
+            or stat.S_IMODE(current.st_mode) != 0o600
+        ):
+            raise ValueError(
+                "mutation execution receipt path changed after publish"
+            )
     finally:
         if fd is not None:
             os.close(fd)
         if temp_path is not None and temp_path.exists():
             temp_path.unlink()
 
-    saved = path.read_bytes()
-    if saved != encoded:
-        raise ValueError("saved mutation execution receipt bytes do not match")
-    if stat.S_IMODE(path.stat().st_mode) != 0o600:
-        raise ValueError("mutation execution receipt permissions are not 0600")
-    return hashlib.sha256(saved).hexdigest()
+    return payload_sha256
 
 
 def _identity_from_ready(ready: Any) -> dict[str, Any]:
