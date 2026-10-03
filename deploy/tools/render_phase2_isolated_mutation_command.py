@@ -102,8 +102,9 @@ def _deploy_surface_identity(
 
     head = _run_git(root, "rev-parse", "HEAD")
     source_commit = head.stdout.strip() if head.returncode == 0 else ""
-    if not source_commit or any(
-        value not in "0123456789abcdef" for value in source_commit
+    if (
+        len(source_commit) not in {40, 64}
+        or any(value not in "0123456789abcdef" for value in source_commit)
     ):
         raise ValueError("reviewed deploy surface HEAD is invalid")
 
