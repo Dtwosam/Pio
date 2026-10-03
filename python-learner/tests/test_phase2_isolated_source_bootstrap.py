@@ -165,3 +165,23 @@ def test_bootstrap_refuses_non_git_existing_directory(
 def test_bootstrap_refuses_protected_runtime_trees(destination):
     with pytest.raises(ValueError, match="outside protected"):
         MODULE.inspect_pinned_source(destination=destination)
+
+
+
+@pytest.mark.parametrize(
+    "repository_url",
+    (
+        "https://token@github.com/Dtwosam/Pio.git",
+        "https://github.com/Dtwosam/Pio.git?token=secret",
+        "https://github.com/Dtwosam/Pio.git#secret",
+    ),
+)
+def test_bootstrap_rejects_secret_bearing_repository_urls(
+    tmp_path,
+    repository_url,
+):
+    with pytest.raises(ValueError, match="repository URL"):
+        MODULE.inspect_pinned_source(
+            destination=tmp_path / "build",
+            repository_url=repository_url,
+        )
