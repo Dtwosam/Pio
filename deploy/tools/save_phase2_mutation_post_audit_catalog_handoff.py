@@ -281,6 +281,7 @@ def _atomic_write_new(path: Path, payload: dict[str, Any]) -> tuple[str, int]:
         if (
             published_stat.st_dev != temp_stat.st_dev
             or published_stat.st_ino != temp_stat.st_ino
+            or published_stat.st_size != len(encoded)
             or not stat.S_ISREG(published_stat.st_mode)
             or stat.S_IMODE(published_stat.st_mode) != 0o600
         ):
@@ -303,6 +304,16 @@ def _atomic_write_new(path: Path, payload: dict[str, Any]) -> tuple[str, int]:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+
+        current = os.stat(path, follow_symlinks=False)
+        if (
+            current.st_dev != published_stat.st_dev
+            or current.st_ino != published_stat.st_ino
+            or current.st_size != len(encoded)
+            or not stat.S_ISREG(current.st_mode)
+            or stat.S_IMODE(current.st_mode) != 0o600
+        ):
+            raise ValueError("catalog handoff snapshot path changed after publish")
     finally:
         if fd is not None:
             os.close(fd)
