@@ -129,9 +129,11 @@ def _atomic_write_new_or_replace(
         + b"\n"
     )
 
+    if path.is_symlink():
+        raise ValueError("mutation execution receipt must not be a symlink")
     if path.exists() and not allow_replace:
         raise ValueError("mutation execution receipt already exists")
-    if path.exists() and (path.is_symlink() or not path.is_file()):
+    if path.exists() and not path.is_file():
         raise ValueError("mutation execution receipt is no longer a regular file")
 
     fd: int | None = None
@@ -150,7 +152,9 @@ def _atomic_write_new_or_replace(
             handle.flush()
             os.fsync(handle.fileno())
 
-        if path.exists() and (path.is_symlink() or not path.is_file()):
+        if path.is_symlink():
+            raise ValueError("mutation execution receipt became a symlink")
+        if path.exists() and not path.is_file():
             raise ValueError("mutation execution receipt changed type during write")
         if path.exists() and not allow_replace:
             raise ValueError("mutation execution receipt appeared before publish")
@@ -189,7 +193,7 @@ def _identity_from_ready(ready: Any) -> dict[str, Any]:
         "deploy_surface_files": int(ready.deploy_surface_files),
         "mutation_fingerprint": str(ready.mutation_fingerprint),
         "mutation_tool_sha256": str(ready.mutation_tool_sha256),
-        "mutation_argv": list(ready.mutation_argv),
+        "mutation_argv_sha256": _canonical_sha256(list(ready.mutation_argv)),
     }
 
 
