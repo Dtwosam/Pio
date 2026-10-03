@@ -48,6 +48,8 @@ class Phase2LifecycleHandoffReport:
     state: str
     next_action: str
     next_tool: str | None
+    next_parameters: dict[str, Any]
+    next_mutation_flag: str | None
     attention_required: bool
     runtime_ready: bool
     installed_units_exact: bool
@@ -161,6 +163,132 @@ def _timer_blockers(report: Any) -> tuple[str, ...]:
         ("SMOKE_PROGRESS_CROSSED_PROMOTION_BOUNDARY", report.evidence_row_no_promotion),
     )
     return tuple(name for name, ready in checks if not bool(ready))
+
+
+def _runtime_release_path(
+    activation: Any,
+    *,
+    runtime_root: str | Path,
+) -> str:
+    raw = getattr(activation, "runtime_current", None)
+    current = (
+        Path(str(raw)).expanduser()
+        if raw
+        else Path(runtime_root).expanduser() / "current"
+    )
+    return str(current.resolve(strict=False))
+
+
+def _operator_parameters(
+    *,
+    runtime_root: str | Path,
+    unit_destination: str | Path,
+    env_file: str | Path,
+    data_root: str | Path,
+) -> dict[str, Any]:
+    return {
+        "runtime_root": str(Path(runtime_root).expanduser()),
+        "unit_destination": str(Path(unit_destination).expanduser()),
+        "env_file": str(Path(env_file).expanduser()),
+        "data_root": str(Path(data_root).expanduser()),
+    }
+
+
+def _next_step_contract(
+    *,
+    state: str,
+    activation: Any,
+    source_path: Path,
+    source_bootstrap: Any | None,
+    runtime_root: str | Path,
+    unit_destination: str | Path,
+    env_file: str | Path,
+    data_root: str | Path,
+    receipt_path: str | Path,
+    max_receipt_age_seconds: int,
+) -> tuple[dict[str, Any], str | None]:
+    operator = _operator_parameters(
+        runtime_root=runtime_root,
+        unit_destination=unit_destination,
+        env_file=env_file,
+        data_root=data_root,
+    )
+
+    if state == "SOURCE_BOOTSTRAP_REQUIRED":
+        repository_url = (
+            str(source_bootstrap.repository_url)
+            if source_bootstrap is not None
+            else BOOTSTRAP.DEFAULT_REPOSITORY_URL
+        )
+        return {
+            "destination": str(source_path),
+            "repository_url": repository_url,
+        }, "--apply"
+
+    if state == "SOURCE_PREPARATION_REQUIRED":
+        return {"source_tree": str(source_path)}, "--prepare"
+
+    if state == "RUNTIME_STAGING_READY":
+        return {
+            "source_tree": str(source_path),
+            "destination_root": str(Path(runtime_root).expanduser()),
+        }, "--apply"
+
+    if state == "SOURCE_CONFLICT_REVIEW_REQUIRED":
+        repository_url = (
+            str(source_bootstrap.repository_url)
+            if source_bootstrap is not None
+            else BOOTSTRAP.DEFAULT_REPOSITORY_URL
+        )
+        return {
+            "destination": str(source_path),
+            "repository_url": repository_url,
+        }, None
+
+    if state == "SYSTEMD_UNITS_NOT_READY":
+        return {
+            "source_tree": _runtime_release_path(
+                activation,
+                runtime_root=runtime_root,
+            ),
+            "runtime_root": str(Path(runtime_root).expanduser()),
+            "destination": str(Path(unit_destination).expanduser()),
+        }, "--apply"
+
+    if state == "DETECTOR_ACTIVATION_READY":
+        return operator, "--apply"
+
+    if state == "SMOKE_REQUIRED":
+        return {
+            **operator,
+            "receipt": str(Path(receipt_path).expanduser()),
+        }, "--apply"
+
+    if state == "TIMER_ACTIVATION_READY":
+        return {
+            **operator,
+            "receipt": str(Path(receipt_path).expanduser()),
+            "max_receipt_age_seconds": max_receipt_age_seconds,
+        }, "--apply"
+
+    if state == "RATE_LIMIT_PAUSE_REQUIRED":
+        return {
+            "database": str(
+                Path(data_root).expanduser() / "pio.db"
+            ),
+        }, "--apply"
+
+    if state in {
+        "RATE_LIMIT_PAUSED",
+        "RUNNING_HEALTHY",
+        "RUNNING_ATTENTION_REQUIRED",
+    }:
+        return operator, None
+
+    if state == "ACTIVE_TOPOLOGY_NOT_READY":
+        return operator, None
+
+    return operator, None
 
 
 def inspect_lifecycle_handoff(
@@ -340,10 +468,25 @@ def inspect_lifecycle_handoff(
             next_tool = "check_phase2_isolated_smoke_readiness.py"
             blockers = _smoke_blockers(smoke)
 
+    next_parameters, next_mutation_flag = _next_step_contract(
+        state=state,
+        activation=activation,
+        source_path=source_path,
+        source_bootstrap=source_bootstrap,
+        runtime_root=runtime_root,
+        unit_destination=unit_destination,
+        env_file=env_file,
+        data_root=data_root,
+        receipt_path=receipt_path,
+        max_receipt_age_seconds=max_receipt_age_seconds,
+    )
+
     return Phase2LifecycleHandoffReport(
         state=state,
         next_action=next_action,
         next_tool=next_tool,
+        next_parameters=next_parameters,
+        next_mutation_flag=next_mutation_flag,
         attention_required=state != "RUNNING_HEALTHY",
         runtime_ready=bool(activation.runtime_ready),
         installed_units_exact=bool(activation.installed_units_exact),
