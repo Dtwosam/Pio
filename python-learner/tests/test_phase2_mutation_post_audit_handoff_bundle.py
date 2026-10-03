@@ -96,11 +96,17 @@ def valid_boundary(**overrides):
 
 
 def install_build_verifiers(monkeypatch):
+    def snapshot_sha(kwargs):
+        return hashlib.sha256(
+            Path(kwargs["snapshot_path"]).read_bytes()
+        ).hexdigest()
+
     monkeypatch.setattr(
         BUILD.HANDOFF_VERIFY,
         "verify_phase2_post_audit_catalog_handoff_snapshot",
         lambda **kwargs: Report(
             handoff_snapshot_verified=True,
+            snapshot_sha256=snapshot_sha(kwargs),
             **valid_boundary(),
         ),
     )
@@ -109,6 +115,7 @@ def install_build_verifiers(monkeypatch):
         "verify_phase2_post_audit_catalog_snapshot",
         lambda **kwargs: Report(
             snapshot_verified=True,
+            snapshot_sha256=snapshot_sha(kwargs),
             artifacts_seen=2,
             **valid_boundary(),
         ),
@@ -118,6 +125,7 @@ def install_build_verifiers(monkeypatch):
         "freshly_reverify_phase2_post_audit_catalog",
         lambda **kwargs: Report(
             fresh_reverification_verified=True,
+            snapshot_sha256=snapshot_sha(kwargs),
             **valid_boundary(),
         ),
     )
@@ -445,3 +453,114 @@ def test_bundle_verifier_source_has_no_split_path_content_reads():
 
     assert ".read_text(" not in source
     assert ".read_bytes(" not in source
+
+
+
+def test_builder_rejects_child_handoff_snapshot_identity_drift(
+    tmp_path,
+    monkeypatch,
+):
+    handoff, catalog, artifacts, _ = inputs(tmp_path)
+    install_build_verifiers(monkeypatch)
+
+    monkeypatch.setattr(
+        BUILD.HANDOFF_VERIFY,
+        "verify_phase2_post_audit_catalog_handoff_snapshot",
+        lambda **kwargs: Report(
+            handoff_snapshot_verified=True,
+            snapshot_sha256="0" * 64,
+            **valid_boundary(),
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="handoff snapshot changed during nested verification",
+    ):
+        BUILD.build_phase2_portable_handoff_bundle(
+            handoff_snapshot_path=handoff,
+            catalog_snapshot_path=catalog,
+            artifact_directory=artifacts,
+            output_directory=tmp_path / "bundle",
+            repository_root=ROOT,
+        )
+
+
+def test_builder_rejects_source_path_swap_during_nested_verification(
+    tmp_path,
+    monkeypatch,
+):
+    handoff, catalog, artifacts, _ = inputs(tmp_path)
+    install_build_verifiers(monkeypatch)
+    original = (
+        BUILD.HANDOFF_VERIFY
+        .verify_phase2_post_audit_catalog_handoff_snapshot
+    )
+
+    def swap_handoff(**kwargs):
+        report = original(**kwargs)
+        replacement = tmp_path / "replacement-handoff.json"
+        replacement.write_bytes(handoff.read_bytes())
+        replacement.chmod(0o600)
+        handoff.unlink()
+        replacement.rename(handoff)
+        return report
+
+    monkeypatch.setattr(
+        BUILD.HANDOFF_VERIFY,
+        "verify_phase2_post_audit_catalog_handoff_snapshot",
+        swap_handoff,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="handoff snapshot path changed during bundle build",
+    ):
+        BUILD.build_phase2_portable_handoff_bundle(
+            handoff_snapshot_path=handoff,
+            catalog_snapshot_path=catalog,
+            artifact_directory=artifacts,
+            output_directory=tmp_path / "bundle",
+            repository_root=ROOT,
+        )
+
+
+def test_builder_writes_exact_preverification_snapshot_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    handoff, catalog, artifacts, _ = inputs(tmp_path)
+    handoff_before = handoff.read_bytes()
+    catalog_before = catalog.read_bytes()
+    install_build_verifiers(monkeypatch)
+    output = tmp_path / "bundle"
+
+    report = BUILD.build_phase2_portable_handoff_bundle(
+        handoff_snapshot_path=handoff,
+        catalog_snapshot_path=catalog,
+        artifact_directory=artifacts,
+        output_directory=output,
+        repository_root=ROOT,
+    )
+
+    assert (output / "handoff.snapshot.json").read_bytes() == handoff_before
+    assert (output / "catalog.snapshot.json").read_bytes() == catalog_before
+    assert report.handoff_snapshot_sha256 == hashlib.sha256(
+        handoff_before
+    ).hexdigest()
+    assert report.catalog_snapshot_sha256 == hashlib.sha256(
+        catalog_before
+    ).hexdigest()
+
+
+def test_bundle_builder_snapshot_inputs_use_descriptor_bound_io():
+    source = BUILD_TOOL.read_text(encoding="utf-8")
+
+    assert "def _private_json_snapshot(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "handoff_bytes" in source
+    assert "catalog_bytes" in source
+    assert "snapshot_sha256" in source
+    assert "shutil.copyfile(handoff_path" not in source
+    assert "shutil.copyfile(catalog_path" not in source
