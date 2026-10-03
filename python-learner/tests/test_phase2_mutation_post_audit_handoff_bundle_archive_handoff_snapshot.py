@@ -357,3 +357,50 @@ def test_static_verifier_fails_closed_if_snapshot_path_is_replaced_after_read(
             snapshot_path=path,
             repository_root=ROOT,
         )
+
+
+
+def test_saver_publish_race_never_overwrites_existing_destination(
+    tmp_path,
+    monkeypatch,
+):
+    report = good_handoff()
+    monkeypatch.setattr(
+        SAVE.HANDOFF,
+        "inspect_phase2_portable_archive_current_handoff",
+        lambda **kwargs: report,
+    )
+    monkeypatch.setattr(
+        SAVE,
+        "_handoff_source_identity",
+        lambda: ("c" * 40, "d" * 64),
+    )
+    output = tmp_path / "archive-handoff.snapshot.json"
+    competitor = b"preexisting concurrent evidence\n"
+    real_link = SAVE.os.link
+    raced = False
+
+    def competing_publish(source, destination, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            destination = Path(destination)
+            destination.write_bytes(competitor)
+            destination.chmod(0o600)
+        return real_link(source, destination, **kwargs)
+
+    monkeypatch.setattr(SAVE.os, "link", competing_publish)
+
+    with pytest.raises(
+        ValueError,
+        match="output appeared before publish",
+    ):
+        SAVE.save_phase2_portable_archive_current_handoff_snapshot(
+            archive_path="/archive/phase2-handoff.tar",
+            output_path=output,
+            repository_root=ROOT,
+        )
+
+    assert output.read_bytes() == competitor
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert not list(tmp_path.glob(".archive-handoff.snapshot.json.*.tmp"))
