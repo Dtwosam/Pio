@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -69,15 +71,31 @@ def good_lifecycle(**overrides):
 
 
 def install(monkeypatch, *, archive=None, lifecycle=None):
+    archive_report = archive or good_archive()
     monkeypatch.setattr(
         MODULE.ARCHIVE,
         "verify_phase2_portable_bundle_archive",
-        lambda **kwargs: archive or good_archive(),
+        lambda **kwargs: archive_report,
     )
     monkeypatch.setattr(
         MODULE.LIFECYCLE,
         "inspect_lifecycle_handoff",
         lambda **kwargs: lifecycle or good_lifecycle(),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_archive_snapshot",
+        lambda archive_path: (
+            Path(str(archive_path)),
+            str(archive_report.archive_sha256),
+            int(archive_report.archive_size),
+            object(),
+        ),
+    )
+    monkeypatch.setattr(
+        MODULE.ARCHIVE,
+        "_assert_archive_path_stable",
+        lambda *args, **kwargs: None,
     )
 
 
@@ -222,5 +240,87 @@ def test_archive_handoff_rejects_current_lifecycle_boundary_crossing(
     with pytest.raises(ValueError, match="current Phase-2 lifecycle"):
         MODULE.inspect_phase2_portable_archive_current_handoff(
             archive_path="/archive/phase2-handoff.tar",
+            repository_root=ROOT,
+        )
+
+
+
+@pytest.mark.parametrize(
+    "archive_overrides",
+    [
+        {"archive_sha256": "b" * 64},
+        {"archive_size": 8192},
+    ],
+)
+def test_archive_handoff_rejects_child_identity_drift(
+    monkeypatch,
+    archive_overrides,
+):
+    install(
+        monkeypatch,
+        archive=good_archive(**archive_overrides),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_archive_snapshot",
+        lambda archive_path: (
+            Path(str(archive_path)),
+            "a" * 64,
+            4096,
+            object(),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="orchestrator byte snapshot"):
+        MODULE.inspect_phase2_portable_archive_current_handoff(
+            archive_path="/archive/phase2-handoff.tar",
+            repository_root=ROOT,
+        )
+
+
+def test_archive_handoff_rejects_path_replacement_during_lifecycle(
+    tmp_path,
+    monkeypatch,
+):
+    archive_path = tmp_path / "phase2-handoff.tar"
+    original_bytes = b"reviewed archive snapshot"
+    archive_path.write_bytes(original_bytes)
+    archive_path.chmod(0o600)
+
+    original_capture = MODULE._capture_archive_snapshot
+    original_assert_stable = MODULE.ARCHIVE._assert_archive_path_stable
+    archive_report = good_archive(
+        archive_path=str(archive_path),
+        archive_sha256=hashlib.sha256(original_bytes).hexdigest(),
+        archive_size=len(original_bytes),
+    )
+    install(monkeypatch, archive=archive_report)
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_archive_snapshot",
+        original_capture,
+    )
+    monkeypatch.setattr(
+        MODULE.ARCHIVE,
+        "_assert_archive_path_stable",
+        original_assert_stable,
+    )
+
+    def replace_during_lifecycle(**kwargs):
+        replacement = tmp_path / "replacement.tar"
+        replacement.write_bytes(b"different archive bytes")
+        replacement.chmod(0o600)
+        os.replace(replacement, archive_path)
+        return good_lifecycle()
+
+    monkeypatch.setattr(
+        MODULE.LIFECYCLE,
+        "inspect_lifecycle_handoff",
+        replace_during_lifecycle,
+    )
+
+    with pytest.raises(ValueError, match="path changed during verification"):
+        MODULE.inspect_phase2_portable_archive_current_handoff(
+            archive_path=archive_path,
             repository_root=ROOT,
         )
