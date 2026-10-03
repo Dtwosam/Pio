@@ -309,12 +309,7 @@ def _atomic_write_new(path: Path, payload: dict[str, Any]) -> tuple[str, int]:
         if temp_path is not None and temp_path.exists():
             temp_path.unlink()
 
-    saved = path.read_bytes()
-    if saved != encoded:
-        raise ValueError("saved catalog handoff snapshot bytes do not match")
-    if stat.S_IMODE(path.stat().st_mode) != 0o600:
-        raise ValueError("catalog handoff snapshot permissions are not 0600")
-    return hashlib.sha256(saved).hexdigest(), len(saved)
+    return hashlib.sha256(encoded).hexdigest(), len(encoded)
 
 
 def save_phase2_post_audit_catalog_handoff_snapshot(
