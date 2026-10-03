@@ -108,7 +108,7 @@ def test_receipt_wrapper_preflight_writes_nothing(tmp_path, monkeypatch):
     report = MODULE.run_mutation_with_receipt(
         preview_path=path,
         expected_preview_sha256="1" * 64,
-        receipt_path=receipt,
+        execution_receipt_path=receipt,
         execute=False,
     )
 
@@ -135,7 +135,7 @@ def test_successful_mutation_finalizes_private_receipt(tmp_path, monkeypatch):
     report = MODULE.run_mutation_with_receipt(
         preview_path=path,
         expected_preview_sha256="1" * 64,
-        receipt_path=receipt,
+        execution_receipt_path=receipt,
         execute=True,
         runner=runner,
         now=times(),
@@ -180,7 +180,7 @@ def test_nonzero_mutation_is_still_finalized_as_known_outcome(
     report = MODULE.run_mutation_with_receipt(
         preview_path=path,
         expected_preview_sha256="1" * 64,
-        receipt_path=receipt,
+        execution_receipt_path=receipt,
         execute=True,
         runner=lambda command, **kwargs: subprocess.CompletedProcess(
             command, 2, stdout="{}", stderr="failed"
@@ -220,7 +220,7 @@ def test_guard_failure_after_pending_finalizes_aborted_before_launch(
     report = MODULE.run_mutation_with_receipt(
         preview_path=path,
         expected_preview_sha256="1" * 64,
-        receipt_path=receipt,
+        execution_receipt_path=receipt,
         execute=True,
         now=times(),
     )
@@ -267,7 +267,7 @@ def test_runner_exception_after_launch_records_unknown_outcome(
     report = MODULE.run_mutation_with_receipt(
         preview_path=path,
         expected_preview_sha256="1" * 64,
-        receipt_path=receipt,
+        execution_receipt_path=receipt,
         execute=True,
         runner=runner,
         now=times(),
@@ -309,7 +309,7 @@ def test_existing_receipt_blocks_execution_before_pending_write(
         MODULE.run_mutation_with_receipt(
             preview_path=path,
             expected_preview_sha256="1" * 64,
-            receipt_path=receipt,
+            execution_receipt_path=receipt,
             execute=True,
         )
 
@@ -327,7 +327,7 @@ def test_broken_symlink_receipt_is_rejected(tmp_path, monkeypatch):
         MODULE.run_mutation_with_receipt(
             preview_path=path,
             expected_preview_sha256="1" * 64,
-            receipt_path=receipt,
+            execution_receipt_path=receipt,
             execute=True,
         )
 
