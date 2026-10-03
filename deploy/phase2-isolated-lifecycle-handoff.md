@@ -169,3 +169,28 @@ canonical payload hash, recorded Git ancestry, and exact historical handoff-tool
 bytes. It deliberately does **not** rerun the current lifecycle. Therefore a
 verified saved handoff remains historical evidence only and still cannot
 authorize the recorded next action.
+
+
+## Portable archive + current lifecycle handoff
+
+When the historical handoff has been packaged as a deterministic private
+`PHASE2_MUTATION_POST_AUDIT_HANDOFF_BUNDLE_ARCHIVE_V1` tar, use
+`deploy/tools/check_phase2_mutation_post_audit_handoff_bundle_archive_handoff.py`
+to verify the single archive and independently evaluate the current lifecycle
+without first unpacking a persistent bundle directory.
+
+The archive remains historical evidence only:
+
+- archive verification rechecks deterministic tar metadata, member hashes, and
+  the reconstructed portable bundle;
+- `historical_archive_only=true` and
+  `historical_authorizes_next_action=false`;
+- every `current_*` action field comes only from the fresh
+  `check_phase2_isolated_lifecycle_handoff.py` result;
+- `archive_influenced_current_action=false` is invariant;
+- the combined report sets `authorizes_next_action=false` and
+  `requires_fresh_separate_mutation_authorization=true`.
+
+This path is read-only and zero-RPC. It does not extract the archive into a
+persistent production location, control services, write the database, execute a
+mutation, or promote a phase.
