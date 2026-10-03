@@ -58,6 +58,8 @@ def test_bootstrap_preflight_is_network_free(tmp_path, monkeypatch):
     assert report.ready is True
     assert report.applied is False
     assert report.network_fetch_performed is False
+    assert report.read_only is True
+    assert report.source_tree_modified is False
     assert destination.exists() is False
 
 
@@ -74,6 +76,8 @@ def test_bootstrap_fetches_exact_pin_atomically(tmp_path, monkeypatch):
     assert report.status == "ALREADY_PINNED"
     assert report.applied is True
     assert report.network_fetch_performed is True
+    assert report.read_only is False
+    assert report.source_tree_modified is True
     assert report.existing_reused is False
     assert report.observed_source_head == head
     assert report.tracked_clean is True
@@ -108,6 +112,8 @@ def test_bootstrap_reuses_existing_exact_source_without_fetch(
     assert report.applied is True
     assert report.existing_reused is True
     assert report.network_fetch_performed is False
+    assert report.read_only is True
+    assert report.source_tree_modified is False
 
 
 def test_bootstrap_fails_closed_on_existing_source_drift(
