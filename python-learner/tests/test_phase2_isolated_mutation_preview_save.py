@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+from pathlib import Path
+import importlib.util
+import json
+import stat
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+TOOL = ROOT / "deploy/tools/save_phase2_isolated_mutation_preview.py"
+SPEC = importlib.util.spec_from_file_location(
+    "save_phase2_isolated_mutation_preview",
+    TOOL,
+)
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+
+
+class Preview(SimpleNamespace):
+    def to_record(self):
+        return dict(self.__dict__)
+
+
+def preview(*, ready=True, rpc_called=False):
+    argv = (
+        sys.executable,
+        str(ROOT / "deploy/tools/bootstrap_phase2_isolated_source.py"),
+        "--destination",
+        "/tmp/pio-phase2-build",
+        "--apply",
+    )
+    return Preview(
+        format_version=MODULE.RENDER.MUTATION_PREVIEW_FORMAT_VERSION,
+        fingerprint_schema=MODULE.RENDER.MUTATION_FINGERPRINT_SCHEMA,
+        state="SOURCE_BOOTSTRAP_REQUIRED",
+        next_action="BOOTSTRAP_PINNED_SOURCE",
+        next_tool="bootstrap_phase2_isolated_source.py",
+        preflight_executed=True,
+        preflight_exit_code=0 if ready else 2,
+        preflight_json_valid=True,
+        preflight_succeeded=ready,
+        mutation_flag="--apply",
+        mutation_argv=argv if ready else None,
+        mutation_command="cmd" if ready else None,
+        mutation_rendered=ready,
+        mutation_executed=False,
+        mutation_tool_sha256="c" * 64 if ready else None,
+        preflight_fingerprint="a" * 64,
+        mutation_fingerprint="b" * 64 if ready else None,
+        preflight={"status": "READY_CREATE"},
+        lifecycle={"state": "SOURCE_BOOTSTRAP_REQUIRED"},
+        read_only=True,
+        rpc_called=rpc_called,
+        database_write_performed=False,
+        service_control_performed=False,
+        daemon_reload_performed=False,
+        production_tree_modified=False,
+    )
+
+
+def install(monkeypatch, report):
+    monkeypatch.setattr(
+        MODULE.RENDER,
+        "render_reviewed_mutation_command",
+        lambda **kwargs: report,
+    )
+
+
+def test_saver_writes_exact_preview_atomically_with_private_mode(
+    tmp_path,
+    monkeypatch,
+):
+    report = preview()
+    install(monkeypatch, report)
+    output = tmp_path / "preview.json"
+
+    saved = MODULE.save_mutation_preview(output_path=output)
+
+    assert saved.preview_saved is True
+    assert saved.artifact_write_performed is True
+    assert saved.read_only_preflight is True
+    assert saved.mutation_executed is False
+    assert saved.replaced_existing is False
+    assert saved.file_mode == "0600"
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert json.loads(output.read_text(encoding="utf-8")) == report.to_record()
+    assert not list(tmp_path.glob(".preview.json.*.tmp"))
+
+
+def test_saver_refuses_existing_preview_without_replace(tmp_path, monkeypatch):
+    install(monkeypatch, preview())
+    output = tmp_path / "preview.json"
+    output.write_text('{"old": true}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="already exists"):
+        MODULE.save_mutation_preview(output_path=output)
+
+    assert json.loads(output.read_text(encoding="utf-8")) == {"old": True}
+
+
+def test_saver_replaces_existing_preview_only_when_explicit(
+    tmp_path,
+    monkeypatch,
+):
+    report = preview()
+    install(monkeypatch, report)
+    output = tmp_path / "preview.json"
+    output.write_text('{"old": true}\n', encoding="utf-8")
+    output.chmod(0o644)
+
+    saved = MODULE.save_mutation_preview(
+        output_path=output,
+        replace=True,
+    )
+
+    assert saved.replaced_existing is True
+    assert saved.file_mode == "0600"
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert json.loads(output.read_text(encoding="utf-8")) == report.to_record()
+
+
+def test_saver_refuses_symlink_output(tmp_path, monkeypatch):
+    install(monkeypatch, preview())
+    target = tmp_path / "target.json"
+    target.write_text("{}\n", encoding="utf-8")
+    link = tmp_path / "preview.json"
+    link.symlink_to(target)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        MODULE.save_mutation_preview(output_path=link)
+
+    assert target.read_text(encoding="utf-8") == "{}\n"
+
+
+def test_saver_refuses_non_mutation_ready_preview(tmp_path, monkeypatch):
+    install(monkeypatch, preview(ready=False))
+    output = tmp_path / "preview.json"
+
+    with pytest.raises(ValueError, match="not safe and mutation-ready"):
+        MODULE.save_mutation_preview(output_path=output)
+
+    assert not output.exists()
+
+
+def test_saver_refuses_preview_that_crossed_read_only_boundary(
+    tmp_path,
+    monkeypatch,
+):
+    install(monkeypatch, preview(rpc_called=True))
+    output = tmp_path / "preview.json"
+
+    with pytest.raises(ValueError, match="not safe and mutation-ready"):
+        MODULE.save_mutation_preview(output_path=output)
+
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/opt/pio/preview.json",
+        "/opt/pio/data/preview.json",
+        "/opt/pio-phase2-runtime/preview.json",
+        "/etc/pio/preview.json",
+        "/etc/systemd/system/preview.json",
+    ),
+)
+def test_saver_refuses_protected_production_paths(path):
+    with pytest.raises(ValueError, match="protected production path"):
+        MODULE._output_path(path)
