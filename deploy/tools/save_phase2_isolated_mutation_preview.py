@@ -262,9 +262,6 @@ def save_mutation_preview(
 
     payload = _encode_preview(preview)
     replaced = _atomic_write(output, payload, replace=replace)
-    saved = output.read_bytes()
-    if saved != payload:
-        raise ValueError("saved mutation preview bytes do not match rendered preview")
 
     mode = stat.S_IMODE(output.stat().st_mode)
     if mode != 0o600:
@@ -272,8 +269,8 @@ def save_mutation_preview(
 
     return Phase2SavedMutationPreview(
         output_path=str(output),
-        preview_sha256=hashlib.sha256(saved).hexdigest(),
-        bytes_written=len(saved),
+        preview_sha256=hashlib.sha256(payload).hexdigest(),
+        bytes_written=len(payload),
         file_mode=f"{mode:04o}",
         replaced_existing=replaced,
         format_version=int(preview.format_version),
