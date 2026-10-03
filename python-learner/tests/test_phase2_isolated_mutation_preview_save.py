@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import importlib.util
 import json
 import stat
@@ -38,7 +39,7 @@ def preview(*, ready=True, rpc_called=False):
     return Preview(
         format_version=MODULE.RENDER.MUTATION_PREVIEW_FORMAT_VERSION,
         fingerprint_schema=MODULE.RENDER.MUTATION_FINGERPRINT_SCHEMA,
-        reviewed_source_commit="d" * 40,
+        reviewed_source_commit=MODULE._renderer_source_identity()[0],
         deploy_surface_sha256="e" * 64,
         deploy_surface_files=10,
         state="SOURCE_BOOTSTRAP_REQUIRED",
@@ -91,7 +92,7 @@ def test_saver_writes_exact_preview_atomically_with_private_mode(
     assert saved.mutation_executed is False
     assert saved.replaced_existing is False
     assert saved.file_mode == "0600"
-    assert saved.reviewed_source_commit == "d" * 40
+    assert saved.reviewed_source_commit == MODULE._renderer_source_identity()[0]
     assert saved.deploy_surface_sha256 == "e" * 64
     assert saved.deploy_surface_files == 10
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
@@ -293,3 +294,87 @@ def test_saver_digest_comes_from_exact_preview_payload_not_path_reread(
     payload = output.read_text(encoding="utf-8").encode("utf-8")
     assert saved.preview_sha256 == MODULE.hashlib.sha256(payload).hexdigest()
     assert saved.bytes_written == len(payload)
+
+
+
+def test_saver_renderer_source_identity_matches_exact_executed_bytes():
+    commit, renderer_sha = MODULE._renderer_source_identity()
+
+    assert len(commit) >= 40
+    assert renderer_sha == MODULE._RENDER_TOOL_SHA256_AT_LOAD
+    assert renderer_sha == hashlib.sha256(
+        MODULE._RENDER_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+
+
+def test_saver_never_rereads_loaded_renderer_tool_bytes(monkeypatch):
+    real_read_bytes = Path.read_bytes
+
+    def reject_renderer_reread(path):
+        if path.resolve() == MODULE._RENDER_TOOL_PATH_AT_LOAD:
+            raise AssertionError(
+                "executed renderer path must not be reread for identity"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_renderer_reread)
+
+    commit, renderer_sha = MODULE._renderer_source_identity()
+
+    assert len(commit) >= 40
+    assert renderer_sha == MODULE._RENDER_TOOL_SHA256_AT_LOAD
+
+
+def test_saver_renderer_is_executed_from_descriptor_captured_bytes():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_tool(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_RENDER_TOOL_BYTES_AT_LOAD" in source
+    assert "RENDER_TOOL.read_bytes()" not in source
+
+
+def test_saver_rejects_renderer_identity_change_during_render(
+    tmp_path,
+    monkeypatch,
+):
+    report = preview()
+    install(monkeypatch, report)
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_renderer_source_identity",
+        lambda: next(identities),
+    )
+
+    output = tmp_path / "preview.json"
+    with pytest.raises(ValueError, match="changed during render"):
+        MODULE.save_mutation_preview(output_path=output)
+
+    assert not output.exists()
+
+
+def test_saver_rejects_preview_commit_not_matching_executed_renderer(
+    tmp_path,
+    monkeypatch,
+):
+    report = preview()
+    report.reviewed_source_commit = "f" * 40
+    install(monkeypatch, report)
+    output = tmp_path / "preview.json"
+
+    with pytest.raises(
+        ValueError,
+        match="source commit does not match executed renderer source",
+    ):
+        MODULE.save_mutation_preview(output_path=output)
+
+    assert not output.exists()
