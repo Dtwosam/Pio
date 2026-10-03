@@ -215,16 +215,69 @@ def build_phase2_portable_bundle_archive(
                 import io
                 archive.addfile(info, io.BytesIO(payload))
 
+        sync_fd = os.open(temp, os.O_RDONLY)
+        try:
+            os.fsync(sync_fd)
+        finally:
+            os.close(sync_fd)
+
+        raw = temp.read_bytes()
+        temp_stat = os.stat(temp, follow_symlinks=False)
         if output.exists() or output.is_symlink():
             raise ValueError("portable bundle archive output appeared before publish")
-        os.replace(temp, output)
+        try:
+            os.link(
+                temp,
+                output,
+                follow_symlinks=False,
+            )
+        except FileExistsError as exc:
+            raise ValueError(
+                "portable bundle archive output appeared before publish"
+            ) from exc
+
+        published_stat = os.stat(output, follow_symlinks=False)
+        if (
+            published_stat.st_dev != temp_stat.st_dev
+            or published_stat.st_ino != temp_stat.st_ino
+            or published_stat.st_size != len(raw)
+            or not stat.S_ISREG(published_stat.st_mode)
+            or stat.S_IMODE(published_stat.st_mode) != 0o600
+        ):
+            try:
+                output.unlink()
+            except OSError:
+                pass
+            raise ValueError(
+                "portable bundle archive publication identity mismatch"
+            )
+
+        temp.unlink()
         temp = None  # type: ignore[assignment]
+
+        directory_fd = os.open(
+            output.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+        current = os.stat(output, follow_symlinks=False)
+        if (
+            current.st_dev != published_stat.st_dev
+            or current.st_ino != published_stat.st_ino
+            or current.st_size != len(raw)
+            or stat.S_IMODE(current.st_mode) != 0o600
+        ):
+            raise ValueError(
+                "portable bundle archive path changed after publish"
+            )
     finally:
         if isinstance(temp, Path) and temp.exists():
             temp.unlink()
 
-    os.chmod(output, 0o600)
-    raw = output.read_bytes()
     return Phase2PortableBundleArchiveReport(
         archive_path=str(output),
         artifact_type=ARTIFACT_TYPE,
