@@ -208,3 +208,61 @@ def test_saver_rejects_invalid_deploy_surface_identity(tmp_path, monkeypatch):
         MODULE.save_mutation_preview(output_path=output)
 
     assert not output.exists()
+
+
+
+def test_saver_default_publish_race_never_overwrites_preview_destination(
+    tmp_path,
+    monkeypatch,
+):
+    install(monkeypatch, preview())
+    output = tmp_path / "preview.json"
+    competitor = b'{"concurrent": true}\n'
+    real_link = MODULE.os.link
+    raced = False
+
+    def competing_publish(source, destination, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            destination = Path(destination)
+            destination.write_bytes(competitor)
+            destination.chmod(0o600)
+        return real_link(source, destination, **kwargs)
+
+    monkeypatch.setattr(MODULE.os, "link", competing_publish)
+
+    with pytest.raises(
+        ValueError,
+        match="output appeared before publish",
+    ):
+        MODULE.save_mutation_preview(output_path=output)
+
+    assert output.read_bytes() == competitor
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert not list(tmp_path.glob(".preview.json.*.tmp"))
+
+
+def test_saver_explicit_replace_does_not_use_no_clobber_link(
+    tmp_path,
+    monkeypatch,
+):
+    report = preview()
+    install(monkeypatch, report)
+    output = tmp_path / "preview.json"
+    output.write_text('{"old": true}\n', encoding="utf-8")
+
+    def forbidden_link(*args, **kwargs):
+        raise AssertionError("explicit replace must not use no-clobber link")
+
+    monkeypatch.setattr(MODULE.os, "link", forbidden_link)
+
+    saved = MODULE.save_mutation_preview(
+        output_path=output,
+        replace=True,
+    )
+
+    assert saved.replaced_existing is True
+    assert json.loads(output.read_text(encoding="utf-8")) == json.loads(
+        json.dumps(report.to_record())
+    )
