@@ -253,3 +253,40 @@ def test_saver_rejects_symlinked_audit_tool(
         )
 
     assert not (tmp_path / "execution.json.post-audit.json").exists()
+
+
+
+def test_saver_publish_race_never_overwrites_post_audit_destination(
+    tmp_path,
+    monkeypatch,
+):
+    execution_receipt = receipt(tmp_path)
+    install(monkeypatch, verified_audit(execution_receipt))
+    output = tmp_path / "audit.json"
+    competitor = b"preexisting concurrent post-audit evidence\n"
+    real_link = MODULE.os.link
+    raced = False
+
+    def competing_publish(source, destination, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            destination = Path(destination)
+            destination.write_bytes(competitor)
+            destination.chmod(0o600)
+        return real_link(source, destination, **kwargs)
+
+    monkeypatch.setattr(MODULE.os, "link", competing_publish)
+
+    with pytest.raises(
+        ValueError,
+        match="output appeared before publish",
+    ):
+        MODULE.save_verified_mutation_post_audit(
+            execution_receipt_path=execution_receipt,
+            output_path=output,
+        )
+
+    assert output.read_bytes() == competitor
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert not list(tmp_path.glob(".audit.json.*.tmp"))
