@@ -103,6 +103,20 @@ def _load_snapshot_catalog_bytes(payload: bytes) -> dict[str, Any]:
     return catalog
 
 
+def _capture_snapshot_identity(
+    snapshot_path: str | Path,
+) -> tuple[Path, str, Any]:
+    snapshot_file = SNAPSHOT_VERIFY._private_json_file(snapshot_path)
+    snapshot_bytes, opened_stat = SNAPSHOT_VERIFY._read_snapshot_bytes(
+        snapshot_file
+    )
+    return (
+        snapshot_file,
+        hashlib.sha256(snapshot_bytes).hexdigest(),
+        opened_stat,
+    )
+
+
 def _verified_snapshot_catalog(
     *,
     snapshot_path: str | Path,
@@ -174,10 +188,21 @@ def freshly_reverify_phase2_post_audit_catalog(
     SNAPSHOT_VERIFY._assert_credential_minimal(str(artifact_directory))
     SNAPSHOT_VERIFY._assert_credential_minimal(pattern)
 
+    (
+        captured_snapshot_path,
+        captured_snapshot_sha256,
+        captured_snapshot_stat,
+    ) = _capture_snapshot_identity(snapshot_path)
+
     snapshot, snapshot_catalog = _verified_snapshot_catalog(
-        snapshot_path=snapshot_path,
+        snapshot_path=captured_snapshot_path,
         repository_root=repository_root,
     )
+    if str(snapshot.snapshot_sha256) != captured_snapshot_sha256:
+        raise ValueError(
+            "post-audit catalog child verification does not match "
+            "the orchestrator byte snapshot"
+        )
     if not _snapshot_boundary_ok(snapshot):
         raise ValueError(
             "post-audit catalog snapshot crossed the historical evidence boundary"
@@ -214,6 +239,11 @@ def freshly_reverify_phase2_post_audit_catalog(
         and fully_verified_live
         and identity_match
         and int(snapshot.artifacts_seen) == int(live.artifacts_seen)
+    )
+
+    SNAPSHOT_VERIFY._assert_snapshot_path_stable(
+        captured_snapshot_path,
+        captured_snapshot_stat,
     )
 
     return Phase2PostAuditCatalogFreshReverification(
