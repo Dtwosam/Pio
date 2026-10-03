@@ -410,13 +410,11 @@ def test_verifier_uses_single_byte_snapshot_for_artifact_and_receipt(
     install_static_receipt_validation(monkeypatch)
     _preview, _receipt, artifact_path, _artifact = build_artifacts(tmp_path)
 
-    def forbidden_loader(*args, **kwargs):
-        raise AssertionError("split JSON loader must not be used")
+    assert not hasattr(MODULE, "_load_json_object")
 
     def forbidden_read_bytes(_self):
         raise AssertionError("artifact path must not be reopened for hashing")
 
-    monkeypatch.setattr(MODULE, "_load_json_object", forbidden_loader)
     monkeypatch.setattr(Path, "read_bytes", forbidden_read_bytes)
 
     report = MODULE.verify_saved_mutation_post_audit(
