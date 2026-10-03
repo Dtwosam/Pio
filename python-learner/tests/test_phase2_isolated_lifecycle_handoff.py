@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import hashlib
 
 import pytest
 
@@ -506,3 +507,84 @@ def test_handoff_next_parameters_never_expose_env_values(monkeypatch):
     assert "super-secret" not in encoded
     assert secret not in encoded
     assert report.next_parameters["env_file"] == "/etc/pio/pio.env"
+
+
+
+def test_handoff_dependency_identity_is_one_reviewed_snapshot():
+    commit, dependency_sha = MODULE._dependency_source_identity()
+
+    assert len(commit) >= 40
+    assert len(dependency_sha) == 64
+    assert len(MODULE._DEPENDENCY_SNAPSHOTS) == 6
+
+    for (
+        _current,
+        _relative,
+        _loaded_path,
+        encoded,
+        _opened,
+        _label,
+    ) in MODULE._DEPENDENCY_SNAPSHOTS:
+        assert encoded
+        assert len(hashlib.sha256(encoded).hexdigest()) == 64
+
+
+def test_handoff_dependencies_are_descriptor_captured_and_executed():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_dependency(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_DEPENDENCY_SNAPSHOTS" in source
+    assert "spec.loader.exec_module(module)" not in source
+
+
+def test_handoff_dependency_identity_does_not_reread_loaded_paths(monkeypatch):
+    loaded_paths = {
+        snapshot[2] for snapshot in MODULE._DEPENDENCY_SNAPSHOTS
+    }
+    real_read_bytes = Path.read_bytes
+
+    def reject_dependency_reread(path):
+        if path.resolve() in loaded_paths:
+            raise AssertionError(
+                "loaded lifecycle dependency path must not be reread"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_dependency_reread)
+
+    commit, dependency_sha = MODULE._dependency_source_identity()
+
+    assert len(commit) >= 40
+    assert len(dependency_sha) == 64
+
+
+def test_handoff_rejects_dependency_change_during_inspection(monkeypatch):
+    install(
+        monkeypatch,
+        activation_report=activation(runtime_ready=False),
+        source_runtime_report=source_runtime(ready=False),
+        source_bootstrap_report=source_bootstrap(status="READY_CREATE"),
+    )
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_dependency_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="dependencies changed during inspection",
+    ):
+        MODULE.inspect_lifecycle_handoff(
+            source_tree="/tmp/pio-phase2-build/pinned"
+        )
