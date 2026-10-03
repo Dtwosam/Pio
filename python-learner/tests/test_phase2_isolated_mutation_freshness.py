@@ -46,6 +46,8 @@ def current(
             "--apply",
         )
     return Current(
+        format_version=MODULE.RENDER.MUTATION_PREVIEW_FORMAT_VERSION,
+        fingerprint_schema=MODULE.RENDER.MUTATION_FINGERPRINT_SCHEMA,
         state=state,
         next_action=action,
         next_tool=tool,
@@ -67,12 +69,20 @@ def current(
 
 def prior_payload(**overrides):
     payload = {
+        "format_version": MODULE.RENDER.MUTATION_PREVIEW_FORMAT_VERSION,
+        "fingerprint_schema": MODULE.RENDER.MUTATION_FINGERPRINT_SCHEMA,
         "state": "SOURCE_BOOTSTRAP_REQUIRED",
         "next_action": "BOOTSTRAP_PINNED_SOURCE",
         "next_tool": "bootstrap_phase2_isolated_source.py",
         "preflight_succeeded": True,
         "mutation_rendered": True,
         "mutation_executed": False,
+        "read_only": True,
+        "rpc_called": False,
+        "database_write_performed": False,
+        "service_control_performed": False,
+        "daemon_reload_performed": False,
+        "production_tree_modified": False,
         "preflight_fingerprint": "a" * 64,
         "mutation_fingerprint": "b" * 64,
         "mutation_argv": [
@@ -218,3 +228,69 @@ def test_freshness_rejects_oversized_preview(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="too large"):
         MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+
+def test_freshness_rejects_unsupported_prior_format_version(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(
+        tmp_path,
+        prior_payload(format_version=999),
+    )
+    install(monkeypatch, current())
+
+    with pytest.raises(ValueError, match="format version is unsupported"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+def test_freshness_rejects_unsupported_prior_fingerprint_schema(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(
+        tmp_path,
+        prior_payload(fingerprint_schema="UNKNOWN"),
+    )
+    install(monkeypatch, current())
+
+    with pytest.raises(ValueError, match="fingerprint schema is unsupported"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+def test_freshness_rejects_prior_boundary_crossing(tmp_path, monkeypatch):
+    path = write_preview(
+        tmp_path,
+        prior_payload(rpc_called=True),
+    )
+    install(monkeypatch, current())
+
+    with pytest.raises(ValueError, match="crossed the read-only boundary"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+def test_freshness_rejects_current_format_contract_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(tmp_path)
+    report = current()
+    report.format_version = 999
+    install(monkeypatch, report)
+
+    with pytest.raises(ValueError, match="crossed the read-only boundary"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+def test_freshness_report_exposes_current_format_contract(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(tmp_path)
+    install(monkeypatch, current())
+
+    report = MODULE.check_mutation_preview_freshness(preview_path=path)
+
+    assert report.format_version == 1
+    assert report.fingerprint_schema == "PHASE2_MUTATION_PREVIEW_V1"
