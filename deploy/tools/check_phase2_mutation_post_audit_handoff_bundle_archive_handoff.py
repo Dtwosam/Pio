@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -106,6 +107,19 @@ def _lifecycle_boundary_ok(report: Any) -> bool:
     )
 
 
+def _capture_archive_snapshot(
+    archive_path: str | Path,
+) -> tuple[Path, str, int, Any]:
+    path = ARCHIVE._archive_file(archive_path)
+    payload, opened_stat = ARCHIVE._read_archive_snapshot(path)
+    return (
+        path,
+        hashlib.sha256(payload).hexdigest(),
+        len(payload),
+        opened_stat,
+    )
+
+
 def inspect_phase2_portable_archive_current_handoff(
     *,
     archive_path: str | Path,
@@ -120,10 +134,25 @@ def inspect_phase2_portable_archive_current_handoff(
     repository_url: str = LIFECYCLE.BOOTSTRAP.DEFAULT_REPOSITORY_URL,
     runner: SystemctlRunner = subprocess.run,
 ) -> Phase2PortableArchiveCurrentHandoff:
+    (
+        captured_archive_path,
+        captured_archive_sha256,
+        captured_archive_size,
+        captured_archive_stat,
+    ) = _capture_archive_snapshot(archive_path)
+
     archive = ARCHIVE.verify_phase2_portable_bundle_archive(
-        archive_path=archive_path,
+        archive_path=captured_archive_path,
         repository_root=repository_root,
     )
+    if (
+        str(archive.archive_sha256) != captured_archive_sha256
+        or int(archive.archive_size) != captured_archive_size
+    ):
+        raise ValueError(
+            "portable Phase-2 archive child verification does not match "
+            "the orchestrator byte snapshot"
+        )
     if not _archive_boundary_ok(archive):
         raise ValueError(
             "portable Phase-2 archive crossed the historical non-authorizing boundary"
@@ -144,6 +173,11 @@ def inspect_phase2_portable_archive_current_handoff(
         raise ValueError(
             "current Phase-2 lifecycle handoff crossed the read-only boundary"
         )
+
+    ARCHIVE._assert_archive_path_stable(
+        captured_archive_path,
+        captured_archive_stat,
+    )
 
     evidence_verified = bool(
         archive.archive_verified
