@@ -332,3 +332,61 @@ def test_verify_saved_handoff_snapshot_rejects_nonpositive_or_boolean_counts(
             snapshot_path=path,
             repository_root=ROOT,
         )
+
+
+
+def test_catalog_handoff_verifier_hashes_the_same_snapshot_bytes_it_parses(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_snapshot(tmp_path)
+    expected_sha = MODULE.hashlib.sha256(path.read_bytes()).hexdigest()
+    original_read_bytes = Path.read_bytes
+
+    def forbid_second_snapshot_read(self):
+        if self == path:
+            raise AssertionError("catalog snapshot path must not be reread")
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", forbid_second_snapshot_read)
+    install_valid_lineage(monkeypatch)
+
+    report = MODULE.verify_phase2_post_audit_catalog_handoff_snapshot(
+        snapshot_path=path,
+        repository_root=ROOT,
+    )
+
+    assert report.handoff_snapshot_verified is True
+    assert report.snapshot_sha256 == expected_sha
+
+
+def test_catalog_handoff_verifier_fails_closed_if_path_is_replaced_after_read(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_snapshot(tmp_path)
+    install_valid_lineage(monkeypatch)
+    original_snapshot = MODULE._read_snapshot_bytes
+
+    def snapshot_then_replace(snapshot_path):
+        payload, opened = original_snapshot(snapshot_path)
+        replacement = tmp_path / "replacement-handoff.json"
+        replacement.write_bytes(payload)
+        replacement.chmod(0o600)
+        replacement.replace(snapshot_path)
+        return payload, opened
+
+    monkeypatch.setattr(
+        MODULE,
+        "_read_snapshot_bytes",
+        snapshot_then_replace,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="snapshot path changed during verification",
+    ):
+        MODULE.verify_phase2_post_audit_catalog_handoff_snapshot(
+            snapshot_path=path,
+            repository_root=ROOT,
+        )
