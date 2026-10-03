@@ -230,9 +230,37 @@ def _atomic_write_new(path: Path, payload: dict[str, Any]) -> tuple[str, int]:
             raise ValueError("post-audit catalog snapshot output became a symlink")
         if path.exists():
             raise ValueError("post-audit catalog snapshot output appeared before publish")
-        os.replace(temp_path, path)
-        temp_path = None
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+        temp_stat = os.stat(temp_path, follow_symlinks=False)
+        try:
+            os.link(
+                temp_path,
+                path,
+                follow_symlinks=False,
+            )
+        except FileExistsError as exc:
+            raise ValueError(
+                "post-audit catalog snapshot output appeared before publish"
+            ) from exc
+
+        published_stat = os.stat(path, follow_symlinks=False)
+        if (
+            published_stat.st_dev != temp_stat.st_dev
+            or published_stat.st_ino != temp_stat.st_ino
+            or published_stat.st_size != len(encoded)
+            or not stat.S_ISREG(published_stat.st_mode)
+            or stat.S_IMODE(published_stat.st_mode) != 0o600
+        ):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            raise ValueError(
+                "post-audit catalog snapshot publication identity mismatch"
+            )
+
+        temp_path.unlink()
+        temp_path = None  # type: ignore[assignment]
 
         directory_fd = os.open(
             path.parent,
@@ -242,6 +270,18 @@ def _atomic_write_new(path: Path, payload: dict[str, Any]) -> tuple[str, int]:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+
+        current = os.stat(path, follow_symlinks=False)
+        if (
+            current.st_dev != published_stat.st_dev
+            or current.st_ino != published_stat.st_ino
+            or current.st_size != len(encoded)
+            or not stat.S_ISREG(current.st_mode)
+            or stat.S_IMODE(current.st_mode) != 0o600
+        ):
+            raise ValueError(
+                "post-audit catalog snapshot path changed after publish"
+            )
     finally:
         if fd is not None:
             os.close(fd)

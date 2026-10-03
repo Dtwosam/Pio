@@ -245,3 +245,46 @@ def test_save_catalog_snapshot_rejects_self_including_output(
             artifact_directory=artifact_dir,
             output_path=artifact_dir / "catalog.post-audit.json",
         )
+
+
+
+def test_save_catalog_snapshot_publish_race_never_overwrites_destination(
+    tmp_path,
+    monkeypatch,
+):
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    monkeypatch.setattr(
+        MODULE.CATALOG,
+        "build_phase2_post_audit_catalog",
+        lambda **kwargs: good_catalog(tmp_path),
+    )
+
+    output = tmp_path / "catalog.json"
+    competitor = b"preexisting concurrent catalog evidence\n"
+    real_link = MODULE.os.link
+    raced = False
+
+    def competing_publish(source, destination, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            destination = Path(destination)
+            destination.write_bytes(competitor)
+            destination.chmod(0o600)
+        return real_link(source, destination, **kwargs)
+
+    monkeypatch.setattr(MODULE.os, "link", competing_publish)
+
+    with pytest.raises(
+        ValueError,
+        match="output appeared before publish",
+    ):
+        MODULE.save_phase2_post_audit_catalog_snapshot(
+            artifact_directory=artifact_dir,
+            output_path=output,
+        )
+
+    assert output.read_bytes() == competitor
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert not list(tmp_path.glob(".catalog.json.*.tmp"))
