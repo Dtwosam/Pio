@@ -15,6 +15,8 @@ from typing import Any
 TOOLS_DIR = Path(__file__).resolve().parent
 RUNNER_TOOL = TOOLS_DIR / "run_phase2_isolated_next_preflight.py"
 _ALLOWED_MUTATION_FLAGS = frozenset({"--apply", "--prepare"})
+MUTATION_PREVIEW_FORMAT_VERSION = 1
+MUTATION_FINGERPRINT_SCHEMA = "PHASE2_MUTATION_PREVIEW_V1"
 
 
 def _load(path: Path, name: str) -> Any:
@@ -32,6 +34,8 @@ RUNNER = _load(RUNNER_TOOL, "phase2_reviewed_mutation_preflight")
 
 @dataclass(frozen=True)
 class Phase2ReviewedMutationCommand:
+    format_version: int
+    fingerprint_schema: str
     state: str
     next_action: str
     next_tool: str | None
@@ -71,9 +75,15 @@ def _preflight_boundary_ok(report: Any) -> bool:
     )
 
 
-def _fingerprint(value: Any) -> str:
+def _fingerprint(kind: str, value: Any) -> str:
+    if not kind:
+        raise ValueError("fingerprint kind is required")
     encoded = json.dumps(
-        value,
+        {
+            "schema": MUTATION_FINGERPRINT_SCHEMA,
+            "kind": kind,
+            "value": value,
+        },
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -118,19 +128,22 @@ def render_reviewed_mutation_command(
         mutation_command = shlex.join(mutation_argv)
 
     preflight_record = preflight.to_record()
-    preflight_fingerprint = _fingerprint(preflight_record)
+    preflight_fingerprint = _fingerprint("preflight", preflight_record)
     mutation_fingerprint = (
         _fingerprint(
+            "mutation",
             {
                 "preflight_fingerprint": preflight_fingerprint,
                 "mutation_argv": mutation_argv,
-            }
+            },
         )
         if mutation_argv is not None
         else None
     )
 
     return Phase2ReviewedMutationCommand(
+        format_version=MUTATION_PREVIEW_FORMAT_VERSION,
+        fingerprint_schema=MUTATION_FINGERPRINT_SCHEMA,
         state=str(preflight.state),
         next_action=str(preflight.next_action),
         next_tool=preflight.next_tool,
