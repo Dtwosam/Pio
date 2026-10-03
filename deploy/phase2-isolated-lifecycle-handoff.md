@@ -220,3 +220,26 @@ for static verification. The verifier rechecks the canonical payload digest,
 recorded Git ancestry, exact historical archive-handoff tool bytes, evidence
 lineage, and the non-authorizing boundary. It deliberately does not rerun the
 current lifecycle.
+
+
+## Fresh archive handoff evidence reverification
+
+If both an immutable
+`PHASE2_MUTATION_POST_AUDIT_HANDOFF_BUNDLE_ARCHIVE_HANDOFF_SNAPSHOT_V1`
+snapshot and the original portable archive are available, run
+`deploy/tools/check_phase2_mutation_post_audit_handoff_bundle_archive_handoff_freshness.py`
+to freshly reverify the archive against the saved handoff evidence.
+
+The check compares immutable identities rather than paths:
+
+- the saved snapshot is statically verified first;
+- the supplied archive is fully reverified, including its reconstructed portable
+  bundle;
+- the archive SHA-256 must match the SHA recorded in the snapshot;
+- the source-bundle SHA-256 must also match;
+- archive relocation is explicitly ignored as evidence drift.
+
+The recorded lifecycle recommendation is not rerun. The result remains
+historical evidence only, sets `current_lifecycle_rechecked=false`, never
+authorizes the recorded action, and requires fresh separate mutation
+authorization.
