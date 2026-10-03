@@ -113,22 +113,94 @@ def _output_directory(value: str | Path) -> Path:
     return path
 
 
-def _json_object(path: str | Path, *, label: str) -> tuple[Path, dict[str, Any]]:
-    raw = Path(path).expanduser()
+def _private_json_snapshot(
+    value: str | Path,
+    *,
+    label: str,
+) -> tuple[Path, bytes, dict[str, Any], os.stat_result]:
+    raw = Path(value).expanduser()
     if raw.is_symlink():
         raise ValueError(f"{label} must not be a symlink")
-    resolved = raw.resolve(strict=True)
-    if not resolved.is_file():
-        raise ValueError(f"{label} must be a regular file")
-    if resolved.stat().st_size <= 0 or resolved.stat().st_size > _MAX_ARTIFACT_BYTES:
-        raise ValueError(f"{label} size is invalid")
+    path = raw.resolve(strict=True)
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        value = json.loads(resolved.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_ARTIFACT_BYTES:
+            raise ValueError(f"{label} size is invalid")
+        if stat.S_IMODE(before.st_mode) != 0o600:
+            raise ValueError(f"{label} permissions must be 0600")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or stat.S_IMODE(after.st_mode) != 0o600
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+
+    _assert_snapshot_path_stable(path, before, label=label)
+
+    try:
+        payload = json.loads(encoded.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{label} is not valid JSON") from exc
-    if not isinstance(value, dict):
+    if not isinstance(payload, dict):
         raise ValueError(f"{label} must be a JSON object")
-    return resolved, value
+    return path, encoded, payload, before
+
+
+def _assert_snapshot_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed during bundle build") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+        or stat.S_IMODE(current.st_mode) != 0o600
+    ):
+        raise ValueError(f"{label} path changed during bundle build")
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
 
 
 def _sha256(path: Path) -> str:
@@ -379,11 +451,21 @@ def build_phase2_portable_handoff_bundle(
 ) -> Phase2PortableHandoffBundleReport:
     output = _output_directory(output_directory)
 
-    handoff_path, handoff_payload = _json_object(
+    (
+        handoff_path,
+        handoff_bytes,
+        handoff_payload,
+        handoff_stat,
+    ) = _private_json_snapshot(
         handoff_snapshot_path,
         label="catalog handoff snapshot",
     )
-    catalog_path, catalog_payload = _json_object(
+    (
+        catalog_path,
+        catalog_bytes,
+        catalog_payload,
+        catalog_stat,
+    ) = _private_json_snapshot(
         catalog_snapshot_path,
         label="catalog snapshot",
     )
@@ -405,17 +487,35 @@ def build_phase2_portable_handoff_bundle(
         repository_root=repository_root,
     )
 
+    handoff_sha = _sha256_bytes(handoff_bytes)
+    catalog_sha = _sha256_bytes(catalog_bytes)
     if not _boundary_ok(handoff, verified_field="handoff_snapshot_verified"):
         raise ValueError("catalog handoff snapshot is not verified and non-authorizing")
     if not _boundary_ok(catalog, verified_field="snapshot_verified"):
         raise ValueError("catalog snapshot is not verified and non-authorizing")
     if not _boundary_ok(fresh, verified_field="fresh_reverification_verified"):
         raise ValueError("post-audit artifacts are not freshly reverified")
+    if getattr(handoff, "snapshot_sha256", None) != handoff_sha:
+        raise ValueError("catalog handoff snapshot changed during nested verification")
+    if getattr(catalog, "snapshot_sha256", None) != catalog_sha:
+        raise ValueError("catalog snapshot changed during nested verification")
+    if getattr(fresh, "snapshot_sha256", None) != catalog_sha:
+        raise ValueError("catalog snapshot changed during fresh verification")
+
+    _assert_snapshot_path_stable(
+        handoff_path,
+        handoff_stat,
+        label="catalog handoff snapshot",
+    )
+    _assert_snapshot_path_stable(
+        catalog_path,
+        catalog_stat,
+        label="catalog snapshot",
+    )
 
     handoff_record = handoff_payload.get("handoff")
     if not isinstance(handoff_record, dict):
         raise ValueError("catalog handoff snapshot payload is invalid")
-    catalog_sha = _sha256(catalog_path)
     if handoff_record.get("snapshot_sha256") != catalog_sha:
         raise ValueError("handoff snapshot does not reference the supplied catalog snapshot")
     if int(handoff_record.get("historical_artifacts_seen", -1)) != int(
@@ -435,7 +535,7 @@ def build_phase2_portable_handoff_bundle(
         "artifact_type": ARTIFACT_TYPE,
         "handoff_snapshot": {
             "path": HANDOFF_NAME,
-            "sha256": _sha256(handoff_path),
+            "sha256": handoff_sha,
         },
         "catalog_snapshot": {
             "path": CATALOG_NAME,
@@ -474,10 +574,14 @@ def build_phase2_portable_handoff_bundle(
         os.chmod(temp, stat.S_IRWXU)
         audit_root = temp / POST_AUDIT_DIR
         audit_root.mkdir(mode=0o700)
-        shutil.copyfile(handoff_path, temp / HANDOFF_NAME)
-        shutil.copyfile(catalog_path, temp / CATALOG_NAME)
+        (temp / HANDOFF_NAME).write_bytes(handoff_bytes)
+        (temp / CATALOG_NAME).write_bytes(catalog_bytes)
         os.chmod(temp / HANDOFF_NAME, 0o600)
         os.chmod(temp / CATALOG_NAME, 0o600)
+        if _sha256(temp / HANDOFF_NAME) != handoff_sha:
+            raise ValueError("copied handoff snapshot hash mismatch")
+        if _sha256(temp / CATALOG_NAME) != catalog_sha:
+            raise ValueError("copied catalog snapshot hash mismatch")
 
         for digest in expected_hashes:
             destination = audit_root / f"{digest}.post-audit.json"
