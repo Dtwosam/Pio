@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 import tempfile
@@ -16,6 +17,8 @@ from typing import Any
 
 TOOLS_DIR = Path(__file__).resolve().parent
 RENDER_TOOL = TOOLS_DIR / "render_phase2_isolated_mutation_command.py"
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
 PROTECTED_ROOTS = (
     Path("/opt/pio"),
     Path("/opt/pio/data"),
@@ -98,11 +101,11 @@ def _preview_boundary_ok(report: Any) -> bool:
         and getattr(report, "mutation_rendered", False)
         and not getattr(report, "mutation_executed", True)
         and isinstance(getattr(report, "preflight_fingerprint", None), str)
-        and len(getattr(report, "preflight_fingerprint")) == 64
+        and _SHA256.fullmatch(getattr(report, "preflight_fingerprint"))
         and isinstance(getattr(report, "mutation_fingerprint", None), str)
-        and len(getattr(report, "mutation_fingerprint")) == 64
+        and _SHA256.fullmatch(getattr(report, "mutation_fingerprint"))
         and isinstance(mutation_tool_sha256, str)
-        and len(mutation_tool_sha256) == 64
+        and _SHA256.fullmatch(mutation_tool_sha256)
         and getattr(report, "read_only", False)
         and not getattr(report, "rpc_called", True)
         and not getattr(report, "database_write_performed", True)
@@ -153,6 +156,14 @@ def _atomic_write(path: Path, payload: bytes, *, replace: bool) -> bool:
         os.replace(temp_path, path)
         temp_path = None
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+        directory_fd = os.open(
+            path.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
         return existed
     finally:
         if fd is not None:
