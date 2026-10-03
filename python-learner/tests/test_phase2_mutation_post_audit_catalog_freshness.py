@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -117,14 +119,12 @@ def install(monkeypatch, *, snapshot=None, live=None, snapshot_entries=None):
     snapshot_entries = snapshot_entries or SNAPSHOT_ENTRIES
 
     monkeypatch.setattr(
-        MODULE.SNAPSHOT_VERIFY,
-        "verify_phase2_post_audit_catalog_snapshot",
-        lambda **kwargs: snapshot,
-    )
-    monkeypatch.setattr(
         MODULE,
-        "_load_snapshot_catalog",
-        lambda path: {"entries": list(snapshot_entries)},
+        "_verified_snapshot_catalog",
+        lambda **kwargs: (
+            snapshot,
+            {"entries": list(snapshot_entries)},
+        ),
     )
     monkeypatch.setattr(
         MODULE.CATALOG,
@@ -259,4 +259,100 @@ def test_fresh_reverification_rejects_sensitive_archive_path(monkeypatch):
         MODULE.freshly_reverify_phase2_post_audit_catalog(
             snapshot_path="/archive/catalog.json",
             artifact_directory="/tmp/api-key=secret",
+        )
+
+
+
+def test_verified_snapshot_catalog_binds_report_to_captured_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    path = tmp_path / "catalog.json"
+    raw = json.dumps(
+        {"catalog": {"entries": []}},
+        sort_keys=True,
+    ).encode("utf-8")
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    expected_sha = hashlib.sha256(raw).hexdigest()
+
+    monkeypatch.setattr(
+        MODULE.SNAPSHOT_VERIFY,
+        "verify_phase2_post_audit_catalog_snapshot",
+        lambda **kwargs: SimpleNamespace(
+            snapshot_sha256=expected_sha,
+        ),
+    )
+
+    report, catalog = MODULE._verified_snapshot_catalog(
+        snapshot_path=path,
+        repository_root=ROOT,
+    )
+
+    assert report.snapshot_sha256 == expected_sha
+    assert catalog == {"entries": []}
+
+
+def test_verified_snapshot_catalog_fails_if_nested_verifier_sees_other_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    path = tmp_path / "catalog.json"
+    path.write_text(
+        json.dumps({"catalog": {"entries": []}}),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)
+
+    monkeypatch.setattr(
+        MODULE.SNAPSHOT_VERIFY,
+        "verify_phase2_post_audit_catalog_snapshot",
+        lambda **kwargs: SimpleNamespace(
+            snapshot_sha256="f" * 64,
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="identity changed during fresh verification",
+    ):
+        MODULE._verified_snapshot_catalog(
+            snapshot_path=path,
+            repository_root=ROOT,
+        )
+
+
+def test_verified_snapshot_catalog_fails_if_path_replaced_during_verify(
+    tmp_path,
+    monkeypatch,
+):
+    path = tmp_path / "catalog.json"
+    raw = json.dumps(
+        {"catalog": {"entries": []}},
+        sort_keys=True,
+    ).encode("utf-8")
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    expected_sha = hashlib.sha256(raw).hexdigest()
+
+    def verify_then_replace(**kwargs):
+        replacement = tmp_path / "replacement.json"
+        replacement.write_bytes(raw)
+        replacement.chmod(0o600)
+        replacement.replace(path)
+        return SimpleNamespace(snapshot_sha256=expected_sha)
+
+    monkeypatch.setattr(
+        MODULE.SNAPSHOT_VERIFY,
+        "verify_phase2_post_audit_catalog_snapshot",
+        verify_then_replace,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="snapshot path changed during verification",
+    ):
+        MODULE._verified_snapshot_catalog(
+            snapshot_path=path,
+            repository_root=ROOT,
         )
