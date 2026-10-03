@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import hashlib
 import importlib.util
 from pathlib import Path
 import shlex
@@ -187,3 +188,46 @@ def test_renderer_returns_no_command_when_handoff_has_no_tool(monkeypatch):
     assert report.preflight_argv is None
     assert report.preflight_command is None
     assert report.mutation_flag is None
+
+
+
+def test_renderer_handoff_source_identity_matches_exact_executed_bytes():
+    commit, handoff_sha = MODULE._handoff_source_identity()
+
+    assert len(commit) >= 40
+    assert handoff_sha == MODULE._HANDOFF_TOOL_SHA256_AT_LOAD
+    assert handoff_sha == hashlib.sha256(
+        MODULE._HANDOFF_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+
+
+def test_renderer_handoff_is_descriptor_captured_and_executed():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_handoff(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_HANDOFF_TOOL_BYTES_AT_LOAD" in source
+    assert "spec.loader.exec_module(module)" not in source
+
+
+def test_renderer_rejects_handoff_identity_change_during_inspection(
+    monkeypatch,
+):
+    install(monkeypatch, handoff())
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_handoff_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(ValueError, match="handoff changed during inspection"):
+        MODULE.render_lifecycle_command()
