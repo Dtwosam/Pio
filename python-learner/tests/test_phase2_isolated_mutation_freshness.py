@@ -34,6 +34,9 @@ def current(
     preflight_fp="a" * 64,
     mutation_fp="b" * 64,
     tool_sha="c" * 64,
+    source_commit="d" * 40,
+    surface_sha="e" * 64,
+    surface_files=10,
     argv=None,
     ready=True,
     rpc_called=False,
@@ -49,6 +52,9 @@ def current(
     return Current(
         format_version=MODULE.RENDER.MUTATION_PREVIEW_FORMAT_VERSION,
         fingerprint_schema=MODULE.RENDER.MUTATION_FINGERPRINT_SCHEMA,
+        reviewed_source_commit=source_commit,
+        deploy_surface_sha256=surface_sha,
+        deploy_surface_files=surface_files,
         state=state,
         next_action=action,
         next_tool=tool,
@@ -73,6 +79,9 @@ def prior_payload(**overrides):
     payload = {
         "format_version": MODULE.RENDER.MUTATION_PREVIEW_FORMAT_VERSION,
         "fingerprint_schema": MODULE.RENDER.MUTATION_FINGERPRINT_SCHEMA,
+        "reviewed_source_commit": "d" * 40,
+        "deploy_surface_sha256": "e" * 64,
+        "deploy_surface_files": 10,
         "state": "SOURCE_BOOTSTRAP_REQUIRED",
         "next_action": "BOOTSTRAP_PINNED_SOURCE",
         "next_tool": "bootstrap_phase2_isolated_source.py",
@@ -296,8 +305,11 @@ def test_freshness_report_exposes_current_format_contract(
 
     report = MODULE.check_mutation_preview_freshness(preview_path=path)
 
-    assert report.format_version == 1
-    assert report.fingerprint_schema == "PHASE2_MUTATION_PREVIEW_V1"
+    assert report.format_version == 2
+    assert report.fingerprint_schema == "PHASE2_MUTATION_PREVIEW_V2"
+    assert report.reviewed_source_commit_matches is True
+    assert report.deploy_surface_sha256_matches is True
+    assert report.deploy_surface_files_match is True
 
 
 
@@ -337,4 +349,61 @@ def test_freshness_rejects_rendered_current_without_tool_sha(
     install(monkeypatch, current(tool_sha=None))
 
     with pytest.raises(ValueError, match="crossed the read-only boundary"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+
+def test_freshness_rejects_changed_reviewed_source_commit(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(tmp_path)
+    install(monkeypatch, current(source_commit="f" * 40))
+
+    report = MODULE.check_mutation_preview_freshness(preview_path=path)
+
+    assert report.status == "STALE"
+    assert report.preview_current is False
+    assert report.reviewed_source_commit_matches is False
+
+
+def test_freshness_rejects_changed_deploy_surface_digest(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(tmp_path)
+    install(monkeypatch, current(surface_sha="f" * 64))
+
+    report = MODULE.check_mutation_preview_freshness(preview_path=path)
+
+    assert report.status == "STALE"
+    assert report.preview_current is False
+    assert report.deploy_surface_sha256_matches is False
+
+
+def test_freshness_rejects_invalid_prior_source_identity(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(
+        tmp_path,
+        prior_payload(reviewed_source_commit="bad"),
+    )
+    install(monkeypatch, current())
+
+    with pytest.raises(ValueError, match="reviewed source commit is invalid"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+def test_freshness_rejects_invalid_prior_surface_file_count(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(
+        tmp_path,
+        prior_payload(deploy_surface_files=0),
+    )
+    install(monkeypatch, current())
+
+    with pytest.raises(ValueError, match="surface file count is invalid"):
         MODULE.check_mutation_preview_freshness(preview_path=path)

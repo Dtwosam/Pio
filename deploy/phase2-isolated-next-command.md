@@ -124,14 +124,21 @@ mutation is eventually run.
 
 ## Preview format contract
 
-Mutation previews use `format_version=1` and
-`fingerprint_schema=PHASE2_MUTATION_PREVIEW_V1`.
+Mutation previews use `format_version=2` and
+`fingerprint_schema=PHASE2_MUTATION_PREVIEW_V2`.
 
 Both preflight and mutation fingerprints are domain-separated by that schema.
+A V2 preview records `reviewed_source_commit`,
+`deploy_surface_sha256`, and `deploy_surface_files`. Preview generation
+requires all tracked files under `deploy/` to match Git HEAD, then hashes
+every tracked deploy file deterministically. Untracked runtime cache files are
+ignored.
+
 A rendered mutation also records `mutation_tool_sha256`, the SHA-256 of the
 exact reviewed Python tool that would receive `--apply` or `--prepare`.
-That digest is part of the mutation fingerprint and the freshness comparison,
-so unchanged argv cannot make a changed tool look current.
+The source identity, deploy-surface digest, and tool digest are part of the
+fingerprints and freshness comparison, so unchanged argv cannot make changed
+reviewed deployment code look current.
 
 The freshness checker rejects an unsupported format version or fingerprint
 schema instead of attempting an implicit migration.
@@ -139,3 +146,22 @@ schema instead of attempting an implicit migration.
 When a future preview format is introduced, regenerate the preview with the
 current reviewed tools. Do not rewrite old preview JSON to make it appear
 compatible.
+
+
+## Atomic preview saving
+
+Use `deploy/tools/save_phase2_isolated_mutation_preview.py --output <file>`
+instead of shell redirection when you want to persist a mutation preview for
+later freshness checks.
+
+The saver first renders a mutation-ready V2 preview, then writes the complete
+JSON to a private temporary file, fsyncs it, atomically renames it into place,
+sets mode `0600`, and fsyncs the parent directory. Existing previews are not
+replaced unless `--replace` is supplied.
+
+The output path must stay outside Pio production/runtime/config paths such as
+`/opt/pio`, `/opt/pio/data`, `/opt/pio-phase2-runtime`, `/etc/pio`,
+and `/etc/systemd/system`.
+
+Saving the preview is only an audit-artifact write. It does not execute the
+rendered mutation, make RPC calls, write the Pio database, or control systemd.

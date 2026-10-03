@@ -14,6 +14,7 @@ from typing import Any
 TOOLS_DIR = Path(__file__).resolve().parent
 RENDER_TOOL = TOOLS_DIR / "render_phase2_isolated_mutation_command.py"
 _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
+_COMMIT = re.compile(r"^[0-9a-f]{40,64}$")
 _MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 
 
@@ -35,6 +36,15 @@ class Phase2MutationPreviewFreshness:
     preview_path: str
     format_version: int
     fingerprint_schema: str
+    prior_reviewed_source_commit: str
+    current_reviewed_source_commit: str
+    reviewed_source_commit_matches: bool
+    prior_deploy_surface_sha256: str
+    current_deploy_surface_sha256: str
+    deploy_surface_sha256_matches: bool
+    prior_deploy_surface_files: int
+    current_deploy_surface_files: int
+    deploy_surface_files_match: bool
     status: str
     preview_current: bool
     prior_state: str
@@ -90,6 +100,26 @@ def _load_prior_preview(path: Path) -> dict[str, Any]:
         raise ValueError("prior mutation preview format version is unsupported")
     if payload.get("fingerprint_schema") != RENDER.MUTATION_FINGERPRINT_SCHEMA:
         raise ValueError("prior mutation preview fingerprint schema is unsupported")
+    source_commit = payload.get("reviewed_source_commit")
+    deploy_surface_sha256 = payload.get("deploy_surface_sha256")
+    deploy_surface_files = payload.get("deploy_surface_files")
+    if (
+        not isinstance(source_commit, str)
+        or not _COMMIT.fullmatch(source_commit)
+    ):
+        raise ValueError("prior reviewed source commit is invalid")
+    if (
+        not isinstance(deploy_surface_sha256, str)
+        or not _FINGERPRINT.fullmatch(deploy_surface_sha256)
+    ):
+        raise ValueError("prior deploy surface SHA256 is invalid")
+    if (
+        isinstance(deploy_surface_files, bool)
+        or not isinstance(deploy_surface_files, int)
+        or deploy_surface_files <= 0
+    ):
+        raise ValueError("prior deploy surface file count is invalid")
+
     if not bool(payload.get("read_only")):
         raise ValueError("prior mutation preview is not read-only")
     for key in (
@@ -144,6 +174,13 @@ def _current_boundary_ok(report: Any) -> bool:
         == RENDER.MUTATION_PREVIEW_FORMAT_VERSION
         and getattr(report, "fingerprint_schema", None)
         == RENDER.MUTATION_FINGERPRINT_SCHEMA
+        and isinstance(getattr(report, "reviewed_source_commit", None), str)
+        and _COMMIT.fullmatch(getattr(report, "reviewed_source_commit"))
+        and isinstance(getattr(report, "deploy_surface_sha256", None), str)
+        and _FINGERPRINT.fullmatch(getattr(report, "deploy_surface_sha256"))
+        and isinstance(getattr(report, "deploy_surface_files", None), int)
+        and not isinstance(getattr(report, "deploy_surface_files", None), bool)
+        and getattr(report, "deploy_surface_files") > 0
         and (
             (
                 not getattr(report, "mutation_rendered", False)
@@ -193,6 +230,15 @@ def check_mutation_preview_freshness(
         else None
     )
 
+    reviewed_source_commit_matches = (
+        current.reviewed_source_commit == prior["reviewed_source_commit"]
+    )
+    deploy_surface_sha256_matches = (
+        current.deploy_surface_sha256 == prior["deploy_surface_sha256"]
+    )
+    deploy_surface_files_match = (
+        current.deploy_surface_files == prior["deploy_surface_files"]
+    )
     state_matches = str(current.state) == str(prior["state"])
     action_matches = str(current.next_action) == str(prior["next_action"])
     tool_matches = str(current.next_tool) == str(prior["next_tool"])
@@ -214,6 +260,9 @@ def check_mutation_preview_freshness(
     )
     preview_current = bool(
         current_ready
+        and reviewed_source_commit_matches
+        and deploy_surface_sha256_matches
+        and deploy_surface_files_match
         and state_matches
         and action_matches
         and tool_matches
@@ -234,6 +283,15 @@ def check_mutation_preview_freshness(
         preview_path=str(path),
         format_version=RENDER.MUTATION_PREVIEW_FORMAT_VERSION,
         fingerprint_schema=RENDER.MUTATION_FINGERPRINT_SCHEMA,
+        prior_reviewed_source_commit=str(prior["reviewed_source_commit"]),
+        current_reviewed_source_commit=str(current.reviewed_source_commit),
+        reviewed_source_commit_matches=reviewed_source_commit_matches,
+        prior_deploy_surface_sha256=str(prior["deploy_surface_sha256"]),
+        current_deploy_surface_sha256=str(current.deploy_surface_sha256),
+        deploy_surface_sha256_matches=deploy_surface_sha256_matches,
+        prior_deploy_surface_files=int(prior["deploy_surface_files"]),
+        current_deploy_surface_files=int(current.deploy_surface_files),
+        deploy_surface_files_match=deploy_surface_files_match,
         status=status,
         preview_current=preview_current,
         prior_state=str(prior["state"]),
