@@ -439,3 +439,149 @@ def test_terminal_receipt_replacement_remains_explicit_and_verified(tmp_path):
     assert receipt.read_bytes() == encoded
     assert receipt.stat().st_ino != pending_inode
     assert stat.S_IMODE(receipt.stat().st_mode) == 0o600
+
+
+
+def test_receipt_runner_source_identity_matches_exact_executed_bytes():
+    commit, executor_sha = MODULE._executor_source_identity()
+
+    assert len(commit) >= 40
+    assert executor_sha == MODULE._EXECUTOR_TOOL_SHA256_AT_LOAD
+    assert executor_sha == hashlib.sha256(
+        MODULE._EXECUTOR_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+
+
+def test_receipt_runner_never_rereads_loaded_executor_tool_bytes(monkeypatch):
+    real_read_bytes = Path.read_bytes
+
+    def reject_executor_reread(path):
+        if path.resolve() == MODULE._EXECUTOR_TOOL_PATH_AT_LOAD:
+            raise AssertionError(
+                "executed mutation tool path must not be reread for identity"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_executor_reread)
+
+    commit, executor_sha = MODULE._executor_source_identity()
+
+    assert len(commit) >= 40
+    assert executor_sha == MODULE._EXECUTOR_TOOL_SHA256_AT_LOAD
+
+
+def test_receipt_runner_executor_is_descriptor_captured_and_executed():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_tool(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_EXECUTOR_TOOL_BYTES_AT_LOAD" in source
+    assert "EXECUTOR_TOOL.read_bytes()" not in source
+
+
+def test_source_change_during_readiness_writes_no_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    install_executor(monkeypatch, path)
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_executor_source_identity",
+        lambda: next(identities),
+    )
+    receipt = tmp_path / "receipt.json"
+
+    with pytest.raises(ValueError, match="source changed during readiness"):
+        MODULE.run_mutation_with_receipt(
+            preview_path=path,
+            expected_preview_sha256="1" * 64,
+            execution_receipt_path=receipt,
+            execute=False,
+        )
+
+    assert not receipt.exists()
+
+
+def test_source_change_before_launch_finalizes_abort_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    install_executor(monkeypatch, path)
+    identity = ("a" * 40, "1" * 64)
+    identities = iter((identity, identity, ("b" * 40, "2" * 64)))
+    monkeypatch.setattr(
+        MODULE,
+        "_executor_source_identity",
+        lambda: next(identities),
+    )
+    receipt = tmp_path / "receipt.json"
+
+    report = MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        now=times(),
+    )
+
+    assert report.receipt_status == "ABORTED_BEFORE_LAUNCH"
+    assert report.mutation_launched is False
+    assert report.failure_category == "EXECUTION_GUARD_FAILED_BEFORE_LAUNCH"
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["outcome_known"] is True
+
+
+def test_source_change_after_launch_keeps_outcome_unknown(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    install_executor(monkeypatch, path)
+    identity = ("a" * 40, "1" * 64)
+    identities = iter(
+        (
+            identity,
+            identity,
+            identity,
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_executor_source_identity",
+        lambda: next(identities),
+    )
+    receipt = tmp_path / "receipt.json"
+
+    report = MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        runner=lambda command, **kwargs: subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="{}",
+            stderr="",
+        ),
+        now=times(),
+    )
+
+    assert report.receipt_status == "OUTCOME_UNKNOWN_AFTER_LAUNCH"
+    assert report.mutation_launched is True
+    assert report.mutation_completed is False
+    assert report.mutation_succeeded is False
+    assert report.failure_category == "MUTATION_RUNNER_FAILED_OUTCOME_UNKNOWN"
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["outcome_known"] is False
