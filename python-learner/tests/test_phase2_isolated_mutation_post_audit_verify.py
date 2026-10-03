@@ -294,8 +294,9 @@ def test_verifier_detects_receipt_hash_tampering(
 ):
     install_static_receipt_validation(monkeypatch)
     _preview, receipt, artifact_path, _artifact = build_artifacts(tmp_path)
-    receipt.write_text('{"tampered": true}\n', encoding="utf-8")
-    receipt.chmod(0o600)
+    receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+    receipt_payload["tampered"] = True
+    write_private(receipt, receipt_payload)
 
     report = MODULE.verify_saved_mutation_post_audit(
         artifact_path=artifact_path,
