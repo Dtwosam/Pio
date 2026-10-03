@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -90,17 +91,42 @@ def _catalog_boundary_ok(report: Any) -> bool:
     )
 
 
-def _load_snapshot_catalog(snapshot_path: str | Path) -> dict[str, Any]:
-    path = SNAPSHOT_VERIFY._private_json_file(snapshot_path)
-    payload = SNAPSHOT_VERIFY._load_json_object(path)
-    SNAPSHOT_VERIFY._assert_credential_minimal(payload)
-    catalog = payload.get("catalog")
+def _load_snapshot_catalog_bytes(payload: bytes) -> dict[str, Any]:
+    value = SNAPSHOT_VERIFY._load_json_object_bytes(payload)
+    SNAPSHOT_VERIFY._assert_credential_minimal(value)
+    catalog = value.get("catalog")
     if not isinstance(catalog, dict):
         raise ValueError("post-audit catalog snapshot catalog payload is invalid")
     entries = catalog.get("entries")
     if not isinstance(entries, list):
         raise ValueError("post-audit catalog snapshot entries are invalid")
     return catalog
+
+
+def _verified_snapshot_catalog(
+    *,
+    snapshot_path: str | Path,
+    repository_root: str | Path,
+) -> tuple[Any, dict[str, Any]]:
+    snapshot_file = SNAPSHOT_VERIFY._private_json_file(snapshot_path)
+    snapshot_bytes, opened_stat = SNAPSHOT_VERIFY._read_snapshot_bytes(
+        snapshot_file
+    )
+    captured_sha256 = hashlib.sha256(snapshot_bytes).hexdigest()
+
+    snapshot = SNAPSHOT_VERIFY.verify_phase2_post_audit_catalog_snapshot(
+        snapshot_path=snapshot_file,
+        repository_root=repository_root,
+    )
+    if str(snapshot.snapshot_sha256) != captured_sha256:
+        raise ValueError(
+            "post-audit catalog snapshot identity changed during fresh verification"
+        )
+    SNAPSHOT_VERIFY._assert_snapshot_path_stable(
+        snapshot_file,
+        opened_stat,
+    )
+    return snapshot, _load_snapshot_catalog_bytes(snapshot_bytes)
 
 
 def _identity(entry: dict[str, Any]) -> tuple[Any, ...]:
@@ -148,7 +174,7 @@ def freshly_reverify_phase2_post_audit_catalog(
     SNAPSHOT_VERIFY._assert_credential_minimal(str(artifact_directory))
     SNAPSHOT_VERIFY._assert_credential_minimal(pattern)
 
-    snapshot = SNAPSHOT_VERIFY.verify_phase2_post_audit_catalog_snapshot(
+    snapshot, snapshot_catalog = _verified_snapshot_catalog(
         snapshot_path=snapshot_path,
         repository_root=repository_root,
     )
@@ -156,8 +182,6 @@ def freshly_reverify_phase2_post_audit_catalog(
         raise ValueError(
             "post-audit catalog snapshot crossed the historical evidence boundary"
         )
-
-    snapshot_catalog = _load_snapshot_catalog(snapshot.snapshot_path)
 
     live = CATALOG.build_phase2_post_audit_catalog(
         artifact_directory=artifact_directory,
