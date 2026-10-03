@@ -16,6 +16,7 @@ from typing import Any
 
 TOOLS_DIR = Path(__file__).resolve().parent
 AUDIT_TOOL = TOOLS_DIR / "check_phase2_isolated_mutation_execution_receipt.py"
+RENDER_TOOL = TOOLS_DIR / "render_phase2_isolated_mutation_command.py"
 _PROTECTED_ROOTS = (
     Path("/opt/pio"),
     Path("/opt/pio/data"),
@@ -37,6 +38,7 @@ def _load(path: Path, name: str) -> Any:
 
 
 AUDIT = _load(AUDIT_TOOL, "phase2_saved_mutation_post_audit")
+RENDER = _load(RENDER_TOOL, "phase2_saved_mutation_post_audit_surface")
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,9 @@ class Phase2SavedMutationPostAudit:
     artifact_sha256: str
     audit_payload_sha256: str
     audit_tool_sha256: str
+    audit_source_commit: str
+    audit_deploy_surface_sha256: str
+    audit_deploy_surface_files: int
     execution_receipt_path: str
     execution_receipt_sha256: str
     prior_state: str
@@ -257,6 +262,11 @@ def save_verified_mutation_post_audit(
     _assert_credential_minimal(audit_record)
     audit_payload_sha = _canonical_sha256(audit_record)
     audit_tool_sha = _audit_tool_sha256()
+    (
+        audit_source_commit,
+        audit_deploy_surface_sha,
+        audit_deploy_surface_files,
+    ) = RENDER._deploy_surface_identity()
 
     payload = {
         "format_version": 1,
@@ -264,6 +274,9 @@ def save_verified_mutation_post_audit(
         "execution_receipt_sha256": str(audit.execution_receipt_sha256),
         "audit_payload_sha256": audit_payload_sha,
         "audit_tool_sha256": audit_tool_sha,
+        "audit_source_commit": audit_source_commit,
+        "audit_deploy_surface_sha256": audit_deploy_surface_sha,
+        "audit_deploy_surface_files": audit_deploy_surface_files,
         "audit": audit_record,
     }
     _assert_credential_minimal(payload)
@@ -276,6 +289,9 @@ def save_verified_mutation_post_audit(
         artifact_sha256=artifact_sha,
         audit_payload_sha256=audit_payload_sha,
         audit_tool_sha256=audit_tool_sha,
+        audit_source_commit=audit_source_commit,
+        audit_deploy_surface_sha256=audit_deploy_surface_sha,
+        audit_deploy_surface_files=audit_deploy_surface_files,
         execution_receipt_path=str(audit.execution_receipt_path),
         execution_receipt_sha256=str(audit.execution_receipt_sha256),
         prior_state=str(audit.prior_state),
