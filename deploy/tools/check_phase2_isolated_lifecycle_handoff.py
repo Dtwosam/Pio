@@ -3,15 +3,21 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 from typing import Any, Callable
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
+_DEPENDENCY_DOMAIN = b"PIO_PHASE2_LIFECYCLE_DEPENDENCIES_V1\0"
 ACTIVATION_TOOL = TOOLS_DIR / "check_phase2_isolated_activation.py"
 SMOKE_TOOL = TOOLS_DIR / "check_phase2_isolated_smoke_readiness.py"
 TIMER_TOOL = TOOLS_DIR / "check_phase2_isolated_timer_readiness.py"
@@ -20,25 +26,271 @@ BOOTSTRAP_TOOL = TOOLS_DIR / "bootstrap_phase2_isolated_source.py"
 RUNTIME_CHECK_TOOL = TOOLS_DIR / "check_phase2_isolated_runtime.py"
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+def _assert_dependency_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after load") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after load")
+
+
+def _capture_dependency(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[Path, bytes, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_TOOL_BYTES:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_dependency_path_stable(resolved, before, label=label)
+    return resolved, encoded, before
+
+
+def _load_captured_dependency(
+    path: Path,
+    name: str,
+    *,
+    label: str,
+) -> tuple[Any, Path, bytes, os.stat_result]:
+    resolved, encoded, opened = _capture_dependency(path, label=label)
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed Phase-2 tool: {path}")
+        raise ValueError(f"cannot load reviewed Phase-2 tool: {resolved}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(encoded, str(resolved), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_dependency_path_stable(resolved, opened, label=label)
+    return module, resolved, encoded, opened
 
 
-ACTIVATION = _load(ACTIVATION_TOOL, "phase2_lifecycle_activation")
-SMOKE = _load(SMOKE_TOOL, "phase2_lifecycle_smoke")
-TIMER = _load(TIMER_TOOL, "phase2_lifecycle_timer")
-OPERATOR = _load(OPERATOR_TOOL, "phase2_lifecycle_operator")
-BOOTSTRAP = _load(BOOTSTRAP_TOOL, "phase2_lifecycle_source_bootstrap")
-RUNTIME_CHECK = _load(
+(
+    ACTIVATION,
+    _ACTIVATION_PATH,
+    _ACTIVATION_BYTES,
+    _ACTIVATION_STAT,
+) = _load_captured_dependency(
+    ACTIVATION_TOOL,
+    "phase2_lifecycle_activation",
+    label="reviewed activation checker",
+)
+(
+    SMOKE,
+    _SMOKE_PATH,
+    _SMOKE_BYTES,
+    _SMOKE_STAT,
+) = _load_captured_dependency(
+    SMOKE_TOOL,
+    "phase2_lifecycle_smoke",
+    label="reviewed smoke checker",
+)
+(
+    TIMER,
+    _TIMER_PATH,
+    _TIMER_BYTES,
+    _TIMER_STAT,
+) = _load_captured_dependency(
+    TIMER_TOOL,
+    "phase2_lifecycle_timer",
+    label="reviewed timer checker",
+)
+(
+    OPERATOR,
+    _OPERATOR_PATH,
+    _OPERATOR_BYTES,
+    _OPERATOR_STAT,
+) = _load_captured_dependency(
+    OPERATOR_TOOL,
+    "phase2_lifecycle_operator",
+    label="reviewed operator checker",
+)
+(
+    BOOTSTRAP,
+    _BOOTSTRAP_PATH,
+    _BOOTSTRAP_BYTES,
+    _BOOTSTRAP_STAT,
+) = _load_captured_dependency(
+    BOOTSTRAP_TOOL,
+    "phase2_lifecycle_source_bootstrap",
+    label="reviewed source bootstrap checker",
+)
+(
+    RUNTIME_CHECK,
+    _RUNTIME_CHECK_PATH,
+    _RUNTIME_CHECK_BYTES,
+    _RUNTIME_CHECK_STAT,
+) = _load_captured_dependency(
     RUNTIME_CHECK_TOOL,
     "phase2_lifecycle_runtime_check",
+    label="reviewed runtime checker",
 )
+
+_DEPENDENCY_SNAPSHOTS = (
+    (
+        ACTIVATION_TOOL,
+        "deploy/tools/check_phase2_isolated_activation.py",
+        _ACTIVATION_PATH,
+        _ACTIVATION_BYTES,
+        _ACTIVATION_STAT,
+        "reviewed activation checker",
+    ),
+    (
+        SMOKE_TOOL,
+        "deploy/tools/check_phase2_isolated_smoke_readiness.py",
+        _SMOKE_PATH,
+        _SMOKE_BYTES,
+        _SMOKE_STAT,
+        "reviewed smoke checker",
+    ),
+    (
+        TIMER_TOOL,
+        "deploy/tools/check_phase2_isolated_timer_readiness.py",
+        _TIMER_PATH,
+        _TIMER_BYTES,
+        _TIMER_STAT,
+        "reviewed timer checker",
+    ),
+    (
+        OPERATOR_TOOL,
+        "deploy/tools/check_phase2_isolated_operator_status.py",
+        _OPERATOR_PATH,
+        _OPERATOR_BYTES,
+        _OPERATOR_STAT,
+        "reviewed operator checker",
+    ),
+    (
+        BOOTSTRAP_TOOL,
+        "deploy/tools/bootstrap_phase2_isolated_source.py",
+        _BOOTSTRAP_PATH,
+        _BOOTSTRAP_BYTES,
+        _BOOTSTRAP_STAT,
+        "reviewed source bootstrap checker",
+    ),
+    (
+        RUNTIME_CHECK_TOOL,
+        "deploy/tools/check_phase2_isolated_runtime.py",
+        _RUNTIME_CHECK_PATH,
+        _RUNTIME_CHECK_BYTES,
+        _RUNTIME_CHECK_STAT,
+        "reviewed runtime checker",
+    ),
+)
+
+def _dependency_source_identity() -> tuple[str, str]:
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if head.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = head.stdout.strip()
+    if len(commit) not in {40, 64}:
+        raise ValueError("reviewed source commit is invalid")
+
+    digest = hashlib.sha256()
+    digest.update(_DEPENDENCY_DOMAIN)
+
+    for current_path, relative, loaded_path, encoded, opened, label in (
+        _DEPENDENCY_SNAPSHOTS
+    ):
+        raw = Path(current_path).expanduser()
+        if raw.is_symlink():
+            raise ValueError(f"{label} is missing or symlinked")
+        try:
+            resolved = raw.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError(f"{label} is missing or symlinked") from exc
+        if resolved != loaded_path:
+            raise ValueError(f"{label} path changed after module load")
+        _assert_dependency_path_stable(
+            loaded_path,
+            opened,
+            label=label,
+        )
+
+        historical = subprocess.run(
+            ["git", "show", f"{commit}:{relative}"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            check=False,
+        )
+        if historical.returncode != 0:
+            raise ValueError(f"{label} is not present at reviewed source commit")
+        if historical.stdout != encoded:
+            raise ValueError(f"{label} bytes do not match reviewed source commit")
+
+        relative_bytes = relative.encode("utf-8")
+        digest.update(len(relative_bytes).to_bytes(8, "big"))
+        digest.update(relative_bytes)
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+
+    return commit, digest.hexdigest()
+
 
 SystemctlRunner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -303,6 +555,8 @@ def inspect_lifecycle_handoff(
     repository_url: str = BOOTSTRAP.DEFAULT_REPOSITORY_URL,
     runner: SystemctlRunner = subprocess.run,
 ) -> Phase2LifecycleHandoffReport:
+    dependency_source_before = _dependency_source_identity()
+
     activation = ACTIVATION.inspect_activation(
         runtime_root=runtime_root,
         unit_destination=unit_destination,
@@ -480,6 +734,12 @@ def inspect_lifecycle_handoff(
         receipt_path=receipt_path,
         max_receipt_age_seconds=max_receipt_age_seconds,
     )
+
+    dependency_source_after = _dependency_source_identity()
+    if dependency_source_after != dependency_source_before:
+        raise ValueError(
+            "reviewed lifecycle dependencies changed during inspection"
+        )
 
     return Phase2LifecycleHandoffReport(
         state=state,
