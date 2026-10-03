@@ -194,3 +194,80 @@ def test_renderer_does_not_render_when_preflight_was_not_executed(
     assert rendered.preflight_succeeded is False
     assert rendered.mutation_argv is None
     assert rendered.mutation_executed is False
+
+
+
+def test_renderer_fingerprints_are_stable_for_same_preflight(monkeypatch):
+    report = preflight()
+    install(monkeypatch, report)
+
+    first = MODULE.render_reviewed_mutation_command()
+    second = MODULE.render_reviewed_mutation_command()
+
+    assert first.preflight_fingerprint == second.preflight_fingerprint
+    assert first.mutation_fingerprint == second.mutation_fingerprint
+    assert len(first.preflight_fingerprint) == 64
+    assert len(first.mutation_fingerprint) == 64
+    assert first.preflight_fingerprint == first.preflight_fingerprint.lower()
+    assert first.mutation_fingerprint == first.mutation_fingerprint.lower()
+
+
+def test_renderer_preflight_fingerprint_changes_with_result(monkeypatch):
+    first_report = preflight()
+    install(monkeypatch, first_report)
+    first = MODULE.render_reviewed_mutation_command()
+
+    second_report = preflight()
+    second_report.result = {"status": "ALREADY_PINNED"}
+    install(monkeypatch, second_report)
+    second = MODULE.render_reviewed_mutation_command()
+
+    assert first.preflight_fingerprint != second.preflight_fingerprint
+    assert first.mutation_fingerprint != second.mutation_fingerprint
+
+
+def test_renderer_mutation_fingerprint_changes_with_argv(monkeypatch):
+    first_report = preflight()
+    install(monkeypatch, first_report)
+    first = MODULE.render_reviewed_mutation_command()
+
+    second_report = preflight(
+        argv=(
+            sys.executable,
+            str(ROOT / "deploy/tools/bootstrap_phase2_isolated_source.py"),
+            "--destination",
+            "/tmp/other-build",
+        )
+    )
+    install(monkeypatch, second_report)
+    second = MODULE.render_reviewed_mutation_command()
+
+    assert first.preflight_fingerprint != second.preflight_fingerprint
+    assert first.mutation_fingerprint != second.mutation_fingerprint
+
+
+def test_renderer_has_no_mutation_fingerprint_when_no_command(monkeypatch):
+    install(
+        monkeypatch,
+        preflight(
+            exit_code=2,
+            failure_category="PREFLIGHT_NONZERO_EXIT",
+        ),
+    )
+
+    rendered = MODULE.render_reviewed_mutation_command()
+
+    assert rendered.preflight_fingerprint
+    assert rendered.mutation_fingerprint is None
+    assert rendered.mutation_rendered is False
+
+
+def test_fingerprint_uses_canonical_json_ordering():
+    left = MODULE._fingerprint(
+        {"b": 2, "a": {"y": 4, "x": 3}}
+    )
+    right = MODULE._fingerprint(
+        {"a": {"x": 3, "y": 4}, "b": 2}
+    )
+
+    assert left == right
