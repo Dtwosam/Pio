@@ -33,6 +33,7 @@ def current(
     tool="bootstrap_phase2_isolated_source.py",
     preflight_fp="a" * 64,
     mutation_fp="b" * 64,
+    tool_sha="c" * 64,
     argv=None,
     ready=True,
     rpc_called=False,
@@ -56,6 +57,7 @@ def current(
         mutation_argv=argv if ready else None,
         mutation_command="cmd" if ready else None,
         mutation_executed=False,
+        mutation_tool_sha256=tool_sha if ready else None,
         preflight_fingerprint=preflight_fp,
         mutation_fingerprint=mutation_fp if ready else None,
         read_only=True,
@@ -85,6 +87,7 @@ def prior_payload(**overrides):
         "production_tree_modified": False,
         "preflight_fingerprint": "a" * 64,
         "mutation_fingerprint": "b" * 64,
+        "mutation_tool_sha256": "c" * 64,
         "mutation_argv": [
             sys.executable,
             str(ROOT / "deploy/tools/bootstrap_phase2_isolated_source.py"),
@@ -126,6 +129,7 @@ def test_freshness_accepts_exact_current_preview(tmp_path, monkeypatch):
     assert report.action_matches is True
     assert report.tool_matches is True
     assert report.mutation_argv_matches is True
+    assert report.mutation_tool_sha256_matches is True
     assert report.preflight_fingerprint_matches is True
     assert report.mutation_fingerprint_matches is True
     assert report.mutation_executed is False
@@ -294,3 +298,43 @@ def test_freshness_report_exposes_current_format_contract(
 
     assert report.format_version == 1
     assert report.fingerprint_schema == "PHASE2_MUTATION_PREVIEW_V1"
+
+
+
+def test_freshness_rejects_changed_mutation_tool_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(tmp_path)
+    install(monkeypatch, current(tool_sha="d" * 64))
+
+    report = MODULE.check_mutation_preview_freshness(preview_path=path)
+
+    assert report.status == "STALE"
+    assert report.preview_current is False
+    assert report.mutation_tool_sha256_matches is False
+
+
+def test_freshness_rejects_invalid_prior_mutation_tool_sha(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(
+        tmp_path,
+        prior_payload(mutation_tool_sha256="not-a-sha"),
+    )
+    install(monkeypatch, current())
+
+    with pytest.raises(ValueError, match="mutation tool SHA256 is invalid"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
+
+
+def test_freshness_rejects_rendered_current_without_tool_sha(
+    tmp_path,
+    monkeypatch,
+):
+    path = write_preview(tmp_path)
+    install(monkeypatch, current(tool_sha=None))
+
+    with pytest.raises(ValueError, match="crossed the read-only boundary"):
+        MODULE.check_mutation_preview_freshness(preview_path=path)
