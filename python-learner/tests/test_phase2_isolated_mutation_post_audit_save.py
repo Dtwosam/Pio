@@ -290,3 +290,34 @@ def test_saver_publish_race_never_overwrites_post_audit_destination(
     assert output.read_bytes() == competitor
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert not list(tmp_path.glob(".audit.json.*.tmp"))
+
+
+
+def test_saver_digest_comes_from_exact_published_payload_not_path_reread(
+    tmp_path,
+    monkeypatch,
+):
+    execution_receipt = receipt(tmp_path)
+    audit = verified_audit(execution_receipt)
+    install(monkeypatch, audit)
+    output = tmp_path / "audit.json"
+
+    real_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path):
+        if path == output:
+            raise AssertionError(
+                "published destination must not be reopened for digesting"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    saved = MODULE.save_verified_mutation_post_audit(
+        execution_receipt_path=execution_receipt,
+        output_path=output,
+    )
+
+    payload = output.read_text(encoding="utf-8").encode("utf-8")
+    assert saved.artifact_sha256 == MODULE.hashlib.sha256(payload).hexdigest()
+    assert saved.bytes_written == len(payload)
