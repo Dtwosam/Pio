@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -96,6 +97,14 @@ def test_runner_executes_allowlisted_preflight_without_mutation_flag(
     def runner(command, **kwargs):
         seen["command"] = command
         seen["kwargs"] = kwargs
+        tool = Path(preview(mutation_flag="--apply").preflight_argv[1])
+        inherited = kwargs["pass_fds"]
+        assert len(inherited) == 1
+        assert os.pread(
+            inherited[0],
+            tool.stat().st_size,
+            0,
+        ) == tool.read_bytes()
         return completed(command)
 
     report = MODULE.run_next_read_only_preflight(runner=runner)
@@ -106,6 +115,12 @@ def test_runner_executes_allowlisted_preflight_without_mutation_flag(
     assert report.failure_category is None
     assert "--apply" not in seen["command"]
     assert "--prepare" not in seen["command"]
+    assert seen["command"][:3] == [
+        sys.executable,
+        "-c",
+        MODULE._EXACT_PREFLIGHT_BOOTSTRAP,
+    ]
+    assert seen["kwargs"]["pass_fds"]
     assert seen["kwargs"]["check"] is False
     assert "shell" not in seen["kwargs"]
     assert report.mutation_flag == "--apply"
@@ -355,3 +370,108 @@ def test_nested_boundary_helper_scans_lists_and_tuples():
             ]
         }
     )
+
+
+
+def test_runner_renderer_source_identity_matches_exact_executed_bytes():
+    commit, renderer_sha = MODULE._renderer_source_identity()
+
+    assert len(commit) >= 40
+    assert renderer_sha == MODULE._RENDER_TOOL_SHA256_AT_LOAD
+    assert renderer_sha == hashlib.sha256(
+        MODULE._RENDER_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+
+
+def test_runner_renderer_is_descriptor_captured_and_executed():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_regular_file(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_RENDER_TOOL_BYTES_AT_LOAD" in source
+    assert "spec.loader.exec_module(module)" not in source
+
+
+def test_runner_rejects_renderer_change_during_render(monkeypatch):
+    value = preview()
+    install(monkeypatch, value)
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_renderer_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(ValueError, match="renderer changed during render"):
+        MODULE.run_next_read_only_preflight()
+
+
+def test_preflight_bootstrap_executes_descriptor_bytes_not_replaced_path(
+    tmp_path,
+):
+    tool = tmp_path / "preflight.py"
+    tool.write_text(
+        "import json,sys\n"
+        "print(json.dumps({'version':'captured','file':__file__,"
+        "'args':sys.argv[1:]}))\n",
+        encoding="utf-8",
+    )
+    fd = os.open(tool, os.O_RDONLY)
+    try:
+        command = MODULE._captured_preflight_command(
+            argv=(sys.executable, str(tool), "--value", "7"),
+            tool_path=tool.resolve(),
+            tool_fd=fd,
+        )
+        tool.unlink()
+        tool.write_text(
+            "import json\n"
+            "print(json.dumps({'version':'replacement'}))\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            pass_fds=(fd,),
+        )
+    finally:
+        os.close(fd)
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["version"] == "captured"
+    assert payload["file"] == str(tool.resolve())
+    assert payload["args"] == ["--value", "7"]
+
+
+def test_runner_reports_original_reviewed_preflight_argv(monkeypatch):
+    value = preview()
+    install(monkeypatch, value)
+
+    report = MODULE.run_next_read_only_preflight(
+        runner=lambda command, **kwargs: completed(command),
+    )
+
+    assert report.preflight_argv == value.preflight_argv
+    assert report.preflight_argv[0] == sys.executable
+    assert report.preflight_argv[1].endswith(
+        "check_phase2_isolated_operator_status.py"
+    )
+
+
+def test_runner_never_launches_preflight_path_directly():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "pass_fds=(preflight_tool_fd,)" in source
+    assert "_EXACT_PREFLIGHT_BOOTSTRAP" in source
+    assert "runner(\n        list(argv)," not in source
