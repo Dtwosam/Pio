@@ -6,8 +6,10 @@ from dataclasses import asdict, dataclass
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shlex
+import stat
 import subprocess
 import sys
 from typing import Any
@@ -16,23 +18,119 @@ from typing import Any
 TOOLS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOLS_DIR.parents[1]
 RUNNER_TOOL = TOOLS_DIR / "run_phase2_isolated_next_preflight.py"
+RUNNER_TOOL_RELATIVE = "deploy/tools/run_phase2_isolated_next_preflight.py"
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
 _ALLOWED_MUTATION_FLAGS = frozenset({"--apply", "--prepare"})
 MUTATION_PREVIEW_FORMAT_VERSION = 2
 MUTATION_FINGERPRINT_SCHEMA = "PHASE2_MUTATION_PREVIEW_V2"
 _DEPLOY_SURFACE_DOMAIN = b"PIO_DEPLOY_SURFACE_V1\0"
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+def _assert_runner_path_stable(
+    path: Path,
+    opened: os.stat_result,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError("reviewed preflight runner path changed after load") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError("reviewed preflight runner path changed after load")
+
+
+def _capture_runner(
+    path: Path,
+) -> tuple[Path, bytes, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError("reviewed preflight runner must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("reviewed preflight runner is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError("reviewed preflight runner cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("reviewed preflight runner must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_TOOL_BYTES:
+            raise ValueError("reviewed preflight runner size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError("reviewed preflight runner changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError("reviewed preflight runner changed while reading")
+    _assert_runner_path_stable(resolved, before)
+    return resolved, encoded, before
+
+
+def _load_captured_runner(
+    path: Path,
+    name: str,
+) -> tuple[Any, Path, bytes, os.stat_result]:
+    resolved, encoded, opened = _capture_runner(path)
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed Phase-2 tool: {path}")
+        raise ValueError(f"cannot load reviewed Phase-2 tool: {resolved}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(encoded, str(resolved), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_runner_path_stable(resolved, opened)
+    return module, resolved, encoded, opened
 
 
-RUNNER = _load(RUNNER_TOOL, "phase2_reviewed_mutation_preflight")
+(
+    RUNNER,
+    _RUNNER_TOOL_PATH_AT_LOAD,
+    _RUNNER_TOOL_BYTES_AT_LOAD,
+    _RUNNER_TOOL_STAT_AT_LOAD,
+) = _load_captured_runner(
+    RUNNER_TOOL,
+    "phase2_reviewed_mutation_preflight",
+)
+_RUNNER_TOOL_SHA256_AT_LOAD = hashlib.sha256(
+    _RUNNER_TOOL_BYTES_AT_LOAD
+).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -156,6 +254,45 @@ def _deploy_surface_identity(
     return source_commit, digest.hexdigest(), count
 
 
+def _runner_source_identity(
+    reviewed_source_commit: str,
+) -> str:
+    raw = Path(RUNNER_TOOL).expanduser()
+    if raw.is_symlink():
+        raise ValueError("reviewed preflight runner is missing or symlinked")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("reviewed preflight runner is missing or symlinked") from exc
+    if resolved != _RUNNER_TOOL_PATH_AT_LOAD:
+        raise ValueError("reviewed preflight runner path changed after module load")
+    _assert_runner_path_stable(
+        _RUNNER_TOOL_PATH_AT_LOAD,
+        _RUNNER_TOOL_STAT_AT_LOAD,
+    )
+
+    historical = subprocess.run(
+        ["git", "show", f"{reviewed_source_commit}:{RUNNER_TOOL_RELATIVE}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+    if historical.returncode != 0:
+        raise ValueError(
+            "reviewed preflight runner is not present at reviewed source commit"
+        )
+    if historical.stdout != _RUNNER_TOOL_BYTES_AT_LOAD:
+        raise ValueError(
+            "reviewed preflight runner bytes do not match reviewed source commit"
+        )
+
+    _assert_runner_path_stable(
+        _RUNNER_TOOL_PATH_AT_LOAD,
+        _RUNNER_TOOL_STAT_AT_LOAD,
+    )
+    return _RUNNER_TOOL_SHA256_AT_LOAD
+
+
 def _fingerprint(kind: str, value: Any) -> str:
     if not kind:
         raise ValueError("fingerprint kind is required")
@@ -203,11 +340,19 @@ def render_reviewed_mutation_command(
         deploy_surface_sha256,
         deploy_surface_files,
     ) = _deploy_surface_identity()
+    runner_identity_before = _runner_source_identity(
+        reviewed_source_commit
+    )
 
     preflight = RUNNER.run_next_read_only_preflight(
         timeout_seconds=timeout_seconds,
         **handoff_kwargs,
     )
+    runner_identity_after = _runner_source_identity(
+        reviewed_source_commit
+    )
+    if runner_identity_after != runner_identity_before:
+        raise ValueError("reviewed preflight runner changed during preflight")
     if not _preflight_boundary_ok(preflight):
         raise ValueError("Phase-2 mutation preview crossed the read-only boundary")
 
