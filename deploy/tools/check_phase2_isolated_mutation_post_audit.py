@@ -443,16 +443,14 @@ def verify_saved_mutation_post_audit(
     preview_path: str | Path | None = None,
     repository_root: str | Path = REPO_ROOT,
 ) -> Phase2MutationPostAuditVerification:
-    artifact_file = _private_json_file(
-        artifact_path,
-        label="saved mutation post-audit",
-    )
-    artifact = _load_json_object(
-        artifact_file,
-        label="saved mutation post-audit",
+    artifact_file, artifact_bytes, artifact = (
+        AUDIT._private_json_snapshot(
+            artifact_path,
+            label="saved mutation post-audit",
+        )
     )
     audit = _validate_artifact(artifact)
-    artifact_sha = _sha256_bytes(artifact_file.read_bytes())
+    artifact_sha = _sha256_bytes(artifact_bytes)
 
     audit_payload_matches = (
         _canonical_sha256(audit) == artifact["audit_payload_sha256"]
@@ -498,20 +496,18 @@ def verify_saved_mutation_post_audit(
     )
     if not isinstance(receipt_raw, (str, Path)) or not str(receipt_raw):
         raise ValueError("saved mutation post-audit receipt path is invalid")
-    receipt_file = _private_json_file(
-        receipt_raw,
-        label="mutation execution receipt",
+    receipt_file, receipt_bytes, receipt = (
+        AUDIT._private_json_snapshot(
+            receipt_raw,
+            label="mutation execution receipt",
+        )
     )
     receipt_override_used = execution_receipt_path is not None
-    receipt_actual_sha = _sha256_bytes(receipt_file.read_bytes())
+    receipt_actual_sha = _sha256_bytes(receipt_bytes)
     receipt_sha_matches = bool(
         receipt_actual_sha == artifact["execution_receipt_sha256"]
         and audit.get("execution_receipt_sha256")
         == artifact["execution_receipt_sha256"]
-    )
-    receipt = _load_json_object(
-        receipt_file,
-        label="mutation execution receipt",
     )
     status, terminal = AUDIT._validate_receipt(receipt)
     receipt_valid = _receipt_record_consistent(
