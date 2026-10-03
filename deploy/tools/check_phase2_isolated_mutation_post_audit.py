@@ -97,6 +97,8 @@ class Phase2MutationPostAuditVerification:
     preview_identity_matches: bool
     mutation_argv_sha256_matches: bool
     prior_state: str
+    prior_next_action: str
+    prior_next_tool: str
     current_state: str
     current_next_action: str
     current_next_tool: str | None
@@ -593,6 +595,8 @@ def verify_saved_mutation_post_audit(
         preview_identity_matches=preview_identity_matches,
         mutation_argv_sha256_matches=argv_matches,
         prior_state=str(audit.get("prior_state", "")),
+        prior_next_action=str(audit.get("prior_next_action", "")),
+        prior_next_tool=str(audit.get("prior_next_tool", "")),
         current_state=str(audit.get("current_state", "")),
         current_next_action=str(audit.get("current_next_action", "")),
         current_next_tool=(
