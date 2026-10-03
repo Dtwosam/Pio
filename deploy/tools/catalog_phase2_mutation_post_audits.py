@@ -58,6 +58,7 @@ class Phase2PostAuditCatalogReport:
     duplicate_artifact_hashes: int
     duplicate_receipt_hashes: int
     entries: tuple[Phase2PostAuditCatalogEntry, ...]
+    catalog_stable_during_scan: bool
     all_verified: bool
     read_only: bool
     rpc_called: bool
@@ -90,6 +91,19 @@ def _candidate_files(directory: Path, pattern: str) -> tuple[Path, ...]:
     return tuple(files)
 
 
+def _candidate_identity(path: Path) -> tuple[str, bool, int, int, int, int, int]:
+    st = path.lstat()
+    return (
+        path.name,
+        path.is_symlink(),
+        stat.S_IMODE(st.st_mode),
+        int(st.st_size),
+        int(st.st_mtime_ns),
+        int(st.st_dev),
+        int(st.st_ino),
+    )
+
+
 def build_phase2_post_audit_catalog(
     *,
     artifact_directory: str | Path,
@@ -98,6 +112,7 @@ def build_phase2_post_audit_catalog(
 ) -> Phase2PostAuditCatalogReport:
     directory = _artifact_directory(artifact_directory)
     candidates = _candidate_files(directory, pattern)
+    identities_before = tuple(_candidate_identity(path) for path in candidates)
     entries: list[Phase2PostAuditCatalogEntry] = []
 
     artifact_hash_counts: dict[str, int] = {}
@@ -161,6 +176,12 @@ def build_phase2_post_audit_catalog(
     duplicate_artifacts = sum(count - 1 for count in artifact_hash_counts.values() if count > 1)
     duplicate_receipts = sum(count - 1 for count in receipt_hash_counts.values() if count > 1)
 
+    candidates_after = _candidate_files(directory, pattern)
+    identities_after = tuple(_candidate_identity(path) for path in candidates_after)
+    stable = identities_after == identities_before
+    if not stable:
+        raise ValueError("post-audit catalog changed during verification")
+
     return Phase2PostAuditCatalogReport(
         artifact_directory=str(directory),
         pattern=pattern,
@@ -170,6 +191,7 @@ def build_phase2_post_audit_catalog(
         duplicate_artifact_hashes=duplicate_artifacts,
         duplicate_receipt_hashes=duplicate_receipts,
         entries=tuple(entries),
+        catalog_stable_during_scan=True,
         all_verified=bool(entries) and failed_count == 0,
         read_only=True,
         rpc_called=False,
