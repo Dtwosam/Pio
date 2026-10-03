@@ -3,32 +3,143 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
+import stat
+import subprocess
 import sys
 from typing import Any
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 RENDER_TOOL = TOOLS_DIR / "render_phase2_isolated_mutation_command.py"
+RENDER_TOOL_RELATIVE = "deploy/tools/render_phase2_isolated_mutation_command.py"
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
 _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40,64}$")
 _MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+def _assert_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after capture") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after capture")
+
+
+def _capture_regular_file(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int,
+) -> tuple[Path, bytes, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > max_bytes:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_path_stable(resolved, before, label=label)
+    return resolved, encoded, before
+
+
+def _load_captured(
+    path: Path,
+    name: str,
+) -> tuple[Any, Path, bytes, os.stat_result]:
+    label = "reviewed mutation freshness renderer"
+    resolved, encoded, opened = _capture_regular_file(
+        path,
+        label=label,
+        max_bytes=_MAX_TOOL_BYTES,
+    )
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed Phase-2 tool: {path}")
+        raise ValueError(f"cannot load reviewed Phase-2 tool: {resolved}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(encoded, str(resolved), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_path_stable(resolved, opened, label=label)
+    return module, resolved, encoded, opened
 
 
-RENDER = _load(RENDER_TOOL, "phase2_mutation_freshness_renderer")
+(
+    RENDER,
+    _RENDER_TOOL_PATH_AT_LOAD,
+    _RENDER_TOOL_BYTES_AT_LOAD,
+    _RENDER_TOOL_STAT_AT_LOAD,
+) = _load_captured(
+    RENDER_TOOL,
+    "phase2_mutation_freshness_renderer",
+)
+_RENDER_TOOL_SHA256_AT_LOAD = hashlib.sha256(
+    _RENDER_TOOL_BYTES_AT_LOAD
+).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -77,21 +188,21 @@ class Phase2MutationPreviewFreshness:
         return asdict(self)
 
 
-def _regular_preview_file(value: str | Path) -> Path:
-    path = Path(value).expanduser()
-    if path.is_symlink():
-        raise ValueError("mutation preview path must not be a symlink")
-    if not path.is_file():
-        raise ValueError(f"mutation preview file is missing: {path}")
-    if path.stat().st_size > _MAX_PREVIEW_BYTES:
-        raise ValueError("mutation preview file is too large")
-    return path.resolve()
+def _capture_preview(
+    value: str | Path,
+) -> tuple[Path, bytes, os.stat_result]:
+    path, encoded, opened = _capture_regular_file(
+        Path(value),
+        label="mutation preview",
+        max_bytes=_MAX_PREVIEW_BYTES,
+    )
+    return path, encoded, opened
 
 
-def _load_prior_preview(path: Path) -> dict[str, Any]:
+def _load_prior_preview(encoded: bytes) -> dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        payload = json.loads(encoded.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("mutation preview file is not valid JSON") from exc
     if not isinstance(payload, dict):
         raise ValueError("mutation preview JSON must be an object")
@@ -168,6 +279,57 @@ def _load_prior_preview(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _run_git(*args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+
+
+def _renderer_source_identity() -> tuple[str, str]:
+    raw = Path(RENDER_TOOL).expanduser()
+    if raw.is_symlink():
+        raise ValueError("reviewed mutation freshness renderer is missing or symlinked")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(
+            "reviewed mutation freshness renderer is missing or symlinked"
+        ) from exc
+    if resolved != _RENDER_TOOL_PATH_AT_LOAD:
+        raise ValueError("mutation freshness renderer path changed after module load")
+    _assert_path_stable(
+        _RENDER_TOOL_PATH_AT_LOAD,
+        _RENDER_TOOL_STAT_AT_LOAD,
+        label="reviewed mutation freshness renderer",
+    )
+
+    head = _run_git("rev-parse", "HEAD")
+    if head.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = head.stdout.decode("utf-8").strip()
+    if not _COMMIT.fullmatch(commit):
+        raise ValueError("reviewed source commit is invalid")
+
+    historical = _run_git("show", f"{commit}:{RENDER_TOOL_RELATIVE}")
+    if historical.returncode != 0:
+        raise ValueError(
+            "mutation freshness renderer is not present at reviewed source commit"
+        )
+    if historical.stdout != _RENDER_TOOL_BYTES_AT_LOAD:
+        raise ValueError(
+            "mutation freshness renderer bytes do not match reviewed source commit"
+        )
+    _assert_path_stable(
+        _RENDER_TOOL_PATH_AT_LOAD,
+        _RENDER_TOOL_STAT_AT_LOAD,
+        label="reviewed mutation freshness renderer",
+    )
+    return commit, _RENDER_TOOL_SHA256_AT_LOAD
+
+
 def _current_boundary_ok(report: Any) -> bool:
     return bool(
         getattr(report, "format_version", None)
@@ -213,13 +375,18 @@ def check_mutation_preview_freshness(
     timeout_seconds: int = 60,
     **handoff_kwargs: Any,
 ) -> Phase2MutationPreviewFreshness:
-    path = _regular_preview_file(preview_path)
-    prior = _load_prior_preview(path)
+    path, preview_bytes, preview_stat = _capture_preview(preview_path)
+    prior = _load_prior_preview(preview_bytes)
 
+    source_before = _renderer_source_identity()
     current = RENDER.render_reviewed_mutation_command(
         timeout_seconds=timeout_seconds,
         **handoff_kwargs,
     )
+    source_after = _renderer_source_identity()
+    if source_after != source_before:
+        raise ValueError("reviewed mutation freshness renderer changed during render")
+    _assert_path_stable(path, preview_stat, label="mutation preview")
     if not _current_boundary_ok(current):
         raise ValueError("current mutation preview crossed the read-only boundary")
 
