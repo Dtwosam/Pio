@@ -149,21 +149,33 @@ def _contains_sensitive_text(value: str) -> bool:
     )
 
 
+_SAFE_AUTHORITY_FIELDS = frozenset(
+    {
+        "authorizes_next_action",
+        "historical_authorizes_next_action",
+        "requires_fresh_separate_mutation_authorization",
+    }
+)
+
+
 def _assert_credential_minimal(value: Any) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             folded = str(key).casefold()
-            if any(
-                marker in folded
-                for marker in (
-                    "api_key",
-                    "apikey",
-                    "rpc_url",
-                    "rpc_endpoint",
-                    "authorization",
-                    "secret_key",
-                    "password",
-                    "credential_value",
+            if (
+                folded not in _SAFE_AUTHORITY_FIELDS
+                and any(
+                    marker in folded
+                    for marker in (
+                        "api_key",
+                        "apikey",
+                        "rpc_url",
+                        "rpc_endpoint",
+                        "authorization",
+                        "secret_key",
+                        "password",
+                        "credential_value",
+                    )
                 )
             ):
                 raise ValueError(
