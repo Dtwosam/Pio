@@ -8,15 +8,18 @@ import importlib.util
 import json
 from pathlib import Path
 import shlex
+import subprocess
 import sys
 from typing import Any
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 RUNNER_TOOL = TOOLS_DIR / "run_phase2_isolated_next_preflight.py"
 _ALLOWED_MUTATION_FLAGS = frozenset({"--apply", "--prepare"})
-MUTATION_PREVIEW_FORMAT_VERSION = 1
-MUTATION_FINGERPRINT_SCHEMA = "PHASE2_MUTATION_PREVIEW_V1"
+MUTATION_PREVIEW_FORMAT_VERSION = 2
+MUTATION_FINGERPRINT_SCHEMA = "PHASE2_MUTATION_PREVIEW_V2"
+_DEPLOY_SURFACE_DOMAIN = b"PIO_DEPLOY_SURFACE_V1\0"
 
 
 def _load(path: Path, name: str) -> Any:
@@ -36,6 +39,9 @@ RUNNER = _load(RUNNER_TOOL, "phase2_reviewed_mutation_preflight")
 class Phase2ReviewedMutationCommand:
     format_version: int
     fingerprint_schema: str
+    reviewed_source_commit: str
+    deploy_surface_sha256: str
+    deploy_surface_files: int
     state: str
     next_action: str
     next_tool: str | None
@@ -74,6 +80,79 @@ def _preflight_boundary_ok(report: Any) -> bool:
         and not getattr(report, "production_tree_modified", True)
         and not getattr(report, "mutation_flag_appended", True)
     )
+
+
+def _run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _deploy_surface_identity(
+    repo_root: Path | None = None,
+) -> tuple[str, str, int]:
+    root = (repo_root or REPO_ROOT).resolve()
+    top = _run_git(root, "rev-parse", "--show-toplevel")
+    if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root:
+        raise ValueError("reviewed deploy surface is not inside expected Git root")
+
+    head = _run_git(root, "rev-parse", "HEAD")
+    source_commit = head.stdout.strip() if head.returncode == 0 else ""
+    if not source_commit or any(
+        value not in "0123456789abcdef" for value in source_commit
+    ):
+        raise ValueError("reviewed deploy surface HEAD is invalid")
+
+    dirty = _run_git(
+        root,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=no",
+        "--",
+        "deploy",
+    )
+    if dirty.returncode != 0:
+        raise ValueError("cannot inspect reviewed deploy surface status")
+    if dirty.stdout.strip():
+        raise ValueError("reviewed deploy surface has tracked local changes")
+
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", "deploy"],
+        cwd=str(root),
+        capture_output=True,
+        check=False,
+    )
+    if listed.returncode != 0:
+        raise ValueError("cannot enumerate reviewed deploy surface")
+    relative_paths = sorted(
+        value.decode("utf-8")
+        for value in listed.stdout.split(b"\0")
+        if value
+    )
+    if not relative_paths:
+        raise ValueError("reviewed deploy surface is empty")
+
+    digest = hashlib.sha256()
+    digest.update(_DEPLOY_SURFACE_DOMAIN)
+    count = 0
+    for relative in relative_paths:
+        path = root / relative
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(
+                f"reviewed deploy surface contains non-regular file: {relative}"
+            )
+        payload = path.read_bytes()
+        relative_bytes = relative.encode("utf-8")
+        digest.update(len(relative_bytes).to_bytes(8, "big"))
+        digest.update(relative_bytes)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+        count += 1
+    return source_commit, digest.hexdigest(), count
 
 
 def _fingerprint(kind: str, value: Any) -> str:
@@ -118,6 +197,12 @@ def render_reviewed_mutation_command(
     timeout_seconds: int = 60,
     **handoff_kwargs: Any,
 ) -> Phase2ReviewedMutationCommand:
+    (
+        reviewed_source_commit,
+        deploy_surface_sha256,
+        deploy_surface_files,
+    ) = _deploy_surface_identity()
+
     preflight = RUNNER.run_next_read_only_preflight(
         timeout_seconds=timeout_seconds,
         **handoff_kwargs,
@@ -150,11 +235,22 @@ def render_reviewed_mutation_command(
 
     mutation_tool_sha256 = _mutation_tool_sha256(mutation_argv)
     preflight_record = preflight.to_record()
-    preflight_fingerprint = _fingerprint("preflight", preflight_record)
+    preflight_fingerprint = _fingerprint(
+        "preflight",
+        {
+            "reviewed_source_commit": reviewed_source_commit,
+            "deploy_surface_sha256": deploy_surface_sha256,
+            "deploy_surface_files": deploy_surface_files,
+            "preflight": preflight_record,
+        },
+    )
     mutation_fingerprint = (
         _fingerprint(
             "mutation",
             {
+                "reviewed_source_commit": reviewed_source_commit,
+                "deploy_surface_sha256": deploy_surface_sha256,
+                "deploy_surface_files": deploy_surface_files,
                 "preflight_fingerprint": preflight_fingerprint,
                 "mutation_argv": mutation_argv,
                 "mutation_tool_sha256": mutation_tool_sha256,
@@ -167,6 +263,9 @@ def render_reviewed_mutation_command(
     return Phase2ReviewedMutationCommand(
         format_version=MUTATION_PREVIEW_FORMAT_VERSION,
         fingerprint_schema=MUTATION_FINGERPRINT_SCHEMA,
+        reviewed_source_commit=reviewed_source_commit,
+        deploy_surface_sha256=deploy_surface_sha256,
+        deploy_surface_files=deploy_surface_files,
         state=str(preflight.state),
         next_action=str(preflight.next_action),
         next_tool=preflight.next_tool,
