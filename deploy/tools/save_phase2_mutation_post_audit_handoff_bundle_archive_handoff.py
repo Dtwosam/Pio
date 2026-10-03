@@ -30,6 +30,7 @@ ARTIFACT_TYPE = (
     "PHASE2_MUTATION_POST_AUDIT_HANDOFF_BUNDLE_ARCHIVE_HANDOFF_SNAPSHOT_V1"
 )
 _COMMIT = re.compile(r"^[0-9a-f]{40,64}$")
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
 _PROTECTED_ROOTS = (
     Path("/opt/pio"),
     Path("/opt/pio/data"),
@@ -39,22 +40,117 @@ _PROTECTED_ROOTS = (
 )
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+def _assert_tool_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after load") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after load")
+
+
+def _capture_tool(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[Path, bytes, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    resolved = raw.resolve(strict=True)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_TOOL_BYTES:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_tool_path_stable(resolved, before, label=label)
+    return resolved, encoded, before
+
+
+def _load_captured(
+    path: Path,
+    name: str,
+) -> tuple[Any, Path, bytes, os.stat_result]:
+    resolved, encoded, opened = _capture_tool(
+        path,
+        label="reviewed archive handoff tool",
+    )
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed Phase-2 tool: {path}")
+        raise ValueError(f"cannot load reviewed Phase-2 tool: {resolved}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(encoded, str(resolved), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_tool_path_stable(
+        resolved,
+        opened,
+        label="reviewed archive handoff tool",
+    )
+    return module, resolved, encoded, opened
 
 
-HANDOFF = _load(
+(
+    HANDOFF,
+    _HANDOFF_TOOL_PATH_AT_LOAD,
+    _HANDOFF_TOOL_BYTES_AT_LOAD,
+    _HANDOFF_TOOL_STAT_AT_LOAD,
+) = _load_captured(
     HANDOFF_TOOL,
     "phase2_saved_portable_archive_current_handoff",
 )
 _HANDOFF_TOOL_SHA256_AT_LOAD = hashlib.sha256(
-    HANDOFF_TOOL.read_bytes()
+    _HANDOFF_TOOL_BYTES_AT_LOAD
 ).hexdigest()
 
 
@@ -194,8 +290,20 @@ def _run_git(*args: str) -> subprocess.CompletedProcess[bytes]:
 
 
 def _handoff_source_identity() -> tuple[str, str]:
-    if HANDOFF_TOOL.is_symlink() or not HANDOFF_TOOL.is_file():
+    raw = Path(HANDOFF_TOOL).expanduser()
+    if raw.is_symlink():
         raise ValueError("reviewed archive handoff tool is missing or symlinked")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("reviewed archive handoff tool is missing or symlinked") from exc
+    if resolved != _HANDOFF_TOOL_PATH_AT_LOAD:
+        raise ValueError("handoff tool path changed after module load")
+    _assert_tool_path_stable(
+        _HANDOFF_TOOL_PATH_AT_LOAD,
+        _HANDOFF_TOOL_STAT_AT_LOAD,
+        label="reviewed archive handoff tool",
+    )
 
     head = _run_git("rev-parse", "HEAD")
     if head.returncode != 0:
@@ -209,15 +317,16 @@ def _handoff_source_identity() -> tuple[str, str]:
         raise ValueError(
             "archive handoff tool is not present at reviewed source commit"
         )
-    current = HANDOFF_TOOL.read_bytes()
-    current_sha = hashlib.sha256(current).hexdigest()
-    if current_sha != _HANDOFF_TOOL_SHA256_AT_LOAD:
-        raise ValueError("archive handoff tool bytes changed after module load")
-    if historical.stdout != current:
+    if historical.stdout != _HANDOFF_TOOL_BYTES_AT_LOAD:
         raise ValueError(
             "archive handoff tool bytes do not match reviewed source commit"
         )
-    return commit, current_sha
+    _assert_tool_path_stable(
+        _HANDOFF_TOOL_PATH_AT_LOAD,
+        _HANDOFF_TOOL_STAT_AT_LOAD,
+        label="reviewed archive handoff tool",
+    )
+    return commit, _HANDOFF_TOOL_SHA256_AT_LOAD
 
 
 def _handoff_boundary_ok(report: Any) -> bool:
