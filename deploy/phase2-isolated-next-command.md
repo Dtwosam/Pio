@@ -85,3 +85,18 @@ This keeps the operator chain explicit:
 3. execute the guarded read-only preflight;
 4. render the reviewed mutation command after a successful preflight;
 5. execute any mutation separately, only when explicitly authorized.
+
+
+## Audit fingerprints
+
+The reviewed mutation preview also emits deterministic SHA-256 fingerprints:
+
+- `preflight_fingerprint` hashes the complete structured guarded-preflight
+  report using canonical JSON key ordering;
+- `mutation_fingerprint` hashes that preflight fingerprint together with the
+  exact rendered mutation argv.
+
+The mutation fingerprint is omitted when no mutation command is rendered.
+These fingerprints are audit identifiers only; they do not authorize or
+execute a mutation and do not replace the underlying tool's own fail-closed
+preflight when a mutation is eventually run.
