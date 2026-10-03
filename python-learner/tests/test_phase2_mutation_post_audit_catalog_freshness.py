@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -130,6 +131,20 @@ def install(monkeypatch, *, snapshot=None, live=None, snapshot_entries=None):
         MODULE.CATALOG,
         "build_phase2_post_audit_catalog",
         lambda **kwargs: live,
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_snapshot_identity",
+        lambda snapshot_path: (
+            Path(str(snapshot_path)),
+            str(snapshot.snapshot_sha256),
+            object(),
+        ),
+    )
+    monkeypatch.setattr(
+        MODULE.SNAPSHOT_VERIFY,
+        "_assert_snapshot_path_stable",
+        lambda *args, **kwargs: None,
     )
 
 
@@ -355,4 +370,73 @@ def test_verified_snapshot_catalog_fails_if_path_replaced_during_verify(
         MODULE._verified_snapshot_catalog(
             snapshot_path=path,
             repository_root=ROOT,
+        )
+
+
+
+def test_fresh_reverification_rejects_outer_snapshot_identity_drift(monkeypatch):
+    install(monkeypatch)
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_snapshot_identity",
+        lambda snapshot_path: (
+            Path(str(snapshot_path)),
+            "9" * 64,
+            object(),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="orchestrator byte snapshot"):
+        MODULE.freshly_reverify_phase2_post_audit_catalog(
+            snapshot_path="/archive/catalog.json",
+            artifact_directory="/archive",
+        )
+
+
+def test_fresh_reverification_rejects_snapshot_replacement_during_live_scan(
+    tmp_path,
+    monkeypatch,
+):
+    path = tmp_path / "catalog.json"
+    raw = json.dumps(
+        {"catalog": {"entries": SNAPSHOT_ENTRIES}},
+        sort_keys=True,
+    ).encode("utf-8")
+    path.write_bytes(raw)
+    path.chmod(0o600)
+
+    original_capture = MODULE._capture_snapshot_identity
+    original_assert = MODULE.SNAPSHOT_VERIFY._assert_snapshot_path_stable
+    snapshot = snapshot_report()
+    snapshot.snapshot_path = str(path)
+    snapshot.snapshot_sha256 = hashlib.sha256(raw).hexdigest()
+    install(monkeypatch, snapshot=snapshot)
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_snapshot_identity",
+        original_capture,
+    )
+    monkeypatch.setattr(
+        MODULE.SNAPSHOT_VERIFY,
+        "_assert_snapshot_path_stable",
+        original_assert,
+    )
+
+    def replace_during_scan(**kwargs):
+        replacement = tmp_path / "replacement.json"
+        replacement.write_bytes(raw)
+        replacement.chmod(0o600)
+        os.replace(replacement, path)
+        return live_report(SNAPSHOT_ENTRIES)
+
+    monkeypatch.setattr(
+        MODULE.CATALOG,
+        "build_phase2_post_audit_catalog",
+        replace_during_scan,
+    )
+
+    with pytest.raises(ValueError, match="snapshot path changed during verification"):
+        MODULE.freshly_reverify_phase2_post_audit_catalog(
+            snapshot_path=path,
+            artifact_directory="/archive",
         )
