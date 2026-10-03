@@ -249,3 +249,14 @@ def test_metadata_drift_is_evidence_identity_drift(monkeypatch):
 
     assert report.evidence_identity_sets_match is False
     assert report.fresh_reverification_verified is False
+
+
+
+def test_fresh_reverification_rejects_sensitive_archive_path(monkeypatch):
+    install(monkeypatch)
+
+    with pytest.raises(ValueError, match="sensitive text"):
+        MODULE.freshly_reverify_phase2_post_audit_catalog(
+            snapshot_path="/archive/catalog.json",
+            artifact_directory="/tmp/api-key=secret",
+        )
