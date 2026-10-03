@@ -58,6 +58,7 @@ class Phase2PostAuditCatalogHandoffReport:
     fresh_reverification_requested: bool
     artifacts_reverified: bool
     fresh_reverification_verified: bool | None
+    fresh_snapshot_identity_matches: bool | None
     fresh_artifact_directory: str | None
     current_state: str
     current_next_action: str
@@ -157,6 +158,15 @@ def inspect_phase2_post_audit_catalog_handoff(
                 "fresh post-audit catalog verification crossed the read-only boundary"
             )
 
+    fresh_snapshot_identity_matches = (
+        bool(
+            str(freshness.snapshot_path) == str(snapshot.snapshot_path)
+            and str(freshness.snapshot_sha256) == str(snapshot.snapshot_sha256)
+        )
+        if freshness is not None
+        else None
+    )
+
     lifecycle = LIFECYCLE.inspect_lifecycle_handoff(
         runtime_root=runtime_root,
         unit_destination=unit_destination,
@@ -177,6 +187,12 @@ def inspect_phase2_post_audit_catalog_handoff(
     if not bool(snapshot.snapshot_verified):
         blockers.append("HISTORICAL_CATALOG_SNAPSHOT_NOT_VERIFIED")
     if freshness is not None and not bool(
+        fresh_snapshot_identity_matches
+    ):
+        blockers.append(
+            "FRESH_REVERIFICATION_SNAPSHOT_IDENTITY_MISMATCH"
+        )
+    if freshness is not None and not bool(
         freshness.fresh_reverification_verified
     ):
         blockers.append("FRESH_ARCHIVE_REVERIFICATION_FAILED")
@@ -186,7 +202,10 @@ def inspect_phase2_post_audit_catalog_handoff(
         snapshot.snapshot_verified
         and (
             freshness is None
-            or freshness.fresh_reverification_verified
+            or (
+                fresh_snapshot_identity_matches
+                and freshness.fresh_reverification_verified
+            )
         )
     )
 
@@ -210,6 +229,7 @@ def inspect_phase2_post_audit_catalog_handoff(
             if freshness is not None
             else None
         ),
+        fresh_snapshot_identity_matches=fresh_snapshot_identity_matches,
         fresh_artifact_directory=(
             str(freshness.artifact_directory)
             if freshness is not None
