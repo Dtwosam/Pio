@@ -281,7 +281,11 @@ def _validate_handoff(
         raise ValueError("catalog handoff historical snapshot was not verified")
     seen = handoff.get("historical_artifacts_seen")
     verified = handoff.get("historical_artifacts_verified")
-    if not _positive_int(seen) or verified != seen:
+    if (
+        not _positive_int(seen)
+        or not _positive_int(verified)
+        or verified != seen
+    ):
         raise ValueError("catalog handoff historical artifact counts are invalid")
     if handoff.get("historical_snapshot_only") is not True:
         raise ValueError("catalog handoff historical evidence boundary is invalid")
