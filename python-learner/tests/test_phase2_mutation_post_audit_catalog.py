@@ -123,18 +123,18 @@ def test_catalog_reports_duplicate_evidence_identity(tmp_path, monkeypatch):
     assert report.duplicate_receipt_hashes == 1
 
 
-def test_catalog_ignores_non_private_candidates(tmp_path, monkeypatch):
+def test_catalog_accounts_for_non_private_candidates(tmp_path, monkeypatch):
     private_file(tmp_path / "private.post-audit.json")
     public = tmp_path / "public.post-audit.json"
     public.write_text("{}", encoding="utf-8")
     public.chmod(0o644)
 
-    calls = []
-
     def verify(*, artifact_path, repository_root):
-        calls.append(Path(artifact_path).name)
+        path = Path(artifact_path)
+        if path.name == "public.post-audit.json":
+            raise ValueError("saved mutation post-audit permissions must be 0600")
         return verified_report(
-            Path(artifact_path),
+            path,
             artifact_sha="1" * 64,
             receipt_sha="2" * 64,
         )
@@ -149,8 +149,11 @@ def test_catalog_ignores_non_private_candidates(tmp_path, monkeypatch):
         artifact_directory=tmp_path,
     )
 
-    assert report.artifacts_seen == 1
-    assert calls == ["private.post-audit.json"]
+    assert report.artifacts_seen == 2
+    assert report.artifacts_verified == 1
+    assert report.artifacts_failed == 1
+    assert report.all_verified is False
+    assert report.entries[1].failure_category == "ARTIFACT_VERIFICATION_FAILED"
 
 
 def test_catalog_rejects_symlink_directory(tmp_path):
@@ -171,3 +174,15 @@ def test_catalog_requires_simple_pattern(tmp_path):
             artifact_directory=tmp_path,
             pattern="../*.json",
         )
+
+
+
+def test_empty_catalog_is_not_verified(tmp_path):
+    report = MODULE.build_phase2_post_audit_catalog(
+        artifact_directory=tmp_path,
+    )
+
+    assert report.artifacts_seen == 0
+    assert report.artifacts_verified == 0
+    assert report.artifacts_failed == 0
+    assert report.all_verified is False
