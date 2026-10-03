@@ -301,3 +301,59 @@ def test_static_verifier_requires_private_file_mode(tmp_path):
             snapshot_path=path,
             repository_root=ROOT,
         )
+
+
+
+def test_static_verifier_hashes_the_same_snapshot_bytes_it_parses(
+    tmp_path,
+    monkeypatch,
+):
+    path = make_verified_snapshot(tmp_path)
+    expected_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    original_read_bytes = Path.read_bytes
+
+    def forbid_second_snapshot_read(self):
+        if self == path:
+            raise AssertionError("snapshot path must not be reread after capture")
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", forbid_second_snapshot_read)
+
+    report = VERIFY.verify_phase2_portable_archive_current_handoff_snapshot(
+        snapshot_path=path,
+        repository_root=ROOT,
+    )
+
+    assert report.handoff_snapshot_verified is True
+    assert report.snapshot_sha256 == expected_sha
+
+
+def test_static_verifier_fails_closed_if_snapshot_path_is_replaced_after_read(
+    tmp_path,
+    monkeypatch,
+):
+    path = make_verified_snapshot(tmp_path)
+    original_snapshot = VERIFY._read_snapshot_bytes
+
+    def snapshot_then_replace(snapshot_path):
+        payload, opened = original_snapshot(snapshot_path)
+        replacement = tmp_path / "replacement.snapshot.json"
+        replacement.write_bytes(payload)
+        replacement.chmod(0o600)
+        replacement.replace(snapshot_path)
+        return payload, opened
+
+    monkeypatch.setattr(
+        VERIFY,
+        "_read_snapshot_bytes",
+        snapshot_then_replace,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="snapshot path changed during verification",
+    ):
+        VERIFY.verify_phase2_portable_archive_current_handoff_snapshot(
+            snapshot_path=path,
+            repository_root=ROOT,
+        )
