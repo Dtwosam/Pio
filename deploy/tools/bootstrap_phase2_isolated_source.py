@@ -44,6 +44,8 @@ class PinnedSourceBootstrapReport:
     applied: bool
     existing_reused: bool
     network_fetch_performed: bool
+    read_only: bool
+    source_tree_modified: bool
     production_tree_modified: bool
     rpc_called: bool
     database_write_performed: bool
@@ -177,6 +179,8 @@ def inspect_pinned_source(
         applied=False,
         existing_reused=status == "ALREADY_PINNED",
         network_fetch_performed=False,
+        read_only=True,
+        source_tree_modified=False,
         production_tree_modified=False,
         rpc_called=False,
         database_write_performed=False,
@@ -250,6 +254,8 @@ def bootstrap_pinned_source(
                 **report.to_record(),
                 "applied": True,
                 "existing_reused": True,
+                "read_only": True,
+                "source_tree_modified": False,
             }
         )
 
@@ -271,6 +277,8 @@ def bootstrap_pinned_source(
             "applied": True,
             "existing_reused": False,
             "network_fetch_performed": True,
+            "read_only": False,
+            "source_tree_modified": True,
         }
     )
 
