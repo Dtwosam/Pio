@@ -145,9 +145,16 @@ def _current_boundary_ok(report: Any) -> bool:
         and getattr(report, "fingerprint_schema", None)
         == RENDER.MUTATION_FINGERPRINT_SCHEMA
         and (
-            getattr(report, "mutation_tool_sha256", None) is None
+            (
+                not getattr(report, "mutation_rendered", False)
+                and getattr(report, "mutation_tool_sha256", None) is None
+            )
             or (
-                isinstance(getattr(report, "mutation_tool_sha256", None), str)
+                getattr(report, "mutation_rendered", False)
+                and isinstance(
+                    getattr(report, "mutation_tool_sha256", None),
+                    str,
+                )
                 and _FINGERPRINT.fullmatch(
                     getattr(report, "mutation_tool_sha256")
                 )
