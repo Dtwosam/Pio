@@ -187,7 +187,7 @@ def _sanitize_result(value: Any) -> tuple[Any, bool]:
                     "rpc_endpoint",
                     "authorization",
                     "secret",
-                    "token",
+                    "credential",
                 )
             ):
                 result[key_text] = "<redacted>"
