@@ -323,3 +323,41 @@ def test_save_catalog_handoff_publish_race_never_overwrites_destination(
     assert output.read_bytes() == competitor
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert not list(tmp_path.glob(".handoff.json.*.tmp"))
+
+
+
+def test_save_catalog_handoff_digest_uses_exact_payload_not_path_reread(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        MODULE.HANDOFF,
+        "inspect_phase2_post_audit_catalog_handoff",
+        lambda **kwargs: good_handoff(),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_handoff_source_identity",
+        lambda: ("c" * 40, "d" * 64),
+    )
+    output = tmp_path / "handoff.json"
+
+    real_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path):
+        if path == output:
+            raise AssertionError(
+                "published catalog handoff must not be reopened for digesting"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    saved = MODULE.save_phase2_post_audit_catalog_handoff_snapshot(
+        snapshot_path=tmp_path / "catalog.json",
+        output_path=output,
+    )
+
+    payload = output.read_text(encoding="utf-8").encode("utf-8")
+    assert saved.artifact_sha256 == MODULE.hashlib.sha256(payload).hexdigest()
+    assert saved.bytes_written == len(payload)
