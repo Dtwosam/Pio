@@ -174,3 +174,16 @@ def test_saver_refuses_preview_that_crossed_read_only_boundary(
 def test_saver_refuses_protected_production_paths(path):
     with pytest.raises(ValueError, match="protected production path"):
         MODULE._output_path(path)
+
+
+
+def test_saver_rejects_non_hex_digest(tmp_path, monkeypatch):
+    report = preview()
+    report.mutation_tool_sha256 = "z" * 64
+    install(monkeypatch, report)
+    output = tmp_path / "preview.json"
+
+    with pytest.raises(ValueError, match="not safe and mutation-ready"):
+        MODULE.save_mutation_preview(output_path=output)
+
+    assert not output.exists()
