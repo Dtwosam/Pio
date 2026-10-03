@@ -71,6 +71,7 @@ def test_catalog_is_deterministic_and_read_only(tmp_path, monkeypatch):
     assert report.artifacts_seen == 2
     assert report.artifacts_verified == 2
     assert report.artifacts_failed == 0
+    assert report.catalog_stable_during_scan is True
     assert report.all_verified is True
     assert report.read_only is True
     assert report.rpc_called is False
@@ -186,3 +187,31 @@ def test_empty_catalog_is_not_verified(tmp_path):
     assert report.artifacts_verified == 0
     assert report.artifacts_failed == 0
     assert report.all_verified is False
+
+
+
+def test_catalog_rejects_directory_change_during_verification(tmp_path, monkeypatch):
+    artifact = private_file(tmp_path / "a.post-audit.json")
+    changed = False
+
+    def verify(*, artifact_path, repository_root):
+        nonlocal changed
+        if not changed:
+            changed = True
+            private_file(tmp_path / "b.post-audit.json")
+        return verified_report(
+            Path(artifact_path),
+            artifact_sha="1" * 64,
+            receipt_sha="2" * 64,
+        )
+
+    monkeypatch.setattr(
+        MODULE.VERIFY,
+        "verify_saved_mutation_post_audit",
+        verify,
+    )
+
+    with pytest.raises(ValueError, match="changed during verification"):
+        MODULE.build_phase2_post_audit_catalog(
+            artifact_directory=tmp_path,
+        )
