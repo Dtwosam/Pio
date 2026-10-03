@@ -145,6 +145,7 @@ def _atomic_write(path: Path, payload: bytes, *, replace: bool) -> bool:
 
     fd: int | None = None
     temp_path: Path | None = None
+    published_stat: os.stat_result | None = None
     try:
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{path.name}.",
@@ -158,15 +159,66 @@ def _atomic_write(path: Path, payload: bytes, *, replace: bool) -> bool:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        if path.exists() and path.is_symlink():
-            raise ValueError("mutation preview output became a symlink")
-        if path.exists() and not path.is_file():
-            raise ValueError("mutation preview output is no longer a regular file")
-        if path.exists() and not replace:
-            raise ValueError("mutation preview output appeared before atomic replace")
-        os.replace(temp_path, path)
-        temp_path = None
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+        temp_stat = os.stat(temp_path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(temp_stat.st_mode)
+            or stat.S_IMODE(temp_stat.st_mode) != 0o600
+            or temp_stat.st_size != len(payload)
+        ):
+            raise ValueError("mutation preview temp artifact identity mismatch")
+
+        if replace:
+            if path.exists() and path.is_symlink():
+                raise ValueError("mutation preview output became a symlink")
+            if path.exists() and not path.is_file():
+                raise ValueError(
+                    "mutation preview output is no longer a regular file"
+                )
+            os.replace(temp_path, path)
+            temp_path = None
+            published_stat = os.stat(path, follow_symlinks=False)
+        else:
+            if path.is_symlink():
+                raise ValueError("mutation preview output became a symlink")
+            if path.exists():
+                raise ValueError(
+                    "mutation preview output appeared before publish"
+                )
+            try:
+                os.link(
+                    temp_path,
+                    path,
+                    follow_symlinks=False,
+                )
+            except FileExistsError as exc:
+                raise ValueError(
+                    "mutation preview output appeared before publish"
+                ) from exc
+
+            published_stat = os.stat(path, follow_symlinks=False)
+            if (
+                published_stat.st_dev != temp_stat.st_dev
+                or published_stat.st_ino != temp_stat.st_ino
+            ):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                raise ValueError(
+                    "mutation preview publication identity mismatch"
+                )
+            temp_path.unlink()
+            temp_path = None
+
+        assert published_stat is not None
+        if (
+            not stat.S_ISREG(published_stat.st_mode)
+            or stat.S_IMODE(published_stat.st_mode) != 0o600
+            or published_stat.st_size != len(payload)
+        ):
+            raise ValueError("mutation preview publication identity mismatch")
+
         directory_fd = os.open(
             path.parent,
             os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
@@ -175,6 +227,16 @@ def _atomic_write(path: Path, payload: bytes, *, replace: bool) -> bool:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+
+        current = os.stat(path, follow_symlinks=False)
+        if (
+            current.st_dev != published_stat.st_dev
+            or current.st_ino != published_stat.st_ino
+            or current.st_size != len(payload)
+            or not stat.S_ISREG(current.st_mode)
+            or stat.S_IMODE(current.st_mode) != 0o600
+        ):
+            raise ValueError("mutation preview path changed after publish")
         return existed
     finally:
         if fd is not None:
