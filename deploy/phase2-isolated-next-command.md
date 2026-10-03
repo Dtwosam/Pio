@@ -120,3 +120,17 @@ changed, the saved command is reported stale and the tool exits non-zero.
 The checker never executes the mutation. The underlying mutation tool must
 still perform its own fail-closed preflight when an explicitly authorized
 mutation is eventually run.
+
+
+## Preview format contract
+
+Mutation previews use `format_version=1` and
+`fingerprint_schema=PHASE2_MUTATION_PREVIEW_V1`.
+
+Both preflight and mutation fingerprints are domain-separated by that schema.
+The freshness checker rejects an unsupported format version or fingerprint
+schema instead of attempting an implicit migration.
+
+When a future preview format is introduced, regenerate the preview with the
+current reviewed tools. Do not rewrite old preview JSON to make it appear
+compatible.
