@@ -42,6 +42,9 @@ def _load(path: Path, name: str) -> Any:
 
 
 CATALOG = _load(CATALOG_TOOL, "phase2_saved_post_audit_catalog")
+_CATALOG_TOOL_SHA256_AT_LOAD = hashlib.sha256(
+    CATALOG_TOOL.read_bytes()
+).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -168,10 +171,13 @@ def _catalog_source_identity() -> tuple[str, str]:
     if historical.returncode != 0:
         raise ValueError("catalog tool is not present at reviewed source commit")
     current = CATALOG_TOOL.read_bytes()
+    current_sha = hashlib.sha256(current).hexdigest()
+    if current_sha != _CATALOG_TOOL_SHA256_AT_LOAD:
+        raise ValueError("catalog tool bytes changed after module load")
     if historical.stdout != current:
         raise ValueError("catalog tool bytes do not match reviewed source commit")
 
-    return commit, hashlib.sha256(current).hexdigest()
+    return commit, current_sha
 
 
 def _catalog_boundary_ok(report: Any) -> bool:
@@ -258,18 +264,22 @@ def save_phase2_post_audit_catalog_snapshot(
     repository_root: str | Path = CATALOG.VERIFY.REPO_ROOT,
 ) -> Phase2SavedPostAuditCatalog:
     output = _output_path(output_path)
+    source_before = _catalog_source_identity()
     catalog = CATALOG.build_phase2_post_audit_catalog(
         artifact_directory=artifact_directory,
         pattern=pattern,
         repository_root=repository_root,
     )
+    source_after = _catalog_source_identity()
+    if source_after != source_before:
+        raise ValueError("reviewed catalog source changed during snapshot build")
     if not _catalog_boundary_ok(catalog):
         raise ValueError("post-audit catalog is not uniquely and fully verified")
 
     catalog_record = catalog.to_record()
     _assert_credential_minimal(catalog_record)
     catalog_payload_sha = _canonical_sha256(catalog_record)
-    source_commit, catalog_tool_sha = _catalog_source_identity()
+    source_commit, catalog_tool_sha = source_before
 
     payload = {
         "format_version": 1,
