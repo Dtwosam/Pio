@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -253,6 +254,64 @@ def test_verify_snapshot_rejects_boolean_count_fields(
     snapshot.chmod(0o600)
 
     with pytest.raises(ValueError):
+        MODULE.verify_phase2_post_audit_catalog_snapshot(
+            snapshot_path=snapshot,
+        )
+
+
+
+def test_verify_catalog_hashes_the_same_snapshot_bytes_it_parses(
+    tmp_path,
+    monkeypatch,
+):
+    snapshot = tmp_path / "catalog.json"
+    write_snapshot(snapshot)
+    expected_sha = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+    original_read_bytes = Path.read_bytes
+
+    def forbid_second_snapshot_read(self):
+        if self == snapshot:
+            raise AssertionError(
+                "catalog snapshot path must not be reread after capture"
+            )
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", forbid_second_snapshot_read)
+
+    report = MODULE.verify_phase2_post_audit_catalog_snapshot(
+        snapshot_path=snapshot,
+    )
+
+    assert report.snapshot_verified is True
+    assert report.snapshot_sha256 == expected_sha
+
+
+def test_verify_catalog_fails_closed_if_snapshot_path_is_replaced_after_read(
+    tmp_path,
+    monkeypatch,
+):
+    snapshot = tmp_path / "catalog.json"
+    write_snapshot(snapshot)
+    original_snapshot = MODULE._read_snapshot_bytes
+
+    def snapshot_then_replace(snapshot_path):
+        payload, opened = original_snapshot(snapshot_path)
+        replacement = tmp_path / "replacement.catalog.json"
+        replacement.write_bytes(payload)
+        replacement.chmod(0o600)
+        replacement.replace(snapshot_path)
+        return payload, opened
+
+    monkeypatch.setattr(
+        MODULE,
+        "_read_snapshot_bytes",
+        snapshot_then_replace,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="snapshot path changed during verification",
+    ):
         MODULE.verify_phase2_post_audit_catalog_snapshot(
             snapshot_path=snapshot,
         )

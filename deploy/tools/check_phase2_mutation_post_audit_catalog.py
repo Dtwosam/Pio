@@ -5,6 +5,7 @@ import argparse
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -101,13 +102,98 @@ def _private_json_file(value: str | Path) -> Path:
     return path
 
 
-def _load_json_object(path: Path) -> dict[str, Any]:
+def _read_snapshot_bytes(path: Path) -> tuple[bytes, os.stat_result]:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError(
+            "post-audit catalog snapshot cannot be opened safely"
+        ) from exc
+
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError(
+                "post-audit catalog snapshot must be a regular file"
+            )
+        if opened.st_size <= 0 or opened.st_size > _MAX_SNAPSHOT_BYTES:
+            raise ValueError(
+                "post-audit catalog snapshot size is invalid"
+            )
+        if stat.S_IMODE(opened.st_mode) != 0o600:
+            raise ValueError(
+                "post-audit catalog snapshot permissions must be 0600"
+            )
+
+        with os.fdopen(os.dup(fd), "rb") as handle:
+            payload = handle.read(_MAX_SNAPSHOT_BYTES + 1)
+
+        finished = os.fstat(fd)
+        if (
+            finished.st_size != opened.st_size
+            or finished.st_mtime_ns != opened.st_mtime_ns
+            or finished.st_ctime_ns != opened.st_ctime_ns
+        ):
+            raise ValueError(
+                "post-audit catalog snapshot changed while its byte snapshot was read"
+            )
+        if len(payload) != opened.st_size:
+            raise ValueError(
+                "post-audit catalog snapshot byte snapshot size changed during read"
+            )
+        return payload, opened
+    finally:
+        os.close(fd)
+
+
+def _assert_snapshot_path_stable(
+    path: Path,
+    opened: os.stat_result,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(
+            "post-audit catalog snapshot path changed during verification"
+        ) from exc
+
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+        or stat.S_IMODE(current.st_mode) != 0o600
+    ):
+        raise ValueError(
+            "post-audit catalog snapshot path changed during verification"
+        )
+
+
+def _load_json_object_bytes(payload: bytes) -> dict[str, Any]:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("post-audit catalog snapshot is not valid JSON") from exc
     if not isinstance(value, dict):
         raise ValueError("post-audit catalog snapshot must be a JSON object")
+    return value
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    """
+    Backward-compatible safe loader for reviewed sibling tools.
+
+    New verification code should prefer one captured byte snapshot end-to-end.
+    This wrapper still uses the no-follow bounded reader and path-stability check.
+    """
+    payload, opened = _read_snapshot_bytes(path)
+    value = _load_json_object_bytes(payload)
+    _assert_snapshot_path_stable(path, opened)
     return value
 
 
@@ -332,7 +418,8 @@ def verify_phase2_post_audit_catalog_snapshot(
     repository_root: str | Path = REPO_ROOT,
 ) -> Phase2PostAuditCatalogSnapshotVerification:
     snapshot_file = _private_json_file(snapshot_path)
-    payload = _load_json_object(snapshot_file)
+    snapshot_bytes, opened_stat = _read_snapshot_bytes(snapshot_file)
+    payload = _load_json_object_bytes(snapshot_bytes)
     _assert_credential_minimal(payload)
 
     if payload.get("format_version") != 1:
@@ -377,9 +464,11 @@ def verify_phase2_post_audit_catalog_snapshot(
         and unique_receipts
     )
 
+    _assert_snapshot_path_stable(snapshot_file, opened_stat)
+
     return Phase2PostAuditCatalogSnapshotVerification(
         snapshot_path=str(snapshot_file),
-        snapshot_sha256=hashlib.sha256(snapshot_file.read_bytes()).hexdigest(),
+        snapshot_sha256=hashlib.sha256(snapshot_bytes).hexdigest(),
         snapshot_format_valid=format_valid,
         catalog_payload_sha256=catalog_payload_sha,
         catalog_payload_sha256_matches=catalog_payload_matches,
