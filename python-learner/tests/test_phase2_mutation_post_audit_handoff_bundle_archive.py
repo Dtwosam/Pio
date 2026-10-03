@@ -435,3 +435,117 @@ def test_archive_builder_digest_uses_exact_prepublished_tar_bytes(
     assert report.archive_sha256 == hashlib.sha256(published).hexdigest()
     assert report.archive_size == len(published)
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+
+
+def test_archive_builder_rejects_child_bundle_identity_drift(
+    tmp_path,
+    monkeypatch,
+):
+    root, bundle_sha = make_bundle(tmp_path)
+    monkeypatch.setattr(
+        ARCHIVE.BUNDLE,
+        "verify_phase2_portable_handoff_bundle",
+        lambda **kwargs: bundle_report(root, "0" * 64),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="portable bundle changed during nested verification",
+    ):
+        ARCHIVE.build_phase2_portable_bundle_archive(
+            bundle_directory=root,
+            output_path=tmp_path / "bundle.tar",
+            repository_root=ROOT,
+        )
+
+
+def test_archive_builder_rejects_member_swap_during_nested_verification(
+    tmp_path,
+    monkeypatch,
+):
+    root, bundle_sha = make_bundle(tmp_path)
+    handoff = root / "handoff.snapshot.json"
+
+    def verify_then_swap(**kwargs):
+        report = bundle_report(root, bundle_sha)
+        replacement = tmp_path / "replacement-handoff.json"
+        replacement.write_bytes(handoff.read_bytes())
+        replacement.chmod(0o600)
+        handoff.unlink()
+        replacement.rename(handoff)
+        return report
+
+    monkeypatch.setattr(
+        ARCHIVE.BUNDLE,
+        "verify_phase2_portable_handoff_bundle",
+        verify_then_swap,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"portable bundle (?:root|member handoff\.snapshot\.json) "
+            r"path changed"
+        ),
+    ):
+        ARCHIVE.build_phase2_portable_bundle_archive(
+            bundle_directory=root,
+            output_path=tmp_path / "bundle.tar",
+            repository_root=ROOT,
+        )
+
+
+def test_archive_builder_never_rereads_bundle_member_paths(
+    tmp_path,
+    monkeypatch,
+):
+    root, bundle_sha = make_bundle(tmp_path)
+    monkeypatch.setattr(
+        ARCHIVE.BUNDLE,
+        "verify_phase2_portable_handoff_bundle",
+        lambda **kwargs: bundle_report(root, bundle_sha),
+    )
+    output = tmp_path / "bundle.tar"
+    original_read_bytes = Path.read_bytes
+
+    def reject_bundle_member_reread(self):
+        try:
+            self.resolve().relative_to(root.resolve())
+        except ValueError:
+            return original_read_bytes(self)
+        raise AssertionError("bundle member path must not be reopened")
+
+    monkeypatch.setattr(Path, "read_bytes", reject_bundle_member_reread)
+
+    report = ARCHIVE.build_phase2_portable_bundle_archive(
+        bundle_directory=root,
+        output_path=output,
+        repository_root=ROOT,
+    )
+
+    assert report.source_bundle_sha256 == bundle_sha
+    assert report.archive_write_performed is True
+    with tarfile.open(output, mode="r:") as archived:
+        names = [member.name for member in archived.getmembers()]
+    assert names == [
+        "manifest.json",
+        "handoff.snapshot.json",
+        "catalog.snapshot.json",
+        "post-audits",
+        next(
+            name
+            for name in names
+            if name.startswith("post-audits/")
+        ),
+    ]
+
+
+def test_archive_builder_source_uses_descriptor_bound_member_snapshots():
+    source = ARCHIVE_TOOL.read_text(encoding="utf-8")
+
+    assert "def _read_member_snapshot(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "captured_members" in source
+    assert "path.read_bytes()" not in source

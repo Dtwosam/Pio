@@ -5,6 +5,7 @@ import argparse
 from dataclasses import asdict, dataclass
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -112,6 +113,94 @@ def _bundle_boundary_ok(report: Any) -> bool:
     )
 
 
+def _bundle_root(value: str | Path) -> Path:
+    raw = Path(value).expanduser()
+    if raw.is_symlink():
+        raise ValueError("portable bundle root must not be a symlink")
+    root = raw.resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("portable bundle root must be a directory")
+    if stat.S_IMODE(root.stat().st_mode) != 0o700:
+        raise ValueError("portable bundle root permissions must be 0700")
+    return root
+
+
+def _read_member_snapshot(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[bytes, os.stat_result]:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_FILE_BYTES:
+            raise ValueError(f"{label} size is invalid")
+        if stat.S_IMODE(before.st_mode) != 0o600:
+            raise ValueError(f"{label} permissions must be 0600")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+            or stat.S_IMODE(after.st_mode) != 0o600
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(payload) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    return payload, before
+
+
+def _assert_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+    directory: bool = False,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed during archive build") from exc
+
+    expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+    expected_mode = 0o700 if directory else 0o600
+    if (
+        not expected_type(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+        or stat.S_IMODE(current.st_mode) != expected_mode
+    ):
+        raise ValueError(f"{label} path changed during archive build")
+
+
 def _bundle_files(root: Path) -> tuple[tuple[str, Path, int], ...]:
     fixed = (
         ("manifest.json", root / "manifest.json", 0o600),
@@ -155,6 +244,68 @@ def _bundle_files(root: Path) -> tuple[tuple[str, Path, int], ...]:
     return tuple(rows)
 
 
+def _capture_bundle_members(
+    root: Path,
+) -> tuple[
+    tuple[tuple[str, Path, int, bytes | None, os.stat_result], ...],
+    os.stat_result,
+]:
+    root_stat = os.stat(root, follow_symlinks=False)
+    if not stat.S_ISDIR(root_stat.st_mode) or stat.S_IMODE(root_stat.st_mode) != 0o700:
+        raise ValueError("portable bundle root permissions must be 0700")
+
+    captured: list[tuple[str, Path, int, bytes | None, os.stat_result]] = []
+    for relative, path, mode in _bundle_files(root):
+        if path.is_dir():
+            opened = os.stat(path, follow_symlinks=False)
+            if (
+                not stat.S_ISDIR(opened.st_mode)
+                or stat.S_IMODE(opened.st_mode) != mode
+            ):
+                raise ValueError(
+                    f"portable bundle member mode is invalid: {relative}"
+                )
+            captured.append((relative, path, mode, None, opened))
+            continue
+
+        payload, opened = _read_member_snapshot(
+            path,
+            label=f"portable bundle member {relative}",
+        )
+        captured.append((relative, path, mode, payload, opened))
+    return tuple(captured), root_stat
+
+
+def _assert_bundle_snapshot_stable(
+    root: Path,
+    *,
+    captured: tuple[
+        tuple[str, Path, int, bytes | None, os.stat_result], ...
+    ],
+    root_stat: os.stat_result,
+) -> None:
+    _assert_path_stable(
+        root,
+        root_stat,
+        label="portable bundle root",
+        directory=True,
+    )
+
+    current_rows = _bundle_files(root)
+    if tuple(row[0] for row in current_rows) != tuple(
+        row[0] for row in captured
+    ):
+        raise ValueError("portable bundle member set changed during archive build")
+
+    for relative, path, _mode, _payload, opened in captured:
+        _assert_path_stable(
+            path,
+            opened,
+            label=f"portable bundle member {relative}",
+            directory=relative == "post-audits",
+        )
+
+
 def _tar_info(name: str, *, mode: int, is_dir: bool, size: int = 0) -> tarfile.TarInfo:
     info = tarfile.TarInfo(name=name)
     info.mode = mode
@@ -175,19 +326,52 @@ def build_phase2_portable_bundle_archive(
     repository_root: str | Path = BUNDLE.HANDOFF_VERIFY.REPO_ROOT,
 ) -> Phase2PortableBundleArchiveReport:
     output = _output_file(output_path)
+    root = _bundle_root(bundle_directory)
+    captured_members, root_stat = _capture_bundle_members(root)
+
+    manifest_entry = next(
+        (
+            item
+            for item in captured_members
+            if item[0] == "manifest.json"
+        ),
+        None,
+    )
+    if manifest_entry is None or manifest_entry[3] is None:
+        raise ValueError("portable bundle manifest snapshot is missing")
+    manifest_bytes = manifest_entry[3]
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("portable bundle manifest snapshot is invalid JSON") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("portable bundle manifest snapshot must be an object")
+    captured_bundle_sha = manifest.get("bundle_sha256")
+    if (
+        not isinstance(captured_bundle_sha, str)
+        or len(captured_bundle_sha) != 64
+        or any(ch not in "0123456789abcdef" for ch in captured_bundle_sha)
+    ):
+        raise ValueError("portable bundle manifest digest is invalid")
+
     bundle = BUNDLE.verify_phase2_portable_handoff_bundle(
-        bundle_directory=bundle_directory,
+        bundle_directory=root,
         repository_root=repository_root,
     )
     if not _bundle_boundary_ok(bundle):
         raise ValueError("portable bundle is not verified and non-authorizing")
+    if Path(bundle.bundle_directory).resolve(strict=True) != root:
+        raise ValueError("portable bundle verifier changed bundle root identity")
+    if str(bundle.bundle_sha256) != captured_bundle_sha:
+        raise ValueError(
+            "portable bundle changed during nested verification"
+        )
 
-    root = Path(bundle.bundle_directory).resolve(strict=True)
-    if root.is_symlink() or not root.is_dir():
-        raise ValueError("portable bundle root is invalid")
-    if stat.S_IMODE(root.stat().st_mode) != 0o700:
-        raise ValueError("portable bundle root permissions must be 0700")
-    members = _bundle_files(root)
+    _assert_bundle_snapshot_stable(
+        root,
+        captured=captured_members,
+        root_stat=root_stat,
+    )
 
     fd, temp_name = tempfile.mkstemp(
         prefix=f".{output.name}.",
@@ -199,20 +383,18 @@ def build_phase2_portable_bundle_archive(
     try:
         os.chmod(temp, 0o600)
         with tarfile.open(temp, mode="w", format=tarfile.USTAR_FORMAT) as archive:
-            for relative, path, mode in members:
-                if path.is_dir():
+            for relative, _path, mode, payload, _opened in captured_members:
+                if payload is None:
                     archive.addfile(
                         _tar_info(relative, mode=mode, is_dir=True)
                     )
                     continue
-                payload = path.read_bytes()
                 info = _tar_info(
                     relative,
                     mode=mode,
                     is_dir=False,
                     size=len(payload),
                 )
-                import io
                 archive.addfile(info, io.BytesIO(payload))
 
         sync_fd = os.open(temp, os.O_RDONLY)
@@ -283,8 +465,8 @@ def build_phase2_portable_bundle_archive(
         artifact_type=ARTIFACT_TYPE,
         archive_sha256=hashlib.sha256(raw).hexdigest(),
         archive_size=len(raw),
-        source_bundle_sha256=str(bundle.bundle_sha256),
-        members_archived=len(members),
+        source_bundle_sha256=captured_bundle_sha,
+        members_archived=len(captured_members),
         deterministic_metadata=True,
         source_bundle_verified=True,
         archive_write_performed=True,
