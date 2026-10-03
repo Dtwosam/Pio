@@ -297,3 +297,61 @@ def test_builder_rejects_protected_output(tmp_path, monkeypatch):
             output_directory="/opt/pio/data/phase2-handoff-bundle",
             repository_root=ROOT,
         )
+
+
+
+def test_directory_publish_noreplace_preserves_source_inode(tmp_path):
+    source = tmp_path / "source"
+    destination = tmp_path / "published"
+    source.mkdir(mode=0o700)
+    marker = source / "marker.txt"
+    marker.write_text("complete", encoding="utf-8")
+    source_stat = source.stat()
+
+    BUILD._publish_directory_noreplace(source, destination)
+
+    assert not source.exists()
+    assert destination.is_dir()
+    published_stat = destination.stat()
+    assert published_stat.st_dev == source_stat.st_dev
+    assert published_stat.st_ino == source_stat.st_ino
+    assert stat.S_IMODE(published_stat.st_mode) == 0o700
+    assert (destination / "marker.txt").read_text(encoding="utf-8") == "complete"
+
+
+def test_builder_does_not_clobber_destination_created_during_publish(
+    tmp_path,
+    monkeypatch,
+):
+    handoff, catalog, artifacts, _ = inputs(tmp_path)
+    install_build_verifiers(monkeypatch)
+    output = tmp_path / "bundle"
+    original_publish = BUILD._publish_directory_noreplace
+
+    def raced_publish(source, destination):
+        destination.mkdir(mode=0o700)
+        sentinel = destination / "sentinel.txt"
+        sentinel.write_text("concurrent-owner", encoding="utf-8")
+        sentinel.chmod(0o600)
+        return original_publish(source, destination)
+
+    monkeypatch.setattr(
+        BUILD,
+        "_publish_directory_noreplace",
+        raced_publish,
+    )
+
+    with pytest.raises(ValueError, match="appeared before publish"):
+        BUILD.build_phase2_portable_handoff_bundle(
+            handoff_snapshot_path=handoff,
+            catalog_snapshot_path=catalog,
+            artifact_directory=artifacts,
+            output_directory=output,
+            repository_root=ROOT,
+        )
+
+    assert output.is_dir()
+    assert (output / "sentinel.txt").read_text(encoding="utf-8") == (
+        "concurrent-owner"
+    )
+    assert {item.name for item in output.iterdir()} == {"sentinel.txt"}
