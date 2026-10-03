@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -96,6 +97,11 @@ def test_saver_writes_private_verified_audit_atomically(
         "SOURCE_PREPARATION_REQUIRED"
     )
     assert payload["audit_payload_sha256"] == report.audit_payload_sha256
+    expected_tool_sha = hashlib.sha256(
+        MODULE.AUDIT_TOOL.read_bytes()
+    ).hexdigest()
+    assert payload["audit_tool_sha256"] == expected_tool_sha
+    assert report.audit_tool_sha256 == expected_tool_sha
     assert report.artifact_write_performed is True
     assert report.rpc_called is False
     assert report.database_write_performed is False
@@ -216,3 +222,24 @@ def test_saver_output_hash_is_stable_for_same_audit_record(
     assert first.audit_payload_sha256 == second.audit_payload_sha256
     assert Path(first.output_path).read_bytes() == Path(second.output_path).read_bytes()
     assert first.artifact_sha256 == second.artifact_sha256
+
+
+
+def test_saver_rejects_symlinked_audit_tool(
+    tmp_path,
+    monkeypatch,
+):
+    execution_receipt = receipt(tmp_path)
+    install(monkeypatch, verified_audit(execution_receipt))
+    real_tool = tmp_path / "audit-tool.py"
+    real_tool.write_text("# reviewed\n", encoding="utf-8")
+    link = tmp_path / "audit-tool-link.py"
+    link.symlink_to(real_tool)
+    monkeypatch.setattr(MODULE, "AUDIT_TOOL", link)
+
+    with pytest.raises(ValueError, match="missing or symlinked"):
+        MODULE.save_verified_mutation_post_audit(
+            execution_receipt_path=execution_receipt,
+        )
+
+    assert not (tmp_path / "execution.json.post-audit.json").exists()
