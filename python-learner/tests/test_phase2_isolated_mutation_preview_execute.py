@@ -330,7 +330,7 @@ def test_executor_rejects_preview_change_during_freshness(
         check,
     )
 
-    with pytest.raises(ValueError, match="changed during freshness review"):
+    with pytest.raises(ValueError, match="preview path changed after capture"):
         MODULE.execute_fresh_mutation_preview(
             preview_path=path,
             expected_preview_sha256=digest,
@@ -427,3 +427,137 @@ def test_executor_never_launches_mutation_tool_path_directly():
     assert "_EXACT_TOOL_BOOTSTRAP" in source
     assert "runner(\n        list(argv)," not in source
     assert "Path(argv[1]).resolve().read_bytes()" not in source
+
+
+
+def test_executor_freshness_source_identity_matches_exact_executed_bytes():
+    commit, freshness_sha = MODULE._freshness_source_identity()
+
+    assert len(commit) >= 40
+    assert freshness_sha == MODULE._FRESHNESS_TOOL_SHA256_AT_LOAD
+    assert freshness_sha == hashlib.sha256(
+        MODULE._FRESHNESS_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+
+
+def test_executor_freshness_tool_is_descriptor_captured_and_executed():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_regular_file(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_FRESHNESS_TOOL_BYTES_AT_LOAD" in source
+    assert "FRESHNESS_TOOL.read_bytes()" not in source
+    assert "spec.loader.exec_module(module)" not in source
+
+
+def test_executor_never_rereads_preview_path_for_hashing(
+    tmp_path,
+    monkeypatch,
+):
+    path, digest = private_preview(tmp_path)
+    tool = reviewed_tool()
+    freshness = freshness_for(tool)
+    monkeypatch.setattr(
+        MODULE.FRESH,
+        "check_mutation_preview_freshness",
+        lambda **kwargs: freshness,
+    )
+
+    real_read_bytes = Path.read_bytes
+
+    def reject_preview_reread(candidate):
+        if candidate.resolve() == path.resolve():
+            raise AssertionError(
+                "preview path must not be reopened after descriptor capture"
+            )
+        return real_read_bytes(candidate)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_preview_reread)
+
+    report = MODULE.execute_fresh_mutation_preview(
+        preview_path=path,
+        expected_preview_sha256=digest,
+        execute=False,
+    )
+
+    assert report.preview_sha256 == digest
+    assert report.preview_sha256_matches is True
+
+
+def test_executor_rejects_freshness_source_change_during_review(
+    tmp_path,
+    monkeypatch,
+):
+    path, digest = private_preview(tmp_path)
+    tool = reviewed_tool()
+    freshness = freshness_for(tool)
+    monkeypatch.setattr(
+        MODULE.FRESH,
+        "check_mutation_preview_freshness",
+        lambda **kwargs: freshness,
+    )
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_freshness_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(ValueError, match="freshness source changed during review"):
+        MODULE.execute_fresh_mutation_preview(
+            preview_path=path,
+            expected_preview_sha256=digest,
+            execute=False,
+        )
+
+
+def test_executor_rejects_freshness_source_change_before_launch(
+    tmp_path,
+    monkeypatch,
+):
+    path, digest = private_preview(tmp_path)
+    tool = reviewed_tool()
+    freshness = freshness_for(tool)
+    monkeypatch.setattr(
+        MODULE.FRESH,
+        "check_mutation_preview_freshness",
+        lambda **kwargs: freshness,
+    )
+    identity = ("a" * 40, "1" * 64)
+    identities = iter(
+        (
+            identity,
+            identity,
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_freshness_source_identity",
+        lambda: next(identities),
+    )
+
+    called = False
+
+    def runner(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("mutation runner must not run")
+
+    with pytest.raises(ValueError, match="freshness source changed before launch"):
+        MODULE.execute_fresh_mutation_preview(
+            preview_path=path,
+            expected_preview_sha256=digest,
+            execute=True,
+            runner=runner,
+        )
+
+    assert called is False
