@@ -128,6 +128,11 @@ Mutation previews use `format_version=1` and
 `fingerprint_schema=PHASE2_MUTATION_PREVIEW_V1`.
 
 Both preflight and mutation fingerprints are domain-separated by that schema.
+A rendered mutation also records `mutation_tool_sha256`, the SHA-256 of the
+exact reviewed Python tool that would receive `--apply` or `--prepare`.
+That digest is part of the mutation fingerprint and the freshness comparison,
+so unchanged argv cannot make a changed tool look current.
+
 The freshness checker rejects an unsupported format version or fingerprint
 schema instead of attempting an implicit migration.
 
