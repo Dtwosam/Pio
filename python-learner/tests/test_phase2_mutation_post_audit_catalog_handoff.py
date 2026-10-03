@@ -219,3 +219,184 @@ def test_historical_snapshot_never_selects_current_next_step(monkeypatch):
     assert report_b.current_next_action == "MONITOR_ZERO_RPC_STATUS"
     assert report_a.snapshot_influenced_current_action is False
     assert report_b.snapshot_influenced_current_action is False
+
+
+
+def freshness_report(
+    *,
+    verified=True,
+    snapshot_path="/archive/catalog.json",
+    snapshot_sha256="1" * 64,
+):
+    return SimpleNamespace(
+        snapshot_path=snapshot_path,
+        snapshot_sha256=snapshot_sha256,
+        artifact_directory="/fresh/archive",
+        artifacts_reverified=True,
+        fresh_reverification_verified=verified,
+        authorizes_next_action=False,
+        read_only=True,
+        rpc_called=False,
+        database_write_performed=False,
+        service_control_performed=False,
+        mutation_executed=False,
+    )
+
+
+def test_handoff_optionally_requires_fresh_archive_reverification(monkeypatch):
+    install_reports(
+        monkeypatch,
+        snapshot_report(),
+        lifecycle_report(),
+    )
+    calls = []
+
+    def fresh(**kwargs):
+        calls.append(kwargs)
+        return freshness_report()
+
+    monkeypatch.setattr(
+        MODULE.CATALOG_FRESHNESS,
+        "freshly_reverify_phase2_post_audit_catalog",
+        fresh,
+    )
+
+    report = MODULE.inspect_phase2_post_audit_catalog_handoff(
+        snapshot_path="/archive/catalog.json",
+        artifact_directory="/fresh/archive",
+        artifact_pattern="*.post-audit.json",
+    )
+
+    assert report.fresh_reverification_requested is True
+    assert report.artifacts_reverified is True
+    assert report.fresh_reverification_verified is True
+    assert report.fresh_snapshot_identity_matches is True
+    assert report.fresh_artifact_directory == "/fresh/archive"
+    assert report.evidence_lineage_verified is True
+    assert report.attention_required is False
+    assert report.snapshot_influenced_current_action is False
+    assert report.authorizes_next_action is False
+    assert calls == [
+        {
+            "snapshot_path": "/archive/catalog.json",
+            "artifact_directory": "/fresh/archive",
+            "pattern": "*.post-audit.json",
+            "repository_root": MODULE.CATALOG_VERIFY.REPO_ROOT,
+        }
+    ]
+
+
+def test_fresh_archive_drift_blocks_evidence_lineage_not_current_action(
+    monkeypatch,
+):
+    install_reports(
+        monkeypatch,
+        snapshot_report(),
+        lifecycle_report(
+            state="SMOKE_REQUIRED",
+            next_action="RUN_ONE_SHOT_SMOKE",
+            next_tool="run_phase2_isolated_smoke.py",
+            next_flag="--apply",
+        ),
+    )
+    monkeypatch.setattr(
+        MODULE.CATALOG_FRESHNESS,
+        "freshly_reverify_phase2_post_audit_catalog",
+        lambda **kwargs: freshness_report(verified=False),
+    )
+
+    report = MODULE.inspect_phase2_post_audit_catalog_handoff(
+        snapshot_path="/archive/catalog.json",
+        artifact_directory="/fresh/archive",
+    )
+
+    assert report.snapshot_verified is True
+    assert report.fresh_reverification_verified is False
+    assert report.evidence_lineage_verified is False
+    assert report.current_next_action == "RUN_ONE_SHOT_SMOKE"
+    assert report.current_next_mutation_flag == "--apply"
+    assert report.snapshot_influenced_current_action is False
+    assert report.authorizes_next_action is False
+    assert report.attention_required is True
+    assert "FRESH_ARCHIVE_REVERIFICATION_FAILED" in report.blockers
+
+
+def test_static_handoff_does_not_require_archive_reverification(monkeypatch):
+    install_reports(
+        monkeypatch,
+        snapshot_report(),
+        lifecycle_report(),
+    )
+    monkeypatch.setattr(
+        MODULE.CATALOG_FRESHNESS,
+        "freshly_reverify_phase2_post_audit_catalog",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("fresh verifier must not run")
+        ),
+    )
+
+    report = MODULE.inspect_phase2_post_audit_catalog_handoff(
+        snapshot_path="/archive/catalog.json",
+    )
+
+    assert report.fresh_reverification_requested is False
+    assert report.artifacts_reverified is False
+    assert report.fresh_reverification_verified is None
+    assert report.fresh_snapshot_identity_matches is None
+    assert report.fresh_artifact_directory is None
+    assert report.evidence_lineage_verified is True
+
+
+def test_handoff_rejects_fresh_reverification_boundary_crossing(monkeypatch):
+    install_reports(
+        monkeypatch,
+        snapshot_report(),
+        lifecycle_report(),
+    )
+    fresh = freshness_report()
+    fresh.rpc_called = True
+    monkeypatch.setattr(
+        MODULE.CATALOG_FRESHNESS,
+        "freshly_reverify_phase2_post_audit_catalog",
+        lambda **kwargs: fresh,
+    )
+
+    with pytest.raises(ValueError, match="fresh post-audit catalog"):
+        MODULE.inspect_phase2_post_audit_catalog_handoff(
+            snapshot_path="/archive/catalog.json",
+            artifact_directory="/fresh/archive",
+        )
+
+
+
+def test_fresh_snapshot_identity_change_blocks_combined_lineage(monkeypatch):
+    install_reports(
+        monkeypatch,
+        snapshot_report(),
+        lifecycle_report(),
+    )
+    monkeypatch.setattr(
+        MODULE.CATALOG_FRESHNESS,
+        "freshly_reverify_phase2_post_audit_catalog",
+        lambda **kwargs: freshness_report(
+            verified=True,
+            snapshot_sha256="9" * 64,
+        ),
+    )
+
+    report = MODULE.inspect_phase2_post_audit_catalog_handoff(
+        snapshot_path="/archive/catalog.json",
+        artifact_directory="/fresh/archive",
+    )
+
+    assert report.snapshot_verified is True
+    assert report.fresh_reverification_verified is True
+    assert report.fresh_snapshot_identity_matches is False
+    assert report.evidence_lineage_verified is False
+    assert report.snapshot_influenced_current_action is False
+    assert report.authorizes_next_action is False
+    assert report.attention_required is True
+    assert (
+        "FRESH_REVERIFICATION_SNAPSHOT_IDENTITY_MISMATCH"
+        in report.blockers
+    )

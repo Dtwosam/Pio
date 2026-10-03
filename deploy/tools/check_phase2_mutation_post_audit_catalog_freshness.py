@@ -145,6 +145,9 @@ def freshly_reverify_phase2_post_audit_catalog(
     pattern: str = "*.post-audit.json",
     repository_root: str | Path = SNAPSHOT_VERIFY.REPO_ROOT,
 ) -> Phase2PostAuditCatalogFreshReverification:
+    SNAPSHOT_VERIFY._assert_credential_minimal(str(artifact_directory))
+    SNAPSHOT_VERIFY._assert_credential_minimal(pattern)
+
     snapshot = SNAPSHOT_VERIFY.verify_phase2_post_audit_catalog_snapshot(
         snapshot_path=snapshot_path,
         repository_root=repository_root,
@@ -163,6 +166,8 @@ def freshly_reverify_phase2_post_audit_catalog(
     )
     if not _catalog_boundary_ok(live):
         raise ValueError("live post-audit catalog crossed the read-only boundary")
+    SNAPSHOT_VERIFY._assert_credential_minimal(str(live.artifact_directory))
+    SNAPSHOT_VERIFY._assert_credential_minimal(str(live.pattern))
 
     snapshot_ids = _snapshot_identities(snapshot_catalog)
     live_ids = _live_identities(live)

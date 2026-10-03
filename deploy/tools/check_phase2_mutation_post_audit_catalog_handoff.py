@@ -13,6 +13,9 @@ from typing import Any, Callable
 
 TOOLS_DIR = Path(__file__).resolve().parent
 CATALOG_VERIFY_TOOL = TOOLS_DIR / "check_phase2_mutation_post_audit_catalog.py"
+CATALOG_FRESHNESS_TOOL = (
+    TOOLS_DIR / "check_phase2_mutation_post_audit_catalog_freshness.py"
+)
 LIFECYCLE_HANDOFF_TOOL = TOOLS_DIR / "check_phase2_isolated_lifecycle_handoff.py"
 
 
@@ -29,6 +32,10 @@ def _load(path: Path, name: str) -> Any:
 CATALOG_VERIFY = _load(
     CATALOG_VERIFY_TOOL,
     "phase2_post_audit_catalog_snapshot_verify_for_handoff",
+)
+CATALOG_FRESHNESS = _load(
+    CATALOG_FRESHNESS_TOOL,
+    "phase2_post_audit_catalog_freshness_for_handoff",
 )
 LIFECYCLE = _load(
     LIFECYCLE_HANDOFF_TOOL,
@@ -48,6 +55,11 @@ class Phase2PostAuditCatalogHandoffReport:
     historical_catalog_source_commit: str
     historical_snapshot_only: bool
     historical_authorizes_next_action: bool
+    fresh_reverification_requested: bool
+    artifacts_reverified: bool
+    fresh_reverification_verified: bool | None
+    fresh_snapshot_identity_matches: bool | None
+    fresh_artifact_directory: str | None
     current_state: str
     current_next_action: str
     current_next_tool: str | None
@@ -86,6 +98,18 @@ def _snapshot_boundary_ok(report: Any) -> bool:
     )
 
 
+def _freshness_boundary_ok(report: Any) -> bool:
+    return bool(
+        getattr(report, "artifacts_reverified", False)
+        and not getattr(report, "authorizes_next_action", True)
+        and getattr(report, "read_only", False)
+        and not getattr(report, "rpc_called", True)
+        and not getattr(report, "database_write_performed", True)
+        and not getattr(report, "service_control_performed", True)
+        and not getattr(report, "mutation_executed", True)
+    )
+
+
 def _lifecycle_boundary_ok(report: Any) -> bool:
     return bool(
         getattr(report, "read_only", False)
@@ -98,6 +122,8 @@ def _lifecycle_boundary_ok(report: Any) -> bool:
 def inspect_phase2_post_audit_catalog_handoff(
     *,
     snapshot_path: str | Path,
+    artifact_directory: str | Path | None = None,
+    artifact_pattern: str = "*.post-audit.json",
     repository_root: str | Path = CATALOG_VERIFY.REPO_ROOT,
     runtime_root: str | Path = "/opt/pio-phase2-runtime",
     unit_destination: str | Path = "/etc/systemd/system",
@@ -118,6 +144,29 @@ def inspect_phase2_post_audit_catalog_handoff(
             "historical post-audit catalog snapshot crossed the evidence-only boundary"
         )
 
+    freshness = None
+    fresh_requested = artifact_directory is not None
+    if fresh_requested:
+        freshness = CATALOG_FRESHNESS.freshly_reverify_phase2_post_audit_catalog(
+            snapshot_path=snapshot_path,
+            artifact_directory=artifact_directory,
+            pattern=artifact_pattern,
+            repository_root=repository_root,
+        )
+        if not _freshness_boundary_ok(freshness):
+            raise ValueError(
+                "fresh post-audit catalog verification crossed the read-only boundary"
+            )
+
+    fresh_snapshot_identity_matches = (
+        bool(
+            str(freshness.snapshot_path) == str(snapshot.snapshot_path)
+            and str(freshness.snapshot_sha256) == str(snapshot.snapshot_sha256)
+        )
+        if freshness is not None
+        else None
+    )
+
     lifecycle = LIFECYCLE.inspect_lifecycle_handoff(
         runtime_root=runtime_root,
         unit_destination=unit_destination,
@@ -137,7 +186,28 @@ def inspect_phase2_post_audit_catalog_handoff(
     blockers: list[str] = []
     if not bool(snapshot.snapshot_verified):
         blockers.append("HISTORICAL_CATALOG_SNAPSHOT_NOT_VERIFIED")
+    if freshness is not None and not bool(
+        fresh_snapshot_identity_matches
+    ):
+        blockers.append(
+            "FRESH_REVERIFICATION_SNAPSHOT_IDENTITY_MISMATCH"
+        )
+    if freshness is not None and not bool(
+        freshness.fresh_reverification_verified
+    ):
+        blockers.append("FRESH_ARCHIVE_REVERIFICATION_FAILED")
     blockers.extend(str(item) for item in lifecycle.blockers)
+
+    evidence_verified = bool(
+        snapshot.snapshot_verified
+        and (
+            freshness is None
+            or (
+                fresh_snapshot_identity_matches
+                and freshness.fresh_reverification_verified
+            )
+        )
+    )
 
     return Phase2PostAuditCatalogHandoffReport(
         snapshot_path=str(snapshot.snapshot_path),
@@ -148,6 +218,23 @@ def inspect_phase2_post_audit_catalog_handoff(
         historical_catalog_source_commit=str(snapshot.catalog_source_commit),
         historical_snapshot_only=bool(snapshot.historical_snapshot_only),
         historical_authorizes_next_action=bool(snapshot.authorizes_next_action),
+        fresh_reverification_requested=fresh_requested,
+        artifacts_reverified=bool(
+            freshness.artifacts_reverified
+            if freshness is not None
+            else False
+        ),
+        fresh_reverification_verified=(
+            bool(freshness.fresh_reverification_verified)
+            if freshness is not None
+            else None
+        ),
+        fresh_snapshot_identity_matches=fresh_snapshot_identity_matches,
+        fresh_artifact_directory=(
+            str(freshness.artifact_directory)
+            if freshness is not None
+            else None
+        ),
         current_state=str(lifecycle.state),
         current_next_action=str(lifecycle.next_action),
         current_next_tool=(
@@ -169,11 +256,11 @@ def inspect_phase2_post_audit_catalog_handoff(
         provider_rate_limit_paused=bool(
             lifecycle.provider_rate_limit_paused
         ),
-        evidence_lineage_verified=bool(snapshot.snapshot_verified),
+        evidence_lineage_verified=evidence_verified,
         snapshot_influenced_current_action=False,
         next_action_source="CURRENT_LIFECYCLE_HANDOFF",
         attention_required=bool(
-            not snapshot.snapshot_verified
+            not evidence_verified
             or lifecycle.attention_required
         ),
         blockers=tuple(blockers),
@@ -197,6 +284,18 @@ def main() -> None:
     )
     parser.add_argument("--snapshot", required=True)
     parser.add_argument(
+        "--artifact-directory",
+        help=(
+            "Optional current post-audit archive directory. When provided, "
+            "every artifact is freshly historically re-verified and its "
+            "evidence identity must match the immutable snapshot."
+        ),
+    )
+    parser.add_argument(
+        "--artifact-pattern",
+        default="*.post-audit.json",
+    )
+    parser.add_argument(
         "--repository-root",
         default=str(CATALOG_VERIFY.REPO_ROOT),
     )
@@ -218,6 +317,8 @@ def main() -> None:
 
     report = inspect_phase2_post_audit_catalog_handoff(
         snapshot_path=args.snapshot,
+        artifact_directory=args.artifact_directory,
+        artifact_pattern=args.artifact_pattern,
         repository_root=args.repository_root,
         runtime_root=args.runtime_root,
         unit_destination=args.unit_destination,
