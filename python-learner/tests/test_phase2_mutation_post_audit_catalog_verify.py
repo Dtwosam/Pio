@@ -222,3 +222,37 @@ def test_verify_snapshot_reports_missing_source_commit_without_action(tmp_path):
     assert report.catalog_tool_sha256_matches is False
     assert report.snapshot_verified is False
     assert report.authorizes_next_action is False
+
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("artifacts_seen", True),
+        ("artifacts_verified", True),
+        ("artifacts_failed", False),
+        ("duplicate_artifact_hashes", False),
+        ("duplicate_receipt_hashes", False),
+    ],
+)
+def test_verify_snapshot_rejects_boolean_count_fields(
+    tmp_path,
+    field,
+    value,
+):
+    snapshot = tmp_path / "catalog.json"
+    payload = write_snapshot(snapshot)
+    payload["catalog"][field] = value
+    payload["catalog_payload_sha256"] = MODULE._canonical_sha256(
+        payload["catalog"]
+    )
+    snapshot.write_text(
+        json.dumps(payload, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    snapshot.chmod(0o600)
+
+    with pytest.raises(ValueError):
+        MODULE.verify_phase2_post_audit_catalog_snapshot(
+            snapshot_path=snapshot,
+        )
