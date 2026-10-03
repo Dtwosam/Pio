@@ -146,6 +146,8 @@ def test_audit_verifies_successful_mutation_and_observed_progress(
     assert report.audit_integrity_valid is True
     assert report.mutation_succeeded is True
     assert report.state_changed is True
+    assert report.expected_post_states == ("SOURCE_PREPARATION_REQUIRED",)
+    assert report.post_state_expected is True
     assert report.post_mutation_progress_observed is True
     assert report.post_mutation_verified is True
     assert report.current_state == "SOURCE_PREPARATION_REQUIRED"
@@ -335,3 +337,56 @@ def test_audit_rejects_lifecycle_boundary_crossing(
         MODULE.audit_mutation_execution_receipt(
             execution_receipt_path=receipt,
         )
+
+
+
+def test_audit_rejects_unexpected_changed_post_state(
+    tmp_path,
+    monkeypatch,
+):
+    preview, receipt = artifacts(tmp_path)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="RUNNING_HEALTHY"),
+    )
+
+    report = MODULE.audit_mutation_execution_receipt(
+        execution_receipt_path=receipt,
+    )
+
+    assert report.audit_integrity_valid is True
+    assert report.mutation_succeeded is True
+    assert report.state_changed is True
+    assert report.expected_post_states == ("SOURCE_PREPARATION_REQUIRED",)
+    assert report.post_state_expected is False
+    assert report.post_mutation_progress_observed is False
+    assert report.post_mutation_verified is False
+
+
+def test_audit_rejects_successful_receipt_when_lifecycle_did_not_advance(
+    tmp_path,
+    monkeypatch,
+):
+    preview, receipt = artifacts(tmp_path)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    report = MODULE.audit_mutation_execution_receipt(
+        execution_receipt_path=receipt,
+    )
+
+    assert report.state_changed is False
+    assert report.post_state_expected is False
+    assert report.post_mutation_verified is False
+
+
+@pytest.mark.parametrize(
+    ("prior_state", "allowed"),
+    tuple(MODULE._EXPECTED_POST_STATES.items()),
+)
+def test_postcondition_contract_never_allows_same_state(prior_state, allowed):
+    assert allowed
+    assert prior_state not in allowed
+    assert len(allowed) == len(set(allowed))
