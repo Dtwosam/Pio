@@ -33,6 +33,8 @@ RENDER = _load(RENDER_TOOL, "phase2_mutation_freshness_renderer")
 @dataclass(frozen=True)
 class Phase2MutationPreviewFreshness:
     preview_path: str
+    format_version: int
+    fingerprint_schema: str
     status: str
     preview_current: bool
     prior_state: str
@@ -41,6 +43,9 @@ class Phase2MutationPreviewFreshness:
     action_matches: bool
     tool_matches: bool
     mutation_argv_matches: bool
+    prior_mutation_tool_sha256: str
+    current_mutation_tool_sha256: str | None
+    mutation_tool_sha256_matches: bool
     prior_preflight_fingerprint: str
     current_preflight_fingerprint: str
     preflight_fingerprint_matches: bool
@@ -81,6 +86,22 @@ def _load_prior_preview(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("mutation preview JSON must be an object")
 
+    if payload.get("format_version") != RENDER.MUTATION_PREVIEW_FORMAT_VERSION:
+        raise ValueError("prior mutation preview format version is unsupported")
+    if payload.get("fingerprint_schema") != RENDER.MUTATION_FINGERPRINT_SCHEMA:
+        raise ValueError("prior mutation preview fingerprint schema is unsupported")
+    if not bool(payload.get("read_only")):
+        raise ValueError("prior mutation preview is not read-only")
+    for key in (
+        "rpc_called",
+        "database_write_performed",
+        "service_control_performed",
+        "daemon_reload_performed",
+        "production_tree_modified",
+    ):
+        if bool(payload.get(key, False)):
+            raise ValueError("prior mutation preview crossed the read-only boundary")
+
     if not bool(payload.get("preflight_succeeded")):
         raise ValueError("prior mutation preview did not have a successful preflight")
     if not bool(payload.get("mutation_rendered")):
@@ -103,6 +124,13 @@ def _load_prior_preview(path: Path) -> dict[str, Any]:
     if mutation_argv[-1] not in {"--apply", "--prepare"}:
         raise ValueError("prior mutation argv is missing reviewed mutation flag")
 
+    mutation_tool_sha256 = payload.get("mutation_tool_sha256")
+    if (
+        not isinstance(mutation_tool_sha256, str)
+        or not _FINGERPRINT.fullmatch(mutation_tool_sha256)
+    ):
+        raise ValueError("prior mutation tool SHA256 is invalid")
+
     for key in ("state", "next_action", "next_tool"):
         if not isinstance(payload.get(key), str):
             raise ValueError(f"prior mutation preview is missing {key}")
@@ -112,7 +140,27 @@ def _load_prior_preview(path: Path) -> dict[str, Any]:
 
 def _current_boundary_ok(report: Any) -> bool:
     return bool(
-        getattr(report, "read_only", False)
+        getattr(report, "format_version", None)
+        == RENDER.MUTATION_PREVIEW_FORMAT_VERSION
+        and getattr(report, "fingerprint_schema", None)
+        == RENDER.MUTATION_FINGERPRINT_SCHEMA
+        and (
+            (
+                not getattr(report, "mutation_rendered", False)
+                and getattr(report, "mutation_tool_sha256", None) is None
+            )
+            or (
+                getattr(report, "mutation_rendered", False)
+                and isinstance(
+                    getattr(report, "mutation_tool_sha256", None),
+                    str,
+                )
+                and _FINGERPRINT.fullmatch(
+                    getattr(report, "mutation_tool_sha256")
+                )
+            )
+        )
+        and getattr(report, "read_only", False)
         and not getattr(report, "rpc_called", True)
         and not getattr(report, "database_write_performed", True)
         and not getattr(report, "service_control_performed", True)
@@ -149,6 +197,9 @@ def check_mutation_preview_freshness(
     action_matches = str(current.next_action) == str(prior["next_action"])
     tool_matches = str(current.next_tool) == str(prior["next_tool"])
     argv_matches = current_argv == prior["mutation_argv"]
+    mutation_tool_sha256_matches = (
+        current.mutation_tool_sha256 == prior["mutation_tool_sha256"]
+    )
     preflight_fp_matches = (
         current.preflight_fingerprint == prior["preflight_fingerprint"]
     )
@@ -167,6 +218,7 @@ def check_mutation_preview_freshness(
         and action_matches
         and tool_matches
         and argv_matches
+        and mutation_tool_sha256_matches
         and preflight_fp_matches
         and mutation_fp_matches
     )
@@ -180,6 +232,8 @@ def check_mutation_preview_freshness(
 
     return Phase2MutationPreviewFreshness(
         preview_path=str(path),
+        format_version=RENDER.MUTATION_PREVIEW_FORMAT_VERSION,
+        fingerprint_schema=RENDER.MUTATION_FINGERPRINT_SCHEMA,
         status=status,
         preview_current=preview_current,
         prior_state=str(prior["state"]),
@@ -188,6 +242,9 @@ def check_mutation_preview_freshness(
         action_matches=action_matches,
         tool_matches=tool_matches,
         mutation_argv_matches=argv_matches,
+        prior_mutation_tool_sha256=str(prior["mutation_tool_sha256"]),
+        current_mutation_tool_sha256=current.mutation_tool_sha256,
+        mutation_tool_sha256_matches=mutation_tool_sha256_matches,
         prior_preflight_fingerprint=str(prior["preflight_fingerprint"]),
         current_preflight_fingerprint=str(current.preflight_fingerprint),
         preflight_fingerprint_matches=preflight_fp_matches,

@@ -15,6 +15,8 @@ from typing import Any
 TOOLS_DIR = Path(__file__).resolve().parent
 RUNNER_TOOL = TOOLS_DIR / "run_phase2_isolated_next_preflight.py"
 _ALLOWED_MUTATION_FLAGS = frozenset({"--apply", "--prepare"})
+MUTATION_PREVIEW_FORMAT_VERSION = 1
+MUTATION_FINGERPRINT_SCHEMA = "PHASE2_MUTATION_PREVIEW_V1"
 
 
 def _load(path: Path, name: str) -> Any:
@@ -32,6 +34,8 @@ RUNNER = _load(RUNNER_TOOL, "phase2_reviewed_mutation_preflight")
 
 @dataclass(frozen=True)
 class Phase2ReviewedMutationCommand:
+    format_version: int
+    fingerprint_schema: str
     state: str
     next_action: str
     next_tool: str | None
@@ -44,6 +48,7 @@ class Phase2ReviewedMutationCommand:
     mutation_command: str | None
     mutation_rendered: bool
     mutation_executed: bool
+    mutation_tool_sha256: str | None
     preflight_fingerprint: str
     mutation_fingerprint: str | None
     preflight: dict[str, Any]
@@ -71,15 +76,41 @@ def _preflight_boundary_ok(report: Any) -> bool:
     )
 
 
-def _fingerprint(value: Any) -> str:
+def _fingerprint(kind: str, value: Any) -> str:
+    if not kind:
+        raise ValueError("fingerprint kind is required")
     encoded = json.dumps(
-        value,
+        {
+            "schema": MUTATION_FINGERPRINT_SCHEMA,
+            "kind": kind,
+            "value": value,
+        },
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _mutation_tool_sha256(
+    mutation_argv: tuple[str, ...] | None,
+) -> str | None:
+    if mutation_argv is None:
+        return None
+    if len(mutation_argv) < 2:
+        raise ValueError("mutation argv is missing reviewed tool")
+    tool = Path(mutation_argv[1])
+    if tool.is_symlink() or not tool.is_file():
+        raise ValueError("mutation tool is missing or symlinked")
+    resolved = tool.resolve()
+    try:
+        resolved.relative_to(TOOLS_DIR.resolve())
+    except ValueError as exc:
+        raise ValueError("mutation tool resolves outside reviewed tools") from exc
+    if resolved.name not in RUNNER.REVIEWED_PREFLIGHT_TOOLS:
+        raise ValueError("mutation tool is not allowlisted")
+    return hashlib.sha256(resolved.read_bytes()).hexdigest()
 
 
 def render_reviewed_mutation_command(
@@ -117,20 +148,25 @@ def render_reviewed_mutation_command(
         mutation_argv = (*argv, mutation_flag)
         mutation_command = shlex.join(mutation_argv)
 
+    mutation_tool_sha256 = _mutation_tool_sha256(mutation_argv)
     preflight_record = preflight.to_record()
-    preflight_fingerprint = _fingerprint(preflight_record)
+    preflight_fingerprint = _fingerprint("preflight", preflight_record)
     mutation_fingerprint = (
         _fingerprint(
+            "mutation",
             {
                 "preflight_fingerprint": preflight_fingerprint,
                 "mutation_argv": mutation_argv,
-            }
+                "mutation_tool_sha256": mutation_tool_sha256,
+            },
         )
         if mutation_argv is not None
         else None
     )
 
     return Phase2ReviewedMutationCommand(
+        format_version=MUTATION_PREVIEW_FORMAT_VERSION,
+        fingerprint_schema=MUTATION_FINGERPRINT_SCHEMA,
         state=str(preflight.state),
         next_action=str(preflight.next_action),
         next_tool=preflight.next_tool,
@@ -143,6 +179,7 @@ def render_reviewed_mutation_command(
         mutation_command=mutation_command,
         mutation_rendered=mutation_argv is not None,
         mutation_executed=False,
+        mutation_tool_sha256=mutation_tool_sha256,
         preflight_fingerprint=preflight_fingerprint,
         mutation_fingerprint=mutation_fingerprint,
         preflight=preflight_record,
