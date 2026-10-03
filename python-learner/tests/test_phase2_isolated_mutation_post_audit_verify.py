@@ -189,6 +189,7 @@ def test_verifier_accepts_intact_saved_post_audit(
     )
 
     assert report.artifact_format_valid is True
+    assert report.audit_payload_sha256 == _artifact["audit_payload_sha256"]
     assert report.audit_payload_sha256_matches is True
     assert report.audit_source_commit_present is True
     assert report.audit_source_is_ancestor_of_current_head is True
@@ -196,12 +197,23 @@ def test_verifier_accepts_intact_saved_post_audit(
     assert report.audit_deploy_surface_files_matches is True
     assert report.audit_tool_sha256_matches is True
     assert report.execution_receipt_path == str(receipt)
+    assert report.execution_receipt_sha256 == _artifact[
+        "execution_receipt_sha256"
+    ]
     assert report.execution_receipt_sha256_matches is True
     assert report.execution_receipt_valid is True
     assert report.preview_path == str(preview)
     assert report.preview_sha256_matches is True
     assert report.preview_identity_matches is True
     assert report.mutation_argv_sha256_matches is True
+    assert report.prior_state == "SOURCE_BOOTSTRAP_REQUIRED"
+    assert report.current_state == "SOURCE_PREPARATION_REQUIRED"
+    assert report.current_next_action == "PREPARE_PINNED_RUNTIME"
+    assert report.current_next_tool == "prepare_phase2_isolated_runtime.py"
+    assert report.current_next_parameters == {
+        "source_tree": "/tmp/pio-phase2-build/pinned",
+    }
+    assert report.current_next_mutation_flag == "--prepare"
     assert report.postcondition_record_valid is True
     assert report.static_audit_verified is True
     assert report.read_only is True
