@@ -194,3 +194,29 @@ The archive remains historical evidence only:
 This path is read-only and zero-RPC. It does not extract the archive into a
 persistent production location, control services, write the database, execute a
 mutation, or promote a phase.
+
+
+## Immutable portable archive handoff snapshot
+
+A verified portable archive + current lifecycle handoff may be frozen as private
+historical evidence with
+`deploy/tools/save_phase2_mutation_post_audit_handoff_bundle_archive_handoff.py`.
+
+The saver reruns the archive verifier and current zero-RPC lifecycle handoff,
+requires the archive evidence lineage to be verified and non-authorizing, binds
+the canonical handoff payload to the exact reviewed Git commit and handoff-tool
+SHA-256, and writes a create-only
+`PHASE2_MUTATION_POST_AUDIT_HANDOFF_BUNDLE_ARCHIVE_HANDOFF_SNAPSHOT_V1`
+artifact at mode `0600` outside protected production paths.
+
+The saved lifecycle recommendation is historical evidence only. It cannot be
+replayed as current mutation authority and always keeps
+`authorizes_next_action=false` and
+`requires_fresh_separate_mutation_authorization=true`.
+
+Later, use
+`deploy/tools/check_phase2_mutation_post_audit_handoff_bundle_archive_handoff_snapshot.py`
+for static verification. The verifier rechecks the canonical payload digest,
+recorded Git ancestry, exact historical archive-handoff tool bytes, evidence
+lineage, and the non-authorizing boundary. It deliberately does not rerun the
+current lifecycle.
