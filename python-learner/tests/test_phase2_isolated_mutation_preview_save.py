@@ -266,3 +266,30 @@ def test_saver_explicit_replace_does_not_use_no_clobber_link(
     assert json.loads(output.read_text(encoding="utf-8")) == json.loads(
         json.dumps(report.to_record())
     )
+
+
+
+def test_saver_digest_comes_from_exact_preview_payload_not_path_reread(
+    tmp_path,
+    monkeypatch,
+):
+    report = preview()
+    install(monkeypatch, report)
+    output = tmp_path / "preview.json"
+
+    real_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path):
+        if path == output:
+            raise AssertionError(
+                "published preview destination must not be reopened for digesting"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    saved = MODULE.save_mutation_preview(output_path=output)
+
+    payload = output.read_text(encoding="utf-8").encode("utf-8")
+    assert saved.preview_sha256 == MODULE.hashlib.sha256(payload).hexdigest()
+    assert saved.bytes_written == len(payload)
