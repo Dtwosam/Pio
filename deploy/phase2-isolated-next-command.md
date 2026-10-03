@@ -203,3 +203,40 @@ production mutation.
 The underlying mutation tool still performs its own fail-closed preflight. A
 fresh preview is therefore necessary but not sufficient for a successful
 mutation.
+
+
+## Two-phase mutation execution receipts
+
+For an auditable mutation launch, prefer
+`deploy/tools/run_phase2_isolated_mutation_with_receipt.py` over calling the
+fresh-preview executor directly.
+
+Without `--execute`, the wrapper performs the same non-mutating readiness
+check and reports the receipt path it would use. It writes nothing.
+
+With `--execute`, it:
+
+1. runs the fresh-preview executor in non-mutating mode;
+2. refuses an existing or symlinked receipt path;
+3. writes a private `0600` atomic `PENDING` receipt before launch;
+4. invokes the fresh-preview executor again with execution enabled, so the
+   preview, source, deploy surface, tool bytes, and mutation fingerprint are
+   checked a second time immediately before mutation;
+5. atomically replaces the receipt with a terminal record.
+
+Terminal receipt states are:
+
+- `COMPLETED`: the mutation subprocess returned; success or non-zero failure is
+  explicitly recorded;
+- `ABORTED_BEFORE_LAUNCH`: the second guard failed before the mutation runner
+  was entered;
+- `OUTCOME_UNKNOWN_AFTER_LAUNCH`: the runner was entered but raised before a
+  trustworthy structured result was returned.
+
+The receipt stores only hashes/identities and outcome metadata. It hashes the
+mutation argv instead of persisting the raw argv, never persists child stderr,
+and never stores the structured mutation result itself.
+
+By default the receipt is written beside the saved preview as
+`<preview>.execution.json`. Receipt paths inside Pio production, runtime,
+configuration, data, or systemd roots are rejected.
