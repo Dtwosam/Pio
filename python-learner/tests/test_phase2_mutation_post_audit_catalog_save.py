@@ -225,3 +225,23 @@ def test_save_catalog_snapshot_rejects_source_change_during_build(
         )
 
     assert not (tmp_path / "catalog.json").exists()
+
+
+
+def test_save_catalog_snapshot_rejects_self_including_output(
+    tmp_path,
+    monkeypatch,
+):
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    monkeypatch.setattr(
+        MODULE.CATALOG,
+        "build_phase2_post_audit_catalog",
+        lambda **kwargs: good_catalog(tmp_path),
+    )
+
+    with pytest.raises(ValueError, match="must not match the catalog pattern"):
+        MODULE.save_phase2_post_audit_catalog_snapshot(
+            artifact_directory=artifact_dir,
+            output_path=artifact_dir / "catalog.post-audit.json",
+        )
