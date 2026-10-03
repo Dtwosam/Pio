@@ -45,6 +45,7 @@ class Phase2SavedMutationPostAudit:
     artifact_type: str
     artifact_sha256: str
     audit_payload_sha256: str
+    audit_tool_sha256: str
     execution_receipt_path: str
     execution_receipt_sha256: str
     prior_state: str
@@ -99,6 +100,12 @@ def _output_path(
     if parent.is_symlink() or not parent.is_dir():
         raise ValueError("mutation post-audit output parent must be an existing directory")
     return path
+
+
+def _audit_tool_sha256() -> str:
+    if AUDIT_TOOL.is_symlink() or not AUDIT_TOOL.is_file():
+        raise ValueError("reviewed mutation post-audit tool is missing or symlinked")
+    return hashlib.sha256(AUDIT_TOOL.read_bytes()).hexdigest()
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -249,12 +256,14 @@ def save_verified_mutation_post_audit(
     audit_record = audit.to_record()
     _assert_credential_minimal(audit_record)
     audit_payload_sha = _canonical_sha256(audit_record)
+    audit_tool_sha = _audit_tool_sha256()
 
     payload = {
         "format_version": 1,
         "artifact_type": _ARTIFACT_TYPE,
         "execution_receipt_sha256": str(audit.execution_receipt_sha256),
         "audit_payload_sha256": audit_payload_sha,
+        "audit_tool_sha256": audit_tool_sha,
         "audit": audit_record,
     }
     _assert_credential_minimal(payload)
@@ -266,6 +275,7 @@ def save_verified_mutation_post_audit(
         artifact_type=_ARTIFACT_TYPE,
         artifact_sha256=artifact_sha,
         audit_payload_sha256=audit_payload_sha,
+        audit_tool_sha256=audit_tool_sha,
         execution_receipt_path=str(audit.execution_receipt_path),
         execution_receipt_sha256=str(audit.execution_receipt_sha256),
         prior_state=str(audit.prior_state),
