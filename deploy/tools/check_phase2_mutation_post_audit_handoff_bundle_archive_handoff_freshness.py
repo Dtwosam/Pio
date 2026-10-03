@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -114,6 +115,22 @@ def _archive_boundary_ok(report: Any) -> bool:
     )
 
 
+def _capture_snapshot_identity(
+    snapshot_path: str | Path,
+) -> tuple[Path, str, Any]:
+    path = SNAPSHOT._private_json_file(snapshot_path)
+    payload, opened_stat = SNAPSHOT._read_snapshot_bytes(path)
+    return path, hashlib.sha256(payload).hexdigest(), opened_stat
+
+
+def _capture_archive_identity(
+    archive_path: str | Path,
+) -> tuple[Path, str, int, Any]:
+    path = ARCHIVE._archive_file(archive_path)
+    payload, opened_stat = ARCHIVE._read_archive_snapshot(path)
+    return path, hashlib.sha256(payload).hexdigest(), len(payload), opened_stat
+
+
 def freshly_reverify_phase2_portable_archive_handoff(
     *,
     snapshot_path: str | Path,
@@ -122,19 +139,44 @@ def freshly_reverify_phase2_portable_archive_handoff(
 ) -> Phase2PortableArchiveHandoffFreshReverification:
     SNAPSHOT._assert_credential_minimal(str(archive_path))
 
+    (
+        captured_snapshot_path,
+        captured_snapshot_sha256,
+        captured_snapshot_stat,
+    ) = _capture_snapshot_identity(snapshot_path)
+    (
+        captured_archive_path,
+        captured_archive_sha256,
+        captured_archive_size,
+        captured_archive_stat,
+    ) = _capture_archive_identity(archive_path)
+
     snapshot = SNAPSHOT.verify_phase2_portable_archive_current_handoff_snapshot(
-        snapshot_path=snapshot_path,
+        snapshot_path=captured_snapshot_path,
         repository_root=repository_root,
     )
+    if str(snapshot.snapshot_sha256) != captured_snapshot_sha256:
+        raise ValueError(
+            "archive handoff snapshot child verification does not match "
+            "the orchestrator byte snapshot"
+        )
     if not _snapshot_boundary_ok(snapshot):
         raise ValueError(
             "archive handoff snapshot crossed the historical evidence boundary"
         )
 
     archive = ARCHIVE.verify_phase2_portable_bundle_archive(
-        archive_path=archive_path,
+        archive_path=captured_archive_path,
         repository_root=repository_root,
     )
+    if (
+        str(archive.archive_sha256) != captured_archive_sha256
+        or int(archive.archive_size) != captured_archive_size
+    ):
+        raise ValueError(
+            "portable Phase-2 archive child verification does not match "
+            "the orchestrator byte snapshot"
+        )
     if not _archive_boundary_ok(archive):
         raise ValueError(
             "portable Phase-2 archive crossed the historical evidence boundary"
@@ -153,6 +195,15 @@ def freshly_reverify_phase2_portable_archive_handoff(
         and archive.source_bundle_verified
         and archive_identity_matches
         and source_bundle_identity_matches
+    )
+
+    SNAPSHOT._assert_snapshot_path_stable(
+        captured_snapshot_path,
+        captured_snapshot_stat,
+    )
+    ARCHIVE._assert_archive_path_stable(
+        captured_archive_path,
+        captured_archive_stat,
     )
 
     return Phase2PortableArchiveHandoffFreshReverification(
