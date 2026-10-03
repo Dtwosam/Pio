@@ -139,3 +139,22 @@ schema instead of attempting an implicit migration.
 When a future preview format is introduced, regenerate the preview with the
 current reviewed tools. Do not rewrite old preview JSON to make it appear
 compatible.
+
+
+## Atomic preview saving
+
+Use `deploy/tools/save_phase2_isolated_mutation_preview.py --output <file>`
+instead of shell redirection when you want to persist a mutation preview for
+later freshness checks.
+
+The saver first renders a mutation-ready V1 preview, then writes the complete
+JSON to a private temporary file, fsyncs it, atomically renames it into place,
+sets mode `0600`, and fsyncs the parent directory. Existing previews are not
+replaced unless `--replace` is supplied.
+
+The output path must stay outside Pio production/runtime/config paths such as
+`/opt/pio`, `/opt/pio/data`, `/opt/pio-phase2-runtime`, `/etc/pio`,
+and `/etc/systemd/system`.
+
+Saving the preview is only an audit-artifact write. It does not execute the
+rendered mutation, make RPC calls, write the Pio database, or control systemd.
