@@ -103,6 +103,32 @@ def _load_snapshot_catalog_bytes(payload: bytes) -> dict[str, Any]:
     return catalog
 
 
+def _verified_snapshot_catalog(
+    *,
+    snapshot_path: str | Path,
+    repository_root: str | Path,
+) -> tuple[Any, dict[str, Any]]:
+    snapshot_file = SNAPSHOT_VERIFY._private_json_file(snapshot_path)
+    snapshot_bytes, opened_stat = SNAPSHOT_VERIFY._read_snapshot_bytes(
+        snapshot_file
+    )
+    captured_sha256 = hashlib.sha256(snapshot_bytes).hexdigest()
+
+    snapshot = SNAPSHOT_VERIFY.verify_phase2_post_audit_catalog_snapshot(
+        snapshot_path=snapshot_file,
+        repository_root=repository_root,
+    )
+    if str(snapshot.snapshot_sha256) != captured_sha256:
+        raise ValueError(
+            "post-audit catalog snapshot identity changed during fresh verification"
+        )
+    SNAPSHOT_VERIFY._assert_snapshot_path_stable(
+        snapshot_file,
+        opened_stat,
+    )
+    return snapshot, _load_snapshot_catalog_bytes(snapshot_bytes)
+
+
 def _identity(entry: dict[str, Any]) -> tuple[Any, ...]:
     return (
         entry.get("artifact_sha256"),
@@ -148,30 +174,14 @@ def freshly_reverify_phase2_post_audit_catalog(
     SNAPSHOT_VERIFY._assert_credential_minimal(str(artifact_directory))
     SNAPSHOT_VERIFY._assert_credential_minimal(pattern)
 
-    snapshot_file = SNAPSHOT_VERIFY._private_json_file(snapshot_path)
-    snapshot_bytes, opened_stat = SNAPSHOT_VERIFY._read_snapshot_bytes(
-        snapshot_file
-    )
-    captured_sha256 = hashlib.sha256(snapshot_bytes).hexdigest()
-
-    snapshot = SNAPSHOT_VERIFY.verify_phase2_post_audit_catalog_snapshot(
-        snapshot_path=snapshot_file,
+    snapshot, snapshot_catalog = _verified_snapshot_catalog(
+        snapshot_path=snapshot_path,
         repository_root=repository_root,
     )
     if not _snapshot_boundary_ok(snapshot):
         raise ValueError(
             "post-audit catalog snapshot crossed the historical evidence boundary"
         )
-    if str(snapshot.snapshot_sha256) != captured_sha256:
-        raise ValueError(
-            "post-audit catalog snapshot identity changed during fresh verification"
-        )
-    SNAPSHOT_VERIFY._assert_snapshot_path_stable(
-        snapshot_file,
-        opened_stat,
-    )
-
-    snapshot_catalog = _load_snapshot_catalog_bytes(snapshot_bytes)
 
     live = CATALOG.build_phase2_post_audit_catalog(
         artifact_directory=artifact_directory,
