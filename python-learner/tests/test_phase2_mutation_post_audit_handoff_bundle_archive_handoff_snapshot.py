@@ -487,3 +487,47 @@ def test_archive_handoff_saver_detects_path_replacement_after_publish(
         )
 
     assert output.read_bytes() == replacement_bytes
+
+
+
+def test_archive_handoff_source_identity_matches_reviewed_git_head():
+    commit, tool_sha = SAVE._handoff_source_identity()
+
+    assert len(commit) >= 40
+    assert len(tool_sha) == 64
+    assert tool_sha == SAVE._HANDOFF_TOOL_SHA256_AT_LOAD
+    assert tool_sha == SAVE.hashlib.sha256(
+        SAVE._HANDOFF_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+
+
+def test_archive_handoff_source_identity_never_rereads_loaded_tool_bytes(
+    monkeypatch,
+):
+    real_read_bytes = Path.read_bytes
+
+    def reject_tool_reread(path):
+        if path.resolve() == SAVE._HANDOFF_TOOL_PATH_AT_LOAD:
+            raise AssertionError(
+                "executed archive handoff tool path must not be reread"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_tool_reread)
+
+    commit, tool_sha = SAVE._handoff_source_identity()
+
+    assert len(commit) >= 40
+    assert tool_sha == SAVE._HANDOFF_TOOL_SHA256_AT_LOAD
+
+
+def test_archive_handoff_tool_is_executed_from_descriptor_captured_bytes():
+    source = SAVE_TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_tool(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_HANDOFF_TOOL_BYTES_AT_LOAD" in source
+    assert "HANDOFF_TOOL.read_bytes()" not in source
