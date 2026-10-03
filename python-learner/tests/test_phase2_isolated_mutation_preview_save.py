@@ -129,7 +129,8 @@ def test_saver_replaces_existing_preview_only_when_explicit(
     assert saved.replaced_existing is True
     assert saved.file_mode == "0600"
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
-    assert json.loads(output.read_text(encoding="utf-8")) == report.to_record()
+    expected = json.loads(json.dumps(report.to_record()))
+    assert json.loads(output.read_text(encoding="utf-8")) == expected
 
 
 def test_saver_refuses_symlink_output(tmp_path, monkeypatch):
