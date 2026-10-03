@@ -259,3 +259,105 @@ def test_archive_builder_refuses_protected_output(tmp_path, monkeypatch):
             output_path="/opt/pio/data/phase2-bundle.tar",
             repository_root=ROOT,
         )
+
+
+
+def test_archive_verifier_hashes_and_parses_the_same_byte_snapshot(
+    tmp_path,
+    monkeypatch,
+):
+    root, bundle_sha = make_bundle(tmp_path)
+    monkeypatch.setattr(
+        ARCHIVE.BUNDLE,
+        "verify_phase2_portable_handoff_bundle",
+        lambda **kwargs: bundle_report(root, bundle_sha),
+    )
+    archive_path = tmp_path / "bundle.tar"
+    ARCHIVE.build_phase2_portable_bundle_archive(
+        bundle_directory=root,
+        output_path=archive_path,
+        repository_root=ROOT,
+    )
+    expected_sha = sha(archive_path.read_bytes())
+
+    monkeypatch.setattr(
+        VERIFY.BUNDLE,
+        "verify_phase2_portable_handoff_bundle",
+        lambda **kwargs: bundle_report(
+            Path(kwargs["bundle_directory"]),
+            bundle_sha,
+        ),
+    )
+    real_open = VERIFY.tarfile.open
+    seen = {}
+
+    def snapshot_only_open(*args, **kwargs):
+        seen["fileobj"] = kwargs.get("fileobj")
+        seen["name"] = kwargs.get("name")
+        if args:
+            seen["positional_name"] = args[0]
+        assert kwargs.get("fileobj") is not None
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(VERIFY.tarfile, "open", snapshot_only_open)
+
+    report = VERIFY.verify_phase2_portable_bundle_archive(
+        archive_path=archive_path,
+        repository_root=ROOT,
+    )
+
+    assert report.archive_sha256 == expected_sha
+    assert seen["fileobj"] is not None
+    assert seen.get("name") is None
+    assert "positional_name" not in seen
+
+
+def test_archive_verifier_fails_closed_if_path_is_replaced_after_snapshot(
+    tmp_path,
+    monkeypatch,
+):
+    root, bundle_sha = make_bundle(tmp_path)
+    monkeypatch.setattr(
+        ARCHIVE.BUNDLE,
+        "verify_phase2_portable_handoff_bundle",
+        lambda **kwargs: bundle_report(root, bundle_sha),
+    )
+    archive_path = tmp_path / "bundle.tar"
+    ARCHIVE.build_phase2_portable_bundle_archive(
+        bundle_directory=root,
+        output_path=archive_path,
+        repository_root=ROOT,
+    )
+
+    monkeypatch.setattr(
+        VERIFY.BUNDLE,
+        "verify_phase2_portable_handoff_bundle",
+        lambda **kwargs: bundle_report(
+            Path(kwargs["bundle_directory"]),
+            bundle_sha,
+        ),
+    )
+    original_snapshot = VERIFY._read_archive_snapshot
+
+    def snapshot_then_replace(path):
+        payload, opened = original_snapshot(path)
+        replacement = tmp_path / "replacement.tar"
+        replacement.write_bytes(payload)
+        replacement.chmod(0o600)
+        replacement.replace(path)
+        return payload, opened
+
+    monkeypatch.setattr(
+        VERIFY,
+        "_read_archive_snapshot",
+        snapshot_then_replace,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="archive path changed during verification",
+    ):
+        VERIFY.verify_phase2_portable_bundle_archive(
+            archive_path=archive_path,
+            repository_root=ROOT,
+        )
