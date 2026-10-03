@@ -207,6 +207,8 @@ def test_verifier_accepts_intact_saved_post_audit(
     assert report.preview_identity_matches is True
     assert report.mutation_argv_sha256_matches is True
     assert report.prior_state == "SOURCE_BOOTSTRAP_REQUIRED"
+    assert report.prior_next_action == "BOOTSTRAP_PINNED_SOURCE"
+    assert report.prior_next_tool == "bootstrap_phase2_isolated_source.py"
     assert report.current_state == "SOURCE_PREPARATION_REQUIRED"
     assert report.current_next_action == "PREPARE_PINNED_RUNTIME"
     assert report.current_next_tool == "prepare_phase2_isolated_runtime.py"
