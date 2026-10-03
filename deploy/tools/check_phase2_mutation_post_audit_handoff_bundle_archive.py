@@ -5,6 +5,7 @@ import argparse
 from dataclasses import asdict, dataclass
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -80,6 +81,71 @@ def _archive_file(value: str | Path) -> Path:
     if stat.S_IMODE(path.stat().st_mode) != 0o600:
         raise ValueError("portable bundle archive permissions must be 0600")
     return path
+
+
+def _read_archive_snapshot(path: Path) -> tuple[bytes, os.stat_result]:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("portable bundle archive cannot be opened safely") from exc
+
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise ValueError("portable bundle archive must be a regular file")
+        if opened.st_size <= 0 or opened.st_size > _MAX_ARCHIVE_BYTES:
+            raise ValueError("portable bundle archive size is invalid")
+        if stat.S_IMODE(opened.st_mode) != 0o600:
+            raise ValueError("portable bundle archive permissions must be 0600")
+
+        with os.fdopen(os.dup(fd), "rb") as handle:
+            payload = handle.read(_MAX_ARCHIVE_BYTES + 1)
+
+        finished = os.fstat(fd)
+        if (
+            finished.st_size != opened.st_size
+            or finished.st_mtime_ns != opened.st_mtime_ns
+            or finished.st_ctime_ns != opened.st_ctime_ns
+        ):
+            raise ValueError(
+                "portable bundle archive changed while its byte snapshot was read"
+            )
+        if len(payload) != opened.st_size:
+            raise ValueError(
+                "portable bundle archive byte snapshot size changed during read"
+            )
+        return payload, opened
+    finally:
+        os.close(fd)
+
+
+def _assert_archive_path_stable(
+    path: Path,
+    opened: os.stat_result,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(
+            "portable bundle archive path changed during verification"
+        ) from exc
+
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+        or stat.S_IMODE(current.st_mode) != 0o600
+    ):
+        raise ValueError(
+            "portable bundle archive path changed during verification"
+        )
 
 
 def _safe_member_name(name: str) -> str:
@@ -167,10 +233,14 @@ def verify_phase2_portable_bundle_archive(
     repository_root: str | Path = BUNDLE.HANDOFF_VERIFY.REPO_ROOT,
 ) -> Phase2PortableBundleArchiveVerification:
     path = _archive_file(archive_path)
-    archive_sha = hashlib.sha256(path.read_bytes()).hexdigest()
-    archive_size = path.stat().st_size
+    archive_bytes, opened_stat = _read_archive_snapshot(path)
+    archive_sha = hashlib.sha256(archive_bytes).hexdigest()
+    archive_size = len(archive_bytes)
 
-    with tarfile.open(path, mode="r:") as archive:
+    with tarfile.open(
+        fileobj=io.BytesIO(archive_bytes),
+        mode="r:",
+    ) as archive:
         members = archive.getmembers()
         if not members:
             raise ValueError("portable bundle archive is empty")
@@ -247,6 +317,8 @@ def verify_phase2_portable_bundle_archive(
         )
         if not _bundle_boundary_ok(bundle):
             raise ValueError("archived portable bundle is not verified and non-authorizing")
+
+    _assert_archive_path_stable(path, opened_stat)
 
     manifest_bundle_sha = manifest.get("bundle_sha256")
     if not isinstance(manifest_bundle_sha, str) or not _SHA256.fullmatch(
