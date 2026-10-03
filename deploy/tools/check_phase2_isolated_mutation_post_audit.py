@@ -131,16 +131,6 @@ def _private_json_file(value: str | Path, *, label: str) -> Path:
     return path
 
 
-def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{label} is not valid JSON") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} JSON must be an object")
-    return value
-
-
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 

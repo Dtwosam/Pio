@@ -35,6 +35,21 @@ DESCRIPTOR_READERS = (
     ),
 )
 
+
+
+PROTECTED_VERIFIER_MODULES = (
+    "deploy/tools/check_phase2_mutation_post_audit_catalog.py",
+    "deploy/tools/check_phase2_mutation_post_audit_catalog_handoff_snapshot.py",
+    (
+        "deploy/tools/"
+        "check_phase2_mutation_post_audit_handoff_bundle_archive_handoff_snapshot.py"
+    ),
+    "deploy/tools/check_phase2_mutation_post_audit_handoff_bundle_archive.py",
+    "deploy/tools/check_phase2_mutation_post_audit_handoff_bundle.py",
+    "deploy/tools/check_phase2_isolated_mutation_execution_receipt.py",
+    "deploy/tools/check_phase2_isolated_mutation_post_audit.py",
+)
+
 ORCHESTRATOR_CONTRACTS = (
     (
         "deploy/tools/check_phase2_mutation_post_audit_handoff_bundle.py",
@@ -175,5 +190,14 @@ def test_portable_archive_parses_only_the_captured_archive_bytes():
     assert "hashlib.sha256(archive_bytes)" in source
     assert "io.BytesIO(archive_bytes)" in source
     assert "_assert_archive_path_stable" in source
+    assert ".read_text(" not in source
+    assert ".read_bytes(" not in source
+
+
+
+@pytest.mark.parametrize("relative", PROTECTED_VERIFIER_MODULES)
+def test_phase2_artifact_verifiers_have_no_path_based_content_readers(relative):
+    source = _source(relative)
+
     assert ".read_text(" not in source
     assert ".read_bytes(" not in source
