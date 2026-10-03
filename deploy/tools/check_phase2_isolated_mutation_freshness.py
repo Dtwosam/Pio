@@ -33,6 +33,8 @@ RENDER = _load(RENDER_TOOL, "phase2_mutation_freshness_renderer")
 @dataclass(frozen=True)
 class Phase2MutationPreviewFreshness:
     preview_path: str
+    format_version: int
+    fingerprint_schema: str
     status: str
     preview_current: bool
     prior_state: str
@@ -81,6 +83,22 @@ def _load_prior_preview(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("mutation preview JSON must be an object")
 
+    if payload.get("format_version") != RENDER.MUTATION_PREVIEW_FORMAT_VERSION:
+        raise ValueError("prior mutation preview format version is unsupported")
+    if payload.get("fingerprint_schema") != RENDER.MUTATION_FINGERPRINT_SCHEMA:
+        raise ValueError("prior mutation preview fingerprint schema is unsupported")
+    if not bool(payload.get("read_only")):
+        raise ValueError("prior mutation preview is not read-only")
+    for key in (
+        "rpc_called",
+        "database_write_performed",
+        "service_control_performed",
+        "daemon_reload_performed",
+        "production_tree_modified",
+    ):
+        if bool(payload.get(key, False)):
+            raise ValueError("prior mutation preview crossed the read-only boundary")
+
     if not bool(payload.get("preflight_succeeded")):
         raise ValueError("prior mutation preview did not have a successful preflight")
     if not bool(payload.get("mutation_rendered")):
@@ -112,7 +130,11 @@ def _load_prior_preview(path: Path) -> dict[str, Any]:
 
 def _current_boundary_ok(report: Any) -> bool:
     return bool(
-        getattr(report, "read_only", False)
+        getattr(report, "format_version", None)
+        == RENDER.MUTATION_PREVIEW_FORMAT_VERSION
+        and getattr(report, "fingerprint_schema", None)
+        == RENDER.MUTATION_FINGERPRINT_SCHEMA
+        and getattr(report, "read_only", False)
         and not getattr(report, "rpc_called", True)
         and not getattr(report, "database_write_performed", True)
         and not getattr(report, "service_control_performed", True)
@@ -180,6 +202,8 @@ def check_mutation_preview_freshness(
 
     return Phase2MutationPreviewFreshness(
         preview_path=str(path),
+        format_version=RENDER.MUTATION_PREVIEW_FORMAT_VERSION,
+        fingerprint_schema=RENDER.MUTATION_FINGERPRINT_SCHEMA,
         status=status,
         preview_current=preview_current,
         prior_state=str(prior["state"]),
