@@ -113,6 +113,26 @@ def timer(*, ready=False):
     )
 
 
+def source_bootstrap(*, status="READY_CREATE", read_only=True):
+    return Result(
+        status=status,
+        read_only=read_only,
+        rpc_called=False,
+        database_write_performed=False,
+        service_control_performed=False,
+        daemon_reload_performed=False,
+    )
+
+
+def source_runtime(*, ready=False, production_modified=False):
+    return Result(
+        runtime_ready=ready,
+        production_tree_modified=production_modified,
+        rpc_called=False,
+        service_control_performed=False,
+    )
+
+
 def install(
     monkeypatch,
     *,
@@ -120,6 +140,8 @@ def install(
     smoke_report=None,
     operator_report=None,
     timer_report=None,
+    source_bootstrap_report=None,
+    source_runtime_report=None,
 ):
     monkeypatch.setattr(
         MODULE.ACTIVATION,
@@ -144,21 +166,100 @@ def install(
             "inspect_timer_readiness",
             lambda **kwargs: timer_report,
         )
+    if source_bootstrap_report is not None:
+        monkeypatch.setattr(
+            MODULE.BOOTSTRAP,
+            "inspect_pinned_source",
+            lambda **kwargs: source_bootstrap_report,
+        )
+    if source_runtime_report is not None:
+        monkeypatch.setattr(
+            MODULE.RUNTIME_CHECK,
+            "inspect_runtime",
+            lambda *args, **kwargs: source_runtime_report,
+        )
 
 
-def test_handoff_stages_runtime_before_any_later_checks(monkeypatch):
+def test_handoff_bootstraps_missing_pinned_source_before_runtime_staging(
+    monkeypatch,
+):
     install(
         monkeypatch,
         activation_report=activation(runtime_ready=False),
+        source_runtime_report=source_runtime(ready=False),
+        source_bootstrap_report=source_bootstrap(status="READY_CREATE"),
     )
 
-    report = MODULE.inspect_lifecycle_handoff()
+    report = MODULE.inspect_lifecycle_handoff(
+        source_tree="/tmp/pio-phase2-build/pinned"
+    )
 
-    assert report.state == "RUNTIME_NOT_READY"
-    assert report.next_action == "STAGE_REVIEWED_RUNTIME"
-    assert report.next_tool == "stage_phase2_isolated_runtime.py"
+    assert report.state == "SOURCE_BOOTSTRAP_REQUIRED"
+    assert report.next_action == "BOOTSTRAP_PINNED_SOURCE"
+    assert report.next_tool == "bootstrap_phase2_isolated_source.py"
+    assert report.source_status == "READY_CREATE"
+    assert report.source_runtime_ready is False
+    assert report.blockers == ("PINNED_SOURCE_MISSING",)
     assert report.smoke_readiness is None
     assert report.operator_status is None
+
+
+def test_handoff_prepares_clean_pinned_source_before_staging(monkeypatch):
+    install(
+        monkeypatch,
+        activation_report=activation(runtime_ready=False),
+        source_runtime_report=source_runtime(ready=False),
+        source_bootstrap_report=source_bootstrap(status="ALREADY_PINNED"),
+    )
+
+    report = MODULE.inspect_lifecycle_handoff(
+        source_tree="/tmp/pio-phase2-build/pinned"
+    )
+
+    assert report.state == "SOURCE_PREPARATION_REQUIRED"
+    assert report.next_action == "PREPARE_PINNED_RUNTIME"
+    assert report.next_tool == "prepare_phase2_isolated_runtime.py"
+    assert report.source_status == "ALREADY_PINNED"
+    assert report.blockers == ("PINNED_SOURCE_NOT_PREPARED",)
+
+
+def test_handoff_stages_fully_prepared_source(monkeypatch):
+    install(
+        monkeypatch,
+        activation_report=activation(runtime_ready=False),
+        source_runtime_report=source_runtime(ready=True),
+    )
+
+    report = MODULE.inspect_lifecycle_handoff(
+        source_tree="/tmp/pio-phase2-build/pinned"
+    )
+
+    assert report.state == "RUNTIME_STAGING_READY"
+    assert report.next_action == "STAGE_REVIEWED_RUNTIME"
+    assert report.next_tool == "stage_phase2_isolated_runtime.py"
+    assert report.source_status == "PREPARED_RUNTIME_READY"
+    assert report.source_runtime_ready is True
+    assert report.blockers == ()
+
+
+def test_handoff_surfaces_pinned_source_conflict(monkeypatch):
+    install(
+        monkeypatch,
+        activation_report=activation(runtime_ready=False),
+        source_runtime_report=source_runtime(ready=False),
+        source_bootstrap_report=source_bootstrap(
+            status="CONFLICT_SOURCE_DRIFT"
+        ),
+    )
+
+    report = MODULE.inspect_lifecycle_handoff(
+        source_tree="/tmp/pio-phase2-build/pinned"
+    )
+
+    assert report.state == "SOURCE_CONFLICT_REVIEW_REQUIRED"
+    assert report.next_action == "REVIEW_PINNED_SOURCE_CONFLICT"
+    assert report.next_tool == "bootstrap_phase2_isolated_source.py"
+    assert report.blockers == ("CONFLICT_SOURCE_DRIFT",)
 
 
 def test_handoff_installs_units_after_runtime_is_ready(monkeypatch):
@@ -299,3 +400,37 @@ def test_handoff_rejects_underlying_boundary_crossing(monkeypatch):
 
     with pytest.raises(ValueError, match="read-only boundary"):
         MODULE.inspect_lifecycle_handoff()
+
+
+
+def test_handoff_rejects_source_bootstrap_boundary_crossing(monkeypatch):
+    install(
+        monkeypatch,
+        activation_report=activation(runtime_ready=False),
+        source_runtime_report=source_runtime(ready=False),
+        source_bootstrap_report=source_bootstrap(
+            status="READY_CREATE",
+            read_only=False,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="read-only boundary"):
+        MODULE.inspect_lifecycle_handoff(
+            source_tree="/tmp/pio-phase2-build/pinned"
+        )
+
+
+def test_handoff_rejects_source_runtime_boundary_crossing(monkeypatch):
+    install(
+        monkeypatch,
+        activation_report=activation(runtime_ready=False),
+        source_runtime_report=source_runtime(
+            ready=True,
+            production_modified=True,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="read-only boundary"):
+        MODULE.inspect_lifecycle_handoff(
+            source_tree="/tmp/pio-phase2-build/pinned"
+        )
