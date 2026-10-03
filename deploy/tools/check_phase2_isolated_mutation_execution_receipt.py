@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -130,6 +131,73 @@ def _private_json_file(value: str | Path, *, label: str) -> Path:
     if stat.S_IMODE(path.stat().st_mode) != 0o600:
         raise ValueError(f"{label} permissions must be 0600")
     return path
+
+
+def _private_json_snapshot(
+    value: str | Path,
+    *,
+    label: str,
+) -> tuple[Path, bytes, dict[str, Any]]:
+    raw = Path(value).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    path = raw.resolve(strict=True)
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_ARTIFACT_BYTES:
+            raise ValueError(f"{label} size is invalid")
+        if stat.S_IMODE(before.st_mode) != 0o600:
+            raise ValueError(f"{label} permissions must be 0600")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or stat.S_IMODE(after.st_mode) != 0o600
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+
+    current = os.stat(path, follow_symlinks=False)
+    if (
+        current.st_dev != before.st_dev
+        or current.st_ino != before.st_ino
+        or current.st_size != before.st_size
+        or stat.S_IMODE(current.st_mode) != 0o600
+        or not stat.S_ISREG(current.st_mode)
+    ):
+        raise ValueError(f"{label} path changed after read")
+
+    try:
+        decoded = encoded.decode("utf-8")
+        payload = json.loads(decoded)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} JSON must be an object")
+    return path, encoded, payload
 
 
 def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -323,8 +391,11 @@ def _validate_preview_chain(
     receipt: dict[str, Any],
     preview_path: Path,
 ) -> tuple[dict[str, Any], bool, bool, bool]:
-    payload = _load_json_object(preview_path, label="mutation preview")
-    actual_sha = _sha256_bytes(preview_path.read_bytes())
+    _snapshot_path, preview_bytes, payload = _private_json_snapshot(
+        preview_path,
+        label="mutation preview",
+    )
+    actual_sha = _sha256_bytes(preview_bytes)
     sha_matches = actual_sha == receipt["preview_sha256"]
 
     identity_matches = bool(
@@ -383,16 +454,12 @@ def audit_mutation_execution_receipt(
     source_tree: str | Path | None = None,
     repository_url: str = LIFECYCLE.BOOTSTRAP.DEFAULT_REPOSITORY_URL,
 ) -> Phase2MutationReceiptAudit:
-    receipt_file = _private_json_file(
+    receipt_file, receipt_bytes, receipt = _private_json_snapshot(
         execution_receipt_path,
         label="mutation execution receipt",
     )
-    receipt = _load_json_object(
-        receipt_file,
-        label="mutation execution receipt",
-    )
     status, terminal = _validate_receipt(receipt)
-    receipt_sha = _sha256_bytes(receipt_file.read_bytes())
+    receipt_sha = _sha256_bytes(receipt_bytes)
 
     preview_raw = receipt.get("preview_path")
     if not isinstance(preview_raw, str) or not preview_raw:
