@@ -33,9 +33,17 @@ class _CapturedFile:
 
 
 @dataclass(frozen=True)
+class _DatabaseCompanionSnapshot:
+    path: Path
+    exists: bool
+    opened: os.stat_result | None
+
+
+@dataclass(frozen=True)
 class _DatabasePathSnapshot:
     path: Path
     opened: os.stat_result
+    companions: tuple[_DatabaseCompanionSnapshot, ...]
 
 
 def _assert_regular_path_stable(
@@ -298,6 +306,32 @@ def _systemctl_state(
     )
 
 
+def _database_companion_snapshot(
+    path: Path,
+) -> _DatabaseCompanionSnapshot:
+    try:
+        opened = os.lstat(path)
+    except FileNotFoundError:
+        return _DatabaseCompanionSnapshot(
+            path=path,
+            exists=False,
+            opened=None,
+        )
+    except OSError as exc:
+        raise ValueError(
+            "Phase-2 database companion cannot be inspected safely"
+        ) from exc
+    if stat.S_ISLNK(opened.st_mode) or not stat.S_ISREG(opened.st_mode):
+        raise ValueError(
+            "Phase-2 database companion must be a regular non-symlink file"
+        )
+    return _DatabaseCompanionSnapshot(
+        path=path,
+        exists=True,
+        opened=opened,
+    )
+
+
 def _database_path_snapshot(
     database_path: Path,
 ) -> _DatabasePathSnapshot | None:
@@ -314,7 +348,52 @@ def _database_path_snapshot(
         resolved = raw.resolve(strict=True)
     except OSError:
         return None
-    return _DatabasePathSnapshot(path=resolved, opened=opened)
+
+    companions = tuple(
+        _database_companion_snapshot(
+            resolved.with_name(resolved.name + suffix)
+        )
+        for suffix in ("-wal", "-shm")
+    )
+    return _DatabasePathSnapshot(
+        path=resolved,
+        opened=opened,
+        companions=companions,
+    )
+
+
+def _assert_database_companion_stable(
+    snapshot: _DatabaseCompanionSnapshot,
+) -> None:
+    try:
+        current = os.lstat(snapshot.path)
+    except FileNotFoundError:
+        if snapshot.exists:
+            raise ValueError(
+                "Phase-2 database companion path changed during health check"
+            )
+        return
+    except OSError as exc:
+        raise ValueError(
+            "Phase-2 database companion path changed during health check"
+        ) from exc
+
+    if not snapshot.exists:
+        raise ValueError(
+            "Phase-2 database companion path changed during health check"
+        )
+    before = snapshot.opened
+    assert before is not None
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or stat.S_ISLNK(current.st_mode)
+        or current.st_dev != before.st_dev
+        or current.st_ino != before.st_ino
+        or current.st_mode != before.st_mode
+    ):
+        raise ValueError(
+            "Phase-2 database companion path changed during health check"
+        )
 
 
 def _assert_database_path_stable(
@@ -332,6 +411,57 @@ def _assert_database_path_stable(
         or current.st_mode != before.st_mode
     ):
         raise ValueError("Phase-2 database path changed during health check")
+    for companion in snapshot.companions:
+        _assert_database_companion_stable(companion)
+
+
+def _open_database_descriptor(
+    snapshot: _DatabasePathSnapshot,
+) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(snapshot.path, flags)
+    except OSError as exc:
+        raise ValueError(
+            "Phase-2 database cannot be opened through a stable descriptor"
+        ) from exc
+
+    opened = os.fstat(fd)
+    before = snapshot.opened
+    if (
+        not stat.S_ISREG(opened.st_mode)
+        or opened.st_dev != before.st_dev
+        or opened.st_ino != before.st_ino
+        or opened.st_mode != before.st_mode
+    ):
+        os.close(fd)
+        raise ValueError(
+            "Phase-2 database path changed before descriptor capture"
+        )
+    return fd
+
+
+def _assert_database_descriptor_stable(
+    fd: int,
+    snapshot: _DatabasePathSnapshot,
+) -> None:
+    try:
+        current = os.fstat(fd)
+    except OSError as exc:
+        raise ValueError(
+            "Phase-2 database descriptor changed during health check"
+        ) from exc
+    before = snapshot.opened
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != before.st_dev
+        or current.st_ino != before.st_ino
+        or current.st_mode != before.st_mode
+    ):
+        raise ValueError(
+            "Phase-2 database descriptor changed during health check"
+        )
 
 
 def _read_recent_cycles_snapshot(
@@ -346,24 +476,46 @@ def _read_recent_cycles_snapshot(
     if snapshot is None:
         return (), None
 
-    uri = f"file:{snapshot.path}?mode=ro"
+    fd = _open_database_descriptor(snapshot)
     try:
-        with sqlite3.connect(uri, uri=True, timeout=5) as conn:
-            conn.execute("BEGIN")
-            rows = conn.execute(
-                """
-                SELECT id, as_of, status, evidence_json
-                FROM advanced_edge_evidence
-                WHERE edge_type = ?
-                  AND pool_address = ?
-                ORDER BY as_of DESC, id DESC
-                LIMIT ?
-                """,
-                (PROGRESS_EDGE_TYPE, pool_address, limit),
-            ).fetchall()
-            conn.rollback()
-    except sqlite3.Error:
-        rows = []
+        proc_path = Path("/proc/self/fd") / str(fd)
+        if not proc_path.exists():
+            raise ValueError(
+                "descriptor-bound SQLite path is unavailable on this platform"
+            )
+        uri = f"file:{proc_path}?mode=ro"
+        try:
+            with sqlite3.connect(uri, uri=True, timeout=5) as conn:
+                conn.execute("PRAGMA query_only=ON")
+                conn.execute("BEGIN")
+                # Establish one SQLite read snapshot before reading health
+                # evidence. Companion identities are checked on both sides of
+                # the transaction while allowing normal WAL append growth.
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master LIMIT 1"
+                ).fetchone()
+                _assert_database_descriptor_stable(fd, snapshot)
+                _assert_database_path_stable(snapshot)
+                rows = conn.execute(
+                    """
+                    SELECT id, as_of, status, evidence_json
+                    FROM advanced_edge_evidence
+                    WHERE edge_type = ?
+                      AND pool_address = ?
+                    ORDER BY as_of DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (PROGRESS_EDGE_TYPE, pool_address, limit),
+                ).fetchall()
+                _assert_database_descriptor_stable(fd, snapshot)
+                _assert_database_path_stable(snapshot)
+                conn.rollback()
+        except sqlite3.Error:
+            rows = []
+        _assert_database_descriptor_stable(fd, snapshot)
+        _assert_database_path_stable(snapshot)
+    finally:
+        os.close(fd)
 
     cycles = []
     for evidence_id, as_of, status, evidence_json in rows:

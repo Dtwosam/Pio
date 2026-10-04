@@ -654,3 +654,154 @@ def test_timer_health_rejects_activation_source_identity_drift(
             ),
             runner=systemctl_runner,
         )
+
+
+
+def test_timer_health_database_query_is_bound_to_captured_descriptor(
+    tmp_path,
+    monkeypatch,
+):
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    database = root / "pio.db"
+
+    alternate_root = tmp_path / "alternate-root"
+    alternate_root.mkdir()
+    alternate_data = write_db(
+        alternate_root,
+        [cycle(at="2026-10-02T18:00:00+00:00")],
+    )
+    alternate_database = alternate_data / "pio.db"
+
+    real_connect = sqlite3.connect
+    swapped = {"done": False}
+
+    def swapping_connect(database_arg, *args, **kwargs):
+        if not swapped["done"]:
+            saved = database.with_name("pio.db.captured")
+            database.rename(saved)
+            alternate_database.rename(database)
+            try:
+                connection = real_connect(database_arg, *args, **kwargs)
+            finally:
+                database.unlink()
+                saved.rename(database)
+            swapped["done"] = True
+            return connection
+        return real_connect(database_arg, *args, **kwargs)
+
+    monkeypatch.setattr(
+        MODULE.sqlite3,
+        "connect",
+        swapping_connect,
+    )
+
+    cycles, snapshot = MODULE._read_recent_cycles_snapshot(
+        database,
+        pool_address=POOL,
+        limit=8,
+    )
+
+    assert swapped["done"] is True
+    assert snapshot is not None
+    assert cycles
+    assert cycles[0].as_of == "2026-10-02T20:20:00+00:00"
+
+
+def test_timer_health_reads_live_wal_database_through_descriptor(tmp_path):
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:05:00+00:00")],
+    )
+    database = root / "pio.db"
+    writer = sqlite3.connect(database)
+    try:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        writer.execute(
+            """
+            INSERT INTO advanced_edge_evidence(
+                edge_type, pool_address, as_of, status,
+                qualified, evidence_json
+            ) VALUES (?, ?, ?, ?, 0, ?)
+            """,
+            (
+                MODULE.PROGRESS_EDGE_TYPE,
+                POOL,
+                "2026-10-02T20:20:00+00:00",
+                "COLLECTION_SUCCESS",
+                json.dumps(cycle(
+                    at="2026-10-02T20:20:00+00:00"
+                )["evidence"]),
+            ),
+        )
+        writer.commit()
+
+        cycles, snapshot = MODULE._read_recent_cycles_snapshot(
+            database,
+            pool_address=POOL,
+            limit=8,
+        )
+
+        assert snapshot is not None
+        assert cycles[0].as_of == "2026-10-02T20:20:00+00:00"
+        assert {
+            item.path.name: item.exists
+            for item in snapshot.companions
+        } == {
+            "pio.db-wal": True,
+            "pio.db-shm": True,
+        }
+    finally:
+        writer.close()
+
+
+def test_timer_health_allows_wal_growth_but_rejects_wal_replacement(
+    tmp_path,
+):
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    database = root / "pio.db"
+    wal = root / "pio.db-wal"
+    wal.write_bytes(b"wal-before")
+
+    snapshot = MODULE._database_path_snapshot(database)
+    assert snapshot is not None
+
+    wal.write_bytes(b"wal-before-and-after-growth")
+    MODULE._assert_database_path_stable(snapshot)
+
+    original = wal.read_bytes()
+    replacement = root / "replacement-wal"
+    replacement.write_bytes(original)
+    replacement.replace(wal)
+
+    with pytest.raises(
+        ValueError,
+        match="database companion path changed",
+    ):
+        MODULE._assert_database_path_stable(snapshot)
+
+
+def test_timer_health_rejects_symlinked_database_companion(tmp_path):
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    database = root / "pio.db"
+    target = root / "wal-target"
+    target.write_bytes(b"not-a-real-wal")
+    (root / "pio.db-wal").symlink_to(target)
+
+    with pytest.raises(
+        ValueError,
+        match="database companion must be a regular non-symlink file",
+    ):
+        MODULE._read_recent_cycles_snapshot(
+            database,
+            pool_address=POOL,
+            limit=8,
+        )
