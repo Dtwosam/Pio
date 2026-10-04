@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 from typing import Any
 
@@ -64,6 +65,8 @@ EXPECTED_DIRTY_PATHS = {
     "python-learner/src/meteora_learner/research_store.py",
 }
 
+_MAX_TRACKED_FILE_BYTES = 32 * 1024 * 1024
+
 
 @dataclass(frozen=True)
 class RuntimeFile:
@@ -96,12 +99,129 @@ class IsolatedRuntimeReport:
         return asdict(self)
 
 
-def _git_blob_sha(path: Path) -> str | None:
-    if path.is_symlink() or not path.is_file():
+def _assert_file_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed during runtime inspection") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed during runtime inspection")
+
+
+def _capture_regular_file(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int,
+) -> tuple[Path, bytes, os.stat_result] | None:
+    raw = Path(path)
+    if raw.is_symlink():
         return None
-    payload = path.read_bytes()
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError:
+        return None
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError:
+        return None
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            return None
+        if before.st_size < 0 or before.st_size > max_bytes:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_file_path_stable(resolved, before, label=label)
+    return resolved, encoded, before
+
+
+def _git_blob_snapshot(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[str | None, Path | None, os.stat_result | None]:
+    captured = _capture_regular_file(
+        path,
+        label=label,
+        max_bytes=_MAX_TRACKED_FILE_BYTES,
+    )
+    if captured is None:
+        return None, None, None
+    resolved, payload, opened = captured
     header = f"blob {len(payload)}\0".encode()
-    return hashlib.sha1(header + payload).hexdigest()
+    return hashlib.sha1(header + payload).hexdigest(), resolved, opened
+
+
+def _git_blob_sha(path: Path) -> str | None:
+    blob, _resolved, _opened = _git_blob_snapshot(
+        path,
+        label=f"runtime contract file {path}",
+    )
+    return blob
+
+
+def _executable_snapshot(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[bool, bool, Path | None, os.stat_result | None]:
+    raw = Path(path)
+    if raw.is_symlink():
+        return False, False, None, None
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError:
+        return False, False, None, None
+    try:
+        opened = os.stat(resolved, follow_symlinks=False)
+    except OSError:
+        return False, False, None, None
+    if not stat.S_ISREG(opened.st_mode):
+        return False, False, None, None
+    _assert_file_path_stable(resolved, opened, label=label)
+    return True, os.access(resolved, os.X_OK), resolved, opened
 
 
 def _run_git(source: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -143,7 +263,10 @@ def _dirty_paths(source: Path) -> tuple[str, ...]:
 
 
 def inspect_runtime(source_tree: str | Path) -> IsolatedRuntimeReport:
-    source = Path(source_tree).resolve()
+    raw_source = Path(source_tree).expanduser()
+    if raw_source.is_symlink():
+        raise ValueError("isolated runtime source must not be a symlink")
+    source = raw_source.resolve()
     if source == Path("/opt/pio").resolve():
         raise ValueError("isolated runtime source must not be /opt/pio")
     if not source.is_dir() or not (source / ".git").exists():
@@ -153,29 +276,68 @@ def inspect_runtime(source_tree: str | Path) -> IsolatedRuntimeReport:
     dirty = _dirty_paths(source)
     dirty_ok = set(dirty) == EXPECTED_DIRTY_PATHS
 
-    files = tuple(
-        RuntimeFile(
-            path=relative,
-            expected_blob=expected,
-            current_blob=_git_blob_sha(source / relative),
-            matches=_git_blob_sha(source / relative) == expected,
+    snapshots: list[tuple[Path, os.stat_result, str]] = []
+    file_rows: list[RuntimeFile] = []
+    for relative, expected in sorted(TRACKED_CONTRACT.items()):
+        current, resolved, opened = _git_blob_snapshot(
+            source / relative,
+            label=f"runtime contract file {relative}",
         )
-        for relative, expected in sorted(TRACKED_CONTRACT.items())
-    )
+        if resolved is not None and opened is not None:
+            snapshots.append(
+                (resolved, opened, f"runtime contract file {relative}")
+            )
+        file_rows.append(
+            RuntimeFile(
+                path=relative,
+                expected_blob=expected,
+                current_blob=current,
+                matches=current == expected,
+            )
+        )
+    files = tuple(file_rows)
 
     executor = source / EXECUTOR_RELATIVE
-    exists = executor.is_file() and not executor.is_symlink()
-    executable = exists and os.access(executor, os.X_OK)
+    (
+        exists,
+        executable,
+        executor_resolved,
+        executor_stat,
+    ) = _executable_snapshot(
+        executor,
+        label="reviewed isolated executor",
+    )
 
     watch_executor = source / WATCH_EXECUTOR_RELATIVE
-    watch_exists = (
-        watch_executor.is_file()
-        and not watch_executor.is_symlink()
+    (
+        watch_exists,
+        watch_executable,
+        watch_resolved,
+        watch_stat,
+    ) = _executable_snapshot(
+        watch_executor,
+        label="reviewed account-watch executor",
     )
-    watch_executable = (
-        watch_exists
-        and os.access(watch_executor, os.X_OK)
-    )
+
+    source_head_after = _head(source)
+    dirty_after = _dirty_paths(source)
+    if source_head_after != source_head or dirty_after != dirty:
+        raise ValueError("isolated runtime source changed during inspection")
+
+    for path, opened, label in snapshots:
+        _assert_file_path_stable(path, opened, label=label)
+    if executor_resolved is not None and executor_stat is not None:
+        _assert_file_path_stable(
+            executor_resolved,
+            executor_stat,
+            label="reviewed isolated executor",
+        )
+    if watch_resolved is not None and watch_stat is not None:
+        _assert_file_path_stable(
+            watch_resolved,
+            watch_stat,
+            label="reviewed account-watch executor",
+        )
 
     ready = bool(
         source_head == PINNED_SOURCE_HEAD
@@ -203,7 +365,6 @@ def inspect_runtime(source_tree: str | Path) -> IsolatedRuntimeReport:
         rpc_called=False,
         service_control_performed=False,
     )
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(

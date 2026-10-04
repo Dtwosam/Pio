@@ -133,3 +133,44 @@ def test_runtime_contract_pins_operational_autopause_surface():
     for relative, expected_blob in required.items():
         assert MODULE.TRACKED_CONTRACT[relative] == expected_blob
         assert MODULE._git_blob_sha(ROOT / relative) == expected_blob
+
+
+
+def test_runtime_checker_uses_descriptor_bound_contract_reads():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "def _capture_regular_file(" in source
+    assert ".read_bytes(" not in source
+
+
+def test_runtime_checker_rejects_same_content_path_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_runtime(tmp_path, monkeypatch)
+    target = source / "rust-executor/src/main.rs"
+    real_dirty_paths = MODULE._dirty_paths
+    calls = 0
+
+    def replace_before_final_recheck(runtime):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            replacement = target.with_name("main.rs.replacement")
+            replacement.write_bytes(target.read_bytes())
+            replacement.replace(target)
+        return real_dirty_paths(runtime)
+
+    monkeypatch.setattr(
+        MODULE,
+        "_dirty_paths",
+        replace_before_final_recheck,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="path changed during runtime inspection",
+    ):
+        MODULE.inspect_runtime(source)
