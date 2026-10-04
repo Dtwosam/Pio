@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 import importlib.util
 import json
 from pathlib import Path
+import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -314,6 +316,180 @@ def test_autopause_does_not_pause_on_stale_rate_limit_streak(tmp_path):
     assert report.consecutive_rpc_rate_limited == 2
     assert report.repeated_provider_rejection is True
     assert report.latest_cycle_recent is False
+    assert report.pause_recommended is False
+    assert report.applied is False
+    assert state["enabled"] is True
+
+
+
+def test_autopause_refuses_database_replacement_before_pause(tmp_path):
+    db = tmp_path / "pio.db"
+    init_db(db)
+    add_cycle(
+        db,
+        as_of="2026-10-02T20:30:00+00:00",
+        rate_limited=True,
+    )
+    add_cycle(
+        db,
+        as_of="2026-10-02T20:15:00+00:00",
+        rate_limited=True,
+    )
+    replacement = tmp_path / "replacement.db"
+    shutil.copy2(db, replacement)
+    state = {"active": True, "enabled": True, "commands": []}
+
+    def runner(command, **kwargs):
+        state["commands"].append(tuple(command))
+        action = command[1]
+        if action == "is-enabled":
+            return subprocess.CompletedProcess(
+                command, 0, "enabled\n", ""
+            )
+        if action == "is-active":
+            if not state.get("replaced"):
+                os.replace(replacement, db)
+                state["replaced"] = True
+            return subprocess.CompletedProcess(
+                command, 0, "active\n", ""
+            )
+        if action == "disable":
+            raise AssertionError("timer must not be disabled after DB replacement")
+        raise AssertionError(command)
+
+    report = MODULE.autopause(
+        database_path=db,
+        apply=True,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
+        runner=runner,
+    )
+
+    assert report.pause_recommended is True
+    assert report.applied is False
+    assert report.failure_step == "EVIDENCE_REVALIDATION"
+    assert report.service_control_performed is False
+    assert not any(
+        command[:3] == ("systemctl", "disable", "--now")
+        for command in state["commands"]
+    )
+
+
+def test_autopause_refuses_newer_evidence_before_pause(tmp_path):
+    db = tmp_path / "pio.db"
+    init_db(db)
+    add_cycle(
+        db,
+        as_of="2026-10-02T20:30:00+00:00",
+        rate_limited=True,
+    )
+    add_cycle(
+        db,
+        as_of="2026-10-02T20:15:00+00:00",
+        rate_limited=True,
+    )
+    state = {"commands": [], "inserted": False}
+
+    def runner(command, **kwargs):
+        state["commands"].append(tuple(command))
+        action = command[1]
+        if action == "is-enabled":
+            return subprocess.CompletedProcess(
+                command, 0, "enabled\n", ""
+            )
+        if action == "is-active":
+            if not state["inserted"]:
+                add_cycle(
+                    db,
+                    as_of="2026-10-02T20:34:00+00:00",
+                    rate_limited=False,
+                )
+                state["inserted"] = True
+            return subprocess.CompletedProcess(
+                command, 0, "active\n", ""
+            )
+        if action == "disable":
+            raise AssertionError("timer must not be disabled on evidence drift")
+        raise AssertionError(command)
+
+    report = MODULE.autopause(
+        database_path=db,
+        apply=True,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
+        runner=runner,
+    )
+
+    assert report.pause_recommended is True
+    assert report.applied is False
+    assert report.failure_step == "EVIDENCE_CHANGED_BEFORE_PAUSE"
+    assert report.service_control_performed is False
+
+
+def test_autopause_refuses_timer_state_drift_before_pause(tmp_path):
+    db = tmp_path / "pio.db"
+    init_db(db)
+    add_cycle(
+        db,
+        as_of="2026-10-02T20:30:00+00:00",
+        rate_limited=True,
+    )
+    add_cycle(
+        db,
+        as_of="2026-10-02T20:15:00+00:00",
+        rate_limited=True,
+    )
+    state = {"commands": [], "enabled_checks": 0}
+
+    def runner(command, **kwargs):
+        state["commands"].append(tuple(command))
+        action = command[1]
+        if action == "is-enabled":
+            state["enabled_checks"] += 1
+            enabled = state["enabled_checks"] == 1
+            return subprocess.CompletedProcess(
+                command,
+                0 if enabled else 1,
+                "enabled\n" if enabled else "disabled\n",
+                "",
+            )
+        if action == "is-active":
+            return subprocess.CompletedProcess(
+                command, 0, "active\n", ""
+            )
+        if action == "disable":
+            raise AssertionError("timer must not be disabled after state drift")
+        raise AssertionError(command)
+
+    report = MODULE.autopause(
+        database_path=db,
+        apply=True,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
+        runner=runner,
+    )
+
+    assert report.pause_recommended is True
+    assert report.applied is False
+    assert report.failure_step == "TIMER_STATE_CHANGED_BEFORE_PAUSE"
+    assert report.timer_enabled_after is False
+    assert report.timer_active_after is True
+    assert report.future_timer_cycles_paused is True
+    assert report.service_control_performed is False
+
+
+def test_autopause_symlink_database_is_not_ready(tmp_path):
+    target = tmp_path / "pio-real.db"
+    init_db(target)
+    db = tmp_path / "pio.db"
+    db.symlink_to(target)
+    state, runner = stateful_runner(active=True, enabled=True)
+
+    report = MODULE.autopause(
+        database_path=db,
+        apply=True,
+        now=lambda: datetime(2026, 10, 2, 20, 35, tzinfo=timezone.utc),
+        runner=runner,
+    )
+
+    assert report.database_ready is False
     assert report.pause_recommended is False
     assert report.applied is False
     assert state["enabled"] is True
