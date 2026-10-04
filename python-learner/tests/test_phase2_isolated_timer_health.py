@@ -805,3 +805,102 @@ def test_timer_health_rejects_symlinked_database_companion(tmp_path):
             pool_address=POOL,
             limit=8,
         )
+
+
+
+def test_timer_health_rejects_critical_activation_drift_after_database_read(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    stable = MODULE.ACTIVATION.inspect_activation()
+    drifted_states = []
+    for item in stable.unit_states:
+        if item.name == MODULE.TIMER_UNIT:
+            drifted_states.append(
+                SimpleNamespace(
+                    name=item.name,
+                    active=False,
+                    enabled=item.enabled,
+                )
+            )
+        else:
+            drifted_states.append(item)
+    drifted = SimpleNamespace(
+        **{
+            **vars(stable),
+            "unit_states": tuple(drifted_states),
+        }
+    )
+    responses = iter((stable, drifted))
+    monkeypatch.setattr(
+        MODULE.ACTIVATION,
+        "inspect_activation",
+        lambda **kwargs: next(responses),
+    )
+
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="activation topology changed during timer-health inspection",
+    ):
+        MODULE.inspect_timer_health(
+            env_file=env_file(tmp_path),
+            data_root=root,
+            now=lambda: datetime(
+                2026, 10, 2, 20, 30, tzinfo=timezone.utc
+            ),
+            runner=systemctl_runner,
+        )
+
+
+def test_timer_health_allows_transient_evidence_service_state_change(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    stable = MODULE.ACTIVATION.inspect_activation()
+    final_states = []
+    for item in stable.unit_states:
+        if item.name == MODULE.EVIDENCE_SERVICE:
+            final_states.append(
+                SimpleNamespace(
+                    name=item.name,
+                    active=True,
+                    enabled=item.enabled,
+                )
+            )
+        else:
+            final_states.append(item)
+    final = SimpleNamespace(
+        **{
+            **vars(stable),
+            "unit_states": tuple(final_states),
+        }
+    )
+    responses = iter((stable, final))
+    monkeypatch.setattr(
+        MODULE.ACTIVATION,
+        "inspect_activation",
+        lambda **kwargs: next(responses),
+    )
+
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    report = MODULE.inspect_timer_health(
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.collection_healthy is True
+    assert report.evidence_service_active is True
