@@ -337,6 +337,53 @@ def _not_ready_report(
     )
 
 
+def _rollback_started_timer(
+    runner: SystemctlRunner,
+    *,
+    failure_step: str,
+    timer_ready: bool,
+) -> Phase2TimerActivationReport:
+    rollback_succeeded = _rollback(runner)
+    if rollback_succeeded:
+        enabled = False
+        active = False
+    else:
+        enabled = _state(runner, "is-enabled")
+        active = _state(runner, "is-active")
+    return Phase2TimerActivationReport(
+        timer_ready=timer_ready,
+        apply_requested=True,
+        applied=False,
+        daemon_reload_performed=True,
+        timer_enabled=enabled,
+        timer_active=active,
+        failure_step=failure_step,
+        rollback_performed=True,
+        rollback_succeeded=rollback_succeeded,
+        detector_services_untouched=True,
+        legacy_services_untouched=True,
+        direct_rpc_called=False,
+        # enable --now already crossed the service-control boundary; even a
+        # successful rollback cannot prove that no timer-triggered work began.
+        timer_may_trigger_rpc_cycles=True,
+        service_control_performed=True,
+    )
+
+
+def _assert_activation_still_valid(
+    *,
+    readiness_snapshot: Any,
+    inputs: _ActivationInputs,
+    readiness_source: tuple[str, str],
+) -> None:
+    READINESS.assert_timer_readiness_snapshot_stable(readiness_snapshot)
+    _assert_activation_inputs_stable(inputs)
+    if _readiness_source_identity() != readiness_source:
+        raise ValueError(
+            "reviewed timer readiness checker changed after timer enable"
+        )
+
+
 def activate_timer(
     *,
     runtime_root: str | Path = "/opt/pio-phase2-runtime",
@@ -468,6 +515,21 @@ def activate_timer(
     failure: str | None = None
     if not _systemctl(runner, "enable", "--now", TIMER_UNIT):
         failure = "ENABLE_NOW"
+
+    if failure is None:
+        try:
+            _assert_activation_still_valid(
+                readiness_snapshot=revalidated_snapshot,
+                inputs=inputs,
+                readiness_source=readiness_source,
+            )
+        except ValueError:
+            return _rollback_started_timer(
+                runner,
+                failure_step="POST_ENABLE_INPUT_DRIFT",
+                timer_ready=False,
+            )
+
     enabled = _state(runner, "is-enabled") if failure is None else False
     if failure is None and not enabled:
         failure = "VERIFY_ENABLED"
@@ -476,6 +538,19 @@ def activate_timer(
         failure = "VERIFY_ACTIVE"
 
     if failure is None:
+        try:
+            _assert_activation_still_valid(
+                readiness_snapshot=revalidated_snapshot,
+                inputs=inputs,
+                readiness_source=readiness_source,
+            )
+        except ValueError:
+            return _rollback_started_timer(
+                runner,
+                failure_step="POST_VERIFY_INPUT_DRIFT",
+                timer_ready=False,
+            )
+
         return Phase2TimerActivationReport(
             timer_ready=True,
             apply_requested=True,
@@ -493,24 +568,10 @@ def activate_timer(
             service_control_performed=True,
         )
 
-    rollback_succeeded = _rollback(runner)
-    return Phase2TimerActivationReport(
-        timer_ready=True,
-        apply_requested=True,
-        applied=False,
-        daemon_reload_performed=True,
-        timer_enabled=False if rollback_succeeded else enabled,
-        timer_active=False if rollback_succeeded else active,
+    return _rollback_started_timer(
+        runner,
         failure_step=failure,
-        rollback_performed=True,
-        rollback_succeeded=rollback_succeeded,
-        detector_services_untouched=True,
-        legacy_services_untouched=True,
-        direct_rpc_called=False,
-        # enable --now may have partially started the timer even when
-        # systemd reports failure, so fail closed in the activity report.
-        timer_may_trigger_rpc_cycles=True,
-        service_control_performed=True,
+        timer_ready=True,
     )
 
 
