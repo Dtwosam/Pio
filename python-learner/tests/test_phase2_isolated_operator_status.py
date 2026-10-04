@@ -471,3 +471,40 @@ def test_operator_status_allows_discovery_cache_age_to_advance(
 
     assert report.state == "HEALTHY"
     assert report.discovery_cache_reusable_now is True
+
+
+
+def test_operator_status_rejects_dependency_identity_drift(
+    monkeypatch,
+):
+    install(monkeypatch)
+    identities = iter(
+        (
+            ("commit-a", "health-sha", "efficiency-sha"),
+            ("commit-b", "health-sha", "efficiency-sha"),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_dependency_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="operator dependencies changed during status inspection",
+    ):
+        MODULE.inspect_operator_status()
+
+
+def test_operator_dependency_capture_rejects_symlink(tmp_path):
+    target = tmp_path / "tool.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    link = tmp_path / "tool-link.py"
+    link.symlink_to(target)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        MODULE._capture_regular_file(
+            link,
+            label="reviewed test tool",
+        )
