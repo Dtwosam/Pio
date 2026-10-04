@@ -429,6 +429,8 @@ def _receipt_record_consistent(
         and audit.get("exit_code") == receipt.get("exit_code")
         and audit.get("execution_failure_category")
         == receipt.get("execution_failure_category")
+        and audit.get("mutation_outcome_summary")
+        == receipt.get("mutation_outcome_summary")
     )
 
 
