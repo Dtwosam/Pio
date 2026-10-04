@@ -68,6 +68,8 @@ def test_upgrade_preflight_accepts_exact_previous_units(tmp_path, monkeypatch):
     )
 
     assert report.ready is True
+    assert report.upgrade_needed is True
+    assert report.installer_needed is False
     assert report.applied is False
     assert {row.status for row in report.units} == {"READY_UPDATE"}
     assert report.daemon_reload_performed is False
@@ -125,6 +127,8 @@ def test_upgrade_allows_missing_peer_for_create_only_installer(tmp_path, monkeyp
     statuses = {row.name: row.status for row in report.units}
     assert statuses[first] == "ALREADY_TARGET"
     assert set(statuses.values()) == {"ALREADY_TARGET", "NOT_INSTALLED"}
+    assert report.upgrade_needed is False
+    assert report.installer_needed is True
     assert report.files_updated == 1
 
 
@@ -183,3 +187,64 @@ def test_upgrade_refuses_live_production_checkout_as_source(tmp_path):
             source_tree="/opt/pio",
             destination=destination,
         )
+
+
+
+def test_upgrade_reports_already_current_without_mutation(tmp_path, monkeypatch):
+    configure_contract(monkeypatch)
+    source = make_source(tmp_path)
+    destination = tmp_path / "systemd"
+    destination.mkdir()
+    for name in OLD_BYTES:
+        shutil.copy2(
+            source / "deploy" / "systemd" / name,
+            destination / name,
+        )
+
+    report = MODULE.inspect_upgrade(
+        source_tree=source,
+        destination=destination,
+    )
+
+    assert report.ready is True
+    assert report.upgrade_needed is False
+    assert report.installer_needed is False
+    assert {row.status for row in report.units} == {"ALREADY_TARGET"}
+
+
+def test_upgrade_rejects_symlinked_source_root(tmp_path):
+    source = tmp_path / "real-source"
+    (source / "deploy" / "systemd").mkdir(parents=True)
+    linked = tmp_path / "linked-source"
+    linked.symlink_to(source, target_is_directory=True)
+    destination = tmp_path / "systemd"
+    destination.mkdir()
+
+    with pytest.raises(ValueError, match="source must not be a symlink"):
+        MODULE.inspect_upgrade(
+            source_tree=linked,
+            destination=destination,
+        )
+
+
+def test_upgrade_rejects_symlinked_destination_root(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    destination = tmp_path / "real-systemd"
+    destination.mkdir()
+    linked = tmp_path / "linked-systemd"
+    linked.symlink_to(destination, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="destination must not be a symlink"):
+        MODULE.inspect_upgrade(
+            source_tree=source,
+            destination=linked,
+        )
+
+
+def test_upgrade_tool_uses_no_follow_descriptor_reads():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "os.open(" in source
