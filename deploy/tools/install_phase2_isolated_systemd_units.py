@@ -219,11 +219,11 @@ _CHECK_SHA256 = hashlib.sha256(_CHECK_CAPTURE.encoded).hexdigest()
 
 UNIT_CONTRACT = {
     "pio-phase2-isolated-prestate-stream@.service":
-        "4270a0c7b3aec8844ae9f06c6a073aa7b9d247af",
+        "0bc468279d8fde628f59e15bd31a9153baf2123e",
     "pio-phase2-isolated-add-detector.service":
-        "fdb5334cca2174421e084813b42052f5399c435b",
+        "eedb3c503848fd1423928b36342351a727fd8f7b",
     "pio-phase2-isolated-evidence-cycle.service":
-        "46fb8d90bbc008702711e14c1de643aecb41c57c",
+        "4baf6473094d3f2d8511755182e23c7479d74b6d",
     "pio-phase2-isolated-evidence-cycle.timer":
         "9b0e757ba3857c2b33d2cecfe94be98f0913a72f",
     "pio-phase2-isolated-rate-limit-pause.service":

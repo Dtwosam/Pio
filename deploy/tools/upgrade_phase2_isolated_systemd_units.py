@@ -15,13 +15,27 @@ from typing import Any
 
 
 UNIT_TRANSITIONS = {
+    "pio-phase2-isolated-prestate-stream@.service": (
+        "4270a0c7b3aec8844ae9f06c6a073aa7b9d247af",
+        "0bc468279d8fde628f59e15bd31a9153baf2123e",
+    ),
+    "pio-phase2-isolated-add-detector.service": (
+        "fdb5334cca2174421e084813b42052f5399c435b",
+        "eedb3c503848fd1423928b36342351a727fd8f7b",
+    ),
     "pio-phase2-isolated-evidence-cycle.service": (
-        "3a82fc92e9785f6dcbde8cfd9c3458a71e34c8e3",
         "46fb8d90bbc008702711e14c1de643aecb41c57c",
+        "4baf6473094d3f2d8511755182e23c7479d74b6d",
     ),
     "pio-phase2-isolated-evidence-cycle.timer": (
         "e6781b6e7f4d235ec170d7f08d8f9c25414100ef",
         "9b0e757ba3857c2b33d2cecfe94be98f0913a72f",
+    ),
+}
+
+ADDITIONAL_PREVIOUS_BLOBS = {
+    "pio-phase2-isolated-evidence-cycle.service": (
+        "3a82fc92e9785f6dcbde8cfd9c3458a71e34c8e3",
     ),
 }
 
@@ -185,7 +199,10 @@ def _inspect(
             status = "SOURCE_DRIFT"
         elif installed_blob == target_blob:
             status = "ALREADY_TARGET"
-        elif installed_blob == previous_blob:
+        elif (
+            installed_blob == previous_blob
+            or installed_blob in ADDITIONAL_PREVIOUS_BLOBS.get(name, ())
+        ):
             status = "READY_UPDATE"
         elif installed_blob is None:
             status = "NOT_INSTALLED"

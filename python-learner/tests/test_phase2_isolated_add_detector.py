@@ -58,7 +58,9 @@ def test_isolated_add_detector_unit_uses_isolated_runtime_and_existing_data():
         "DQ9weJhfiU4iL5LUoeshDrm5KxDHCMiSbnnKJz7buMcf:300"
     ) in source
     assert (
-        "ExecStart=/opt/pio/python-learner/.venv/bin/python "
+        "ExecStart=/usr/bin/env "
+        "PIO_DATABASE_PATH=/opt/pio/data/pio.db "
+        "/opt/pio/python-learner/.venv/bin/python "
         "/opt/pio-phase2-runtime/current/scripts/phase2-add-detector.py"
     ) in source
     assert "Restart=on-failure" in source

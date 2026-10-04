@@ -404,3 +404,48 @@ def test_upgrade_main_prints_structured_json_for_apply_failure(
     assert payload["rollback_succeeded"] is True
     assert payload["rpc_called"] is False
     assert payload["service_control_performed"] is False
+
+
+def test_upgrade_accepts_additional_reviewed_predecessor(
+    tmp_path,
+    monkeypatch,
+):
+    name = "pio-phase2-isolated-evidence-cycle.service"
+    target_bytes = b"[Unit]\nDescription=new target\n"
+    previous_bytes = b"[Unit]\nDescription=previous target\n"
+    older_bytes = b"[Unit]\nDescription=older reviewed target\n"
+
+    target_blob = MODULE.git_blob_sha_bytes(target_bytes)
+    previous_blob = MODULE.git_blob_sha_bytes(previous_bytes)
+    older_blob = MODULE.git_blob_sha_bytes(older_bytes)
+
+    monkeypatch.setattr(
+        MODULE,
+        "UNIT_TRANSITIONS",
+        {name: (previous_blob, target_blob)},
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "ADDITIONAL_PREVIOUS_BLOBS",
+        {name: (older_blob,)},
+    )
+
+    source = tmp_path / "source"
+    source_unit = source / "deploy" / "systemd" / name
+    source_unit.parent.mkdir(parents=True)
+    source_unit.write_bytes(target_bytes)
+
+    destination = tmp_path / "systemd"
+    destination.mkdir()
+    (destination / name).write_bytes(older_bytes)
+
+    report = MODULE.inspect_upgrade(
+        source_tree=source,
+        destination=destination,
+    )
+
+    assert report.ready is True
+    assert report.upgrade_needed is True
+    assert report.installer_needed is False
+    assert len(report.units) == 1
+    assert report.units[0].status == "READY_UPDATE"
