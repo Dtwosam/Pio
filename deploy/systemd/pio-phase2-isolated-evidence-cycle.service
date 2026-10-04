@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 Conflicts=pio-phase2-position-observer.service pio-phase2-evidence-cycle.service
 OnFailure=pio-phase2-isolated-rate-limit-pause.service
-ConditionPathIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
+ConditionFileIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
 
 [Service]
 Type=oneshot
