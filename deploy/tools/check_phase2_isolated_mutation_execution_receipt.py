@@ -26,6 +26,18 @@ _TERMINAL_STATUSES = frozenset(
         "OUTCOME_UNKNOWN_AFTER_LAUNCH",
     }
 )
+_EXECUTION_FAILURE_EVIDENCE_FIELDS = frozenset(
+    {
+        "applied",
+        "failure_step",
+        "rollback_performed",
+        "rollback_succeeded",
+        "files_updated",
+        "ready",
+        "upgrade_needed",
+        "installer_needed",
+    }
+)
 
 _EXPECTED_POST_STATES: dict[str, tuple[str, ...]] = {
     "SOURCE_BOOTSTRAP_REQUIRED": (
@@ -111,6 +123,7 @@ class Phase2MutationReceiptAudit:
     outcome_known: bool
     exit_code: int | None
     execution_failure_category: str | None
+    execution_failure_evidence: dict[str, Any] | None
     audit_integrity_valid: bool
     post_mutation_progress_observed: bool
     post_mutation_verified: bool
@@ -278,6 +291,63 @@ def _bool_field(payload: dict[str, Any], key: str) -> bool:
     return value
 
 
+def _validate_execution_failure_evidence(
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    raw = payload.get("execution_failure_evidence")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("execution receipt failure evidence is invalid")
+
+    unknown = set(raw) - _EXECUTION_FAILURE_EVIDENCE_FIELDS
+    if unknown:
+        raise ValueError("execution receipt failure evidence has unreviewed fields")
+
+    for key, value in raw.items():
+        if key == "failure_step":
+            if value is not None and (
+                not isinstance(value, str) or not value
+            ):
+                raise ValueError(
+                    "execution receipt failure evidence failure_step is invalid"
+                )
+        elif key == "files_updated":
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                raise ValueError(
+                    "execution receipt failure evidence files_updated is invalid"
+                )
+        elif not isinstance(value, bool):
+            raise ValueError(
+                f"execution receipt failure evidence {key} is invalid"
+            )
+
+    exit_code = payload.get("exit_code")
+    category = payload.get("execution_failure_category")
+    if not (
+        payload.get("status") == "COMPLETED"
+        and payload.get("mutation_completed") is True
+        and payload.get("mutation_succeeded") is False
+        and payload.get("outcome_known") is True
+        and isinstance(exit_code, int)
+        and not isinstance(exit_code, bool)
+        and exit_code != 0
+        and payload.get("result_json_valid") is True
+        and payload.get("result_secret_safe") is True
+        and isinstance(category, str)
+        and bool(category)
+    ):
+        raise ValueError(
+            "execution receipt failure evidence is inconsistent with outcome"
+        )
+
+    return dict(raw)
+
+
 def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
     _assert_credential_minimal(payload)
     if payload.get("format_version") != 1:
@@ -379,6 +449,7 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
 
     if not consistent:
         raise ValueError("execution receipt outcome fields are inconsistent")
+    _validate_execution_failure_evidence(payload)
     return str(status), status in _TERMINAL_STATUSES
 
 
@@ -540,6 +611,7 @@ def audit_mutation_execution_receipt(
     execution_failure_category = receipt.get("execution_failure_category")
     if execution_failure_category is not None:
         execution_failure_category = str(execution_failure_category)
+    execution_failure_evidence = _validate_execution_failure_evidence(receipt)
 
     return Phase2MutationReceiptAudit(
         execution_receipt_path=str(receipt_file),
@@ -575,6 +647,7 @@ def audit_mutation_execution_receipt(
         outcome_known=bool(receipt["outcome_known"]),
         exit_code=receipt.get("exit_code"),
         execution_failure_category=execution_failure_category,
+        execution_failure_evidence=execution_failure_evidence,
         audit_integrity_valid=audit_integrity_valid,
         post_mutation_progress_observed=progress_observed,
         post_mutation_verified=verified,
