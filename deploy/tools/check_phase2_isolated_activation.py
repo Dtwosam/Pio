@@ -3,32 +3,253 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 from typing import Any, Callable
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 INSTALL_TOOL = TOOLS_DIR / "install_phase2_isolated_systemd_units.py"
+INSTALL_TOOL_RELATIVE = "deploy/tools/install_phase2_isolated_systemd_units.py"
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
+_MAX_CONFIG_BYTES = 4 * 1024 * 1024
+_MAX_STATE_BYTES = 64 * 1024 * 1024
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+@dataclass(frozen=True)
+class _CapturedFile:
+    path: Path
+    encoded: bytes
+    opened: os.stat_result
+
+
+@dataclass(frozen=True)
+class _PathSnapshot:
+    path: Path
+    kind: str
+    opened: os.stat_result | None
+    symlink_target: str | None
+
+
+def _assert_regular_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after capture") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after capture")
+
+
+def _capture_regular_file(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int,
+    allow_missing: bool = False,
+) -> _CapturedFile | None:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        if allow_missing:
+            return None
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        raise ValueError(f"{label} is missing")
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be resolved") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        raise ValueError(f"{label} is missing")
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            if allow_missing:
+                return None
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size < 0 or before.st_size > max_bytes:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_regular_path_stable(resolved, before, label=label)
+    return _CapturedFile(path=resolved, encoded=encoded, opened=before)
+
+
+def _path_snapshot(path: Path) -> _PathSnapshot:
+    raw = Path(path).expanduser()
+    try:
+        opened = os.lstat(raw)
+    except FileNotFoundError:
+        return _PathSnapshot(raw, "ABSENT", None, None)
+    except OSError as exc:
+        raise ValueError(f"cannot inspect path: {raw}") from exc
+
+    if stat.S_ISLNK(opened.st_mode):
+        try:
+            target = os.readlink(raw)
+        except OSError as exc:
+            raise ValueError(f"cannot inspect symlink: {raw}") from exc
+        return _PathSnapshot(raw, "SYMLINK", opened, target)
+    if stat.S_ISREG(opened.st_mode):
+        return _PathSnapshot(raw, "REGULAR", opened, None)
+    return _PathSnapshot(raw, "OTHER", opened, None)
+
+
+def _assert_path_snapshot_stable(
+    snapshot: _PathSnapshot,
+    *,
+    label: str,
+) -> None:
+    current = _path_snapshot(snapshot.path)
+    if current.kind != snapshot.kind:
+        raise ValueError(f"{label} path changed during activation inspection")
+    if snapshot.kind == "ABSENT":
+        return
+    before = snapshot.opened
+    after = current.opened
+    assert before is not None and after is not None
+    if (
+        before.st_dev != after.st_dev
+        or before.st_ino != after.st_ino
+        or before.st_mode != after.st_mode
+        or before.st_size != after.st_size
+        or before.st_mtime_ns != after.st_mtime_ns
+        or before.st_ctime_ns != after.st_ctime_ns
+        or snapshot.symlink_target != current.symlink_target
+    ):
+        raise ValueError(f"{label} path changed during activation inspection")
+
+
+def _load_captured_tool(path: Path, name: str) -> tuple[Any, _CapturedFile]:
+    captured = _capture_regular_file(
+        path,
+        label="reviewed systemd installer",
+        max_bytes=_MAX_TOOL_BYTES,
+    )
+    assert captured is not None
+    spec = importlib.util.spec_from_file_location(name, captured.path)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed deployment tool: {path}")
+        raise ValueError(f"cannot load reviewed deployment tool: {captured.path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(captured.encoded, str(captured.path), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_regular_path_stable(
+        captured.path,
+        captured.opened,
+        label="reviewed systemd installer",
+    )
+    return module, captured
 
 
-INSTALL = _load(
+INSTALL, _INSTALL_CAPTURE = _load_captured_tool(
     INSTALL_TOOL,
     "phase2_isolated_activation_install_check",
 )
+_INSTALL_SHA256 = hashlib.sha256(_INSTALL_CAPTURE.encoded).hexdigest()
+
+
+def _repo_head() -> str:
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = completed.stdout.strip()
+    if len(commit) not in {40, 64}:
+        raise ValueError("reviewed source commit is invalid")
+    return commit
+
+
+def _install_source_identity() -> tuple[str, str]:
+    _assert_regular_path_stable(
+        _INSTALL_CAPTURE.path,
+        _INSTALL_CAPTURE.opened,
+        label="reviewed systemd installer",
+    )
+    commit = _repo_head()
+    historical = subprocess.run(
+        ["git", "show", f"{commit}:{INSTALL_TOOL_RELATIVE}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+    if historical.returncode != 0:
+        raise ValueError(
+            "reviewed systemd installer is not present at reviewed source commit"
+        )
+    if historical.stdout != _INSTALL_CAPTURE.encoded:
+        raise ValueError(
+            "reviewed systemd installer bytes do not match reviewed source commit"
+        )
+    _assert_regular_path_stable(
+        _INSTALL_CAPTURE.path,
+        _INSTALL_CAPTURE.opened,
+        label="reviewed systemd installer",
+    )
+    return commit, _INSTALL_SHA256
 
 SystemctlRunner = Callable[..., subprocess.CompletedProcess[str]]
 
