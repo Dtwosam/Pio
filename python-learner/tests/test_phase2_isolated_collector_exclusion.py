@@ -19,7 +19,10 @@ TIMER = (
 def test_isolated_evidence_service_conflicts_with_legacy_position_observer():
     text = SERVICE.read_text(encoding="utf-8")
 
-    assert "Conflicts=pio-phase2-position-observer.service" in text
+    assert (
+        "Conflicts=pio-phase2-position-observer.service "
+        "pio-phase2-evidence-cycle.service"
+    ) in text
     assert "OnFailure=pio-phase2-isolated-rate-limit-pause.service" in text
     assert (
         "/opt/pio-phase2-runtime/current/"
@@ -30,7 +33,10 @@ def test_isolated_evidence_service_conflicts_with_legacy_position_observer():
 def test_isolated_evidence_timer_conflicts_with_legacy_position_timer():
     text = TIMER.read_text(encoding="utf-8")
 
-    assert "Conflicts=pio-phase2-position-observer.timer" in text
+    assert (
+        "Conflicts=pio-phase2-position-observer.timer "
+        "pio-phase2-evidence-cycle.timer"
+    ) in text
     assert "OnUnitActiveSec=15min" in text
     assert "Unit=pio-phase2-isolated-evidence-cycle.service" in text
 
