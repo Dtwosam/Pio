@@ -331,3 +331,35 @@ def test_systemd_apply_does_not_clobber_target_that_appears_after_preflight(
     assert target.read_text(encoding="utf-8") == (
         "[Unit]\nDescription=concurrent owner\n"
     )
+
+
+def test_isolated_services_use_supported_executable_conditions():
+    names = (
+        "pio-phase2-isolated-add-detector.service",
+        "pio-phase2-isolated-evidence-cycle.service",
+        "pio-phase2-isolated-prestate-stream.service",
+        "pio-phase2-isolated-prestate-stream@.service",
+    )
+    for name in names:
+        text = (
+            ROOT / "deploy" / "systemd" / name
+        ).read_text(encoding="utf-8")
+        assert "ConditionPathIsExecutable=" not in text
+        assert "ConditionFileIsExecutable=" in text
+
+
+def test_isolated_detector_exec_pins_absolute_database_path():
+    text = (
+        ROOT
+        / "deploy"
+        / "systemd"
+        / "pio-phase2-isolated-add-detector.service"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "ExecStart=/usr/bin/env "
+        "PIO_DATABASE_PATH=/opt/pio/data/pio.db "
+        "/opt/pio/python-learner/.venv/bin/python "
+        "/opt/pio-phase2-runtime/current/scripts/phase2-add-detector.py"
+        in text
+    )
