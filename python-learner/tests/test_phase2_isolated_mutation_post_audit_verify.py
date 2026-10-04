@@ -321,6 +321,47 @@ def test_verifier_detects_receipt_hash_tampering(
     assert report.static_audit_verified is False
 
 
+
+
+def test_verifier_rejects_saved_audit_receipt_outcome_summary_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    install_static_receipt_validation(monkeypatch)
+    _preview, receipt, artifact_path, artifact = build_artifacts(tmp_path)
+
+    receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+    receipt_payload["mutation_outcome_summary"] = {
+        "rollback_performed": True,
+        "rollback_succeeded": True,
+        "files_updated": 0,
+    }
+    write_private(receipt, receipt_payload)
+    receipt_sha = hashlib.sha256(receipt.read_bytes()).hexdigest()
+
+    artifact["execution_receipt_sha256"] = receipt_sha
+    artifact["audit"]["execution_receipt_sha256"] = receipt_sha
+    artifact["audit"]["mutation_outcome_summary"] = {
+        "rollback_performed": True,
+        "rollback_succeeded": False,
+        "files_updated": 1,
+    }
+    artifact["audit_payload_sha256"] = MODULE._canonical_sha256(
+        artifact["audit"]
+    )
+    write_private(artifact_path, artifact)
+
+    report = MODULE.verify_saved_mutation_post_audit(
+        artifact_path=artifact_path,
+        repository_root=ROOT,
+    )
+
+    assert report.execution_receipt_sha256_matches is True
+    assert report.audit_payload_sha256_matches is True
+    assert report.execution_receipt_valid is False
+    assert report.static_audit_verified is False
+
+
 def test_verifier_rejects_noncontract_postcondition_record(
     tmp_path,
     monkeypatch,
