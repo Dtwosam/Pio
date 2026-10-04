@@ -41,16 +41,6 @@ TRACKED_CONTRACT = {
         "a7a6a888e7833fab73ffd564b1ec40195b185f33",
     "deploy/tools/autopause_phase2_isolated_timer.py":
         "e907ce7cccdd28986066027449378682955c04ea",
-    "deploy/systemd/pio-phase2-isolated-prestate-stream@.service":
-        "4270a0c7b3aec8844ae9f06c6a073aa7b9d247af",
-    "deploy/systemd/pio-phase2-isolated-add-detector.service":
-        "fdb5334cca2174421e084813b42052f5399c435b",
-    "deploy/systemd/pio-phase2-isolated-evidence-cycle.service":
-        "46fb8d90bbc008702711e14c1de643aecb41c57c",
-    "deploy/systemd/pio-phase2-isolated-evidence-cycle.timer":
-        "9b0e757ba3857c2b33d2cecfe94be98f0913a72f",
-    "deploy/systemd/pio-phase2-isolated-rate-limit-pause.service":
-        "07e8d4a58243537bea74226da4ab6548bf212496",
     "rust-executor/src/bin/pio-phase2-account-watch.rs":
         "29ebea566a9ed4599b6dbe1a486a2ce509412995",
     "rust-executor/src/main.rs":
