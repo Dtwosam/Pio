@@ -715,3 +715,25 @@ def test_handoff_rejects_dependency_change_during_inspection(monkeypatch):
         MODULE.inspect_lifecycle_handoff(
             source_tree="/tmp/pio-phase2-build/pinned"
         )
+
+
+
+def test_lifecycle_runbooks_cover_unit_upgrade_and_conflict_states():
+    handoff_doc = (
+        ROOT / "deploy/phase2-isolated-lifecycle-handoff.md"
+    ).read_text(encoding="utf-8")
+    command_doc = (
+        ROOT / "deploy/phase2-isolated-next-command.md"
+    ).read_text(encoding="utf-8")
+
+    for value in (
+        "SYSTEMD_UNIT_UPGRADE_READY",
+        "SYSTEMD_UNIT_CONFLICT_REVIEW_REQUIRED",
+        "upgrade_phase2_isolated_systemd_units.py",
+    ):
+        assert value in handoff_doc
+        assert value in command_doc
+
+    assert "UPGRADE_REVIEWED_UNITS" in handoff_doc
+    assert "daemon-reload" in handoff_doc
+    assert "without `--apply`" in command_doc

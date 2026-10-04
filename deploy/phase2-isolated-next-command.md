@@ -12,12 +12,19 @@ tool's **read-only preflight command**.
 If the next reviewed step has a mutation mode, the renderer reports it in
 `mutation_flag`:
 
-- `--apply` for bootstrap, staging, systemd installation, activation, smoke,
-  timer activation, or autopause;
+- `--apply` for bootstrap, staging, systemd installation or exact-predecessor
+  upgrade, activation, smoke, timer activation, or autopause;
 - `--prepare` for isolated runtime preparation.
 
 The mutation flag is never appended to `preflight_argv` or
 `preflight_command`. The renderer never executes either command.
+
+
+For `SYSTEMD_UNIT_UPGRADE_READY`, the rendered preflight invokes
+`upgrade_phase2_isolated_systemd_units.py` without `--apply`. If installed
+unit bytes are modified or otherwise outside the reviewed predecessor/current
+contract, the lifecycle returns `SYSTEMD_UNIT_CONFLICT_REVIEW_REQUIRED`
+instead and no mutation command is rendered.
 
 That means the output can be used to inspect the next gate without silently
 crossing into a Git fetch, build mutation, systemd action, RPC smoke cycle, or
