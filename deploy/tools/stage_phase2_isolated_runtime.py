@@ -416,15 +416,15 @@ def stage_runtime(
                 symlinks=True,
                 copy_function=shutil.copy2,
             )
+            if _binary_identity(_validate_source(source)) != source_binary_identity:
+                raise ValueError(
+                    "prepared source binary identity changed during stage copy"
+                )
             staging_report = _validate_existing_release(staging)
             staging_identity = _binary_identity(staging_report)
             if staging_identity != source_binary_identity:
                 raise ValueError(
                     "staged runtime binary identity does not match prepared source"
-                )
-            if _binary_identity(_validate_source(source)) != source_binary_identity:
-                raise ValueError(
-                    "prepared source binary identity changed during stage copy"
                 )
             if _check_source_identity() != check_identity:
                 raise ValueError(
