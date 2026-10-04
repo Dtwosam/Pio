@@ -290,6 +290,8 @@ MUST_BE_DISABLED = (
     "pio-phase2-isolated-evidence-cycle.timer",
 )
 
+EVIDENCE_SERVICE_UNIT = "pio-phase2-isolated-evidence-cycle.service"
+
 
 @dataclass(frozen=True)
 class ActivationEnvKey:
@@ -553,6 +555,7 @@ def inspect_activation(
     env_file: str | Path = "/etc/pio/pio.env",
     data_root: str | Path = "/opt/pio/data",
     runner: SystemctlRunner = subprocess.run,
+    allow_transient_evidence_service: bool = False,
 ) -> Phase2IsolatedActivationReport:
     install_source_before = _install_source_identity()
 
@@ -740,7 +743,21 @@ def inspect_activation(
     assert_inputs_stable()
     units_after = _all_unit_states(runner=runner)
     assert_inputs_stable()
-    if units_after != units_before:
+
+    def stable_unit_projection(
+        rows: tuple[ActivationUnitState, ...],
+    ) -> tuple[ActivationUnitState, ...]:
+        if not allow_transient_evidence_service:
+            return rows
+        return tuple(
+            item
+            for item in rows
+            if item.name != EVIDENCE_SERVICE_UNIT
+        )
+
+    if stable_unit_projection(units_after) != stable_unit_projection(
+        units_before
+    ):
         raise ValueError(
             "systemd unit state changed during activation inspection"
         )
