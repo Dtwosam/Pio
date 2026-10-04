@@ -417,3 +417,54 @@ def test_stager_rejects_tampered_existing_identity_manifest(
             source_tree=source,
             destination_root=destination,
         )
+
+
+
+def test_stager_rolls_back_current_on_post_switch_identity_drift(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_ready_runtime(tmp_path, monkeypatch)
+    destination = tmp_path / "runtime-root"
+    previous = destination / "releases" / "previous"
+    previous.mkdir(parents=True)
+    current = destination / "current"
+    previous_target = os.path.relpath(previous, destination)
+    current.symlink_to(previous_target)
+
+    real_atomic = MODULE._atomic_current_link
+
+    def switch_then_reformat_identity(dest, release):
+        real_atomic(dest, release)
+        identity_path = MODULE._identity_path(release)
+        payload = __import__("json").loads(
+            identity_path.read_text(encoding="utf-8")
+        )
+        identity_path.write_text(
+            __import__("json").dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(
+        MODULE,
+        "_atomic_current_link",
+        switch_then_reformat_identity,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="runtime identity manifest changed after current-link update",
+    ):
+        MODULE.stage_runtime(
+            source_tree=source,
+            destination_root=destination,
+            apply=True,
+        )
+
+    assert current.is_symlink()
+    assert os.readlink(current) == previous_target
+    assert current.resolve() == previous.resolve()
