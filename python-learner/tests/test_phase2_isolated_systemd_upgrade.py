@@ -1,5 +1,6 @@
 from pathlib import Path
 import importlib.util
+import json
 import shutil
 import stat
 import sys
@@ -278,10 +279,7 @@ def test_upgrade_restores_current_unit_when_publish_verification_fails(
 
     monkeypatch.setattr(MODULE, "_write_target", replace_then_fail)
 
-    with pytest.raises(
-        ValueError,
-        match="injected post-publish verification failure",
-    ):
+    with pytest.raises(MODULE.UnitUpgradeApplyError) as excinfo:
         MODULE.upgrade_units(
             source_tree=source,
             destination=destination,
@@ -289,5 +287,120 @@ def test_upgrade_restores_current_unit_when_publish_verification_fails(
             apply=True,
         )
 
+    report = excinfo.value.report
+    assert report.applied is False
+    assert report.failure_step == f"UPDATE:{first}"
+    assert report.rollback_performed is True
+    assert report.rollback_succeeded is True
+    assert report.files_updated == 0
+    assert report.backup_root is not None
+
     for name, payload in OLD_BYTES.items():
         assert (destination / name).read_bytes() == payload
+
+
+
+def test_upgrade_reports_uncertain_rollback_without_leaking_failure_text(
+    tmp_path,
+    monkeypatch,
+):
+    configure_contract(monkeypatch)
+    source = make_source(tmp_path)
+    destination = tmp_path / "systemd"
+    destination.mkdir()
+    for name, payload in OLD_BYTES.items():
+        path = destination / name
+        path.write_bytes(payload)
+        path.chmod(0o644)
+
+    first = next(iter(OLD_BYTES))
+    real_write = MODULE._write_target
+    injected = False
+    secret = "https://rpc.invalid/?api-key=secret"
+
+    def replace_then_fail(**kwargs):
+        nonlocal injected
+        if kwargs["destination"].name == first and not injected:
+            injected = True
+            real_write(**kwargs)
+            raise ValueError(f"injected failure at {secret}")
+        return real_write(**kwargs)
+
+    def rollback_fails(**kwargs):
+        raise ValueError(f"rollback diagnostic at {secret}")
+
+    monkeypatch.setattr(MODULE, "_write_target", replace_then_fail)
+    monkeypatch.setattr(MODULE, "_restore_backup", rollback_fails)
+
+    with pytest.raises(MODULE.UnitUpgradeApplyError) as excinfo:
+        MODULE.upgrade_units(
+            source_tree=source,
+            destination=destination,
+            backup_dir=tmp_path / "backups",
+            apply=True,
+        )
+
+    report = excinfo.value.report
+    assert report.applied is False
+    assert report.failure_step == f"UPDATE:{first}"
+    assert report.rollback_performed is True
+    assert report.rollback_succeeded is False
+    assert report.files_updated == 1
+    assert secret not in str(excinfo.value)
+    assert secret not in json.dumps(report.to_record())
+    assert (destination / first).read_bytes() == (
+        source / "deploy" / "systemd" / first
+    ).read_bytes()
+
+
+def test_upgrade_main_prints_structured_json_for_apply_failure(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    report = MODULE.UnitUpgradeReport(
+        source_tree=str(source),
+        destination=str(tmp_path / "systemd"),
+        backup_root=str(tmp_path / "backups" / "stamp"),
+        ready=True,
+        upgrade_needed=True,
+        installer_needed=False,
+        applied=False,
+        units=(),
+        files_updated=0,
+        failure_step="UPDATE:unit.service",
+        rollback_performed=True,
+        rollback_succeeded=True,
+        daemon_reload_performed=False,
+        service_control_performed=False,
+        rpc_called=False,
+    )
+
+    def fail(**kwargs):
+        raise MODULE.UnitUpgradeApplyError(report)
+
+    monkeypatch.setattr(MODULE, "upgrade_units", fail)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(TOOL),
+            "--source-tree",
+            str(source),
+            "--apply",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        MODULE.main()
+
+    assert excinfo.value.code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["applied"] is False
+    assert payload["failure_step"] == "UPDATE:unit.service"
+    assert payload["rollback_performed"] is True
+    assert payload["rollback_succeeded"] is True
+    assert payload["rpc_called"] is False
+    assert payload["service_control_performed"] is False

@@ -47,12 +47,24 @@ class UnitUpgradeReport:
     applied: bool
     units: tuple[UnitUpgradeStatus, ...]
     files_updated: int
+    failure_step: str | None
+    rollback_performed: bool
+    rollback_succeeded: bool
     daemon_reload_performed: bool
     service_control_performed: bool
     rpc_called: bool
 
     def to_record(self) -> dict[str, Any]:
         return asdict(self)
+
+
+class UnitUpgradeApplyError(ValueError):
+    def __init__(self, report: UnitUpgradeReport):
+        self.report = report
+        step = report.failure_step or "UNKNOWN"
+        super().__init__(
+            f"isolated Phase-2 unit upgrade apply failed at {step}"
+        )
 
 
 def git_blob_sha_bytes(payload: bytes) -> str:
@@ -229,6 +241,9 @@ def inspect_upgrade(
         applied=False,
         units=rows,
         files_updated=0,
+        failure_step=None,
+        rollback_performed=False,
+        rollback_succeeded=True,
         daemon_reload_performed=False,
         service_control_performed=False,
         rpc_called=False,
@@ -295,6 +310,34 @@ def _write_target(
             temp.unlink()
 
 
+def _restore_backup(
+    *,
+    installed: Path,
+    backup: Path,
+    expected_previous_blob: str,
+    expected_target_blob: str,
+) -> None:
+    backup_bytes, _ = _read_regular(backup, allow_missing=False)
+    assert backup_bytes is not None
+    if git_blob_sha_bytes(backup_bytes) != expected_previous_blob:
+        raise ValueError(f"rollback backup blob mismatch: {installed.name}")
+
+    installed_bytes, _ = _read_regular(installed, allow_missing=False)
+    assert installed_bytes is not None
+    current_blob = git_blob_sha_bytes(installed_bytes)
+    if current_blob == expected_previous_blob:
+        return
+    if current_blob != expected_target_blob:
+        raise ValueError(f"installed unit changed before rollback: {installed.name}")
+
+    _write_target(
+        destination=installed,
+        source_bytes=backup_bytes,
+        expected_previous_blob=expected_target_blob,
+        expected_target_blob=expected_previous_blob,
+    )
+
+
 def upgrade_units(
     *,
     source_tree: str | Path,
@@ -329,6 +372,9 @@ def upgrade_units(
             applied=True,
             units=rows,
             files_updated=0,
+            failure_step=None,
+            rollback_performed=False,
+            rollback_succeeded=True,
             daemon_reload_performed=False,
             service_control_performed=False,
             rpc_called=False,
@@ -338,12 +384,14 @@ def upgrade_units(
     backup_root = Path(backup_dir).resolve() / stamp
     backup_root.mkdir(parents=True, exist_ok=False)
     backups: dict[str, Path] = {}
-    updated: list[UnitUpgradeStatus] = []
+    attempted: list[UnitUpgradeStatus] = []
+    failure_step: str | None = None
 
     try:
         for row in to_update:
             installed = target_dir / row.name
             source_path = source / "deploy" / "systemd" / row.name
+            failure_step = f"BACKUP:{row.name}"
 
             installed_bytes, _ = _read_regular(installed, allow_missing=False)
             source_bytes, _ = _read_regular(source_path, allow_missing=False)
@@ -361,19 +409,16 @@ def upgrade_units(
                 raise ValueError(f"backup blob mismatch: {row.name}")
             backups[row.name] = backup
 
-            try:
-                _write_target(
-                    destination=installed,
-                    source_bytes=source_bytes,
-                    expected_previous_blob=row.expected_previous_blob,
-                    expected_target_blob=row.expected_target_blob,
-                )
-            except Exception:
-                shutil.copy2(backup, installed)
-                _fsync_directory(target_dir)
-                raise
-            updated.append(row)
+            failure_step = f"UPDATE:{row.name}"
+            attempted.append(row)
+            _write_target(
+                destination=installed,
+                source_bytes=source_bytes,
+                expected_previous_blob=row.expected_previous_blob,
+                expected_target_blob=row.expected_target_blob,
+            )
 
+        failure_step = "POST_VALIDATE"
         final = inspect_upgrade(
             source_tree=source,
             destination=target_dir,
@@ -384,13 +429,58 @@ def upgrade_units(
         ):
             raise ValueError("post-upgrade unit validation failed")
     except Exception:
-        for row in reversed(updated):
+        rollback_performed = bool(attempted)
+        rollback_succeeded = True
+        for row in reversed(attempted):
             backup = backups.get(row.name)
-            if backup is None or not backup.exists():
+            if backup is None:
+                rollback_succeeded = False
                 continue
-            shutil.copy2(backup, target_dir / row.name)
-            _fsync_directory(target_dir)
-        raise
+            try:
+                _restore_backup(
+                    installed=target_dir / row.name,
+                    backup=backup,
+                    expected_previous_blob=row.expected_previous_blob,
+                    expected_target_blob=row.expected_target_blob,
+                )
+            except Exception:
+                rollback_succeeded = False
+
+        try:
+            rolled_back = inspect_upgrade(
+                source_tree=source,
+                destination=target_dir,
+            )
+        except Exception:
+            rolled_back = report
+            rollback_succeeded = False
+
+        attempted_names = {row.name for row in attempted}
+        files_still_updated = sum(
+            item.name in attempted_names and item.status == "ALREADY_TARGET"
+            for item in rolled_back.units
+        )
+        if files_still_updated:
+            rollback_succeeded = False
+
+        failure_report = UnitUpgradeReport(
+            source_tree=report.source_tree,
+            destination=report.destination,
+            backup_root=str(backup_root),
+            ready=bool(rolled_back.ready),
+            upgrade_needed=bool(rolled_back.upgrade_needed),
+            installer_needed=bool(rolled_back.installer_needed),
+            applied=False,
+            units=rolled_back.units,
+            files_updated=files_still_updated,
+            failure_step=failure_step or "UNKNOWN",
+            rollback_performed=rollback_performed,
+            rollback_succeeded=rollback_succeeded,
+            daemon_reload_performed=False,
+            service_control_performed=False,
+            rpc_called=False,
+        )
+        raise UnitUpgradeApplyError(failure_report) from None
 
     final = inspect_upgrade(
         source_tree=source,
@@ -408,6 +498,9 @@ def upgrade_units(
         applied=True,
         units=final.units,
         files_updated=len(to_update),
+        failure_step=None,
+        rollback_performed=False,
+        rollback_succeeded=True,
         daemon_reload_performed=False,
         service_control_performed=False,
         rpc_called=False,
@@ -431,14 +524,21 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
 
-    report = upgrade_units(
-        source_tree=args.source_tree,
-        destination=args.destination,
-        backup_dir=args.backup_dir,
-        apply=args.apply,
-    )
+    try:
+        report = upgrade_units(
+            source_tree=args.source_tree,
+            destination=args.destination,
+            backup_dir=args.backup_dir,
+            apply=args.apply,
+        )
+    except UnitUpgradeApplyError as exc:
+        print(json.dumps(exc.report.to_record(), indent=2))
+        raise SystemExit(2) from None
+
     print(json.dumps(report.to_record(), indent=2))
-    if not report.ready:
+    if args.apply and not report.applied:
+        raise SystemExit(2)
+    if not args.apply and not report.ready:
         raise SystemExit(2)
 
 
