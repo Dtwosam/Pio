@@ -223,9 +223,9 @@ UNIT_CONTRACT = {
     "pio-phase2-isolated-add-detector.service":
         "fdb5334cca2174421e084813b42052f5399c435b",
     "pio-phase2-isolated-evidence-cycle.service":
-        "3a82fc92e9785f6dcbde8cfd9c3458a71e34c8e3",
+        "46fb8d90bbc008702711e14c1de643aecb41c57c",
     "pio-phase2-isolated-evidence-cycle.timer":
-        "e6781b6e7f4d235ec170d7f08d8f9c25414100ef",
+        "9b0e757ba3857c2b33d2cecfe94be98f0913a72f",
     "pio-phase2-isolated-rate-limit-pause.service":
         "07e8d4a58243537bea74226da4ab6548bf212496",
 }
