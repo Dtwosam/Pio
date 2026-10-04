@@ -498,6 +498,8 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and exit_code is None
             and execution_sha is None
             and payload.get("completed_at") is None
+            and receipt_failure_category is None
+            and execution_failure_category is None
         )
     elif status == "COMPLETED":
         consistent = bool(
@@ -529,8 +531,9 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and known
             and exit_code is None
             and execution_sha is None
-            and payload.get("failure_category")
+            and receipt_failure_category
             == "EXECUTION_GUARD_FAILED_BEFORE_LAUNCH"
+            and execution_failure_category is None
         )
     else:
         consistent = bool(
@@ -540,8 +543,9 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and not known
             and exit_code is None
             and execution_sha is None
-            and payload.get("failure_category")
+            and receipt_failure_category
             == "MUTATION_RUNNER_FAILED_OUTCOME_UNKNOWN"
+            and execution_failure_category is None
         )
 
     if not consistent:
