@@ -479,7 +479,7 @@ def test_runner_never_launches_preflight_path_directly():
 
 
 def test_preflight_runner_allows_unit_upgrade_tool(monkeypatch):
-    preview = Result(
+    rendered = Preview(
         state="SYSTEMD_UNIT_UPGRADE_READY",
         next_action="UPGRADE_REVIEWED_UNITS",
         next_tool="upgrade_phase2_isolated_systemd_units.py",
@@ -505,7 +505,7 @@ def test_preflight_runner_allows_unit_upgrade_tool(monkeypatch):
     monkeypatch.setattr(
         MODULE.RENDER,
         "render_lifecycle_command",
-        lambda **kwargs: preview,
+        lambda **kwargs: rendered,
     )
 
     def runner(command, **kwargs):
