@@ -47,12 +47,27 @@ class _RuntimeCurrentSnapshot:
 
 
 @dataclass(frozen=True)
+class _RuntimeIdentitySnapshot:
+    runtime_target: Path
+    identity_path: Path
+    identity_opened: os.stat_result
+    identity_sha256: str
+    executor_path: Path
+    executor_opened: os.stat_result
+    executor_sha256: str
+    watch_executor_path: Path
+    watch_executor_opened: os.stat_result
+    watch_executor_sha256: str
+
+
+@dataclass(frozen=True)
 class Phase2TimerReadinessSnapshot:
     smoke_source_commit: str
     smoke_source_sha256: str
     receipt: _CapturedFile | None
     database: _DatabasePathSnapshot | None
     runtime_current: _RuntimeCurrentSnapshot | None
+    runtime_identity: _RuntimeIdentitySnapshot | None
 
 
 def _assert_regular_path_stable(
@@ -200,6 +215,10 @@ class Phase2TimerReadinessReport:
     receipt_regular: bool
     receipt_valid: bool
     receipt_runtime_matches: bool
+    receipt_identity_fields_valid: bool
+    receipt_executor_identity_matches: bool
+    receipt_watch_executor_identity_matches: bool
+    receipt_stage_identity_matches: bool
     receipt_age_seconds: float | None
     receipt_fresh: bool
     receipt_stage_statuses_valid: bool
@@ -278,6 +297,14 @@ def _parse_receipt_bytes(encoded: bytes) -> dict[str, Any] | None:
     except (UnicodeDecodeError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _valid_sha256(value: Any) -> bool:
+    return bool(
+        isinstance(value, str)
+        and len(value) == 64
+        and all(ch in "0123456789abcdef" for ch in value.lower())
+    )
 
 
 def _receipt_stages_valid(payload: dict[str, Any]) -> bool:
@@ -489,6 +516,71 @@ def assert_timer_readiness_snapshot_stable(
         _assert_database_path_stable(snapshot.database)
     if snapshot.runtime_current is not None:
         _assert_runtime_current_stable(snapshot.runtime_current)
+    if snapshot.runtime_identity is not None:
+        identity = snapshot.runtime_identity
+        _assert_regular_path_stable(
+            identity.identity_path,
+            identity.identity_opened,
+            label="staged runtime identity manifest",
+        )
+        (
+            _payload,
+            identity_path,
+            identity_opened,
+            identity_sha256,
+        ) = SMOKE._runtime_identity(identity.runtime_target)
+        if (
+            identity_path != identity.identity_path
+            or identity_sha256 != identity.identity_sha256
+        ):
+            raise ValueError(
+                "staged runtime identity changed after timer-readiness capture"
+            )
+        _assert_regular_path_stable(
+            identity_path,
+            identity_opened,
+            label="staged runtime identity manifest",
+        )
+        (
+            executor_path,
+            executor_opened,
+            executor_sha256,
+        ) = SMOKE._sha256_regular_file(
+            identity.executor_path,
+            label="reviewed isolated executor",
+        )
+        if (
+            executor_path != identity.executor_path
+            or executor_sha256 != identity.executor_sha256
+        ):
+            raise ValueError(
+                "runtime executor identity changed after timer-readiness capture"
+            )
+        _assert_regular_path_stable(
+            executor_path,
+            executor_opened,
+            label="reviewed isolated executor",
+        )
+        (
+            watch_path,
+            watch_opened,
+            watch_sha256,
+        ) = SMOKE._sha256_regular_file(
+            identity.watch_executor_path,
+            label="reviewed account-watch executor",
+        )
+        if (
+            watch_path != identity.watch_executor_path
+            or watch_sha256 != identity.watch_executor_sha256
+        ):
+            raise ValueError(
+                "runtime account-watch identity changed after timer-readiness capture"
+            )
+        _assert_regular_path_stable(
+            watch_path,
+            watch_opened,
+            label="reviewed account-watch executor",
+        )
 
 
 def capture_timer_readiness(
@@ -530,6 +622,12 @@ def capture_timer_readiness(
         else None
     )
 
+    identity_fields_valid = bool(
+        payload
+        and _valid_sha256(payload.get("runtime_executor_sha256"))
+        and _valid_sha256(payload.get("runtime_watch_executor_sha256"))
+        and _valid_sha256(payload.get("stage_identity_sha256"))
+    )
     receipt_valid = bool(
         payload
         and payload.get("format_version") == 1
@@ -539,10 +637,15 @@ def capture_timer_readiness(
         and isinstance(payload.get("progress_evidence_id"), int)
         and int(payload["progress_evidence_id"]) > 0
         and isinstance(payload.get("finished_at"), str)
+        and identity_fields_valid
     )
 
     runtime_snapshot: _RuntimeCurrentSnapshot | None = None
+    runtime_identity_snapshot: _RuntimeIdentitySnapshot | None = None
     runtime_matches = False
+    executor_matches = False
+    watch_executor_matches = False
+    stage_identity_matches = False
     age_seconds: float | None = None
     fresh = False
     stages_valid = False
@@ -558,6 +661,62 @@ def capture_timer_readiness(
         except (OSError, RuntimeError, ValueError):
             runtime_snapshot = None
             runtime_matches = False
+
+        if runtime_matches and runtime_snapshot is not None:
+            try:
+                runtime_target = runtime_snapshot.resolved_target
+                (
+                    identity_payload,
+                    identity_path,
+                    identity_opened,
+                    identity_sha256,
+                ) = SMOKE._runtime_identity(runtime_target)
+                (
+                    executor_path,
+                    executor_opened,
+                    executor_sha256,
+                ) = SMOKE._sha256_regular_file(
+                    runtime_target
+                    / "rust-executor/target/release/meteora-executor",
+                    label="reviewed isolated executor",
+                )
+                (
+                    watch_path,
+                    watch_opened,
+                    watch_sha256,
+                ) = SMOKE._sha256_regular_file(
+                    runtime_target
+                    / "rust-executor/target/release/pio-phase2-account-watch",
+                    label="reviewed account-watch executor",
+                )
+                executor_matches = bool(
+                    payload["runtime_executor_sha256"] == executor_sha256
+                    and identity_payload["executor_sha256"] == executor_sha256
+                )
+                watch_executor_matches = bool(
+                    payload["runtime_watch_executor_sha256"] == watch_sha256
+                    and identity_payload["watch_executor_sha256"] == watch_sha256
+                )
+                stage_identity_matches = bool(
+                    payload["stage_identity_sha256"] == identity_sha256
+                )
+                runtime_identity_snapshot = _RuntimeIdentitySnapshot(
+                    runtime_target=runtime_target,
+                    identity_path=identity_path,
+                    identity_opened=identity_opened,
+                    identity_sha256=identity_sha256,
+                    executor_path=executor_path,
+                    executor_opened=executor_opened,
+                    executor_sha256=executor_sha256,
+                    watch_executor_path=watch_path,
+                    watch_executor_opened=watch_opened,
+                    watch_executor_sha256=watch_sha256,
+                )
+            except (OSError, RuntimeError, ValueError):
+                runtime_identity_snapshot = None
+                executor_matches = False
+                watch_executor_matches = False
+                stage_identity_matches = False
 
         try:
             age_seconds = (
@@ -620,6 +779,10 @@ def capture_timer_readiness(
         and receipt_regular
         and receipt_valid
         and runtime_matches
+        and identity_fields_valid
+        and executor_matches
+        and watch_executor_matches
+        and stage_identity_matches
         and fresh
         and stages_valid
         and row_present
@@ -634,6 +797,10 @@ def capture_timer_readiness(
         receipt_regular=receipt_regular,
         receipt_valid=receipt_valid,
         receipt_runtime_matches=runtime_matches,
+        receipt_identity_fields_valid=identity_fields_valid,
+        receipt_executor_identity_matches=executor_matches,
+        receipt_watch_executor_identity_matches=watch_executor_matches,
+        receipt_stage_identity_matches=stage_identity_matches,
         receipt_age_seconds=age_seconds,
         receipt_fresh=fresh,
         receipt_stage_statuses_valid=stages_valid,
@@ -656,6 +823,7 @@ def capture_timer_readiness(
         receipt=receipt_capture,
         database=database_snapshot,
         runtime_current=runtime_snapshot,
+        runtime_identity=runtime_identity_snapshot,
     )
     assert_timer_readiness_snapshot_stable(snapshot)
     return report, snapshot
