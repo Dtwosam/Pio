@@ -700,6 +700,7 @@ def inspect_timer_health(
         env_file=env_file,
         data_root=data_root,
         runner=runner,
+        allow_transient_evidence_service=True,
     )
     activation_projection = _critical_activation_projection(base)
     if _activation_source_identity() != activation_source:
@@ -862,6 +863,7 @@ def inspect_timer_health(
         env_file=env_file,
         data_root=data_root,
         runner=runner,
+        allow_transient_evidence_service=True,
     )
     if _critical_activation_projection(base_after) != activation_projection:
         raise ValueError(
