@@ -167,6 +167,95 @@ def test_successful_mutation_finalizes_private_receipt(tmp_path, monkeypatch):
     assert "private stderr" not in encoded
 
 
+def test_successful_mutation_persists_only_allowlisted_outcome_summary(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    secret = "https://rpc.invalid/?api-key=secret"
+    execution = Execution(
+        result={
+            "applied": True,
+            "ready": True,
+            "upgrade_needed": False,
+            "installer_needed": False,
+            "files_updated": 2,
+            "daemon_reload_performed": False,
+            "service_control_performed": False,
+            "rpc_called": False,
+            "rollback_performed": False,
+            "failure_step": "SHOULD_NOT_COPY",
+            "source_tree": "/private/source",
+            "diagnostic": secret,
+        },
+    )
+    install_executor(monkeypatch, path, execution)
+    receipt = tmp_path / "receipt.json"
+
+    report = MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        runner=lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, stdout="{}", stderr=secret
+        ),
+        now=times(),
+    )
+
+    expected = {
+        "applied": True,
+        "ready": True,
+        "upgrade_needed": False,
+        "installer_needed": False,
+        "files_updated": 2,
+        "daemon_reload_performed": False,
+        "service_control_performed": False,
+        "rpc_called": False,
+    }
+    assert report.mutation_outcome_summary == expected
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["mutation_outcome_summary"] == expected
+    assert payload["execution_failure_evidence"] is None
+    encoded = receipt.read_text(encoding="utf-8")
+    assert "rollback_performed" not in encoded
+    assert "failure_step" not in encoded
+    assert "/private/source" not in encoded
+    assert secret not in encoded
+
+
+def test_successful_summary_drops_wrong_typed_values(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    execution = Execution(
+        result={
+            "applied": "yes",
+            "ready": False,
+            "files_updated": True,
+            "rpc_called": 0,
+        },
+    )
+    install_executor(monkeypatch, path, execution)
+    receipt = tmp_path / "receipt.json"
+
+    report = MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        runner=lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, stdout="{}", stderr=""
+        ),
+        now=times(),
+    )
+
+    assert report.mutation_outcome_summary == {"ready": False}
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["mutation_outcome_summary"] == {"ready": False}
+
+
 def test_nonzero_mutation_is_still_finalized_as_known_outcome(
     tmp_path,
     monkeypatch,
@@ -198,6 +287,7 @@ def test_nonzero_mutation_is_still_finalized_as_known_outcome(
     payload = json.loads(receipt.read_text(encoding="utf-8"))
     assert payload["outcome_known"] is True
     assert payload["execution_failure_category"] == "MUTATION_NONZERO_EXIT"
+    assert payload["mutation_outcome_summary"] is None
 
 
 def test_failed_mutation_preserves_reviewed_structured_failure_evidence(

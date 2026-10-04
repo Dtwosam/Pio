@@ -240,9 +240,17 @@ Terminal receipt states are:
 - `OUTCOME_UNKNOWN_AFTER_LAUNCH`: the runner was entered but raised before a
   trustworthy structured result was returned.
 
-The receipt stores only hashes/identities and outcome metadata. It hashes the
-mutation argv instead of persisting the raw argv, never persists child stderr,
-and never stores the structured mutation result itself.
+The receipt stores only hashes/identities and narrow outcome metadata. It
+hashes the mutation argv instead of persisting the raw argv, never persists
+child stderr, and never stores the arbitrary structured mutation result itself.
+
+For a known failed mutation, the receipt may preserve the reviewed
+`execution_failure_evidence` fields needed to assess rollback. For a successful
+mutation, it may instead preserve a small `mutation_outcome_summary` containing
+only allowlisted scalar safety facts such as `applied`, `files_updated`,
+readiness booleans, and the reported daemon-reload/service-control/RPC boundary
+booleans. Failure-only rollback fields, paths, diagnostics, unit lists, URLs,
+credentials, and unknown result fields are excluded from the success summary.
 
 By default the receipt is written beside the saved preview as
 `<preview>.execution.json`. Receipt paths inside Pio production, runtime,

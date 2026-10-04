@@ -87,6 +87,11 @@ def build_artifacts(
         "outcome_known": True,
         "exit_code": 0,
         "execution_failure_category": None,
+        "execution_failure_evidence": None,
+        "mutation_outcome_summary": {
+            "applied": True,
+            "files_updated": 1,
+        },
     }
     write_private(receipt, receipt_payload)
     receipt_sha = hashlib.sha256(receipt.read_bytes()).hexdigest()
@@ -130,6 +135,11 @@ def build_artifacts(
         "outcome_known": True,
         "exit_code": 0,
         "execution_failure_category": None,
+        "execution_failure_evidence": None,
+        "mutation_outcome_summary": {
+            "applied": True,
+            "files_updated": 1,
+        },
         "audit_integrity_valid": True,
         "post_mutation_progress_observed": True,
         "post_mutation_verified": True,
@@ -206,6 +216,11 @@ def test_verifier_accepts_intact_saved_post_audit(
     assert report.preview_sha256_matches is True
     assert report.preview_identity_matches is True
     assert report.mutation_argv_sha256_matches is True
+    assert report.execution_failure_evidence is None
+    assert report.mutation_outcome_summary == {
+        "applied": True,
+        "files_updated": 1,
+    }
     assert report.prior_state == "SOURCE_BOOTSTRAP_REQUIRED"
     assert report.prior_next_action == "BOOTSTRAP_PINNED_SOURCE"
     assert report.prior_next_tool == "bootstrap_phase2_isolated_source.py"
@@ -318,6 +333,57 @@ def test_verifier_detects_receipt_hash_tampering(
     )
 
     assert report.execution_receipt_sha256_matches is False
+    assert report.static_audit_verified is False
+
+
+def test_verifier_rejects_saved_audit_outcome_summary_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    install_static_receipt_validation(monkeypatch)
+    _preview, _receipt, artifact_path, artifact = build_artifacts(tmp_path)
+    artifact["audit"]["mutation_outcome_summary"] = {
+        "applied": True,
+        "files_updated": 2,
+    }
+    artifact["audit_payload_sha256"] = MODULE._canonical_sha256(
+        artifact["audit"]
+    )
+    write_private(artifact_path, artifact)
+
+    report = MODULE.verify_saved_mutation_post_audit(
+        artifact_path=artifact_path,
+        repository_root=ROOT,
+    )
+
+    assert report.audit_payload_sha256_matches is True
+    assert report.execution_receipt_sha256_matches is True
+    assert report.execution_receipt_valid is False
+    assert report.static_audit_verified is False
+
+
+def test_verifier_rejects_saved_audit_failure_evidence_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    install_static_receipt_validation(monkeypatch)
+    _preview, _receipt, artifact_path, artifact = build_artifacts(tmp_path)
+    artifact["audit"]["execution_failure_evidence"] = {
+        "rollback_performed": True,
+        "rollback_succeeded": True,
+    }
+    artifact["audit_payload_sha256"] = MODULE._canonical_sha256(
+        artifact["audit"]
+    )
+    write_private(artifact_path, artifact)
+
+    report = MODULE.verify_saved_mutation_post_audit(
+        artifact_path=artifact_path,
+        repository_root=ROOT,
+    )
+
+    assert report.audit_payload_sha256_matches is True
+    assert report.execution_receipt_valid is False
     assert report.static_audit_verified is False
 
 

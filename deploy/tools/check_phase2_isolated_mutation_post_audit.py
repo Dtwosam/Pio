@@ -102,6 +102,8 @@ class Phase2MutationPostAuditVerification:
     preview_sha256_matches: bool
     preview_identity_matches: bool
     mutation_argv_sha256_matches: bool
+    execution_failure_evidence: dict[str, Any] | None
+    mutation_outcome_summary: dict[str, Any] | None
     prior_state: str
     prior_next_action: str
     prior_next_tool: str
@@ -429,6 +431,10 @@ def _receipt_record_consistent(
         and audit.get("exit_code") == receipt.get("exit_code")
         and audit.get("execution_failure_category")
         == receipt.get("execution_failure_category")
+        and audit.get("execution_failure_evidence")
+        == receipt.get("execution_failure_evidence")
+        and audit.get("mutation_outcome_summary")
+        == receipt.get("mutation_outcome_summary")
     )
 
 
@@ -586,6 +592,16 @@ def verify_saved_mutation_post_audit(
         preview_sha256_matches=preview_sha_matches,
         preview_identity_matches=preview_identity_matches,
         mutation_argv_sha256_matches=argv_matches,
+        execution_failure_evidence=(
+            dict(audit["execution_failure_evidence"])
+            if isinstance(audit.get("execution_failure_evidence"), dict)
+            else None
+        ),
+        mutation_outcome_summary=(
+            dict(audit["mutation_outcome_summary"])
+            if isinstance(audit.get("mutation_outcome_summary"), dict)
+            else None
+        ),
         prior_state=str(audit.get("prior_state", "")),
         prior_next_action=str(audit.get("prior_next_action", "")),
         prior_next_tool=str(audit.get("prior_next_tool", "")),
