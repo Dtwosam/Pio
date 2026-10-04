@@ -104,6 +104,7 @@ def test_stager_preflight_is_non_mutating(tmp_path, monkeypatch):
     ).hexdigest()
     assert report.release_executor_sha256 is None
     assert report.release_watch_executor_sha256 is None
+    assert report.identity_sha256 is None
     assert report.applied is False
     assert destination.exists() is False
     assert report.production_tree_modified is False
@@ -135,6 +136,22 @@ def test_stager_installs_versioned_release_and_atomic_current_link(
     assert (
         report.release_watch_executor_sha256
         == report.source_watch_executor_sha256
+    )
+    identity_path = Path(report.identity_path)
+    assert identity_path == release / MODULE._IDENTITY_FILENAME
+    assert identity_path.is_file()
+    assert report.identity_sha256 == hashlib.sha256(
+        identity_path.read_bytes()
+    ).hexdigest()
+    identity = __import__("json").loads(
+        identity_path.read_text(encoding="utf-8")
+    )
+    assert identity["release_path"] == str(release)
+    assert identity["pinned_source_head"] == MODULE.CHECK.PINNED_SOURCE_HEAD
+    assert identity["executor_sha256"] == report.release_executor_sha256
+    assert (
+        identity["watch_executor_sha256"]
+        == report.release_watch_executor_sha256
     )
     assert MODULE.CHECK.inspect_runtime(release).runtime_ready is True
 
@@ -368,3 +385,35 @@ def test_stager_rejects_source_binary_drift_during_copy(
     )
     assert release.exists() is False
     assert (destination / "current").exists() is False
+
+
+
+def test_stager_rejects_tampered_existing_identity_manifest(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_ready_runtime(tmp_path, monkeypatch)
+    destination = tmp_path / "runtime-root"
+    first = MODULE.stage_runtime(
+        source_tree=source,
+        destination_root=destination,
+        apply=True,
+    )
+    identity_path = Path(first.identity_path)
+    payload = __import__("json").loads(
+        identity_path.read_text(encoding="utf-8")
+    )
+    payload["executor_sha256"] = "0" * 64
+    identity_path.write_text(
+        __import__("json").dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="runtime identity manifest does not match staged runtime",
+    ):
+        MODULE.stage_runtime(
+            source_tree=source,
+            destination_root=destination,
+        )
