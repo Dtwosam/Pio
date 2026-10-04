@@ -282,6 +282,52 @@ def _parse_time(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _critical_activation_projection(report: Any) -> tuple[Any, ...]:
+    critical_names = {
+        *ACTIVATION.LEGACY_UNITS,
+        *(
+            name
+            for name in ACTIVATION.NEW_INACTIVE_UNITS
+            if name != EVIDENCE_SERVICE
+        ),
+    }
+    unit_states = {
+        item.name: (
+            bool(item.active),
+            bool(item.enabled),
+        )
+        for item in report.unit_states
+        if item.name in critical_names
+    }
+    return (
+        bool(report.runtime_ready),
+        bool(report.installed_units_exact),
+        bool(report.env_file_regular),
+        tuple(
+            (item.name, bool(item.configured))
+            for item in report.env_keys
+        ),
+        bool(report.position_pool_matches_detector_topology),
+        tuple(
+            (
+                bool(item.exists),
+                bool(item.regular_file),
+                bool(item.symlink),
+            )
+            for item in report.data_files
+        ),
+        bool(report.detector_state_valid),
+        bool(report.detector_cursors_complete),
+        tuple(
+            (
+                name,
+                *unit_states.get(name, (None, None)),
+            )
+            for name in sorted(critical_names)
+        ),
+    )
+
+
 def _systemctl_state(
     unit: str,
     *,
@@ -655,6 +701,7 @@ def inspect_timer_health(
         data_root=data_root,
         runner=runner,
     )
+    activation_projection = _critical_activation_projection(base)
     if _activation_source_identity() != activation_source:
         raise ValueError(
             "reviewed activation checker changed during timer-health inspection"
@@ -808,6 +855,39 @@ def inspect_timer_health(
         )
     if database_snapshot is not None:
         _assert_database_path_stable(database_snapshot)
+
+    base_after = ACTIVATION.inspect_activation(
+        runtime_root=runtime_root,
+        unit_destination=unit_destination,
+        env_file=env_file,
+        data_root=data_root,
+        runner=runner,
+    )
+    if _critical_activation_projection(base_after) != activation_projection:
+        raise ValueError(
+            "Phase-2 activation topology changed during timer-health inspection"
+        )
+    if _activation_source_identity() != activation_source:
+        raise ValueError(
+            "reviewed activation checker changed during timer-health inspection"
+        )
+    if env_capture is not None:
+        _assert_regular_path_stable(
+            env_capture.path,
+            env_capture.opened,
+            label="Phase-2 environment file",
+        )
+    if database_snapshot is not None:
+        _assert_database_path_stable(database_snapshot)
+
+    final_states = {
+        item.name: item
+        for item in base_after.unit_states
+    }
+    final_evidence_service = final_states.get(EVIDENCE_SERVICE)
+    evidence_service_active = bool(
+        final_evidence_service and final_evidence_service.active
+    )
 
     return Phase2TimerHealthReport(
         runtime_ready=bool(base.runtime_ready),
