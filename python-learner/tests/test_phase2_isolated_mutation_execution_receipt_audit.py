@@ -198,6 +198,89 @@ def test_audit_keeps_known_failed_mutation_distinct_from_integrity(
     assert report.post_mutation_verified is False
 
 
+def test_audit_surfaces_reviewed_structured_failure_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview, succeeded=False, exit_code=2)
+    payload["execution_failure_evidence"] = {
+        "applied": False,
+        "failure_step": (
+            "UPDATE:pio-phase2-isolated-evidence-cycle.service"
+        ),
+        "rollback_performed": True,
+        "rollback_succeeded": False,
+        "files_updated": 1,
+        "ready": True,
+        "upgrade_needed": True,
+        "installer_needed": False,
+    }
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    report = MODULE.audit_mutation_execution_receipt(
+        execution_receipt_path=receipt,
+    )
+
+    assert report.audit_integrity_valid is True
+    assert report.mutation_succeeded is False
+    assert report.execution_failure_evidence == payload[
+        "execution_failure_evidence"
+    ]
+    assert report.post_mutation_verified is False
+
+
+def test_audit_rejects_failure_evidence_on_success(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview)
+    payload["execution_failure_evidence"] = {
+        "rollback_performed": True,
+        "rollback_succeeded": True,
+    }
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(monkeypatch, lifecycle())
+
+    with pytest.raises(ValueError, match="failure evidence is inconsistent"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
+def test_audit_rejects_unreviewed_failure_evidence_field(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview, succeeded=False, exit_code=2)
+    payload["execution_failure_evidence"] = {
+        "rollback_performed": True,
+        "diagnostic": "unreviewed",
+    }
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    with pytest.raises(ValueError, match="unreviewed fields"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
 @pytest.mark.parametrize(
     ("status", "launched", "known", "category"),
     (
