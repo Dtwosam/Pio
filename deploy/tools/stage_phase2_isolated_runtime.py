@@ -581,6 +581,16 @@ def stage_runtime(
             raise ValueError(
                 "release binary identity changed after current-link update"
             )
+        final_identity_sha256 = _read_identity_manifest(
+            release,
+            binary_identity=source_binary_identity,
+            check_identity=check_identity,
+            required=True,
+        )
+        if final_identity_sha256 != identity_sha256:
+            raise ValueError(
+                "runtime identity manifest changed after current-link update"
+            )
         if _check_source_identity() != check_identity:
             raise ValueError(
                 "reviewed isolated-runtime validator changed after current-link update"
