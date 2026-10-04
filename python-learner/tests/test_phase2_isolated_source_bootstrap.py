@@ -191,3 +191,92 @@ def test_bootstrap_rejects_secret_bearing_repository_urls(
             destination=tmp_path / "build",
             repository_url=repository_url,
         )
+
+
+
+def test_bootstrap_rejects_reviewed_validator_drift_during_preflight(
+    tmp_path,
+    monkeypatch,
+):
+    identities = iter(
+        (
+            ("commit-a", "validator-sha"),
+            ("commit-b", "validator-sha"),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_check_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="validator changed during bootstrap preflight",
+    ):
+        MODULE.inspect_pinned_source(
+            destination=tmp_path / "build",
+            repository_url="https://github.com/Dtwosam/Pio.git",
+        )
+
+    assert (tmp_path / "build").exists() is False
+
+
+def test_bootstrap_stops_before_publish_if_validator_changes_during_fetch(
+    tmp_path,
+    monkeypatch,
+):
+    origin, head = make_origin(tmp_path, monkeypatch)
+    destination = tmp_path / "build" / head
+    expected_identity = ("commit-a", "validator-sha")
+    monkeypatch.setattr(
+        MODULE,
+        "_check_source_identity",
+        lambda: ("commit-b", "validator-sha"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="validator changed during source fetch",
+    ):
+        MODULE._fetch_exact_source(
+            destination=destination,
+            repository_url=str(origin),
+            pinned_source_head=head,
+            check_identity=expected_identity,
+        )
+
+    assert destination.exists() is False
+
+
+def test_bootstrap_validator_capture_rejects_symlink(tmp_path):
+    target = tmp_path / "check.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    link = tmp_path / "check-link.py"
+    link.symlink_to(target)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        MODULE._capture_regular_file(
+            link,
+            label="reviewed test validator",
+        )
+
+
+def test_bootstrap_report_records_reviewed_validator_identity(
+    tmp_path,
+    monkeypatch,
+):
+    identity = ("reviewed-commit", "reviewed-sha256")
+    monkeypatch.setattr(
+        MODULE,
+        "_check_source_identity",
+        lambda: identity,
+    )
+
+    report = MODULE.inspect_pinned_source(
+        destination=tmp_path / "build",
+        repository_url="https://github.com/Dtwosam/Pio.git",
+    )
+
+    assert report.reviewed_check_commit == identity[0]
+    assert report.reviewed_check_sha256 == identity[1]

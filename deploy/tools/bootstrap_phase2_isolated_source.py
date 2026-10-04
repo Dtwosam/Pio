@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 from typing import Any
@@ -15,21 +17,178 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 CHECK_TOOL = TOOLS_DIR / "check_phase2_isolated_runtime.py"
+CHECK_TOOL_RELATIVE = "deploy/tools/check_phase2_isolated_runtime.py"
 DEFAULT_REPOSITORY_URL = "https://github.com/Dtwosam/Pio.git"
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+@dataclass(frozen=True)
+class _CapturedFile:
+    path: Path
+    encoded: bytes
+    opened: os.stat_result
+
+
+def _assert_file_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after capture") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_mode != opened.st_mode
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after capture")
+
+
+def _capture_regular_file(
+    path: Path,
+    *,
+    label: str,
+) -> _CapturedFile:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_TOOL_BYTES:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_mode != before.st_mode
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_file_path_stable(resolved, before, label=label)
+    return _CapturedFile(
+        path=resolved,
+        encoded=encoded,
+        opened=before,
+    )
+
+
+def _load_captured_check(
+    path: Path,
+    name: str,
+) -> tuple[Any, _CapturedFile]:
+    label = "reviewed isolated-runtime validator"
+    captured = _capture_regular_file(path, label=label)
+    spec = importlib.util.spec_from_file_location(name, captured.path)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed deployment tool: {path}")
+        raise ValueError(f"cannot load reviewed deployment tool: {captured.path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(captured.encoded, str(captured.path), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_file_path_stable(
+        captured.path,
+        captured.opened,
+        label=label,
+    )
+    return module, captured
 
 
-CHECK = _load(CHECK_TOOL, "phase2_pinned_source_runtime_check")
+CHECK, _CHECK_CAPTURE = _load_captured_check(
+    CHECK_TOOL,
+    "phase2_pinned_source_runtime_check",
+)
+_CHECK_SHA256 = hashlib.sha256(_CHECK_CAPTURE.encoded).hexdigest()
+
+
+def _repo_head() -> str:
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ValueError("cannot resolve reviewed bootstrap source commit")
+    commit = completed.stdout.strip()
+    if len(commit) not in {40, 64}:
+        raise ValueError("reviewed bootstrap source commit is invalid")
+    return commit
+
+
+def _check_source_identity() -> tuple[str, str]:
+    _assert_file_path_stable(
+        _CHECK_CAPTURE.path,
+        _CHECK_CAPTURE.opened,
+        label="reviewed isolated-runtime validator",
+    )
+    commit = _repo_head()
+    historical = subprocess.run(
+        ["git", "show", f"{commit}:{CHECK_TOOL_RELATIVE}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+    if historical.returncode != 0:
+        raise ValueError(
+            "reviewed isolated-runtime validator is not present at reviewed source commit"
+        )
+    if historical.stdout != _CHECK_CAPTURE.encoded:
+        raise ValueError(
+            "reviewed isolated-runtime validator bytes do not match reviewed source commit"
+        )
+    _assert_file_path_stable(
+        _CHECK_CAPTURE.path,
+        _CHECK_CAPTURE.opened,
+        label="reviewed isolated-runtime validator",
+    )
+    return commit, _CHECK_SHA256
 
 
 @dataclass(frozen=True)
@@ -37,6 +196,8 @@ class PinnedSourceBootstrapReport:
     destination: str
     repository_url: str
     pinned_source_head: str
+    reviewed_check_commit: str
+    reviewed_check_sha256: str
     observed_source_head: str | None
     tracked_clean: bool
     status: str
@@ -142,6 +303,7 @@ def inspect_pinned_source(
     destination: str | Path,
     repository_url: str = DEFAULT_REPOSITORY_URL,
 ) -> PinnedSourceBootstrapReport:
+    check_identity = _check_source_identity()
     target = _destination(destination)
     _raw_repository_url, safe_repository_url = _validated_repository_url(
         repository_url
@@ -168,10 +330,16 @@ def inspect_pinned_source(
         status = "READY_CREATE"
 
     ready = status in {"READY_CREATE", "ALREADY_PINNED"}
+    if _check_source_identity() != check_identity:
+        raise ValueError(
+            "reviewed isolated-runtime validator changed during bootstrap preflight"
+        )
     return PinnedSourceBootstrapReport(
         destination=str(target),
         repository_url=safe_repository_url,
         pinned_source_head=CHECK.PINNED_SOURCE_HEAD,
+        reviewed_check_commit=check_identity[0],
+        reviewed_check_sha256=check_identity[1],
         observed_source_head=observed_head,
         tracked_clean=tracked_clean,
         status=status,
@@ -192,6 +360,8 @@ def _fetch_exact_source(
     *,
     destination: Path,
     repository_url: str,
+    pinned_source_head: str,
+    check_identity: tuple[str, str],
 ) -> None:
     parent = destination.parent
     parent.mkdir(parents=True, exist_ok=True)
@@ -209,7 +379,7 @@ def _fetch_exact_source(
                 "--quiet",
                 "--depth=1",
                 "origin",
-                CHECK.PINNED_SOURCE_HEAD,
+                pinned_source_head,
             ),
             ("checkout", "--quiet", "--detach", "FETCH_HEAD"),
         )
@@ -220,10 +390,14 @@ def _fetch_exact_source(
                     f"pinned source Git step failed: {args[0]}"
                 )
 
-        if _head(staging) != CHECK.PINNED_SOURCE_HEAD:
+        if _head(staging) != pinned_source_head:
             raise ValueError("fetched source HEAD does not match runtime pin")
         if not _tracked_clean(staging):
             raise ValueError("fetched source tree is not tracked-clean")
+        if _check_source_identity() != check_identity:
+            raise ValueError(
+                "reviewed isolated-runtime validator changed during source fetch"
+            )
         if destination.exists() or destination.is_symlink():
             raise ValueError("source bootstrap destination changed during fetch")
         os.replace(staging, destination)
@@ -238,10 +412,15 @@ def bootstrap_pinned_source(
     repository_url: str = DEFAULT_REPOSITORY_URL,
     apply: bool = False,
 ) -> PinnedSourceBootstrapReport:
+    check_identity = _check_source_identity()
     report = inspect_pinned_source(
         destination=destination,
         repository_url=repository_url,
     )
+    if _check_source_identity() != check_identity:
+        raise ValueError(
+            "reviewed isolated-runtime validator changed after bootstrap preflight"
+        )
     if not apply:
         return report
     if not report.ready:
@@ -249,6 +428,10 @@ def bootstrap_pinned_source(
             f"pinned source bootstrap is not ready: {report.status}"
         )
     if report.status == "ALREADY_PINNED":
+        if _check_source_identity() != check_identity:
+            raise ValueError(
+                "reviewed isolated-runtime validator changed before source reuse"
+            )
         return PinnedSourceBootstrapReport(
             **{
                 **report.to_record(),
@@ -260,10 +443,21 @@ def bootstrap_pinned_source(
         )
 
     target = Path(report.destination)
+    pinned_source_head = str(report.pinned_source_head)
+    if _check_source_identity() != check_identity:
+        raise ValueError(
+            "reviewed isolated-runtime validator changed before source fetch"
+        )
     _fetch_exact_source(
         destination=target,
         repository_url=repository_url,
+        pinned_source_head=pinned_source_head,
+        check_identity=check_identity,
     )
+    if _check_source_identity() != check_identity:
+        raise ValueError(
+            "reviewed isolated-runtime validator changed after source fetch"
+        )
     final = inspect_pinned_source(
         destination=target,
         repository_url=repository_url,
