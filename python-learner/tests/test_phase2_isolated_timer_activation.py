@@ -321,3 +321,79 @@ def test_timer_activation_rechecks_readiness_snapshot_before_enable(
 
     assert "daemon-reload" in systemctl.calls
     assert f"enable:--now:{MODULE.TIMER_UNIT}" not in systemctl.calls
+
+
+
+def test_timer_activation_rolls_back_on_input_drift_after_enable(monkeypatch):
+    install_readiness(monkeypatch)
+    systemctl = Systemctl()
+
+    def guard(_inputs):
+        if f"enable:--now:{MODULE.TIMER_UNIT}" in systemctl.calls:
+            raise ValueError("environment file path changed after capture")
+
+    monkeypatch.setattr(
+        MODULE,
+        "_assert_activation_inputs_stable",
+        guard,
+    )
+
+    report = MODULE.activate_timer(
+        apply=True,
+        runner=systemctl,
+    )
+
+    assert report.applied is False
+    assert report.timer_ready is False
+    assert report.failure_step == "POST_ENABLE_INPUT_DRIFT"
+    assert report.rollback_performed is True
+    assert report.rollback_succeeded is True
+    assert report.timer_enabled is False
+    assert report.timer_active is False
+    assert systemctl.calls[-1] == f"disable:--now:{MODULE.TIMER_UNIT}"
+    assert systemctl.calls.count(
+        f"is-enabled:{MODULE.TIMER_UNIT}"
+    ) == 1
+    assert systemctl.calls.count(
+        f"is-active:{MODULE.TIMER_UNIT}"
+    ) == 1
+
+
+def test_timer_activation_rolls_back_on_drift_after_state_verification(
+    monkeypatch,
+):
+    install_readiness(monkeypatch)
+    systemctl = Systemctl()
+
+    def guard(_inputs):
+        if systemctl.calls.count(
+            f"is-active:{MODULE.TIMER_UNIT}"
+        ) >= 2:
+            raise ValueError("runtime current changed after capture")
+
+    monkeypatch.setattr(
+        MODULE,
+        "_assert_activation_inputs_stable",
+        guard,
+    )
+
+    report = MODULE.activate_timer(
+        apply=True,
+        runner=systemctl,
+    )
+
+    assert report.applied is False
+    assert report.timer_ready is False
+    assert report.failure_step == "POST_VERIFY_INPUT_DRIFT"
+    assert report.rollback_performed is True
+    assert report.rollback_succeeded is True
+    assert report.timer_enabled is False
+    assert report.timer_active is False
+    assert f"enable:--now:{MODULE.TIMER_UNIT}" in systemctl.calls
+    assert systemctl.calls.count(
+        f"is-enabled:{MODULE.TIMER_UNIT}"
+    ) == 2
+    assert systemctl.calls.count(
+        f"is-active:{MODULE.TIMER_UNIT}"
+    ) == 2
+    assert systemctl.calls[-1] == f"disable:--now:{MODULE.TIMER_UNIT}"
