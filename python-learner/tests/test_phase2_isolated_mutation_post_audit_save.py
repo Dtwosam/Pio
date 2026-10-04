@@ -35,6 +35,15 @@ def verified_audit(receipt: Path, **overrides):
         "receipt_terminal": True,
         "audit_integrity_valid": True,
         "mutation_succeeded": True,
+        "receipt_failure_category": None,
+        "execution_failure_category": None,
+        "execution_failure_evidence": None,
+        "mutation_outcome_summary": {
+            "applied": True,
+            "files_updated": 1,
+            "service_control_performed": False,
+            "rpc_called": False,
+        },
         "prior_state": "SOURCE_BOOTSTRAP_REQUIRED",
         "current_state": "SOURCE_PREPARATION_REQUIRED",
         "expected_post_states": ("SOURCE_PREPARATION_REQUIRED",),
@@ -113,6 +122,15 @@ def test_saver_writes_private_verified_audit_atomically(
         report.audit_deploy_surface_files
     )
     assert report.audit_deploy_surface_files > 0
+    assert report.mutation_outcome_summary == {
+        "applied": True,
+        "files_updated": 1,
+        "service_control_performed": False,
+        "rpc_called": False,
+    }
+    assert payload["audit"]["mutation_outcome_summary"] == (
+        report.mutation_outcome_summary
+    )
     assert report.artifact_write_performed is True
     assert report.rpc_called is False
     assert report.database_write_performed is False
@@ -126,6 +144,15 @@ def test_saver_writes_private_verified_audit_atomically(
         ("audit_integrity_valid", False),
         ("receipt_terminal", False),
         ("mutation_succeeded", False),
+        ("receipt_failure_category", "MUTATION_NONZERO_EXIT"),
+        ("execution_failure_category", "MUTATION_NONZERO_EXIT"),
+        (
+            "execution_failure_evidence",
+            {
+                "rollback_performed": True,
+                "rollback_succeeded": True,
+            },
+        ),
         ("post_state_expected", False),
         ("post_mutation_verified", False),
         ("read_only", False),
@@ -151,6 +178,30 @@ def test_saver_refuses_unverified_or_boundary_crossing_audit(
         )
 
     assert not (tmp_path / "execution.json.post-audit.json").exists()
+
+
+def test_saver_allows_success_without_outcome_summary(
+    tmp_path,
+    monkeypatch,
+):
+    execution_receipt = receipt(tmp_path)
+    install(
+        monkeypatch,
+        verified_audit(
+            execution_receipt,
+            mutation_outcome_summary=None,
+        ),
+    )
+
+    report = MODULE.save_verified_mutation_post_audit(
+        execution_receipt_path=execution_receipt,
+    )
+
+    assert report.mutation_outcome_summary is None
+    payload = json.loads(
+        Path(report.output_path).read_text(encoding="utf-8")
+    )
+    assert payload["audit"]["mutation_outcome_summary"] is None
 
 
 def test_saver_refuses_existing_output(tmp_path, monkeypatch):
