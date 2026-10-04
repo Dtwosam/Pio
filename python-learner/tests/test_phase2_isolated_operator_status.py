@@ -263,3 +263,146 @@ def test_operator_status_does_not_treat_stale_autopause_failure_as_incident(
     assert report.autopause_service_failed is True
     assert report.autopause_failure_relevant is False
     assert report.attention_required is False
+
+
+
+def test_operator_status_rejects_timer_health_drift_between_snapshots(
+    monkeypatch,
+):
+    health_reports = iter(
+        (
+            health(),
+            health(
+                timer_active=False,
+                timer_enabled=False,
+                timer_active_enabled=False,
+                collection_healthy=False,
+            ),
+        )
+    )
+    stable_efficiency = efficiency()
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: next(health_reports),
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: stable_efficiency,
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="operator inputs changed during status inspection",
+    ):
+        MODULE.inspect_operator_status()
+
+
+def test_operator_status_rejects_rpc_efficiency_drift_between_snapshots(
+    monkeypatch,
+):
+    stable_health = health()
+    efficiency_reports = iter(
+        (
+            efficiency(),
+            efficiency(
+                repeated_provider_rejection=True,
+                latest_cycle_recent=True,
+                pause_recommended=True,
+                attention_required=True,
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: stable_health,
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: next(efficiency_reports),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="operator inputs changed during status inspection",
+    ):
+        MODULE.inspect_operator_status()
+
+
+def test_operator_status_rejects_autopause_state_drift(
+    monkeypatch,
+):
+    stable_health = health()
+    stable_efficiency = efficiency()
+    unit_states = iter((False, True))
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: stable_health,
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: stable_efficiency,
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: next(unit_states),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="operator inputs changed during status inspection",
+    ):
+        MODULE.inspect_operator_status()
+
+
+def test_operator_status_allows_age_only_progress_between_snapshots(
+    monkeypatch,
+):
+    health_reports = iter(
+        (
+            health(latest_cycle_age_seconds=10.0),
+            health(latest_cycle_age_seconds=10.2),
+        )
+    )
+    efficiency_reports = iter(
+        (
+            efficiency(latest_cycle_age_seconds=10.0),
+            efficiency(latest_cycle_age_seconds=10.2),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: next(health_reports),
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: next(efficiency_reports),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: False,
+    )
+
+    report = MODULE.inspect_operator_status()
+
+    assert report.state == "HEALTHY"
+    assert report.attention_required is False
