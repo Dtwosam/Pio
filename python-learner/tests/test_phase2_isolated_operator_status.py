@@ -263,3 +263,248 @@ def test_operator_status_does_not_treat_stale_autopause_failure_as_incident(
     assert report.autopause_service_failed is True
     assert report.autopause_failure_relevant is False
     assert report.attention_required is False
+
+
+
+def test_operator_status_rejects_timer_health_drift_between_snapshots(
+    monkeypatch,
+):
+    health_reports = iter(
+        (
+            health(),
+            health(
+                timer_active=False,
+                timer_enabled=False,
+                timer_active_enabled=False,
+                collection_healthy=False,
+            ),
+        )
+    )
+    stable_efficiency = efficiency()
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: next(health_reports),
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: stable_efficiency,
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="operator inputs changed during status inspection",
+    ):
+        MODULE.inspect_operator_status()
+
+
+def test_operator_status_rejects_rpc_efficiency_drift_between_snapshots(
+    monkeypatch,
+):
+    stable_health = health()
+    efficiency_reports = iter(
+        (
+            efficiency(),
+            efficiency(
+                repeated_provider_rejection=True,
+                latest_cycle_recent=True,
+                pause_recommended=True,
+                attention_required=True,
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: stable_health,
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: next(efficiency_reports),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="operator inputs changed during status inspection",
+    ):
+        MODULE.inspect_operator_status()
+
+
+def test_operator_status_rejects_autopause_state_drift(
+    monkeypatch,
+):
+    stable_health = health()
+    stable_efficiency = efficiency()
+    unit_states = iter((False, True))
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: stable_health,
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: stable_efficiency,
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: next(unit_states),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="operator inputs changed during status inspection",
+    ):
+        MODULE.inspect_operator_status()
+
+
+def test_operator_status_allows_age_only_progress_between_snapshots(
+    monkeypatch,
+):
+    health_reports = iter(
+        (
+            health(latest_cycle_age_seconds=10.0),
+            health(latest_cycle_age_seconds=10.2),
+        )
+    )
+    efficiency_reports = iter(
+        (
+            efficiency(latest_cycle_age_seconds=10.0),
+            efficiency(latest_cycle_age_seconds=10.2),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: next(health_reports),
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: next(efficiency_reports),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: False,
+    )
+
+    report = MODULE.inspect_operator_status()
+
+    assert report.state == "HEALTHY"
+    assert report.attention_required is False
+
+
+
+def test_operator_status_allows_discovery_cache_age_to_advance(
+    monkeypatch,
+):
+    stable_health = health()
+    first_cache = Report(
+        path="/opt/pio/data/phase2-position-discovery-cache.json",
+        exists=True,
+        regular_file=True,
+        symlink=False,
+        format_valid=True,
+        pool_matches=True,
+        complete=True,
+        captured_at="2026-10-04T10:00:00+00:00",
+        age_seconds=100.0,
+        max_age_seconds=3600,
+        reusable_now=True,
+        positions_found=10,
+        positions_returned=10,
+        positions_cached=10,
+    )
+    second_cache = Report(
+        path="/opt/pio/data/phase2-position-discovery-cache.json",
+        exists=True,
+        regular_file=True,
+        symlink=False,
+        format_valid=True,
+        pool_matches=True,
+        complete=True,
+        captured_at="2026-10-04T10:00:00+00:00",
+        age_seconds=100.4,
+        max_age_seconds=3600,
+        reusable_now=True,
+        positions_found=10,
+        positions_returned=10,
+        positions_cached=10,
+    )
+    efficiency_reports = iter(
+        (
+            efficiency(discovery_cache=first_cache),
+            efficiency(discovery_cache=second_cache),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: stable_health,
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: next(efficiency_reports),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: False,
+    )
+
+    report = MODULE.inspect_operator_status()
+
+    assert report.state == "HEALTHY"
+    assert report.discovery_cache_reusable_now is True
+
+
+
+def test_operator_status_rejects_dependency_identity_drift(
+    monkeypatch,
+):
+    install(monkeypatch)
+    identities = iter(
+        (
+            ("commit-a", "health-sha", "efficiency-sha"),
+            ("commit-b", "health-sha", "efficiency-sha"),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_dependency_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="operator dependencies changed during status inspection",
+    ):
+        MODULE.inspect_operator_status()
+
+
+def test_operator_dependency_capture_rejects_symlink(tmp_path):
+    target = tmp_path / "tool.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    link = tmp_path / "tool-link.py"
+    link.symlink_to(target)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        MODULE._capture_regular_file(
+            link,
+            label="reviewed test tool",
+        )
