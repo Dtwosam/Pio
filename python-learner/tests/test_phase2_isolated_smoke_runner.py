@@ -6,6 +6,9 @@ from pathlib import Path
 import stat
 import subprocess
 import sys
+
+import pytest
+
 from types import SimpleNamespace
 
 
@@ -309,3 +312,170 @@ def test_smoke_refuses_symlinked_receipt_on_success(
     else:
         raise AssertionError("expected symlink receipt rejection")
     assert target.read_text(encoding="utf-8") == "do not replace"
+
+
+
+def test_smoke_runner_executes_captured_readiness_bytes():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "spec.loader.exec_module(module)" not in source
+    assert "def _read_env(" not in source
+    assert "def _parse_env_bytes(" in source
+
+
+def test_smoke_aborts_if_readiness_identity_changes_before_launch(
+    tmp_path,
+    monkeypatch,
+):
+    install_readiness(monkeypatch, ready=True)
+    runtime_root, _ = runtime_tree(tmp_path)
+    python = python_executable(tmp_path)
+    env = env_file(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "pio.db").write_text("db", encoding="utf-8")
+    calls = []
+
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_readiness_source_identity",
+        lambda: next(identities),
+    )
+
+    def runner(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("runner must not execute")
+
+    with pytest.raises(
+        ValueError,
+        match="readiness source changed before launch",
+    ):
+        MODULE.run_smoke(
+            runtime_root=runtime_root,
+            env_file=env,
+            data_root=data,
+            python_executable=python,
+            receipt_path=data / "receipt.json",
+            apply=True,
+            runner=runner,
+        )
+
+    assert calls == []
+
+
+def test_smoke_aborts_if_env_path_is_replaced_after_capture(
+    tmp_path,
+    monkeypatch,
+):
+    install_readiness(monkeypatch, ready=True)
+    runtime_root, _ = runtime_tree(tmp_path)
+    python = python_executable(tmp_path)
+    env = env_file(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "pio.db").write_text("db", encoding="utf-8")
+    calls = []
+
+    real_parse = MODULE._parse_env_bytes
+
+    def replace_after_parse(encoded):
+        parsed = real_parse(encoded)
+        replacement = env.with_name("replacement.env")
+        replacement.write_text(
+            "SOLANA_RPC_URL=https://different.invalid\n"
+            "PIO_PHASE2_POSITION_POOL=pool\n",
+            encoding="utf-8",
+        )
+        replacement.replace(env)
+        return parsed
+
+    monkeypatch.setattr(MODULE, "_parse_env_bytes", replace_after_parse)
+
+    def runner(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("runner must not execute")
+
+    with pytest.raises(
+        ValueError,
+        match="environment file path changed after capture",
+    ):
+        MODULE.run_smoke(
+            runtime_root=runtime_root,
+            env_file=env,
+            data_root=data,
+            python_executable=python,
+            receipt_path=data / "receipt.json",
+            apply=True,
+            runner=runner,
+        )
+
+    assert calls == []
+
+
+def test_smoke_aborts_if_runtime_current_changes_before_launch(
+    tmp_path,
+    monkeypatch,
+):
+    install_readiness(monkeypatch, ready=True)
+    runtime_root, _ = runtime_tree(tmp_path)
+    python = python_executable(tmp_path)
+    env = env_file(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "pio.db").write_text("db", encoding="utf-8")
+    calls = []
+
+    other = runtime_root / "releases" / "other"
+    other_executor = other / "rust-executor/target/release/meteora-executor"
+    other_executor.parent.mkdir(parents=True)
+    other_executor.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    other_executor.chmod(
+        other_executor.stat().st_mode | stat.S_IXUSR
+    )
+    (other / "python-learner/src").mkdir(parents=True)
+
+    real_parse = MODULE._parse_env_bytes
+
+    def switch_runtime_after_parse(encoded):
+        parsed = real_parse(encoded)
+        current = runtime_root / "current"
+        current.unlink()
+        current.symlink_to(Path("releases") / "other")
+        return parsed
+
+    monkeypatch.setattr(
+        MODULE,
+        "_parse_env_bytes",
+        switch_runtime_after_parse,
+    )
+
+    def runner(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("runner must not execute")
+
+    with pytest.raises(
+        ValueError,
+        match="runtime current target changed before smoke launch",
+    ):
+        MODULE.run_smoke(
+            runtime_root=runtime_root,
+            env_file=env,
+            data_root=data,
+            python_executable=python,
+            receipt_path=data / "receipt.json",
+            apply=True,
+            runner=runner,
+        )
+
+    assert calls == []
