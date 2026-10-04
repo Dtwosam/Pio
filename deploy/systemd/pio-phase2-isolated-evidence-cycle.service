@@ -2,7 +2,7 @@
 Description=Pio Phase 2 isolated bounded evidence collection
 After=network-online.target
 Wants=network-online.target
-Conflicts=pio-phase2-position-observer.service
+Conflicts=pio-phase2-position-observer.service pio-phase2-evidence-cycle.service
 OnFailure=pio-phase2-isolated-rate-limit-pause.service
 ConditionPathIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
 
