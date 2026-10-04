@@ -111,6 +111,7 @@ class Phase2MutationReceiptAudit:
     outcome_known: bool
     exit_code: int | None
     execution_failure_category: str | None
+    mutation_outcome_summary: dict[str, Any] | None
     audit_integrity_valid: bool
     post_mutation_progress_observed: bool
     post_mutation_verified: bool
@@ -278,6 +279,80 @@ def _bool_field(payload: dict[str, Any], key: str) -> bool:
     return value
 
 
+_OUTCOME_BOOL_FIELDS = frozenset(
+    {
+        "applied",
+        "rollback_performed",
+        "rollback_succeeded",
+        "upgrade_needed",
+        "installer_needed",
+        "ready",
+        "daemon_reload_performed",
+        "service_control_performed",
+        "rpc_called",
+    }
+)
+_OUTCOME_INT_FIELDS = frozenset({"files_updated"})
+_OUTCOME_TEXT_FIELDS = frozenset({"failure_step"})
+_OUTCOME_FIELDS = (
+    _OUTCOME_BOOL_FIELDS
+    | _OUTCOME_INT_FIELDS
+    | _OUTCOME_TEXT_FIELDS
+)
+_OUTCOME_TEXT_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789._:-@"
+)
+
+
+def _validate_outcome_summary(
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    raw = payload.get("mutation_outcome_summary")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("execution receipt mutation outcome summary is invalid")
+
+    unknown = set(raw) - _OUTCOME_FIELDS
+    if unknown:
+        raise ValueError(
+            "execution receipt mutation outcome summary has unknown fields"
+        )
+
+    for key in _OUTCOME_BOOL_FIELDS & set(raw):
+        if not isinstance(raw[key], bool):
+            raise ValueError(
+                f"execution receipt mutation outcome {key} is invalid"
+            )
+
+    for key in _OUTCOME_INT_FIELDS & set(raw):
+        value = raw[key]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+        ):
+            raise ValueError(
+                f"execution receipt mutation outcome {key} is invalid"
+            )
+
+    if "failure_step" in raw:
+        value = raw["failure_step"]
+        if value is not None and (
+            not isinstance(value, str)
+            or not value
+            or len(value) > 256
+            or any(char not in _OUTCOME_TEXT_CHARS for char in value)
+        ):
+            raise ValueError(
+                "execution receipt mutation outcome failure_step is invalid"
+            )
+
+    return dict(raw)
+
+
 def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
     _assert_credential_minimal(payload)
     if payload.get("format_version") != 1:
@@ -326,6 +401,8 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
     ):
         raise ValueError("execution receipt execution_report_sha256 is invalid")
 
+    outcome_summary = _validate_outcome_summary(payload)
+
     launched = payload["mutation_launched"]
     completed = payload["mutation_completed"]
     succeeded = payload["mutation_succeeded"]
@@ -340,6 +417,7 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and not known
             and exit_code is None
             and execution_sha is None
+            and outcome_summary is None
             and payload.get("completed_at") is None
         )
     elif status == "COMPLETED":
@@ -362,6 +440,7 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and known
             and exit_code is None
             and execution_sha is None
+            and outcome_summary is None
             and payload.get("failure_category")
             == "EXECUTION_GUARD_FAILED_BEFORE_LAUNCH"
         )
@@ -373,6 +452,7 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and not known
             and exit_code is None
             and execution_sha is None
+            and outcome_summary is None
             and payload.get("failure_category")
             == "MUTATION_RUNNER_FAILED_OUTCOME_UNKNOWN"
         )
@@ -575,6 +655,7 @@ def audit_mutation_execution_receipt(
         outcome_known=bool(receipt["outcome_known"]),
         exit_code=receipt.get("exit_code"),
         execution_failure_category=execution_failure_category,
+        mutation_outcome_summary=_validate_outcome_summary(receipt),
         audit_integrity_valid=audit_integrity_valid,
         post_mutation_progress_observed=progress_observed,
         post_mutation_verified=verified,
