@@ -325,6 +325,7 @@ class Phase2IsolatedActivationReport:
     env_file: str
     env_file_regular: bool
     env_keys: tuple[ActivationEnvKey, ...]
+    position_pool_address: str
     position_pool_matches_detector_topology: bool
     detector_pool_count: int
     detector_state_valid: bool
@@ -771,6 +772,7 @@ def inspect_activation(
         env_file=str(env_path),
         env_file_regular=env_regular,
         env_keys=env_keys,
+        position_pool_address=position_pool,
         position_pool_matches_detector_topology=pool_matches,
         detector_pool_count=len(detector_pools),
         detector_state_valid=detector_state_valid,
