@@ -200,3 +200,90 @@ def test_stager_rejects_symlinked_source_and_destination(
             source_tree=source,
             destination_root=destination_link,
         )
+
+
+
+def test_stager_rejects_reviewed_validator_drift_before_preflight_return(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_ready_runtime(tmp_path, monkeypatch)
+    destination = tmp_path / "runtime-root"
+    identities = iter(
+        (
+            ("commit-a", "validator-sha"),
+            ("commit-b", "validator-sha"),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_check_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="validator changed during stage preflight",
+    ):
+        MODULE.stage_runtime(
+            source_tree=source,
+            destination_root=destination,
+        )
+
+    assert destination.exists() is False
+
+
+def test_stager_rolls_back_current_link_on_post_switch_validator_drift(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_ready_runtime(tmp_path, monkeypatch)
+    destination = tmp_path / "runtime-root"
+    previous = destination / "releases" / "previous"
+    previous.mkdir(parents=True)
+    current = destination / "current"
+    previous_target = os.path.relpath(previous, destination)
+    current.symlink_to(previous_target)
+
+    stable = ("commit-a", "validator-sha")
+    identities = iter(
+        (
+            stable,
+            stable,
+            stable,
+            stable,
+            ("commit-b", "validator-sha"),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_check_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="validator changed after current-link update",
+    ):
+        MODULE.stage_runtime(
+            source_tree=source,
+            destination_root=destination,
+            apply=True,
+        )
+
+    assert current.is_symlink()
+    assert os.readlink(current) == previous_target
+    assert current.resolve() == previous.resolve()
+
+
+def test_stager_validator_capture_rejects_symlink(tmp_path):
+    target = tmp_path / "check.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    link = tmp_path / "check-link.py"
+    link.symlink_to(target)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        MODULE._capture_regular_file(
+            link,
+            label="reviewed test validator",
+        )
