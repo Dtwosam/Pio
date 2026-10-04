@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from pathlib import Path
 import shutil
@@ -161,6 +162,55 @@ def test_runtime_checker_rejects_same_content_path_replacement(
             replacement = target.with_name("main.rs.replacement")
             replacement.write_bytes(target.read_bytes())
             replacement.replace(target)
+        return real_dirty_paths(runtime)
+
+    monkeypatch.setattr(
+        MODULE,
+        "_dirty_paths",
+        replace_before_final_recheck,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="path changed during runtime inspection",
+    ):
+        MODULE.inspect_runtime(source)
+
+
+
+def test_runtime_checker_reports_executor_sha256(tmp_path, monkeypatch):
+    source = make_runtime(tmp_path, monkeypatch)
+    executor = source / MODULE.EXECUTOR_RELATIVE
+    watcher = source / MODULE.WATCH_EXECUTOR_RELATIVE
+
+    report = MODULE.inspect_runtime(source)
+
+    assert report.executor_sha256 == hashlib.sha256(
+        executor.read_bytes()
+    ).hexdigest()
+    assert report.watch_executor_sha256 == hashlib.sha256(
+        watcher.read_bytes()
+    ).hexdigest()
+    assert report.runtime_ready is True
+
+
+def test_runtime_checker_rejects_same_content_executor_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_runtime(tmp_path, monkeypatch)
+    executor = source / MODULE.EXECUTOR_RELATIVE
+    real_dirty_paths = MODULE._dirty_paths
+    calls = 0
+
+    def replace_before_final_recheck(runtime):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            replacement = executor.with_name("meteora-executor.replacement")
+            replacement.write_bytes(executor.read_bytes())
+            replacement.chmod(executor.stat().st_mode)
+            replacement.replace(executor)
         return real_dirty_paths(runtime)
 
     monkeypatch.setattr(
