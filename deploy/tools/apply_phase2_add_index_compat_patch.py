@@ -5,7 +5,9 @@ import argparse
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 from typing import Any
 
@@ -15,7 +17,8 @@ PATCH_PATH = (
     / "patches"
     / "phase2-production-add-index-compat.patch"
 )
-EXPECTED_PATCH_SHA256 = "2b494423d864afa2610043774afaf55022f88a83"
+EXPECTED_PATCH_BLOB = "2b494423d864afa2610043774afaf55022f88a83"
+_MAX_PATCH_BYTES = 4 * 1024 * 1024
 
 FILE_CONTRACT = {
     "python-learner/src/meteora_learner/calibration_queue.py": (
@@ -34,6 +37,15 @@ FILE_CONTRACT = {
 
 
 @dataclass(frozen=True)
+class CapturedPatch:
+    path: Path
+    encoded: bytes
+    opened: os.stat_result
+    blob_sha1: str
+    sha256: str
+
+
+@dataclass(frozen=True)
 class CompatFile:
     path: str
     expected_base_blob: str
@@ -46,6 +58,7 @@ class CompatFile:
 class CompatPatchReport:
     source_tree: str
     patch: str
+    patch_blob_sha1: str
     patch_sha256: str
     status: str
     ready: bool
@@ -59,16 +72,103 @@ class CompatPatchReport:
         return asdict(self)
 
 
-def git_blob_sha(path: Path) -> str | None:
-    if not path.is_file():
-        return None
-    payload = path.read_bytes()
+def _git_blob_bytes(payload: bytes) -> str:
     header = f"blob {len(payload)}\0".encode()
     return hashlib.sha1(header + payload).hexdigest()
 
 
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def git_blob_sha(path: Path) -> str | None:
+    if path.is_symlink() or not path.is_file():
+        return None
+    payload = path.read_bytes()
+    return _git_blob_bytes(payload)
+
+
+def _assert_patch_path_stable(patch: CapturedPatch) -> None:
+    try:
+        current = os.stat(patch.path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError("reviewed compatibility patch path changed after capture") from exc
+    before = patch.opened
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != before.st_dev
+        or current.st_ino != before.st_ino
+        or current.st_mode != before.st_mode
+        or current.st_size != before.st_size
+        or current.st_mtime_ns != before.st_mtime_ns
+        or current.st_ctime_ns != before.st_ctime_ns
+    ):
+        raise ValueError("reviewed compatibility patch path changed after capture")
+
+
+def _capture_patch() -> CapturedPatch:
+    raw = Path(PATCH_PATH).expanduser()
+    if raw.is_symlink():
+        raise ValueError("reviewed compatibility patch must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(
+            f"reviewed compatibility patch is missing: {raw}"
+        ) from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(
+            "reviewed compatibility patch cannot be opened safely"
+        ) from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("reviewed compatibility patch must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_PATCH_BYTES:
+            raise ValueError("reviewed compatibility patch size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_mode != before.st_mode
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError("reviewed compatibility patch changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError("reviewed compatibility patch changed while reading")
+
+    captured = CapturedPatch(
+        path=resolved,
+        encoded=encoded,
+        opened=before,
+        blob_sha1=_git_blob_bytes(encoded),
+        sha256=hashlib.sha256(encoded).hexdigest(),
+    )
+    _assert_patch_path_stable(captured)
+    if captured.blob_sha1 != EXPECTED_PATCH_BLOB:
+        raise ValueError(
+            "reviewed compatibility patch bytes do not match pinned Git blob"
+        )
+    return captured
 
 
 def _source_tree(value: str | Path) -> Path:
@@ -78,15 +178,6 @@ def _source_tree(value: str | Path) -> Path:
     if not source.is_dir():
         raise ValueError(f"source tree is missing: {source}")
     return source
-
-
-def _patch() -> Path:
-    patch = PATCH_PATH.resolve()
-    if patch.is_symlink() or not patch.is_file():
-        raise ValueError(f"reviewed compatibility patch is missing: {patch}")
-    if git_blob_sha(patch) != EXPECTED_PATCH_SHA256:
-        raise ValueError("reviewed compatibility patch bytes do not match pinned Git blob")
-    return patch
 
 
 def _inspect(source: Path) -> tuple[CompatFile, ...]:
@@ -119,15 +210,20 @@ def _inspect(source: Path) -> tuple[CompatFile, ...]:
     return tuple(rows)
 
 
-def _git_apply(source: Path, patch: Path, *, check: bool) -> None:
+def _git_apply(
+    source: Path,
+    patch_bytes: bytes,
+    *,
+    check: bool,
+) -> None:
     command = ["git", "apply"]
     if check:
         command.append("--check")
-    command.extend(["--whitespace=error-all", str(patch)])
+    command.extend(["--whitespace=error-all", "-"])
     proc = subprocess.run(
         command,
         cwd=str(source),
-        text=True,
+        input=patch_bytes,
         capture_output=True,
         check=False,
     )
@@ -136,70 +232,83 @@ def _git_apply(source: Path, patch: Path, *, check: bool) -> None:
         raise ValueError(f"compatibility patch {mode} failed")
 
 
+def _report(
+    *,
+    source: Path,
+    patch: CapturedPatch,
+    status: str,
+    ready: bool,
+    applied: bool,
+    files: tuple[CompatFile, ...],
+) -> CompatPatchReport:
+    return CompatPatchReport(
+        source_tree=str(source),
+        patch=str(patch.path),
+        patch_blob_sha1=patch.blob_sha1,
+        patch_sha256=patch.sha256,
+        status=status,
+        ready=ready,
+        applied=applied,
+        files=files,
+        production_tree_modified=False,
+        service_control_performed=False,
+        rpc_called=False,
+    )
+
+
 def evaluate(*, source_tree: str | Path, apply: bool = False) -> CompatPatchReport:
     source = _source_tree(source_tree)
-    patch = _patch()
+    patch = _capture_patch()
     files = _inspect(source)
     statuses = {item.status for item in files}
 
     if statuses == {"ALREADY_TARGET"}:
-        return CompatPatchReport(
-            source_tree=str(source),
-            patch=str(patch),
-            patch_sha256=EXPECTED_PATCH_SHA256,
+        _assert_patch_path_stable(patch)
+        return _report(
+            source=source,
+            patch=patch,
             status="ALREADY_TARGET",
             ready=True,
             applied=apply,
             files=files,
-            production_tree_modified=False,
-            service_control_performed=False,
-            rpc_called=False,
         )
 
     if statuses != {"READY_APPLY"}:
-        return CompatPatchReport(
-            source_tree=str(source),
-            patch=str(patch),
-            patch_sha256=EXPECTED_PATCH_SHA256,
+        _assert_patch_path_stable(patch)
+        return _report(
+            source=source,
+            patch=patch,
             status="SOURCE_DRIFT",
             ready=False,
             applied=False,
             files=files,
-            production_tree_modified=False,
-            service_control_performed=False,
-            rpc_called=False,
         )
 
-    _git_apply(source, patch, check=True)
+    _assert_patch_path_stable(patch)
+    _git_apply(source, patch.encoded, check=True)
+    _assert_patch_path_stable(patch)
     if not apply:
-        return CompatPatchReport(
-            source_tree=str(source),
-            patch=str(patch),
-            patch_sha256=EXPECTED_PATCH_SHA256,
+        return _report(
+            source=source,
+            patch=patch,
             status="READY_APPLY",
             ready=True,
             applied=False,
             files=files,
-            production_tree_modified=False,
-            service_control_performed=False,
-            rpc_called=False,
         )
 
-    _git_apply(source, patch, check=False)
+    _git_apply(source, patch.encoded, check=False)
+    _assert_patch_path_stable(patch)
     updated = _inspect(source)
     if {item.status for item in updated} != {"ALREADY_TARGET"}:
         raise ValueError("post-apply compatibility blob verification failed")
-    return CompatPatchReport(
-        source_tree=str(source),
-        patch=str(patch),
-        patch_sha256=EXPECTED_PATCH_SHA256,
+    return _report(
+        source=source,
+        patch=patch,
         status="APPLIED",
         ready=True,
         applied=True,
         files=updated,
-        production_tree_modified=False,
-        service_control_performed=False,
-        rpc_called=False,
     )
 
 

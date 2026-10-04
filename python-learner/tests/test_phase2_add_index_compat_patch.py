@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import hashlib
 import shutil
 import sys
 
@@ -103,3 +104,70 @@ def test_compat_patch_fails_closed_on_source_drift(tmp_path):
 def test_compat_patch_refuses_live_production_tree():
     with pytest.raises(ValueError, match="must not be applied directly"):
         MODULE.evaluate(source_tree="/opt/pio")
+
+
+
+def test_compat_patch_report_exposes_exact_blob_and_true_sha256(tmp_path):
+    source = make_source(tmp_path)
+    patch_bytes = (
+        ROOT / "deploy/patches/phase2-production-add-index-compat.patch"
+    ).read_bytes()
+
+    report = MODULE.evaluate(source_tree=source)
+
+    assert report.patch_blob_sha1 == MODULE.EXPECTED_PATCH_BLOB
+    assert report.patch_sha256 == hashlib.sha256(patch_bytes).hexdigest()
+    assert len(report.patch_sha256) == 64
+
+
+def test_compat_patch_capture_rejects_symlink(tmp_path, monkeypatch):
+    target = tmp_path / "compat.patch"
+    target.write_text("not reviewed\n", encoding="utf-8")
+    link = tmp_path / "compat-link.patch"
+    link.symlink_to(target)
+    monkeypatch.setattr(MODULE, "PATCH_PATH", link)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        MODULE._capture_patch()
+
+
+def test_git_apply_consumes_captured_bytes_not_patch_path(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    target = source / "a.txt"
+    target.write_text("old\n", encoding="utf-8")
+    patch_bytes = b"".join(
+        (
+            b"diff --git a/a.txt b/a.txt\n",
+            b"--- a/a.txt\n",
+            b"+++ b/a.txt\n",
+            b"@@ -1 +1 @@\n",
+            b"-old\n",
+            b"+new\n",
+        )
+    )
+
+    MODULE._git_apply(source, patch_bytes, check=True)
+    MODULE._git_apply(source, patch_bytes, check=False)
+
+    assert target.read_text(encoding="utf-8") == "new\n"
+
+
+def test_captured_patch_detects_path_drift(tmp_path, monkeypatch):
+    reviewed = (
+        ROOT / "deploy/patches/phase2-production-add-index-compat.patch"
+    ).read_bytes()
+    patch = tmp_path / "compat.patch"
+    patch.write_bytes(reviewed)
+    monkeypatch.setattr(MODULE, "PATCH_PATH", patch)
+    monkeypatch.setattr(
+        MODULE,
+        "EXPECTED_PATCH_BLOB",
+        MODULE._git_blob_bytes(reviewed),
+    )
+
+    captured = MODULE._capture_patch()
+    patch.write_bytes(reviewed + b"\n# drift\n")
+
+    with pytest.raises(ValueError, match="path changed after capture"):
+        MODULE._assert_patch_path_stable(captured)
