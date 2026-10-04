@@ -20,9 +20,14 @@ TOOLS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOLS_DIR.parents[1]
 ACTIVATION_TOOL = TOOLS_DIR / "check_phase2_isolated_activation.py"
 ACTIVATION_TOOL_RELATIVE = "deploy/tools/check_phase2_isolated_activation.py"
+TIMER_READINESS_TOOL = TOOLS_DIR / "check_phase2_isolated_timer_readiness.py"
+TIMER_READINESS_TOOL_RELATIVE = (
+    "deploy/tools/check_phase2_isolated_timer_readiness.py"
+)
 
 _MAX_TOOL_BYTES = 4 * 1024 * 1024
 _MAX_ENV_BYTES = 1024 * 1024
+_MAX_RECEIPT_BYTES = 4 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -173,6 +178,44 @@ _ACTIVATION_SHA256 = hashlib.sha256(
 ).hexdigest()
 
 
+def _load_captured_timer_readiness(
+    path: Path,
+    name: str,
+) -> tuple[Any, _CapturedFile]:
+    captured = _capture_regular_file(
+        path,
+        label="reviewed timer readiness checker",
+        max_bytes=_MAX_TOOL_BYTES,
+    )
+    assert captured is not None
+    spec = importlib.util.spec_from_file_location(name, captured.path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load reviewed deployment tool: {captured.path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        code = compile(captured.encoded, str(captured.path), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_regular_path_stable(
+        captured.path,
+        captured.opened,
+        label="reviewed timer readiness checker",
+    )
+    return module, captured
+
+
+TIMER_READINESS, _TIMER_READINESS_CAPTURE = _load_captured_timer_readiness(
+    TIMER_READINESS_TOOL,
+    "phase2_timer_health_readiness_helpers",
+)
+_TIMER_READINESS_SHA256 = hashlib.sha256(
+    _TIMER_READINESS_CAPTURE.encoded
+).hexdigest()
+
+
 def _repo_head() -> str:
     completed = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -189,33 +232,53 @@ def _repo_head() -> str:
     return commit
 
 
-def _activation_source_identity() -> tuple[str, str]:
+def _reviewed_tool_identity(
+    *,
+    capture: _CapturedFile,
+    relative: str,
+    expected_sha256: str,
+    label: str,
+) -> tuple[str, str]:
     _assert_regular_path_stable(
-        _ACTIVATION_CAPTURE.path,
-        _ACTIVATION_CAPTURE.opened,
-        label="reviewed activation checker",
+        capture.path,
+        capture.opened,
+        label=label,
     )
     commit = _repo_head()
     historical = subprocess.run(
-        ["git", "show", f"{commit}:{ACTIVATION_TOOL_RELATIVE}"],
+        ["git", "show", f"{commit}:{relative}"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         check=False,
     )
     if historical.returncode != 0:
-        raise ValueError(
-            "reviewed activation checker is not present at reviewed source commit"
-        )
-    if historical.stdout != _ACTIVATION_CAPTURE.encoded:
-        raise ValueError(
-            "reviewed activation checker bytes do not match reviewed source commit"
-        )
+        raise ValueError(f"{label} is not present at reviewed source commit")
+    if historical.stdout != capture.encoded:
+        raise ValueError(f"{label} bytes do not match reviewed source commit")
     _assert_regular_path_stable(
-        _ACTIVATION_CAPTURE.path,
-        _ACTIVATION_CAPTURE.opened,
+        capture.path,
+        capture.opened,
+        label=label,
+    )
+    return commit, expected_sha256
+
+
+def _activation_source_identity() -> tuple[str, str]:
+    return _reviewed_tool_identity(
+        capture=_ACTIVATION_CAPTURE,
+        relative=ACTIVATION_TOOL_RELATIVE,
+        expected_sha256=_ACTIVATION_SHA256,
         label="reviewed activation checker",
     )
-    return commit, _ACTIVATION_SHA256
+
+
+def _timer_readiness_source_identity() -> tuple[str, str]:
+    return _reviewed_tool_identity(
+        capture=_TIMER_READINESS_CAPTURE,
+        relative=TIMER_READINESS_TOOL_RELATIVE,
+        expected_sha256=_TIMER_READINESS_SHA256,
+        label="reviewed timer readiness checker",
+    )
 
 SystemctlRunner = Callable[..., subprocess.CompletedProcess[str]]
 Now = Callable[[], datetime]
@@ -224,6 +287,197 @@ PROGRESS_EDGE_TYPE = "PHASE2_EVIDENCE_CYCLE_PROGRESS_V1"
 TIMER_UNIT = "pio-phase2-isolated-evidence-cycle.timer"
 EVIDENCE_SERVICE = "pio-phase2-isolated-evidence-cycle.service"
 DETECTOR_UNIT = "pio-phase2-isolated-add-detector.service"
+
+
+@dataclass(frozen=True)
+class _SmokeRuntimeContinuitySnapshot:
+    timer_readiness_commit: str
+    timer_readiness_sha256: str
+    receipt: Any | None
+    runtime_current: Any | None
+    runtime_identity: Any | None
+    runtime_executor: Any | None
+    runtime_watch_executor: Any | None
+
+
+@dataclass(frozen=True)
+class _SmokeRuntimeContinuity:
+    receipt_regular: bool
+    receipt_valid: bool
+    runtime_target_matches: bool
+    stage_identity_matches: bool
+    executor_matches: bool
+    watch_executor_matches: bool
+
+    @property
+    def current(self) -> bool:
+        return bool(
+            self.receipt_regular
+            and self.receipt_valid
+            and self.runtime_target_matches
+            and self.stage_identity_matches
+            and self.executor_matches
+            and self.watch_executor_matches
+        )
+
+
+def _capture_smoke_runtime_continuity(
+    *,
+    runtime_root: str | Path,
+    receipt_path: str | Path,
+) -> tuple[_SmokeRuntimeContinuity, _SmokeRuntimeContinuitySnapshot]:
+    source = _timer_readiness_source_identity()
+    receipt = TIMER_READINESS._capture_regular_file(
+        Path(receipt_path),
+        label="smoke receipt",
+        max_bytes=_MAX_RECEIPT_BYTES,
+        optional=True,
+    )
+    payload = (
+        TIMER_READINESS._parse_receipt_bytes(receipt.encoded)
+        if receipt is not None
+        else None
+    )
+    valid = bool(
+        isinstance(payload, dict)
+        and payload.get("format_version") == 1
+        and payload.get("smoke_passed") is True
+        and payload.get("eligible_for_timer_enable_preflight") is True
+        and isinstance(payload.get("runtime_target"), str)
+        and isinstance(payload.get("runtime_executor_sha256"), str)
+        and len(str(payload["runtime_executor_sha256"])) == 64
+        and isinstance(payload.get("runtime_watch_executor_sha256"), str)
+        and len(str(payload["runtime_watch_executor_sha256"])) == 64
+        and isinstance(payload.get("stage_identity_sha256"), str)
+        and len(str(payload["stage_identity_sha256"])) == 64
+    )
+
+    runtime_current = None
+    runtime_identity = None
+    executor = None
+    watcher = None
+    target_matches = False
+    stage_matches = False
+    executor_matches = False
+    watcher_matches = False
+
+    if valid and payload is not None:
+        try:
+            runtime_current = TIMER_READINESS._capture_runtime_current(
+                runtime_root
+            )
+            target_matches = bool(
+                str(runtime_current.resolved_target)
+                == str(payload["runtime_target"])
+            )
+            if target_matches:
+                runtime = runtime_current.resolved_target
+                runtime_identity = TIMER_READINESS._capture_regular_file(
+                    runtime / TIMER_READINESS._RUNTIME_IDENTITY_FILENAME,
+                    label="staged runtime identity manifest",
+                    max_bytes=TIMER_READINESS._MAX_RUNTIME_IDENTITY_BYTES,
+                )
+                assert runtime_identity is not None
+                identity_payload = TIMER_READINESS._parse_receipt_bytes(
+                    runtime_identity.encoded
+                )
+                executor = TIMER_READINESS._capture_digest_file(
+                    runtime
+                    / "rust-executor/target/release/meteora-executor",
+                    label="staged runtime executor",
+                    max_bytes=TIMER_READINESS._MAX_EXECUTOR_BYTES,
+                )
+                watcher = TIMER_READINESS._capture_digest_file(
+                    runtime
+                    / "rust-executor/target/release/pio-phase2-account-watch",
+                    label="staged runtime account-watch executor",
+                    max_bytes=TIMER_READINESS._MAX_EXECUTOR_BYTES,
+                )
+                stage_matches = bool(
+                    hashlib.sha256(runtime_identity.encoded).hexdigest()
+                    == str(payload["stage_identity_sha256"])
+                )
+                executor_matches = bool(
+                    executor.sha256
+                    == str(payload["runtime_executor_sha256"])
+                    and isinstance(identity_payload, dict)
+                    and identity_payload.get("executor_sha256")
+                    == executor.sha256
+                )
+                watcher_matches = bool(
+                    watcher.sha256
+                    == str(payload["runtime_watch_executor_sha256"])
+                    and isinstance(identity_payload, dict)
+                    and identity_payload.get("watch_executor_sha256")
+                    == watcher.sha256
+                )
+        except (OSError, RuntimeError, ValueError):
+            runtime_current = None
+            runtime_identity = None
+            executor = None
+            watcher = None
+            target_matches = False
+            stage_matches = False
+            executor_matches = False
+            watcher_matches = False
+
+    continuity = _SmokeRuntimeContinuity(
+        receipt_regular=receipt is not None,
+        receipt_valid=valid,
+        runtime_target_matches=target_matches,
+        stage_identity_matches=stage_matches,
+        executor_matches=executor_matches,
+        watch_executor_matches=watcher_matches,
+    )
+    snapshot = _SmokeRuntimeContinuitySnapshot(
+        timer_readiness_commit=source[0],
+        timer_readiness_sha256=source[1],
+        receipt=receipt,
+        runtime_current=runtime_current,
+        runtime_identity=runtime_identity,
+        runtime_executor=executor,
+        runtime_watch_executor=watcher,
+    )
+    _assert_smoke_runtime_continuity_stable(snapshot)
+    return continuity, snapshot
+
+
+def _assert_smoke_runtime_continuity_stable(
+    snapshot: _SmokeRuntimeContinuitySnapshot,
+) -> None:
+    if _timer_readiness_source_identity() != (
+        snapshot.timer_readiness_commit,
+        snapshot.timer_readiness_sha256,
+    ):
+        raise ValueError(
+            "reviewed timer readiness checker changed during timer health"
+        )
+    if snapshot.receipt is not None:
+        TIMER_READINESS._assert_regular_path_stable(
+            snapshot.receipt.path,
+            snapshot.receipt.opened,
+            label="smoke receipt",
+        )
+    if snapshot.runtime_current is not None:
+        TIMER_READINESS._assert_runtime_current_stable(
+            snapshot.runtime_current
+        )
+    if snapshot.runtime_identity is not None:
+        TIMER_READINESS._assert_regular_path_stable(
+            snapshot.runtime_identity.path,
+            snapshot.runtime_identity.opened,
+            label="staged runtime identity manifest",
+        )
+    if snapshot.runtime_executor is not None:
+        TIMER_READINESS._assert_digest_snapshot_stable(
+            snapshot.runtime_executor,
+            label="staged runtime executor",
+        )
+    if snapshot.runtime_watch_executor is not None:
+        TIMER_READINESS._assert_digest_snapshot_stable(
+            snapshot.runtime_watch_executor,
+            label="staged runtime account-watch executor",
+        )
 
 
 @dataclass(frozen=True)
@@ -258,6 +512,13 @@ class Phase2TimerHealthReport:
     timer_active_enabled: bool
     legacy_collectors_quiescent: bool
     evidence_service_active: bool
+    smoke_receipt_regular: bool
+    smoke_receipt_valid: bool
+    smoke_runtime_target_matches: bool
+    smoke_stage_identity_matches: bool
+    smoke_executor_matches: bool
+    smoke_watch_executor_matches: bool
+    smoke_runtime_identity_current: bool
     cycles: tuple[TimerHealthCycle, ...]
     latest_cycle_age_seconds: float | None
     latest_cycle_recent: bool
@@ -667,6 +928,7 @@ def inspect_timer_health(
     unit_destination: str | Path = "/etc/systemd/system",
     env_file: str | Path = "/etc/pio/pio.env",
     data_root: str | Path = "/opt/pio/data",
+    receipt_path: str | Path = "/opt/pio/data/phase2-isolated-smoke-receipt.json",
     history_limit: int = 8,
     max_cycle_age_seconds: int = 2700,
     rate_limit_streak_threshold: int = 2,
@@ -681,6 +943,11 @@ def inspect_timer_health(
         raise ValueError("rate_limit_streak_threshold must be positive")
 
     activation_source = _activation_source_identity()
+    timer_readiness_source = _timer_readiness_source_identity()
+    continuity, continuity_snapshot = _capture_smoke_runtime_continuity(
+        runtime_root=runtime_root,
+        receipt_path=receipt_path,
+    )
     env_capture = _capture_regular_file(
         Path(env_file),
         label="Phase-2 environment file",
@@ -707,6 +974,11 @@ def inspect_timer_health(
         raise ValueError(
             "reviewed activation checker changed during timer-health inspection"
         )
+    if _timer_readiness_source_identity() != timer_readiness_source:
+        raise ValueError(
+            "reviewed timer readiness checker changed during timer-health inspection"
+        )
+    _assert_smoke_runtime_continuity_stable(continuity_snapshot)
     if env_capture is not None:
         _assert_regular_path_stable(
             env_capture.path,
@@ -818,7 +1090,8 @@ def inspect_timer_health(
     )
 
     topology_ready = bool(
-        base.runtime_ready
+        continuity.current
+        and base.runtime_ready
         and base.installed_units_exact
         and env_ready
         and data_ready
@@ -848,6 +1121,11 @@ def inspect_timer_health(
         raise ValueError(
             "reviewed activation checker changed during timer-health inspection"
         )
+    if _timer_readiness_source_identity() != timer_readiness_source:
+        raise ValueError(
+            "reviewed timer readiness checker changed during timer-health inspection"
+        )
+    _assert_smoke_runtime_continuity_stable(continuity_snapshot)
     if env_capture is not None:
         _assert_regular_path_stable(
             env_capture.path,
@@ -904,6 +1182,13 @@ def inspect_timer_health(
         timer_active_enabled=timer_active_enabled,
         legacy_collectors_quiescent=legacy_clear,
         evidence_service_active=evidence_service_active,
+        smoke_receipt_regular=continuity.receipt_regular,
+        smoke_receipt_valid=continuity.receipt_valid,
+        smoke_runtime_target_matches=continuity.runtime_target_matches,
+        smoke_stage_identity_matches=continuity.stage_identity_matches,
+        smoke_executor_matches=continuity.executor_matches,
+        smoke_watch_executor_matches=continuity.watch_executor_matches,
+        smoke_runtime_identity_current=continuity.current,
         cycles=cycles,
         latest_cycle_age_seconds=latest_age,
         latest_cycle_recent=latest_recent,
@@ -931,6 +1216,10 @@ def main() -> None:
     parser.add_argument("--unit-destination", default="/etc/systemd/system")
     parser.add_argument("--env-file", default="/etc/pio/pio.env")
     parser.add_argument("--data-root", default="/opt/pio/data")
+    parser.add_argument(
+        "--receipt",
+        default="/opt/pio/data/phase2-isolated-smoke-receipt.json",
+    )
     parser.add_argument("--history-limit", type=int, default=8)
     parser.add_argument("--max-cycle-age-seconds", type=int, default=2700)
     parser.add_argument("--rate-limit-streak-threshold", type=int, default=2)
@@ -941,6 +1230,7 @@ def main() -> None:
         unit_destination=args.unit_destination,
         env_file=args.env_file,
         data_root=args.data_root,
+        receipt_path=args.receipt,
         history_limit=args.history_limit,
         max_cycle_age_seconds=args.max_cycle_age_seconds,
         rate_limit_streak_threshold=args.rate_limit_streak_threshold,
