@@ -66,6 +66,7 @@ EXPECTED_DIRTY_PATHS = {
 }
 
 _MAX_TRACKED_FILE_BYTES = 32 * 1024 * 1024
+_MAX_EXECUTOR_BYTES = 512 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -87,9 +88,11 @@ class IsolatedRuntimeReport:
     executor_path: str
     executor_exists: bool
     executor_executable: bool
+    executor_sha256: str | None
     watch_executor_path: str
     watch_executor_exists: bool
     watch_executor_executable: bool
+    watch_executor_sha256: str | None
     runtime_ready: bool
     production_tree_modified: bool
     rpc_called: bool
@@ -206,22 +209,68 @@ def _executable_snapshot(
     path: Path,
     *,
     label: str,
-) -> tuple[bool, bool, Path | None, os.stat_result | None]:
+) -> tuple[
+    bool,
+    bool,
+    Path | None,
+    os.stat_result | None,
+    str | None,
+]:
     raw = Path(path)
     if raw.is_symlink():
-        return False, False, None, None
+        return False, False, None, None, None
     try:
         resolved = raw.resolve(strict=True)
     except OSError:
-        return False, False, None, None
+        return False, False, None, None, None
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        opened = os.stat(resolved, follow_symlinks=False)
+        fd = os.open(resolved, flags)
     except OSError:
-        return False, False, None, None
-    if not stat.S_ISREG(opened.st_mode):
-        return False, False, None, None
-    _assert_file_path_stable(resolved, opened, label=label)
-    return True, os.access(resolved, os.X_OK), resolved, opened
+        return False, False, None, None, None
+
+    digest = hashlib.sha256()
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            return False, False, None, None, None
+        if before.st_size <= 0 or before.st_size > _MAX_EXECUTOR_BYTES:
+            raise ValueError(f"{label} size is invalid")
+
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            digest.update(chunk)
+            remaining -= len(chunk)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_mode != before.st_mode
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while hashing")
+    finally:
+        os.close(fd)
+
+    if remaining:
+        raise ValueError(f"{label} changed while hashing")
+    _assert_file_path_stable(resolved, before, label=label)
+    return (
+        True,
+        os.access(resolved, os.X_OK),
+        resolved,
+        before,
+        digest.hexdigest(),
+    )
 
 
 def _run_git(source: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -303,6 +352,7 @@ def inspect_runtime(source_tree: str | Path) -> IsolatedRuntimeReport:
         executable,
         executor_resolved,
         executor_stat,
+        executor_sha256,
     ) = _executable_snapshot(
         executor,
         label="reviewed isolated executor",
@@ -314,6 +364,7 @@ def inspect_runtime(source_tree: str | Path) -> IsolatedRuntimeReport:
         watch_executable,
         watch_resolved,
         watch_stat,
+        watch_executor_sha256,
     ) = _executable_snapshot(
         watch_executor,
         label="reviewed account-watch executor",
@@ -357,9 +408,11 @@ def inspect_runtime(source_tree: str | Path) -> IsolatedRuntimeReport:
         executor_path=str(executor),
         executor_exists=exists,
         executor_executable=executable,
+        executor_sha256=executor_sha256,
         watch_executor_path=str(watch_executor),
         watch_executor_exists=watch_exists,
         watch_executor_executable=watch_executable,
+        watch_executor_sha256=watch_executor_sha256,
         runtime_ready=ready,
         production_tree_modified=False,
         rpc_called=False,
