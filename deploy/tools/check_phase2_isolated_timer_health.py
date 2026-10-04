@@ -624,6 +624,7 @@ def inspect_timer_health(
     data_root: str | Path = "/opt/pio/data",
     history_limit: int = 8,
     max_cycle_age_seconds: int = 2700,
+    max_rate_limit_gap_seconds: int | None = None,
     rate_limit_streak_threshold: int = 2,
     now: Now = lambda: datetime.now(timezone.utc),
     runner: SystemctlRunner = subprocess.run,
@@ -632,6 +633,13 @@ def inspect_timer_health(
         raise ValueError("history_limit must be positive")
     if max_cycle_age_seconds <= 0:
         raise ValueError("max_cycle_age_seconds must be positive")
+    rate_limit_gap_seconds = (
+        max_cycle_age_seconds
+        if max_rate_limit_gap_seconds is None
+        else max_rate_limit_gap_seconds
+    )
+    if rate_limit_gap_seconds <= 0:
+        raise ValueError("max_rate_limit_gap_seconds must be positive")
     if rate_limit_streak_threshold <= 0:
         raise ValueError("rate_limit_streak_threshold must be positive")
 
@@ -764,7 +772,7 @@ def inspect_timer_health(
 
     rate_limit_streak = _consecutive_rate_limits(
         cycles,
-        max_gap_seconds=max_cycle_age_seconds,
+        max_gap_seconds=rate_limit_gap_seconds,
     )
     latest_failed = bool(
         cycles and cycles[0].status == "COLLECTION_FAILED"
@@ -853,6 +861,7 @@ def main() -> None:
     parser.add_argument("--data-root", default="/opt/pio/data")
     parser.add_argument("--history-limit", type=int, default=8)
     parser.add_argument("--max-cycle-age-seconds", type=int, default=2700)
+    parser.add_argument("--max-rate-limit-gap-seconds", type=int)
     parser.add_argument("--rate-limit-streak-threshold", type=int, default=2)
     args = parser.parse_args()
 
@@ -863,6 +872,7 @@ def main() -> None:
         data_root=args.data_root,
         history_limit=args.history_limit,
         max_cycle_age_seconds=args.max_cycle_age_seconds,
+        max_rate_limit_gap_seconds=args.max_rate_limit_gap_seconds,
         rate_limit_streak_threshold=args.rate_limit_streak_threshold,
     )
     print(json.dumps(report.to_record(), indent=2))
