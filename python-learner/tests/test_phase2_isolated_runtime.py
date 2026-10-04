@@ -115,25 +115,20 @@ def test_runtime_checker_requires_executable_event_watch_binary(
 
 
 
-def test_runtime_contract_pins_operational_autopause_surface():
-    required = {
-        "deploy/tools/autopause_phase2_isolated_timer.py":
-            "e907ce7cccdd28986066027449378682955c04ea",
-        "deploy/systemd/pio-phase2-isolated-prestate-stream@.service":
-            "4270a0c7b3aec8844ae9f06c6a073aa7b9d247af",
-        "deploy/systemd/pio-phase2-isolated-add-detector.service":
-            "fdb5334cca2174421e084813b42052f5399c435b",
-        "deploy/systemd/pio-phase2-isolated-evidence-cycle.service":
-            "46fb8d90bbc008702711e14c1de643aecb41c57c",
-        "deploy/systemd/pio-phase2-isolated-evidence-cycle.timer":
-            "9b0e757ba3857c2b33d2cecfe94be98f0913a72f",
-        "deploy/systemd/pio-phase2-isolated-rate-limit-pause.service":
-            "07e8d4a58243537bea74226da4ab6548bf212496",
-    }
+def test_runtime_contract_pins_operational_autopause_tool_not_deploy_units():
+    relative = "deploy/tools/autopause_phase2_isolated_timer.py"
+    expected_blob = "e907ce7cccdd28986066027449378682955c04ea"
 
-    for relative, expected_blob in required.items():
-        assert MODULE.TRACKED_CONTRACT[relative] == expected_blob
-        assert MODULE._git_blob_sha(ROOT / relative) == expected_blob
+    assert MODULE.TRACKED_CONTRACT[relative] == expected_blob
+    assert MODULE._git_blob_sha(ROOT / relative) == expected_blob
+
+    # Deploy unit bytes have their own exact installer/upgrade contracts.
+    # Keeping them out of the pinned runtime-source contract lets reviewed
+    # systemd units evolve without repinning the staged application runtime.
+    assert not any(
+        path.startswith("deploy/systemd/")
+        for path in MODULE.TRACKED_CONTRACT
+    )
 
 
 
