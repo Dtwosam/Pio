@@ -395,9 +395,14 @@ def _identity_from_ready(ready: Any) -> dict[str, Any]:
 
 
 def _execution_failure_evidence(execution: Any) -> dict[str, Any] | None:
+    category = getattr(execution, "failure_category", None)
+    exit_code = getattr(execution, "exit_code", None)
     if (
-        getattr(execution, "failure_category", None) is None
-        or getattr(execution, "exit_code", 0) == 0
+        not isinstance(category, str)
+        or not category
+        or isinstance(exit_code, bool)
+        or not isinstance(exit_code, int)
+        or exit_code == 0
         or not bool(getattr(execution, "result_json_valid", False))
         or not bool(getattr(execution, "result_secret_safe", False))
     ):
@@ -422,7 +427,9 @@ def _execution_failure_evidence(execution: Any) -> dict[str, Any] | None:
             continue
         value = result[key]
         if key == "failure_step":
-            if value is not None and not isinstance(value, str):
+            if value is not None and (
+                not isinstance(value, str) or not value
+            ):
                 continue
         elif key == "files_updated":
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
