@@ -338,7 +338,7 @@ def test_handoff_installs_units_after_runtime_is_ready(monkeypatch):
     assert report.next_action == "INSTALL_REVIEWED_UNITS"
     assert report.next_tool == "install_phase2_isolated_systemd_units.py"
     assert report.next_parameters == {
-        "source_tree": "/opt/pio-phase2-runtime/current",
+        "source_tree": str(ROOT),
         "runtime_root": "/opt/pio-phase2-runtime",
         "destination": "/etc/systemd/system",
     }
@@ -364,7 +364,7 @@ def test_handoff_routes_exact_predecessor_units_to_upgrader(monkeypatch):
     assert report.next_action == "UPGRADE_REVIEWED_UNITS"
     assert report.next_tool == "upgrade_phase2_isolated_systemd_units.py"
     assert report.next_parameters == {
-        "source_tree": "/opt/pio-phase2-runtime/current",
+        "source_tree": str(ROOT),
         "destination": "/etc/systemd/system",
     }
     assert report.next_mutation_flag == "--apply"
@@ -737,3 +737,35 @@ def test_lifecycle_runbooks_cover_unit_upgrade_and_conflict_states():
     assert "UPGRADE_REVIEWED_UNITS" in handoff_doc
     assert "daemon-reload" in handoff_doc
     assert "without `--apply`" in command_doc
+
+
+def test_handoff_unit_upgrade_uses_reviewed_checkout_not_runtime_release(
+    monkeypatch,
+):
+    captured = {}
+
+    def inspect_upgrade(**kwargs):
+        captured.update(kwargs)
+        return unit_upgrade(
+            upgrade_needed=True,
+            installer_needed=False,
+            statuses=("READY_UPDATE", "READY_UPDATE"),
+        )
+
+    install(
+        monkeypatch,
+        activation_report=activation(
+            installed_units_exact=False,
+            runtime_current="/opt/pio-phase2-runtime/releases/pinned-runtime",
+        ),
+    )
+    monkeypatch.setattr(MODULE.UNIT_UPGRADE, "inspect_upgrade", inspect_upgrade)
+
+    report = MODULE.inspect_lifecycle_handoff(
+        source_tree="/tmp/pio-phase2-build/pinned"
+    )
+
+    assert report.state == "SYSTEMD_UNIT_UPGRADE_READY"
+    assert captured["source_tree"] == str(ROOT)
+    assert report.next_parameters["source_tree"] == str(ROOT)
+    assert "pio-phase2-runtime" not in report.next_parameters["source_tree"]
