@@ -162,6 +162,7 @@ class Phase2MutationReceiptRun:
     failure_category: str | None
     receipt_sha256: str | None
     execution_report_sha256: str | None
+    mutation_outcome_summary: dict[str, Any] | None
     shell_used: bool
     raw_stderr_exposed: bool
 
@@ -394,6 +395,75 @@ def _identity_from_ready(ready: Any) -> dict[str, Any]:
     }
 
 
+_OUTCOME_BOOL_FIELDS = (
+    "applied",
+    "rollback_performed",
+    "rollback_succeeded",
+    "upgrade_needed",
+    "installer_needed",
+    "ready",
+    "daemon_reload_performed",
+    "service_control_performed",
+    "rpc_called",
+)
+_OUTCOME_INT_FIELDS = ("files_updated",)
+_OUTCOME_TEXT_FIELDS = ("failure_step",)
+_OUTCOME_TEXT_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789._:-@"
+)
+
+
+def _safe_outcome_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or len(value) > 256:
+        return None
+    if any(char not in _OUTCOME_TEXT_CHARS for char in value):
+        return None
+    return value
+
+
+def _mutation_outcome_summary(execution: Any) -> dict[str, Any] | None:
+    if (
+        not bool(getattr(execution, "result_json_valid", False))
+        or not bool(getattr(execution, "result_secret_safe", False))
+    ):
+        return None
+    result = getattr(execution, "result", None)
+    if not isinstance(result, dict):
+        return None
+
+    summary: dict[str, Any] = {}
+    for key in _OUTCOME_BOOL_FIELDS:
+        value = result.get(key)
+        if isinstance(value, bool):
+            summary[key] = value
+
+    for key in _OUTCOME_INT_FIELDS:
+        value = result.get(key)
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+        ):
+            summary[key] = value
+
+    for key in _OUTCOME_TEXT_FIELDS:
+        if key not in result:
+            continue
+        value = result.get(key)
+        if value is None:
+            summary[key] = None
+            continue
+        safe = _safe_outcome_text(value)
+        if safe is not None:
+            summary[key] = safe
+
+    return summary or None
+
+
 def _pending_payload(
     *,
     ready: Any,
@@ -413,6 +483,7 @@ def _pending_payload(
         "exit_code": None,
         "failure_category": None,
         "execution_report_sha256": None,
+        "mutation_outcome_summary": None,
         "raw_stderr_persisted": False,
     }
 
@@ -438,6 +509,7 @@ def _final_payload(
         payload["outcome_known"] = status == "ABORTED_BEFORE_LAUNCH"
         payload["exit_code"] = None
         payload["execution_report_sha256"] = None
+        payload["mutation_outcome_summary"] = None
         return payload
 
     record = execution.to_record()
@@ -454,6 +526,7 @@ def _final_payload(
     payload["result_json_valid"] = bool(execution.result_json_valid)
     payload["result_secret_safe"] = bool(execution.result_secret_safe)
     payload["execution_failure_category"] = execution.failure_category
+    payload["mutation_outcome_summary"] = _mutation_outcome_summary(execution)
     return payload
 
 
@@ -503,6 +576,7 @@ def run_mutation_with_receipt(
             failure_category=None,
             receipt_sha256=None,
             execution_report_sha256=None,
+            mutation_outcome_summary=None,
             shell_used=False,
             raw_stderr_exposed=False,
         )
@@ -577,6 +651,7 @@ def run_mutation_with_receipt(
             failure_category=category,
             receipt_sha256=receipt_sha,
             execution_report_sha256=None,
+            mutation_outcome_summary=None,
             shell_used=False,
             raw_stderr_exposed=False,
         )
@@ -611,6 +686,7 @@ def run_mutation_with_receipt(
         failure_category=execution.failure_category,
         receipt_sha256=receipt_sha,
         execution_report_sha256=execution_sha,
+        mutation_outcome_summary=final["mutation_outcome_summary"],
         shell_used=False,
         raw_stderr_exposed=False,
     )
