@@ -24,6 +24,7 @@ TIMER_TOOL = TOOLS_DIR / "check_phase2_isolated_timer_readiness.py"
 OPERATOR_TOOL = TOOLS_DIR / "check_phase2_isolated_operator_status.py"
 BOOTSTRAP_TOOL = TOOLS_DIR / "bootstrap_phase2_isolated_source.py"
 RUNTIME_CHECK_TOOL = TOOLS_DIR / "check_phase2_isolated_runtime.py"
+UNIT_UPGRADE_TOOL = TOOLS_DIR / "upgrade_phase2_isolated_systemd_units.py"
 
 
 def _assert_dependency_path_stable(
@@ -185,6 +186,16 @@ def _load_captured_dependency(
     "phase2_lifecycle_runtime_check",
     label="reviewed runtime checker",
 )
+(
+    UNIT_UPGRADE,
+    _UNIT_UPGRADE_PATH,
+    _UNIT_UPGRADE_BYTES,
+    _UNIT_UPGRADE_STAT,
+) = _load_captured_dependency(
+    UNIT_UPGRADE_TOOL,
+    "phase2_lifecycle_unit_upgrade",
+    label="reviewed systemd unit upgrader",
+)
 
 _DEPENDENCY_SNAPSHOTS = (
     (
@@ -234,6 +245,14 @@ _DEPENDENCY_SNAPSHOTS = (
         _RUNTIME_CHECK_BYTES,
         _RUNTIME_CHECK_STAT,
         "reviewed runtime checker",
+    ),
+    (
+        UNIT_UPGRADE_TOOL,
+        "deploy/tools/upgrade_phase2_isolated_systemd_units.py",
+        _UNIT_UPGRADE_PATH,
+        _UNIT_UPGRADE_BYTES,
+        _UNIT_UPGRADE_STAT,
+        "reviewed systemd unit upgrader",
     ),
 )
 
@@ -317,6 +336,7 @@ class Phase2LifecycleHandoffReport:
     blockers: tuple[str, ...]
     source_bootstrap: dict[str, Any] | None
     source_runtime: dict[str, Any] | None
+    systemd_unit_upgrade: dict[str, Any] | None
     activation: dict[str, Any]
     smoke_readiness: dict[str, Any] | None
     timer_readiness: dict[str, Any] | None
@@ -350,6 +370,27 @@ def _runtime_boundary_ok(report: Any) -> bool:
         and not getattr(report, "rpc_called", True)
         and not getattr(report, "service_control_performed", True)
     )
+
+
+def _unit_upgrade_boundary_ok(report: Any) -> bool:
+    return bool(
+        not getattr(report, "applied", True)
+        and int(getattr(report, "files_updated", -1)) == 0
+        and getattr(report, "backup_root", None) is None
+        and not getattr(report, "daemon_reload_performed", True)
+        and not getattr(report, "service_control_performed", True)
+        and not getattr(report, "rpc_called", True)
+    )
+
+
+def _unit_upgrade_blockers(report: Any) -> tuple[str, ...]:
+    allowed = {"READY_UPDATE", "ALREADY_TARGET", "NOT_INSTALLED"}
+    blockers = tuple(
+        f"{item.name}:{item.status}"
+        for item in report.units
+        if str(item.status) not in allowed
+    )
+    return blockers or ("SYSTEMD_UNIT_STATE_INCONSISTENT",)
 
 
 def _activation_blockers(report: Any) -> tuple[str, ...]:
@@ -497,6 +538,24 @@ def _next_step_contract(
             "repository_url": repository_url,
         }, None
 
+    if state == "SYSTEMD_UNIT_UPGRADE_READY":
+        return {
+            "source_tree": _runtime_release_path(
+                activation,
+                runtime_root=runtime_root,
+            ),
+            "destination": str(Path(unit_destination).expanduser()),
+        }, "--apply"
+
+    if state == "SYSTEMD_UNIT_CONFLICT_REVIEW_REQUIRED":
+        return {
+            "source_tree": _runtime_release_path(
+                activation,
+                runtime_root=runtime_root,
+            ),
+            "destination": str(Path(unit_destination).expanduser()),
+        }, None
+
     if state == "SYSTEMD_UNITS_NOT_READY":
         return {
             "source_tree": _runtime_release_path(
@@ -573,6 +632,7 @@ def inspect_lifecycle_handoff(
     operator = None
     source_bootstrap = None
     source_runtime = None
+    unit_upgrade = None
     source_runtime_ready = False
     source_status = "NOT_REQUIRED"
     source_path = Path(
@@ -640,9 +700,37 @@ def inspect_lifecycle_handoff(
                 next_tool = "bootstrap_phase2_isolated_source.py"
                 blockers = (str(source_bootstrap.status),)
     elif not bool(activation.installed_units_exact):
-        state = "SYSTEMD_UNITS_NOT_READY"
-        next_action = "INSTALL_REVIEWED_UNITS"
-        next_tool = "install_phase2_isolated_systemd_units.py"
+        unit_upgrade = UNIT_UPGRADE.inspect_upgrade(
+            source_tree=_runtime_release_path(
+                activation,
+                runtime_root=runtime_root,
+            ),
+            destination=unit_destination,
+        )
+        if not _unit_upgrade_boundary_ok(unit_upgrade):
+            raise ValueError(
+                "Phase-2 unit upgrade inspection crossed the read-only boundary"
+            )
+
+        if not bool(unit_upgrade.ready):
+            state = "SYSTEMD_UNIT_CONFLICT_REVIEW_REQUIRED"
+            next_action = "REVIEW_SYSTEMD_UNIT_CONFLICT"
+            next_tool = "upgrade_phase2_isolated_systemd_units.py"
+            blockers = _unit_upgrade_blockers(unit_upgrade)
+        elif bool(unit_upgrade.upgrade_needed):
+            state = "SYSTEMD_UNIT_UPGRADE_READY"
+            next_action = "UPGRADE_REVIEWED_UNITS"
+            next_tool = "upgrade_phase2_isolated_systemd_units.py"
+            blockers = ()
+        elif bool(unit_upgrade.installer_needed):
+            state = "SYSTEMD_UNITS_NOT_READY"
+            next_action = "INSTALL_REVIEWED_UNITS"
+            next_tool = "install_phase2_isolated_systemd_units.py"
+            blockers = ("SYSTEMD_UNITS_MISSING",)
+        else:
+            raise ValueError(
+                "activation/unit-upgrade reports disagree on installed unit bytes"
+            )
     else:
         smoke = SMOKE.inspect_smoke_readiness(
             runtime_root=runtime_root,
@@ -768,6 +856,11 @@ def inspect_lifecycle_handoff(
         source_runtime=(
             source_runtime.to_record()
             if source_runtime is not None
+            else None
+        ),
+        systemd_unit_upgrade=(
+            unit_upgrade.to_record()
+            if unit_upgrade is not None
             else None
         ),
         activation=activation_record,

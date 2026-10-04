@@ -26,6 +26,7 @@ REVIEWED_PREFLIGHT_TOOLS = frozenset(
         "prepare_phase2_isolated_runtime.py",
         "stage_phase2_isolated_runtime.py",
         "install_phase2_isolated_systemd_units.py",
+        "upgrade_phase2_isolated_systemd_units.py",
         "activate_phase2_isolated_detector.py",
         "run_phase2_isolated_smoke.py",
         "activate_phase2_isolated_timer.py",

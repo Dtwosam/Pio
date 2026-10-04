@@ -231,3 +231,30 @@ def test_renderer_rejects_handoff_identity_change_during_inspection(
 
     with pytest.raises(ValueError, match="handoff changed during inspection"):
         MODULE.render_lifecycle_command()
+
+
+
+def test_renderer_renders_unit_upgrade_preflight_without_applying(monkeypatch):
+    install(
+        monkeypatch,
+        handoff(
+            next_tool="upgrade_phase2_isolated_systemd_units.py",
+            next_parameters={
+                "source_tree": "/opt/pio-phase2-runtime/current",
+                "destination": "/etc/systemd/system",
+            },
+            mutation_flag="--apply",
+        ),
+    )
+
+    report = MODULE.render_lifecycle_command()
+
+    assert report.preflight_argv is not None
+    assert report.preflight_argv[1].endswith(
+        "upgrade_phase2_isolated_systemd_units.py"
+    )
+    assert "--source-tree" in report.preflight_argv
+    assert "--destination" in report.preflight_argv
+    assert "--apply" not in report.preflight_argv
+    assert report.mutation_flag == "--apply"
+    assert report.mutation_flag_appended is False
