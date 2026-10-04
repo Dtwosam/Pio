@@ -48,9 +48,6 @@ class Phase2EvidenceCycleProgress:
     stages_failed: int
     stages_skipped: int
     stage_statuses: tuple[tuple[str, str], ...]
-    stage_outcomes: tuple[tuple[str, str, str | None], ...]
-    rpc_rate_limited: bool
-    rpc_circuit_open: bool
     reconciliation: dict[str, Any] | None
     calibration: dict[str, Any] | None
     work_queue_items: int
@@ -539,25 +536,6 @@ def build_phase2_evidence_cycle_progress(
         stages_skipped=report.stages_skipped,
         stage_statuses=tuple(
             (stage.name, stage.status)
-            for stage in report.stages
-        ),
-        stage_outcomes=tuple(
-            (
-                stage.name,
-                stage.status,
-                stage.failure_category,
-            )
-            for stage in report.stages
-        ),
-        rpc_rate_limited=any(
-            stage.failure_category == "RPC_RATE_LIMITED"
-            for stage in report.stages
-        ),
-        rpc_circuit_open=any(
-            stage.failure_category in {
-                "RPC_RATE_LIMITED",
-                "RPC_CIRCUIT_OPEN",
-            }
             for stage in report.stages
         ),
         reconciliation=_compact_reconciliation(
