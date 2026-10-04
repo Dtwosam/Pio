@@ -441,6 +441,8 @@ def _report_without_control(
     pause_recommended: bool,
     apply: bool,
     failure_step: str | None,
+    enabled_after: bool | None = None,
+    active_after: bool | None = None,
 ) -> Phase2RateLimitAutopauseReport:
     return Phase2RateLimitAutopauseReport(
         database_ready=database_ready,
@@ -457,9 +459,15 @@ def _report_without_control(
         pause_recommended=pause_recommended,
         apply_requested=apply,
         applied=False,
-        timer_enabled_after=enabled_before,
-        timer_active_after=active_before,
-        future_timer_cycles_paused=not enabled_before,
+        timer_enabled_after=(
+            enabled_before if enabled_after is None else enabled_after
+        ),
+        timer_active_after=(
+            active_before if active_after is None else active_after
+        ),
+        future_timer_cycles_paused=not (
+            enabled_before if enabled_after is None else enabled_after
+        ),
         failure_step=failure_step,
         read_only_evidence_check=True,
         rpc_called=False,
@@ -630,6 +638,8 @@ def autopause(
             pause_recommended=True,
             apply=True,
             failure_step="TIMER_STATE_CHANGED_BEFORE_PAUSE",
+            enabled_after=enabled_at_boundary,
+            active_after=active_at_boundary,
         )
 
     try:
