@@ -42,6 +42,8 @@ class UnitUpgradeReport:
     destination: str
     backup_root: str | None
     ready: bool
+    upgrade_needed: bool
+    installer_needed: bool
     applied: bool
     units: tuple[UnitUpgradeStatus, ...]
     files_updated: int
@@ -58,29 +60,68 @@ def git_blob_sha_bytes(payload: bytes) -> str:
     return hashlib.sha1(header + payload).hexdigest()
 
 
-def _read_regular(path: Path, *, allow_missing: bool) -> tuple[bytes | None, os.stat_result | None]:
+def _read_regular(
+    path: Path,
+    *,
+    allow_missing: bool,
+) -> tuple[bytes | None, os.stat_result | None]:
     raw = Path(path)
     if raw.is_symlink():
         raise ValueError(f"path must not be a symlink: {raw}")
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        opened = os.stat(raw, follow_symlinks=False)
+        fd = os.open(raw, flags)
     except FileNotFoundError:
         if allow_missing:
             return None, None
         raise ValueError(f"required file is missing: {raw}")
-    if not stat.S_ISREG(opened.st_mode):
-        raise ValueError(f"path must be a regular file: {raw}")
-    payload = raw.read_bytes()
-    after = os.stat(raw, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"path cannot be opened safely: {raw}") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"path must be a regular file: {raw}")
+        if before.st_size < 0 or before.st_size > 4 * 1024 * 1024:
+            raise ValueError(f"file size is invalid: {raw}")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+
+        after_fd = os.fstat(fd)
+        if (
+            after_fd.st_dev != before.st_dev
+            or after_fd.st_ino != before.st_ino
+            or after_fd.st_size != before.st_size
+            or after_fd.st_mtime_ns != before.st_mtime_ns
+            or after_fd.st_ctime_ns != before.st_ctime_ns
+        ):
+            raise ValueError(f"path changed while reading: {raw}")
+    finally:
+        os.close(fd)
+
+    if len(payload) != before.st_size:
+        raise ValueError(f"path changed while reading: {raw}")
+    after_path = os.stat(raw, follow_symlinks=False)
     if (
-        after.st_dev != opened.st_dev
-        or after.st_ino != opened.st_ino
-        or after.st_size != opened.st_size
-        or after.st_mtime_ns != opened.st_mtime_ns
-        or after.st_ctime_ns != opened.st_ctime_ns
+        not stat.S_ISREG(after_path.st_mode)
+        or after_path.st_dev != before.st_dev
+        or after_path.st_ino != before.st_ino
+        or after_path.st_size != before.st_size
+        or after_path.st_mtime_ns != before.st_mtime_ns
+        or after_path.st_ctime_ns != before.st_ctime_ns
     ):
         raise ValueError(f"path changed while reading: {raw}")
-    return payload, opened
+    return payload, before
 
 
 def _inspect(
@@ -146,8 +187,14 @@ def inspect_upgrade(
     source_tree: str | Path,
     destination: str | Path = "/etc/systemd/system",
 ) -> UnitUpgradeReport:
-    source = Path(source_tree).resolve()
-    target_dir = Path(destination).resolve()
+    source_raw = Path(source_tree).expanduser()
+    destination_raw = Path(destination).expanduser()
+    if source_raw.is_symlink():
+        raise ValueError("unit upgrade source must not be a symlink")
+    if destination_raw.is_symlink():
+        raise ValueError("systemd destination must not be a symlink")
+    source = source_raw.resolve()
+    target_dir = destination_raw.resolve()
     if source == Path("/opt/pio").resolve():
         raise ValueError("unit upgrade source must not be /opt/pio")
     if not source.is_dir():
@@ -157,18 +204,17 @@ def inspect_upgrade(
 
     rows = _inspect(source_tree=source, destination=target_dir)
     allowed = {"READY_UPDATE", "ALREADY_TARGET", "NOT_INSTALLED"}
-    ready = bool(
-        all(row.status in allowed for row in rows)
-        and any(row.status == "READY_UPDATE" for row in rows)
-    )
-    if all(row.status in {"ALREADY_TARGET", "NOT_INSTALLED"} for row in rows):
-        ready = True
+    ready = all(row.status in allowed for row in rows)
+    upgrade_needed = any(row.status == "READY_UPDATE" for row in rows)
+    installer_needed = any(row.status == "NOT_INSTALLED" for row in rows)
 
     return UnitUpgradeReport(
         source_tree=str(source),
         destination=str(target_dir),
         backup_root=None,
         ready=ready,
+        upgrade_needed=upgrade_needed,
+        installer_needed=installer_needed,
         applied=False,
         units=rows,
         files_updated=0,
@@ -264,6 +310,10 @@ def upgrade_units(
             destination=report.destination,
             backup_root=None,
             ready=True,
+            upgrade_needed=False,
+            installer_needed=any(
+                row.status == "NOT_INSTALLED" for row in rows
+            ),
             applied=True,
             units=rows,
             files_updated=0,
@@ -333,6 +383,10 @@ def upgrade_units(
         destination=final.destination,
         backup_root=str(backup_root),
         ready=True,
+        upgrade_needed=False,
+        installer_needed=any(
+            row.status == "NOT_INSTALLED" for row in final.units
+        ),
         applied=True,
         units=final.units,
         files_updated=len(to_update),
