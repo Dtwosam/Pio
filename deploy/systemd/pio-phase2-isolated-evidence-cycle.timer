@@ -1,5 +1,6 @@
 [Unit]
 Description=Run Pio isolated Phase 2 evidence cycle periodically
+Conflicts=pio-phase2-position-observer.timer
 
 [Timer]
 OnBootSec=10min
