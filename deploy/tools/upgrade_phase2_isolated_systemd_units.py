@@ -60,6 +60,17 @@ def git_blob_sha_bytes(payload: bytes) -> str:
     return hashlib.sha1(header + payload).hexdigest()
 
 
+def _fsync_directory(path: Path) -> None:
+    fd = os.open(
+        path,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _read_regular(
     path: Path,
     *,
@@ -272,6 +283,7 @@ def _write_target(
             raise ValueError(f"installed unit changed before publish: {destination.name}")
 
         os.replace(temp, destination)
+        _fsync_directory(destination.parent)
         final_bytes, _ = _read_regular(destination, allow_missing=False)
         assert final_bytes is not None
         if git_blob_sha_bytes(final_bytes) != expected_target_blob:
@@ -349,12 +361,17 @@ def upgrade_units(
                 raise ValueError(f"backup blob mismatch: {row.name}")
             backups[row.name] = backup
 
-            _write_target(
-                destination=installed,
-                source_bytes=source_bytes,
-                expected_previous_blob=row.expected_previous_blob,
-                expected_target_blob=row.expected_target_blob,
-            )
+            try:
+                _write_target(
+                    destination=installed,
+                    source_bytes=source_bytes,
+                    expected_previous_blob=row.expected_previous_blob,
+                    expected_target_blob=row.expected_target_blob,
+                )
+            except Exception:
+                shutil.copy2(backup, installed)
+                _fsync_directory(target_dir)
+                raise
             updated.append(row)
 
         final = inspect_upgrade(
@@ -372,6 +389,7 @@ def upgrade_units(
             if backup is None or not backup.exists():
                 continue
             shutil.copy2(backup, target_dir / row.name)
+            _fsync_directory(target_dir)
         raise
 
     final = inspect_upgrade(
