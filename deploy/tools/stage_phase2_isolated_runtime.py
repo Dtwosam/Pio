@@ -199,6 +199,10 @@ class IsolatedRuntimeStageReport:
     reviewed_check_commit: str
     reviewed_check_sha256: str
     source_runtime_ready: bool
+    source_executor_sha256: str
+    source_watch_executor_sha256: str
+    release_executor_sha256: str | None
+    release_watch_executor_sha256: str | None
     existing_release_reused: bool
     applied: bool
     current_target: str | None
@@ -254,18 +258,32 @@ def _current_target(current: Path) -> str | None:
     return os.readlink(current)
 
 
-def _validate_source(source: Path) -> None:
+def _binary_identity(report: Any) -> tuple[str, str]:
+    executor_sha = getattr(report, "executor_sha256", None)
+    watcher_sha = getattr(report, "watch_executor_sha256", None)
+    if not isinstance(executor_sha, str) or len(executor_sha) != 64:
+        raise ValueError("runtime executor SHA-256 is missing or invalid")
+    if not isinstance(watcher_sha, str) or len(watcher_sha) != 64:
+        raise ValueError("runtime account-watch SHA-256 is missing or invalid")
+    return executor_sha, watcher_sha
+
+
+def _validate_source(source: Path) -> Any:
     report = CHECK.inspect_runtime(source)
     if not report.runtime_ready:
         raise ValueError("source runtime failed reviewed validation")
+    _binary_identity(report)
+    return report
 
 
-def _validate_existing_release(release: Path) -> None:
+def _validate_existing_release(release: Path) -> Any:
     report = CHECK.inspect_runtime(release)
     if not report.runtime_ready:
         raise ValueError(
             "existing pinned release failed reviewed validation"
         )
+    _binary_identity(report)
+    return report
 
 
 def _replace_current_target(
@@ -306,18 +324,25 @@ def stage_runtime(
     check_identity = _check_source_identity()
     source = _source(source_tree)
     destination = _destination(destination_root)
-    _validate_source(source)
+    source_report = _validate_source(source)
+    source_binary_identity = _binary_identity(source_report)
 
     release = _release_path(destination)
     current = destination / "current"
     existing_release = release.exists()
+    release_binary_identity: tuple[str, str] | None = None
 
     if existing_release:
         if release.is_symlink() or not release.is_dir():
             raise ValueError(
                 "existing pinned release is not a regular directory"
             )
-        _validate_existing_release(release)
+        release_report = _validate_existing_release(release)
+        release_binary_identity = _binary_identity(release_report)
+        if release_binary_identity != source_binary_identity:
+            raise ValueError(
+                "existing pinned release binary identity does not match prepared source"
+            )
 
     if not apply:
         if _check_source_identity() != check_identity:
@@ -333,6 +358,18 @@ def stage_runtime(
             reviewed_check_commit=check_identity[0],
             reviewed_check_sha256=check_identity[1],
             source_runtime_ready=True,
+            source_executor_sha256=source_binary_identity[0],
+            source_watch_executor_sha256=source_binary_identity[1],
+            release_executor_sha256=(
+                release_binary_identity[0]
+                if release_binary_identity is not None
+                else None
+            ),
+            release_watch_executor_sha256=(
+                release_binary_identity[1]
+                if release_binary_identity is not None
+                else None
+            ),
             existing_release_reused=existing_release,
             applied=False,
             current_target=_current_target(current),
@@ -345,6 +382,10 @@ def stage_runtime(
         raise ValueError(
             "reviewed isolated-runtime validator changed before stage apply"
         )
+    if _binary_identity(_validate_source(source)) != source_binary_identity:
+        raise ValueError(
+            "prepared source binary identity changed before stage apply"
+        )
 
     if current.exists() and not current.is_symlink():
         raise ValueError("current path exists and is not a symlink")
@@ -356,7 +397,12 @@ def stage_runtime(
 
     reused = release.exists()
     if reused:
-        _validate_existing_release(release)
+        release_report = _validate_existing_release(release)
+        release_binary_identity = _binary_identity(release_report)
+        if release_binary_identity != source_binary_identity:
+            raise ValueError(
+                "existing pinned release binary identity does not match prepared source"
+            )
     else:
         staging = releases / (
             f".staging-{CHECK.PINNED_SOURCE_HEAD}.{os.getpid()}"
@@ -370,16 +416,36 @@ def stage_runtime(
                 symlinks=True,
                 copy_function=shutil.copy2,
             )
-            _validate_existing_release(staging)
+            staging_report = _validate_existing_release(staging)
+            staging_identity = _binary_identity(staging_report)
+            if staging_identity != source_binary_identity:
+                raise ValueError(
+                    "staged runtime binary identity does not match prepared source"
+                )
+            if _binary_identity(_validate_source(source)) != source_binary_identity:
+                raise ValueError(
+                    "prepared source binary identity changed during stage copy"
+                )
             if _check_source_identity() != check_identity:
                 raise ValueError(
                     "reviewed isolated-runtime validator changed before release publish"
                 )
             os.replace(staging, release)
+            release_binary_identity = staging_identity
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
 
+    release_report = _validate_existing_release(release)
+    release_binary_identity = _binary_identity(release_report)
+    if release_binary_identity != source_binary_identity:
+        raise ValueError(
+            "release binary identity changed before current-link update"
+        )
+    if _binary_identity(_validate_source(source)) != source_binary_identity:
+        raise ValueError(
+            "prepared source binary identity changed before current-link update"
+        )
     if _check_source_identity() != check_identity:
         raise ValueError(
             "reviewed isolated-runtime validator changed before current-link update"
@@ -387,6 +453,10 @@ def stage_runtime(
 
     _atomic_current_link(destination, release)
     try:
+        if _binary_identity(_validate_existing_release(release)) != source_binary_identity:
+            raise ValueError(
+                "release binary identity changed after current-link update"
+            )
         if _check_source_identity() != check_identity:
             raise ValueError(
                 "reviewed isolated-runtime validator changed after current-link update"
@@ -404,6 +474,10 @@ def stage_runtime(
         reviewed_check_commit=check_identity[0],
         reviewed_check_sha256=check_identity[1],
         source_runtime_ready=True,
+        source_executor_sha256=source_binary_identity[0],
+        source_watch_executor_sha256=source_binary_identity[1],
+        release_executor_sha256=release_binary_identity[0],
+        release_watch_executor_sha256=release_binary_identity[1],
         existing_release_reused=reused,
         applied=True,
         current_target=_current_target(current),
