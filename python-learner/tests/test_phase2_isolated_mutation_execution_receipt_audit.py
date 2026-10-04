@@ -493,3 +493,15 @@ def test_audit_uses_single_byte_snapshot_for_receipt_and_preview(
     assert report.preview_identity_matches is True
     assert report.mutation_argv_sha256_matches is True
     assert report.audit_integrity_valid is True
+
+
+
+def test_unit_upgrade_postcondition_contract_routes_sequentially():
+    assert "SYSTEMD_UNIT_UPGRADE_READY" in (
+        MODULE._EXPECTED_POST_STATES["RUNTIME_STAGING_READY"]
+    )
+    assert MODULE._EXPECTED_POST_STATES["SYSTEMD_UNIT_UPGRADE_READY"] == (
+        "SYSTEMD_UNITS_NOT_READY",
+        "DETECTOR_ACTIVATION_READY",
+        "ACTIVE_TOPOLOGY_NOT_READY",
+    )
