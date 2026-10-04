@@ -3,33 +3,140 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 from typing import Any, Callable
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 READINESS_TOOL = TOOLS_DIR / "check_phase2_isolated_smoke_readiness.py"
+READINESS_TOOL_RELATIVE = "deploy/tools/check_phase2_isolated_smoke_readiness.py"
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
+_MAX_ENV_BYTES = 1024 * 1024
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+def _assert_file_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after capture") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after capture")
+
+
+def _capture_regular_file(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int,
+) -> tuple[Path, bytes, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > max_bytes:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_file_path_stable(resolved, before, label=label)
+    return resolved, encoded, before
+
+
+def _load_captured_readiness(
+    path: Path,
+    name: str,
+) -> tuple[Any, Path, bytes, os.stat_result]:
+    label = "reviewed smoke readiness checker"
+    resolved, encoded, opened = _capture_regular_file(
+        path,
+        label=label,
+        max_bytes=_MAX_TOOL_BYTES,
+    )
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed deployment tool: {path}")
+        raise ValueError(f"cannot load reviewed deployment tool: {resolved}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(encoded, str(resolved), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_file_path_stable(resolved, opened, label=label)
+    return module, resolved, encoded, opened
 
 
-READINESS = _load(
+(
+    READINESS,
+    _READINESS_PATH_AT_LOAD,
+    _READINESS_BYTES_AT_LOAD,
+    _READINESS_STAT_AT_LOAD,
+) = _load_captured_readiness(
     READINESS_TOOL,
     "phase2_isolated_smoke_runner_readiness",
 )
+_READINESS_SHA256_AT_LOAD = hashlib.sha256(
+    _READINESS_BYTES_AT_LOAD
+).hexdigest()
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -65,11 +172,67 @@ class Phase2IsolatedSmokeReport:
         return asdict(self)
 
 
-def _read_env(path: Path) -> dict[str, str]:
-    if path.is_symlink() or not path.is_file():
-        return {}
+def _readiness_source_identity() -> tuple[str, str]:
+    raw = Path(READINESS_TOOL).expanduser()
+    if raw.is_symlink():
+        raise ValueError("reviewed smoke readiness checker is missing or symlinked")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(
+            "reviewed smoke readiness checker is missing or symlinked"
+        ) from exc
+    if resolved != _READINESS_PATH_AT_LOAD:
+        raise ValueError("reviewed smoke readiness checker path changed after load")
+    _assert_file_path_stable(
+        _READINESS_PATH_AT_LOAD,
+        _READINESS_STAT_AT_LOAD,
+        label="reviewed smoke readiness checker",
+    )
+
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if head.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = head.stdout.strip()
+    if len(commit) not in {40, 64}:
+        raise ValueError("reviewed source commit is invalid")
+
+    historical = subprocess.run(
+        ["git", "show", f"{commit}:{READINESS_TOOL_RELATIVE}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+    if historical.returncode != 0:
+        raise ValueError(
+            "reviewed smoke readiness checker is not present at reviewed source commit"
+        )
+    if historical.stdout != _READINESS_BYTES_AT_LOAD:
+        raise ValueError(
+            "reviewed smoke readiness checker bytes do not match reviewed source commit"
+        )
+    _assert_file_path_stable(
+        _READINESS_PATH_AT_LOAD,
+        _READINESS_STAT_AT_LOAD,
+        label="reviewed smoke readiness checker",
+    )
+    return commit, _READINESS_SHA256_AT_LOAD
+
+
+def _parse_env_bytes(encoded: bytes) -> dict[str, str]:
+    try:
+        text = encoded.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("environment file is not valid UTF-8") from exc
+
     values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -105,6 +268,33 @@ def _runtime_current(runtime_root: str | Path) -> Path:
     except ValueError as exc:
         raise ValueError("runtime current target is outside releases") from exc
     return resolved
+
+
+def _regular_file_identity(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[Path, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+    current = os.stat(resolved, follow_symlinks=False)
+    if not stat.S_ISREG(current.st_mode):
+        raise ValueError(f"{label} must be a regular file")
+    return resolved, current
+
+
+def _assert_runtime_target_stable(
+    runtime_root: str | Path,
+    expected: Path,
+) -> None:
+    current = _runtime_current(runtime_root)
+    if current != expected:
+        raise ValueError("isolated runtime current target changed before smoke launch")
 
 
 def _parse_output(stdout: str) -> tuple[
@@ -208,12 +398,16 @@ def run_smoke(
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
 
+    readiness_source_before = _readiness_source_identity()
     readiness = READINESS.inspect_smoke_readiness(
         runtime_root=runtime_root,
         unit_destination=unit_destination,
         env_file=env_file,
         data_root=data_root,
     )
+    readiness_source_after = _readiness_source_identity()
+    if readiness_source_after != readiness_source_before:
+        raise ValueError("reviewed smoke readiness source changed during inspection")
     receipt = Path(receipt_path).expanduser()
 
     if not readiness.smoke_ready:
@@ -259,16 +453,21 @@ def run_smoke(
         )
 
     runtime = _runtime_current(runtime_root)
-    executor = runtime / "rust-executor/target/release/meteora-executor"
-    if not executor.is_file() or executor.is_symlink():
-        raise ValueError("reviewed isolated executor is missing")
+    executor, executor_stat = _regular_file_identity(
+        runtime / "rust-executor/target/release/meteora-executor",
+        label="reviewed isolated executor",
+    )
+    python_path, python_stat = _regular_file_identity(
+        Path(python_executable),
+        label="Python executable",
+    )
 
-    python_path = Path(python_executable)
-    if not python_path.is_file() or python_path.is_symlink():
-        raise ValueError("Python executable is missing")
-
-    env_path = Path(env_file).expanduser()
-    loaded_env = _read_env(env_path)
+    env_path, env_bytes, env_stat = _capture_regular_file(
+        Path(env_file),
+        label="environment file",
+        max_bytes=_MAX_ENV_BYTES,
+    )
+    loaded_env = _parse_env_bytes(env_bytes)
     env = os.environ.copy()
     env.update(loaded_env)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -284,6 +483,26 @@ def run_smoke(
         str(executor),
         "--persist-progress",
     ]
+
+    readiness_source_before_launch = _readiness_source_identity()
+    if readiness_source_before_launch != readiness_source_before:
+        raise ValueError("reviewed smoke readiness source changed before launch")
+    _assert_file_path_stable(
+        env_path,
+        env_stat,
+        label="environment file",
+    )
+    _assert_runtime_target_stable(runtime_root, runtime)
+    _assert_file_path_stable(
+        executor,
+        executor_stat,
+        label="reviewed isolated executor",
+    )
+    _assert_file_path_stable(
+        python_path,
+        python_stat,
+        label="Python executable",
+    )
 
     completed = runner(
         command,
