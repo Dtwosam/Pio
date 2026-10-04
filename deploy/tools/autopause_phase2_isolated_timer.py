@@ -376,6 +376,7 @@ def autopause(
         raise ValueError("autopause database must be named pio.db")
     data_root = database.parent
     decision_time = now().astimezone(timezone.utc)
+    health_source = _health_source_identity()
 
     initial = _inspect_health(
         runtime_root=runtime_root,
@@ -389,6 +390,11 @@ def autopause(
         decision_time=decision_time,
         runner=runner,
     )
+
+    if _health_source_identity() != health_source:
+        raise ValueError(
+            "reviewed timer health checker changed during autopause preflight"
+        )
 
     if not apply or not initial.pause_recommended:
         return _report(
@@ -414,6 +420,18 @@ def autopause(
         decision_time=decision_time,
         runner=runner,
     )
+    if _health_source_identity() != health_source:
+        return _report(
+            health=initial,
+            database_path=database,
+            apply=True,
+            applied=False,
+            timer_enabled_after=bool(revalidated.timer_enabled),
+            timer_active_after=bool(revalidated.timer_active),
+            failure_step="HEALTH_SOURCE_CHANGED_BEFORE_APPLY",
+            service_control_performed=False,
+        )
+
     if (
         not revalidated.pause_recommended
         or _decision_identity(revalidated) != _decision_identity(initial)
@@ -447,11 +465,16 @@ def autopause(
             service_control_performed=False,
         )
 
-    if _health_source_identity() != _health_source_identity():
-        # This branch is intentionally unreachable in stable execution, but
-        # keep source validation directly adjacent to the mutation boundary.
-        raise ValueError(
-            "reviewed timer health checker changed before autopause mutation"
+    if _health_source_identity() != health_source:
+        return _report(
+            health=initial,
+            database_path=database,
+            apply=True,
+            applied=False,
+            timer_enabled_after=enabled_now,
+            timer_active_after=active_now,
+            failure_step="HEALTH_SOURCE_CHANGED_BEFORE_APPLY",
+            service_control_performed=False,
         )
 
     completed = runner(
