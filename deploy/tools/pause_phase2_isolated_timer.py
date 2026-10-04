@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 TOOLS_DIR = Path(__file__).resolve().parent
 HEALTH_TOOL = TOOLS_DIR / "check_phase2_isolated_timer_health.py"
+AUTOPAUSE_TOOL = TOOLS_DIR / "autopause_phase2_isolated_timer.py"
 
 
 def _load(path: Path, name: str) -> Any:
@@ -29,9 +30,12 @@ HEALTH = _load(
     HEALTH_TOOL,
     "phase2_timer_pause_health",
 )
+AUTOPAUSE = _load(
+    AUTOPAUSE_TOOL,
+    "phase2_timer_pause_stable_autopause",
+)
 
 SystemctlRunner = Callable[..., subprocess.CompletedProcess[str]]
-TIMER_UNIT = "pio-phase2-isolated-evidence-cycle.timer"
 
 
 @dataclass(frozen=True)
@@ -56,20 +60,42 @@ class Phase2TimerPauseReport:
         return asdict(self)
 
 
-def _state(
-    runner: SystemctlRunner,
-    action: str,
-) -> bool:
-    completed = runner(
-        ["systemctl", action, TIMER_UNIT],
-        capture_output=True,
-        text=True,
-        check=False,
+def _autopause_boundary_ok(report: Any) -> bool:
+    return bool(
+        not getattr(report, "rpc_called", True)
+        and not getattr(report, "database_write_performed", True)
     )
-    expected = "active" if action == "is-active" else "enabled"
-    return (
-        int(completed.returncode) == 0
-        and (completed.stdout or "").strip() == expected
+
+
+def _base_report(
+    *,
+    pause_recommended: bool,
+    apply_requested: bool,
+    applied: bool,
+    timer_active_before: bool,
+    timer_enabled_before: bool,
+    timer_active_after: bool,
+    timer_enabled_after: bool,
+    failure_step: str | None,
+    future_rpc_cycles_paused: bool,
+    service_control_performed: bool,
+) -> Phase2TimerPauseReport:
+    return Phase2TimerPauseReport(
+        pause_recommended=pause_recommended,
+        apply_requested=apply_requested,
+        applied=applied,
+        timer_active_before=timer_active_before,
+        timer_enabled_before=timer_enabled_before,
+        timer_active_after=timer_active_after,
+        timer_enabled_after=timer_enabled_after,
+        failure_step=failure_step,
+        detector_untouched=True,
+        streams_untouched=True,
+        evidence_service_untouched=True,
+        legacy_services_untouched=True,
+        direct_rpc_called=False,
+        future_rpc_cycles_paused=future_rpc_cycles_paused,
+        service_control_performed=service_control_performed,
     )
 
 
@@ -85,6 +111,14 @@ def pause_timer(
     apply: bool = False,
     runner: SystemctlRunner = subprocess.run,
 ) -> Phase2TimerPauseReport:
+    """
+    Compatibility wrapper around the reviewed stable-evidence autopause path.
+
+    The dry-run preserves the richer topology-aware timer-health check. An
+    explicit apply never issues systemctl directly from this module; it
+    delegates the mutation to autopause_phase2_isolated_timer.py so all pause
+    entrypoints share the same descriptor-bound evidence revalidation.
+    """
     health = HEALTH.inspect_timer_health(
         runtime_root=runtime_root,
         unit_destination=unit_destination,
@@ -96,11 +130,12 @@ def pause_timer(
         runner=runner,
     )
 
-    active_before = health.timer_active
-    enabled_before = health.timer_enabled
+    active_before = bool(health.timer_active)
+    enabled_before = bool(health.timer_enabled)
+    recommended = bool(health.pause_recommended)
 
-    if not health.pause_recommended:
-        return Phase2TimerPauseReport(
+    if not recommended:
+        return _base_report(
             pause_recommended=False,
             apply_requested=apply,
             applied=False,
@@ -109,17 +144,12 @@ def pause_timer(
             timer_active_after=active_before,
             timer_enabled_after=enabled_before,
             failure_step="PAUSE_NOT_RECOMMENDED" if apply else None,
-            detector_untouched=True,
-            streams_untouched=True,
-            evidence_service_untouched=True,
-            legacy_services_untouched=True,
-            direct_rpc_called=False,
-            future_rpc_cycles_paused=False,
+            future_rpc_cycles_paused=not enabled_before,
             service_control_performed=False,
         )
 
     if not apply:
-        return Phase2TimerPauseReport(
+        return _base_report(
             pause_recommended=True,
             apply_requested=False,
             applied=False,
@@ -128,69 +158,55 @@ def pause_timer(
             timer_active_after=active_before,
             timer_enabled_after=enabled_before,
             failure_step=None,
-            detector_untouched=True,
-            streams_untouched=True,
-            evidence_service_untouched=True,
-            legacy_services_untouched=True,
-            direct_rpc_called=False,
-            future_rpc_cycles_paused=False,
+            future_rpc_cycles_paused=not enabled_before,
             service_control_performed=False,
         )
 
-    completed = runner(
-        ["systemctl", "disable", "--now", TIMER_UNIT],
-        capture_output=True,
-        text=True,
-        check=False,
+    autopause = AUTOPAUSE.autopause(
+        database_path=Path(data_root).expanduser() / "pio.db",
+        history_limit=history_limit,
+        rate_limit_streak_threshold=rate_limit_streak_threshold,
+        max_cycle_gap_seconds=max_cycle_age_seconds,
+        max_latest_age_seconds=max_cycle_age_seconds,
+        apply=True,
+        runner=runner,
     )
-    if int(completed.returncode) != 0:
-        return Phase2TimerPauseReport(
-            pause_recommended=True,
-            apply_requested=True,
-            applied=False,
-            timer_active_before=active_before,
-            timer_enabled_before=enabled_before,
-            timer_active_after=_state(runner, "is-active"),
-            timer_enabled_after=_state(runner, "is-enabled"),
-            failure_step="DISABLE_NOW",
-            detector_untouched=True,
-            streams_untouched=True,
-            evidence_service_untouched=True,
-            legacy_services_untouched=True,
-            direct_rpc_called=False,
-            future_rpc_cycles_paused=False,
-            service_control_performed=True,
-        )
+    if not _autopause_boundary_ok(autopause):
+        raise ValueError("stable autopause crossed the local safety boundary")
 
-    active_after = _state(runner, "is-active")
-    enabled_after = _state(runner, "is-enabled")
-    applied = not active_after and not enabled_after
+    if not bool(autopause.pause_recommended):
+        failure_step = "AUTOPAUSE_NO_LONGER_RECOMMENDED"
+    elif bool(autopause.applied):
+        failure_step = None
+    else:
+        detail = str(autopause.failure_step or "NOT_APPLIED")
+        failure_step = f"AUTOPAUSE_{detail}"
 
-    return Phase2TimerPauseReport(
+    return _base_report(
         pause_recommended=True,
         apply_requested=True,
-        applied=applied,
-        timer_active_before=active_before,
-        timer_enabled_before=enabled_before,
-        timer_active_after=active_after,
-        timer_enabled_after=enabled_after,
-        failure_step=None if applied else "VERIFY_PAUSED",
-        detector_untouched=True,
-        streams_untouched=True,
-        evidence_service_untouched=True,
-        legacy_services_untouched=True,
-        direct_rpc_called=False,
-        future_rpc_cycles_paused=applied,
-        service_control_performed=True,
+        applied=bool(autopause.applied),
+        timer_active_before=bool(autopause.timer_active_before),
+        timer_enabled_before=bool(autopause.timer_enabled_before),
+        timer_active_after=bool(autopause.timer_active_after),
+        timer_enabled_after=bool(autopause.timer_enabled_after),
+        failure_step=failure_step,
+        future_rpc_cycles_paused=bool(
+            autopause.future_timer_cycles_paused
+        ),
+        service_control_performed=bool(
+            autopause.service_control_performed
+        ),
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Pause only the recurring isolated Phase-2 evidence timer when "
-            "the persisted health record shows repeated Solana RPC rate limits. "
-            "Detector and prestate streams remain untouched."
+            "Compatibility wrapper for pausing the recurring isolated Phase-2 "
+            "evidence timer. Apply requests delegate to the stable-evidence "
+            "standalone autopause guard. Detector and prestate streams remain "
+            "untouched."
         )
     )
     parser.add_argument("--runtime-root", default="/opt/pio-phase2-runtime")
