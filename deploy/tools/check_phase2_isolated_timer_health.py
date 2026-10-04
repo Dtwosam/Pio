@@ -246,6 +246,7 @@ class TimerHealthUnit:
 
 @dataclass(frozen=True)
 class Phase2TimerHealthReport:
+    pool_address: str | None
     runtime_ready: bool
     installed_units_exact: bool
     env_ready: bool
@@ -810,6 +811,7 @@ def inspect_timer_health(
         _assert_database_path_stable(database_snapshot)
 
     return Phase2TimerHealthReport(
+        pool_address=pool_address or None,
         runtime_ready=bool(base.runtime_ready),
         installed_units_exact=bool(base.installed_units_exact),
         env_ready=env_ready,
