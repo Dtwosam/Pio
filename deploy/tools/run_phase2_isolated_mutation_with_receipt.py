@@ -162,6 +162,7 @@ class Phase2MutationReceiptRun:
     failure_category: str | None
     receipt_sha256: str | None
     execution_report_sha256: str | None
+    mutation_outcome_summary: dict[str, Any] | None
     shell_used: bool
     raw_stderr_exposed: bool
 
@@ -441,6 +442,55 @@ def _execution_failure_evidence(execution: Any) -> dict[str, Any] | None:
     return evidence or None
 
 
+_SUCCESS_OUTCOME_BOOL_FIELDS = (
+    "applied",
+    "ready",
+    "upgrade_needed",
+    "installer_needed",
+    "daemon_reload_performed",
+    "service_control_performed",
+    "rpc_called",
+)
+_SUCCESS_OUTCOME_INT_FIELDS = ("files_updated",)
+
+
+def _successful_mutation_outcome_summary(
+    execution: Any,
+) -> dict[str, Any] | None:
+    exit_code = getattr(execution, "exit_code", None)
+    if (
+        not bool(getattr(execution, "mutation_executed", False))
+        or not bool(getattr(execution, "result_json_valid", False))
+        or not bool(getattr(execution, "result_secret_safe", False))
+        or isinstance(exit_code, bool)
+        or not isinstance(exit_code, int)
+        or exit_code != 0
+        or getattr(execution, "failure_category", None) is not None
+    ):
+        return None
+
+    result = getattr(execution, "result", None)
+    if not isinstance(result, dict):
+        return None
+
+    summary: dict[str, Any] = {}
+    for key in _SUCCESS_OUTCOME_BOOL_FIELDS:
+        value = result.get(key)
+        if isinstance(value, bool):
+            summary[key] = value
+
+    for key in _SUCCESS_OUTCOME_INT_FIELDS:
+        value = result.get(key)
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+        ):
+            summary[key] = value
+
+    return summary or None
+
+
 def _pending_payload(
     *,
     ready: Any,
@@ -461,6 +511,7 @@ def _pending_payload(
         "failure_category": None,
         "execution_report_sha256": None,
         "execution_failure_evidence": None,
+        "mutation_outcome_summary": None,
         "raw_stderr_persisted": False,
     }
 
@@ -504,6 +555,9 @@ def _final_payload(
     payload["execution_failure_category"] = execution.failure_category
     payload["execution_failure_evidence"] = _execution_failure_evidence(
         execution
+    )
+    payload["mutation_outcome_summary"] = (
+        _successful_mutation_outcome_summary(execution)
     )
     return payload
 
@@ -554,6 +608,7 @@ def run_mutation_with_receipt(
             failure_category=None,
             receipt_sha256=None,
             execution_report_sha256=None,
+            mutation_outcome_summary=None,
             shell_used=False,
             raw_stderr_exposed=False,
         )
@@ -628,6 +683,7 @@ def run_mutation_with_receipt(
             failure_category=category,
             receipt_sha256=receipt_sha,
             execution_report_sha256=None,
+            mutation_outcome_summary=None,
             shell_used=False,
             raw_stderr_exposed=False,
         )
@@ -662,6 +718,7 @@ def run_mutation_with_receipt(
         failure_category=execution.failure_category,
         receipt_sha256=receipt_sha,
         execution_report_sha256=execution_sha,
+        mutation_outcome_summary=final["mutation_outcome_summary"],
         shell_used=False,
         raw_stderr_exposed=False,
     )
