@@ -8,6 +8,8 @@ import sqlite3
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "deploy/tools/check_phase2_isolated_timer_readiness.py"
@@ -391,3 +393,126 @@ def test_timer_readiness_ignores_newer_progress_for_other_pool(
     assert report.latest_progress_evidence_id == 123
     assert report.receipt_is_latest_for_pool is True
     assert report.timer_ready is True
+
+
+
+def test_timer_readiness_rejects_same_content_receipt_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    create_database(data)
+    receipt_path = receipt(tmp_path, release)
+    original = MODULE._read_progress_snapshot
+
+    def replacing_reader(database_path, evidence_id):
+        result = original(database_path, evidence_id)
+        encoded = receipt_path.read_bytes()
+        receipt_path.unlink()
+        receipt_path.write_bytes(encoded)
+        return result
+
+    monkeypatch.setattr(MODULE, "_read_progress_snapshot", replacing_reader)
+
+    with pytest.raises(ValueError, match="smoke receipt path changed"):
+        MODULE.inspect_timer_readiness(
+            runtime_root=runtime_root,
+            data_root=data,
+            receipt_path=receipt_path,
+            now=lambda: datetime(
+                2026, 10, 2, 19, 10, tzinfo=timezone.utc
+            ),
+        )
+
+
+def test_timer_readiness_rejects_same_content_database_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    database = create_database(data)
+    receipt_path = receipt(tmp_path, release)
+    original = MODULE._read_progress_snapshot
+
+    def replacing_reader(database_path, evidence_id):
+        result = original(database_path, evidence_id)
+        encoded = database.read_bytes()
+        database.unlink()
+        database.write_bytes(encoded)
+        return result
+
+    monkeypatch.setattr(MODULE, "_read_progress_snapshot", replacing_reader)
+
+    with pytest.raises(ValueError, match="database path changed"):
+        MODULE.inspect_timer_readiness(
+            runtime_root=runtime_root,
+            data_root=data,
+            receipt_path=receipt_path,
+            now=lambda: datetime(
+                2026, 10, 2, 19, 10, tzinfo=timezone.utc
+            ),
+        )
+
+
+def test_timer_readiness_rejects_runtime_current_retarget(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    other = runtime_root / "releases" / "other"
+    other.mkdir()
+    data = tmp_path / "data"
+    data.mkdir()
+    create_database(data)
+    receipt_path = receipt(tmp_path, release)
+    current = runtime_root / "current"
+    original = MODULE._read_progress_snapshot
+
+    def retargeting_reader(database_path, evidence_id):
+        result = original(database_path, evidence_id)
+        current.unlink()
+        current.symlink_to(Path("releases") / "other")
+        return result
+
+    monkeypatch.setattr(MODULE, "_read_progress_snapshot", retargeting_reader)
+
+    with pytest.raises(ValueError, match="runtime current changed"):
+        MODULE.inspect_timer_readiness(
+            runtime_root=runtime_root,
+            data_root=data,
+            receipt_path=receipt_path,
+            now=lambda: datetime(
+                2026, 10, 2, 19, 10, tzinfo=timezone.utc
+            ),
+        )
+
+
+def test_timer_readiness_snapshot_guard_can_be_rechecked(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    create_database(data)
+    receipt_path = receipt(tmp_path, release)
+
+    report, snapshot = MODULE.capture_timer_readiness(
+        runtime_root=runtime_root,
+        data_root=data,
+        receipt_path=receipt_path,
+        now=lambda: datetime(
+            2026, 10, 2, 19, 10, tzinfo=timezone.utc
+        ),
+    )
+
+    assert report.timer_ready is True
+    MODULE.assert_timer_readiness_snapshot_stable(snapshot)
