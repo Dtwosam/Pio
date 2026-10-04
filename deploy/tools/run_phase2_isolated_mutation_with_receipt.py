@@ -394,6 +394,46 @@ def _identity_from_ready(ready: Any) -> dict[str, Any]:
     }
 
 
+def _execution_failure_evidence(execution: Any) -> dict[str, Any] | None:
+    if (
+        getattr(execution, "failure_category", None) is None
+        or getattr(execution, "exit_code", 0) == 0
+        or not bool(getattr(execution, "result_json_valid", False))
+        or not bool(getattr(execution, "result_secret_safe", False))
+    ):
+        return None
+
+    result = getattr(execution, "result", None)
+    if not isinstance(result, dict):
+        return None
+
+    evidence: dict[str, Any] = {}
+    for key in (
+        "applied",
+        "failure_step",
+        "rollback_performed",
+        "rollback_succeeded",
+        "files_updated",
+        "ready",
+        "upgrade_needed",
+        "installer_needed",
+    ):
+        if key not in result:
+            continue
+        value = result[key]
+        if key == "failure_step":
+            if value is not None and not isinstance(value, str):
+                continue
+        elif key == "files_updated":
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                continue
+        elif not isinstance(value, bool):
+            continue
+        evidence[key] = value
+
+    return evidence or None
+
+
 def _pending_payload(
     *,
     ready: Any,
@@ -413,6 +453,7 @@ def _pending_payload(
         "exit_code": None,
         "failure_category": None,
         "execution_report_sha256": None,
+        "execution_failure_evidence": None,
         "raw_stderr_persisted": False,
     }
 
@@ -454,6 +495,9 @@ def _final_payload(
     payload["result_json_valid"] = bool(execution.result_json_valid)
     payload["result_secret_safe"] = bool(execution.result_secret_safe)
     payload["execution_failure_category"] = execution.failure_category
+    payload["execution_failure_evidence"] = _execution_failure_evidence(
+        execution
+    )
     return payload
 
 
