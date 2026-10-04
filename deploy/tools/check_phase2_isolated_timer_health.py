@@ -4,33 +4,210 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sqlite3
+import stat
 import subprocess
 import sys
 from typing import Any, Callable
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 ACTIVATION_TOOL = TOOLS_DIR / "check_phase2_isolated_activation.py"
+ACTIVATION_TOOL_RELATIVE = "deploy/tools/check_phase2_isolated_activation.py"
+
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
+_MAX_ENV_BYTES = 1024 * 1024
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+@dataclass(frozen=True)
+class _CapturedFile:
+    path: Path
+    encoded: bytes
+    opened: os.stat_result
+
+
+@dataclass(frozen=True)
+class _DatabasePathSnapshot:
+    path: Path
+    opened: os.stat_result
+
+
+def _assert_regular_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after capture") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_mode != opened.st_mode
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after capture")
+
+
+def _capture_regular_file(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int,
+    optional: bool = False,
+) -> _CapturedFile | None:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        return None if optional else (_ for _ in ()).throw(
+            ValueError(f"{label} must not be a symlink")
+        )
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError:
+        if optional:
+            return None
+        raise ValueError(f"{label} is missing")
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError:
+        if optional:
+            return None
+        raise ValueError(f"{label} cannot be opened safely")
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            if optional:
+                return None
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size < 0 or before.st_size > max_bytes:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_mode != before.st_mode
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_regular_path_stable(resolved, before, label=label)
+    return _CapturedFile(path=resolved, encoded=encoded, opened=before)
+
+
+def _load_captured_activation(
+    path: Path,
+    name: str,
+) -> tuple[Any, _CapturedFile]:
+    captured = _capture_regular_file(
+        path,
+        label="reviewed activation checker",
+        max_bytes=_MAX_TOOL_BYTES,
+    )
+    assert captured is not None
+    spec = importlib.util.spec_from_file_location(name, captured.path)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed deployment tool: {path}")
+        raise ValueError(f"cannot load reviewed deployment tool: {captured.path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(captured.encoded, str(captured.path), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_regular_path_stable(
+        captured.path,
+        captured.opened,
+        label="reviewed activation checker",
+    )
+    return module, captured
 
 
-ACTIVATION = _load(
+ACTIVATION, _ACTIVATION_CAPTURE = _load_captured_activation(
     ACTIVATION_TOOL,
     "phase2_timer_health_activation_helpers",
 )
+_ACTIVATION_SHA256 = hashlib.sha256(
+    _ACTIVATION_CAPTURE.encoded
+).hexdigest()
+
+
+def _repo_head() -> str:
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = completed.stdout.strip()
+    if len(commit) not in {40, 64}:
+        raise ValueError("reviewed source commit is invalid")
+    return commit
+
+
+def _activation_source_identity() -> tuple[str, str]:
+    _assert_regular_path_stable(
+        _ACTIVATION_CAPTURE.path,
+        _ACTIVATION_CAPTURE.opened,
+        label="reviewed activation checker",
+    )
+    commit = _repo_head()
+    historical = subprocess.run(
+        ["git", "show", f"{commit}:{ACTIVATION_TOOL_RELATIVE}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+    if historical.returncode != 0:
+        raise ValueError(
+            "reviewed activation checker is not present at reviewed source commit"
+        )
+    if historical.stdout != _ACTIVATION_CAPTURE.encoded:
+        raise ValueError(
+            "reviewed activation checker bytes do not match reviewed source commit"
+        )
+    _assert_regular_path_stable(
+        _ACTIVATION_CAPTURE.path,
+        _ACTIVATION_CAPTURE.opened,
+        label="reviewed activation checker",
+    )
+    return commit, _ACTIVATION_SHA256
 
 SystemctlRunner = Callable[..., subprocess.CompletedProcess[str]]
 Now = Callable[[], datetime]
@@ -121,22 +298,58 @@ def _systemctl_state(
     )
 
 
-def _read_recent_cycles(
+def _database_path_snapshot(
+    database_path: Path,
+) -> _DatabasePathSnapshot | None:
+    raw = Path(database_path).expanduser()
+    try:
+        opened = os.lstat(raw)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValueError("Phase-2 database cannot be inspected safely") from exc
+    if stat.S_ISLNK(opened.st_mode) or not stat.S_ISREG(opened.st_mode):
+        return None
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError:
+        return None
+    return _DatabasePathSnapshot(path=resolved, opened=opened)
+
+
+def _assert_database_path_stable(
+    snapshot: _DatabasePathSnapshot,
+) -> None:
+    try:
+        current = os.stat(snapshot.path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError("Phase-2 database path changed during health check") from exc
+    before = snapshot.opened
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != before.st_dev
+        or current.st_ino != before.st_ino
+        or current.st_mode != before.st_mode
+    ):
+        raise ValueError("Phase-2 database path changed during health check")
+
+
+def _read_recent_cycles_snapshot(
     database_path: Path,
     *,
     pool_address: str,
     limit: int,
-) -> tuple[TimerHealthCycle, ...]:
-    if (
-        limit <= 0
-        or database_path.is_symlink()
-        or not database_path.is_file()
-    ):
-        return ()
+) -> tuple[tuple[TimerHealthCycle, ...], _DatabasePathSnapshot | None]:
+    if limit <= 0:
+        return (), None
+    snapshot = _database_path_snapshot(database_path)
+    if snapshot is None:
+        return (), None
 
-    uri = f"file:{database_path.resolve()}?mode=ro"
+    uri = f"file:{snapshot.path}?mode=ro"
     try:
         with sqlite3.connect(uri, uri=True, timeout=5) as conn:
+            conn.execute("BEGIN")
             rows = conn.execute(
                 """
                 SELECT id, as_of, status, evidence_json
@@ -148,8 +361,9 @@ def _read_recent_cycles(
                 """,
                 (PROGRESS_EDGE_TYPE, pool_address, limit),
             ).fetchall()
+            conn.rollback()
     except sqlite3.Error:
-        return ()
+        rows = []
 
     cycles = []
     for evidence_id, as_of, status, evidence_json in rows:
@@ -205,7 +419,22 @@ def _read_recent_cycles(
                 stages_skipped=int(payload.get("stages_skipped", 0) or 0),
             )
         )
-    return tuple(cycles)
+    _assert_database_path_stable(snapshot)
+    return tuple(cycles), snapshot
+
+
+def _read_recent_cycles(
+    database_path: Path,
+    *,
+    pool_address: str,
+    limit: int,
+) -> tuple[TimerHealthCycle, ...]:
+    cycles, _snapshot = _read_recent_cycles_snapshot(
+        database_path,
+        pool_address=pool_address,
+        limit=limit,
+    )
+    return cycles
 
 
 def _consecutive_rate_limits(
@@ -253,6 +482,20 @@ def inspect_timer_health(
     if rate_limit_streak_threshold <= 0:
         raise ValueError("rate_limit_streak_threshold must be positive")
 
+    activation_source = _activation_source_identity()
+    env_capture = _capture_regular_file(
+        Path(env_file),
+        label="Phase-2 environment file",
+        max_bytes=_MAX_ENV_BYTES,
+        optional=True,
+    )
+    if env_capture is not None:
+        _assert_regular_path_stable(
+            env_capture.path,
+            env_capture.opened,
+            label="Phase-2 environment file",
+        )
+
     base = ACTIVATION.inspect_activation(
         runtime_root=runtime_root,
         unit_destination=unit_destination,
@@ -260,6 +503,16 @@ def inspect_timer_health(
         data_root=data_root,
         runner=runner,
     )
+    if _activation_source_identity() != activation_source:
+        raise ValueError(
+            "reviewed activation checker changed during timer-health inspection"
+        )
+    if env_capture is not None:
+        _assert_regular_path_stable(
+            env_capture.path,
+            env_capture.opened,
+            label="Phase-2 environment file",
+        )
 
     env_ready = bool(
         base.env_file_regular
@@ -322,20 +575,24 @@ def inspect_timer_health(
         for name in ACTIVATION.LEGACY_UNITS
     )
 
-    env_values = ACTIVATION._read_env(Path(env_file).expanduser())
+    env_values = (
+        ACTIVATION._read_env_bytes(env_capture.encoded)
+        if env_capture is not None
+        else {}
+    )
     pool_address = env_values.get(
         "PIO_PHASE2_POSITION_POOL",
         "",
     ).strip()
-    cycles = (
-        _read_recent_cycles(
+    database_snapshot = None
+    if pool_address:
+        cycles, database_snapshot = _read_recent_cycles_snapshot(
             Path(data_root).expanduser() / "pio.db",
             pool_address=pool_address,
             limit=history_limit,
         )
-        if pool_address
-        else ()
-    )
+    else:
+        cycles = ()
 
     latest_age: float | None = None
     latest_recent = False
@@ -386,6 +643,19 @@ def inspect_timer_health(
         and not latest_failed
         and rate_limit_streak == 0
     )
+
+    if _activation_source_identity() != activation_source:
+        raise ValueError(
+            "reviewed activation checker changed during timer-health inspection"
+        )
+    if env_capture is not None:
+        _assert_regular_path_stable(
+            env_capture.path,
+            env_capture.opened,
+            label="Phase-2 environment file",
+        )
+    if database_snapshot is not None:
+        _assert_database_path_stable(database_snapshot)
 
     return Phase2TimerHealthReport(
         runtime_ready=bool(base.runtime_ready),
