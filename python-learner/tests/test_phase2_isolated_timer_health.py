@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -25,6 +26,9 @@ SPEC.loader.exec_module(MODULE)
 
 
 POOL = "pool"
+
+_REAL_CAPTURE_CONTINUITY = MODULE._capture_smoke_runtime_continuity
+_REAL_ASSERT_CONTINUITY = MODULE._assert_smoke_runtime_continuity_stable
 
 
 def write_db(tmp_path: Path, cycles) -> Path:
@@ -116,6 +120,26 @@ def install_base(
             for name in MODULE.ACTIVATION.LEGACY_UNITS
         ],
     ]
+    continuity = SimpleNamespace(
+        receipt_regular=True,
+        receipt_valid=True,
+        runtime_target_matches=True,
+        stage_identity_matches=True,
+        executor_matches=True,
+        watch_executor_matches=True,
+        current=True,
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_smoke_runtime_continuity",
+        lambda **kwargs: (continuity, object()),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_assert_smoke_runtime_continuity_stable",
+        lambda _snapshot: None,
+    )
+
     monkeypatch.setattr(
         MODULE.ACTIVATION,
         "inspect_activation",
@@ -144,6 +168,61 @@ def install_base(
         ),
     )
     return streams
+
+
+def runtime_smoke_identity(tmp_path: Path) -> tuple[Path, Path, Path]:
+    root = tmp_path / "runtime"
+    release = root / "releases" / "pin"
+    binaries = release / "rust-executor" / "target" / "release"
+    binaries.mkdir(parents=True)
+    executor = binaries / "meteora-executor"
+    watcher = binaries / "pio-phase2-account-watch"
+    executor.write_bytes(b"reviewed-executor")
+    watcher.write_bytes(b"reviewed-account-watch")
+    identity = {
+        "executor_sha256": hashlib.sha256(executor.read_bytes()).hexdigest(),
+        "watch_executor_sha256": hashlib.sha256(watcher.read_bytes()).hexdigest(),
+    }
+    identity_path = release / MODULE.TIMER_READINESS._RUNTIME_IDENTITY_FILENAME
+    identity_path.write_text(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    current = root / "current"
+    current.symlink_to(Path("releases") / "pin")
+    receipt = tmp_path / "smoke-receipt.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "runtime_target": str(release),
+                "runtime_executor_sha256": identity["executor_sha256"],
+                "runtime_watch_executor_sha256": identity[
+                    "watch_executor_sha256"
+                ],
+                "stage_identity_sha256": hashlib.sha256(
+                    identity_path.read_bytes()
+                ).hexdigest(),
+                "smoke_passed": True,
+                "eligible_for_timer_enable_preflight": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root, release, receipt
+
+
+def restore_real_continuity(monkeypatch) -> None:
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_smoke_runtime_continuity",
+        _REAL_CAPTURE_CONTINUITY,
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_assert_smoke_runtime_continuity_stable",
+        _REAL_ASSERT_CONTINUITY,
+    )
 
 
 def systemctl_runner(command, **kwargs):
@@ -242,6 +321,138 @@ def test_running_timer_health_is_green_after_recent_success(
     assert report.rpc_called is False
     assert report.database_write_performed is False
     assert report.service_control_performed is False
+
+
+def test_timer_health_requires_smoke_bound_runtime_identity(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    restore_real_continuity(monkeypatch)
+    runtime_root, _release, receipt = runtime_smoke_identity(tmp_path)
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    report = MODULE.inspect_timer_health(
+        runtime_root=runtime_root,
+        receipt_path=receipt,
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.smoke_receipt_regular is True
+    assert report.smoke_receipt_valid is True
+    assert report.smoke_runtime_target_matches is True
+    assert report.smoke_stage_identity_matches is True
+    assert report.smoke_executor_matches is True
+    assert report.smoke_watch_executor_matches is True
+    assert report.smoke_runtime_identity_current is True
+    assert report.collection_healthy is True
+
+
+def test_timer_health_rejects_executor_drift_after_smoke(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    restore_real_continuity(monkeypatch)
+    runtime_root, release, receipt = runtime_smoke_identity(tmp_path)
+    executor = (
+        release / "rust-executor" / "target" / "release" / "meteora-executor"
+    )
+    executor.write_bytes(b"drifted-executor")
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+
+    report = MODULE.inspect_timer_health(
+        runtime_root=runtime_root,
+        receipt_path=receipt,
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.smoke_executor_matches is False
+    assert report.smoke_runtime_identity_current is False
+    assert report.collection_healthy is False
+
+
+def test_timer_health_rejects_runtime_retarget_after_smoke(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    restore_real_continuity(monkeypatch)
+    runtime_root, _release, receipt = runtime_smoke_identity(tmp_path)
+    other = runtime_root / "releases" / "other"
+    other.mkdir()
+    current = runtime_root / "current"
+    current.unlink()
+    current.symlink_to(Path("releases") / "other")
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+
+    report = MODULE.inspect_timer_health(
+        runtime_root=runtime_root,
+        receipt_path=receipt,
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.smoke_runtime_target_matches is False
+    assert report.smoke_runtime_identity_current is False
+    assert report.collection_healthy is False
+
+
+def test_timer_health_rejects_runtime_identity_manifest_drift(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    restore_real_continuity(monkeypatch)
+    runtime_root, release, receipt = runtime_smoke_identity(tmp_path)
+    identity = release / MODULE.TIMER_READINESS._RUNTIME_IDENTITY_FILENAME
+    payload = json.loads(identity.read_text(encoding="utf-8"))
+    payload["drift"] = True
+    identity.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+
+    report = MODULE.inspect_timer_health(
+        runtime_root=runtime_root,
+        receipt_path=receipt,
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.smoke_stage_identity_matches is False
+    assert report.smoke_runtime_identity_current is False
+    assert report.collection_healthy is False
 
 
 def test_two_consecutive_rate_limits_recommend_pause(
