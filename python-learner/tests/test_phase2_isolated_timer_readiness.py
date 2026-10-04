@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import stat
 import sys
 from types import SimpleNamespace
 
@@ -29,7 +31,31 @@ FINISHED = "2026-10-02T19:00:00+00:00"
 def runtime_tree(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "runtime"
     release = root / "releases" / "pin"
-    release.mkdir(parents=True)
+    executor = release / "rust-executor/target/release/meteora-executor"
+    executor.parent.mkdir(parents=True)
+    executor.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    executor.chmod(executor.stat().st_mode | stat.S_IXUSR)
+    watcher = (
+        release
+        / "rust-executor/target/release/pio-phase2-account-watch"
+    )
+    watcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    watcher.chmod(watcher.stat().st_mode | stat.S_IXUSR)
+    identity = {
+        "format_version": 1,
+        "pinned_source_head": "pin",
+        "release_path": str(release),
+        "reviewed_check_commit": "a" * 40,
+        "reviewed_check_sha256": "b" * 64,
+        "executor_sha256": hashlib.sha256(executor.read_bytes()).hexdigest(),
+        "watch_executor_sha256": hashlib.sha256(
+            watcher.read_bytes()
+        ).hexdigest(),
+    }
+    (release / MODULE.SMOKE._IDENTITY_FILENAME).write_text(
+        json.dumps(identity, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     current = root / "current"
     current.symlink_to(Path("releases") / "pin")
     return root, release
@@ -81,11 +107,26 @@ def create_database(tmp_path: Path, evidence_id=123) -> Path:
 
 def receipt(tmp_path: Path, release: Path, evidence_id=123) -> Path:
     path = tmp_path / "receipt.json"
+    executor = release / "rust-executor/target/release/meteora-executor"
+    watcher = (
+        release
+        / "rust-executor/target/release/pio-phase2-account-watch"
+    )
+    identity_path = release / MODULE.SMOKE._IDENTITY_FILENAME
     path.write_text(
         json.dumps(
             {
                 "format_version": 1,
                 "runtime_target": str(release),
+                "runtime_executor_sha256": hashlib.sha256(
+                    executor.read_bytes()
+                ).hexdigest(),
+                "runtime_watch_executor_sha256": hashlib.sha256(
+                    watcher.read_bytes()
+                ).hexdigest(),
+                "stage_identity_sha256": hashlib.sha256(
+                    identity_path.read_bytes()
+                ).hexdigest(),
                 "progress_evidence_id": evidence_id,
                 "finished_at": FINISHED,
                 "stage_statuses": [
@@ -140,6 +181,10 @@ def test_timer_readiness_verifies_receipt_and_immutable_progress_row(
     assert db.exists()
     assert report.timer_ready is True
     assert report.receipt_runtime_matches is True
+    assert report.receipt_identity_fields_valid is True
+    assert report.receipt_executor_identity_matches is True
+    assert report.receipt_watch_executor_identity_matches is True
+    assert report.receipt_stage_identity_matches is True
     assert report.receipt_fresh is True
     assert report.evidence_row_present is True
     assert report.evidence_row_matches_receipt is True
@@ -516,3 +561,108 @@ def test_timer_readiness_snapshot_guard_can_be_rechecked(
 
     assert report.timer_ready is True
     MODULE.assert_timer_readiness_snapshot_stable(snapshot)
+
+
+
+def test_timer_readiness_rejects_legacy_receipt_without_executor_identity(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    database = create_database(tmp_path)
+    receipt_path = receipt(tmp_path, release)
+    payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    payload.pop("runtime_executor_sha256")
+    payload.pop("runtime_watch_executor_sha256")
+    payload.pop("stage_identity_sha256")
+    receipt_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = MODULE.inspect_timer_readiness(
+        runtime_root=runtime_root,
+        data_root=database.parent,
+        receipt_path=receipt_path,
+        now=lambda: datetime(2026, 10, 2, 19, 5, tzinfo=timezone.utc),
+    )
+
+    assert report.receipt_identity_fields_valid is False
+    assert report.receipt_valid is False
+    assert report.timer_ready is False
+
+
+def test_timer_readiness_rejects_executor_hash_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    database = create_database(tmp_path)
+    receipt_path = receipt(tmp_path, release)
+    executor = release / "rust-executor/target/release/meteora-executor"
+    executor.write_text("#!/bin/sh\necho tampered\n", encoding="utf-8")
+    executor.chmod(executor.stat().st_mode | stat.S_IXUSR)
+
+    report = MODULE.inspect_timer_readiness(
+        runtime_root=runtime_root,
+        data_root=database.parent,
+        receipt_path=receipt_path,
+        now=lambda: datetime(2026, 10, 2, 19, 5, tzinfo=timezone.utc),
+    )
+
+    assert report.receipt_executor_identity_matches is False
+    assert report.timer_ready is False
+
+
+def test_timer_readiness_rejects_account_watch_hash_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    database = create_database(tmp_path)
+    receipt_path = receipt(tmp_path, release)
+    watcher = (
+        release
+        / "rust-executor/target/release/pio-phase2-account-watch"
+    )
+    watcher.write_text("#!/bin/sh\necho tampered\n", encoding="utf-8")
+    watcher.chmod(watcher.stat().st_mode | stat.S_IXUSR)
+
+    report = MODULE.inspect_timer_readiness(
+        runtime_root=runtime_root,
+        data_root=database.parent,
+        receipt_path=receipt_path,
+        now=lambda: datetime(2026, 10, 2, 19, 5, tzinfo=timezone.utc),
+    )
+
+    assert report.receipt_watch_executor_identity_matches is False
+    assert report.timer_ready is False
+
+
+def test_timer_readiness_snapshot_detects_identity_sidecar_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    install_smoke_ready(monkeypatch)
+    runtime_root, release = runtime_tree(tmp_path)
+    database = create_database(tmp_path)
+    receipt_path = receipt(tmp_path, release)
+
+    report, snapshot = MODULE.capture_timer_readiness(
+        runtime_root=runtime_root,
+        data_root=database.parent,
+        receipt_path=receipt_path,
+        now=lambda: datetime(2026, 10, 2, 19, 5, tzinfo=timezone.utc),
+    )
+    assert report.timer_ready is True
+
+    identity_path = release / MODULE.SMOKE._IDENTITY_FILENAME
+    encoded = identity_path.read_bytes()
+    identity_path.unlink()
+    identity_path.write_bytes(encoded)
+
+    with pytest.raises(
+        ValueError,
+        match="staged runtime identity manifest path changed",
+    ):
+        MODULE.assert_timer_readiness_snapshot_stable(snapshot)
