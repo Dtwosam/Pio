@@ -171,6 +171,85 @@ def test_audit_verifies_successful_mutation_and_observed_progress(
     assert report.mutation_executed is False
 
 
+def test_audit_surfaces_successful_mutation_outcome_summary(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview)
+    payload["mutation_outcome_summary"] = {
+        "applied": True,
+        "ready": True,
+        "files_updated": 2,
+        "service_control_performed": False,
+        "rpc_called": False,
+    }
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(monkeypatch, lifecycle())
+
+    report = MODULE.audit_mutation_execution_receipt(
+        execution_receipt_path=receipt,
+    )
+
+    assert report.audit_integrity_valid is True
+    assert report.mutation_succeeded is True
+    assert report.execution_failure_evidence is None
+    assert report.mutation_outcome_summary == payload[
+        "mutation_outcome_summary"
+    ]
+    assert report.post_mutation_verified is True
+
+
+def test_audit_rejects_success_summary_on_failed_mutation(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview, succeeded=False, exit_code=2)
+    payload["mutation_outcome_summary"] = {
+        "applied": False,
+        "ready": True,
+    }
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="mutation outcome summary is inconsistent",
+    ):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
+def test_audit_rejects_unreviewed_success_summary_field(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview)
+    payload["mutation_outcome_summary"] = {
+        "applied": True,
+        "private_path": "/private/source",
+    }
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(monkeypatch, lifecycle())
+
+    with pytest.raises(ValueError, match="unreviewed fields"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
 def test_audit_keeps_known_failed_mutation_distinct_from_integrity(
     tmp_path,
     monkeypatch,
