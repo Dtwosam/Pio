@@ -230,6 +230,9 @@ class IsolatedRuntimePreparationReport:
     build_succeeded: bool
     runtime_ready: bool
     executor_path: str
+    executor_sha256: str | None
+    watch_executor_path: str
+    watch_executor_sha256: str | None
     production_tree_modified: bool
     rpc_called: bool
     service_control_performed: bool
@@ -339,6 +342,9 @@ def prepare_runtime(
             build_succeeded=False,
             runtime_ready=False,
             executor_path=str(source / CHECK.EXECUTOR_RELATIVE),
+            executor_sha256=None,
+            watch_executor_path=str(source / CHECK.WATCH_EXECUTOR_RELATIVE),
+            watch_executor_sha256=None,
             production_tree_modified=False,
             rpc_called=False,
             service_control_performed=False,
@@ -392,6 +398,9 @@ def prepare_runtime(
         build_succeeded=True,
         runtime_ready=True,
         executor_path=final.executor_path,
+        executor_sha256=final.executor_sha256,
+        watch_executor_path=final.watch_executor_path,
+        watch_executor_sha256=final.watch_executor_sha256,
         production_tree_modified=False,
         rpc_called=False,
         service_control_performed=False,
