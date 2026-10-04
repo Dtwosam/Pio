@@ -292,6 +292,126 @@ def test_audit_surfaces_stranded_pending_receipt(tmp_path, monkeypatch):
     assert report.post_mutation_verified is False
 
 
+
+
+def test_audit_surfaces_allowlisted_mutation_outcome_summary(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    receipt = tmp_path / "execution.json"
+    payload = completed_receipt(
+        preview,
+        succeeded=False,
+        exit_code=2,
+    )
+    payload["mutation_outcome_summary"] = {
+        "applied": False,
+        "failure_step": (
+            "UPDATE:pio-phase2-isolated-evidence-cycle.service"
+        ),
+        "rollback_performed": True,
+        "rollback_succeeded": True,
+        "files_updated": 0,
+        "service_control_performed": False,
+        "rpc_called": False,
+    }
+    write_private(receipt, payload)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    report = MODULE.audit_mutation_execution_receipt(
+        execution_receipt_path=receipt,
+    )
+
+    assert report.audit_integrity_valid is True
+    assert report.mutation_succeeded is False
+    assert report.mutation_outcome_summary == (
+        payload["mutation_outcome_summary"]
+    )
+
+
+def test_audit_rejects_unknown_mutation_outcome_summary_field(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview)
+    payload["mutation_outcome_summary"] = {
+        "applied": True,
+        "private_path": "/private/source",
+    }
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(monkeypatch, lifecycle())
+
+    with pytest.raises(ValueError, match="unknown fields"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
+def test_audit_rejects_unsafe_failure_step_in_outcome_summary(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview)
+    payload["mutation_outcome_summary"] = {
+        "failure_step": "UPDATE:https://rpc.invalid/?api-key=secret",
+    }
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(monkeypatch, lifecycle())
+
+    with pytest.raises(ValueError, match="sensitive text|failure_step"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
+def test_audit_rejects_outcome_summary_on_pending_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview)
+    payload.update(
+        {
+            "status": "PENDING",
+            "completed_at": None,
+            "mutation_launched": False,
+            "mutation_completed": False,
+            "mutation_succeeded": False,
+            "outcome_known": False,
+            "exit_code": None,
+            "failure_category": None,
+            "execution_report_sha256": None,
+            "execution_failure_category": None,
+            "mutation_outcome_summary": {
+                "rollback_succeeded": True,
+            },
+        }
+    )
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    with pytest.raises(ValueError, match="outcome fields are inconsistent"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
 def test_audit_detects_preview_tampering_without_mutation(
     tmp_path,
     monkeypatch,
