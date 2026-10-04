@@ -235,6 +235,7 @@ class TimerHealthCycle:
     rpc_circuit_open: bool
     stages_failed: int
     stages_skipped: int
+    telemetry_valid: bool = True
 
 
 @dataclass(frozen=True)
@@ -261,6 +262,7 @@ class Phase2TimerHealthReport:
     cycles: tuple[TimerHealthCycle, ...]
     latest_cycle_age_seconds: float | None
     latest_cycle_recent: bool
+    latest_cycle_valid: bool
     latest_cycle_failed: bool
     consecutive_rpc_rate_limited: int
     rate_limit_streak_threshold: int
@@ -510,6 +512,136 @@ def _assert_database_descriptor_stable(
         )
 
 
+def _is_nonnegative_int(value: Any) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= 0
+    )
+
+
+def _progress_payload_valid(
+    payload: Any,
+    *,
+    pool_address: str,
+    as_of: str,
+    status: str,
+) -> bool:
+    if not isinstance(payload, dict):
+        return False
+
+    overall_status = payload.get("overall_status")
+    if overall_status not in {"SUCCESS", "PARTIAL", "FAILED"}:
+        return False
+    if status != f"COLLECTION_{overall_status}":
+        return False
+    if payload.get("pool_address") != pool_address:
+        return False
+    if payload.get("finished_at") != as_of:
+        return False
+
+    counts = {}
+    for key in (
+        "stages_successful",
+        "stages_partial",
+        "stages_failed",
+    ):
+        value = payload.get(key)
+        if not _is_nonnegative_int(value):
+            return False
+        counts[key] = int(value)
+
+    skipped_raw = payload.get("stages_skipped", 0)
+    if not _is_nonnegative_int(skipped_raw):
+        return False
+    counts["stages_skipped"] = int(skipped_raw)
+
+    raw_statuses = payload.get("stage_statuses")
+    if not isinstance(raw_statuses, (list, tuple)) or not raw_statuses:
+        return False
+    normalized_statuses: list[tuple[str, str]] = []
+    for item in raw_statuses:
+        if (
+            not isinstance(item, (list, tuple))
+            or len(item) != 2
+            or not isinstance(item[0], str)
+            or not item[0]
+            or item[1] not in {
+                "SUCCESS",
+                "PARTIAL",
+                "FAILED",
+                "SKIPPED",
+            }
+        ):
+            return False
+        normalized_statuses.append((item[0], item[1]))
+
+    expected_counts = {
+        "stages_successful": sum(
+            stage_status == "SUCCESS"
+            for _, stage_status in normalized_statuses
+        ),
+        "stages_partial": sum(
+            stage_status == "PARTIAL"
+            for _, stage_status in normalized_statuses
+        ),
+        "stages_failed": sum(
+            stage_status == "FAILED"
+            for _, stage_status in normalized_statuses
+        ),
+        "stages_skipped": sum(
+            stage_status == "SKIPPED"
+            for _, stage_status in normalized_statuses
+        ),
+    }
+    if counts != expected_counts:
+        return False
+
+    if payload.get("read_only") is not True:
+        return False
+    for key in (
+        "actionable",
+        "live_authorized",
+        "promotion_gate_evaluated",
+        "phase_promotion_performed",
+        "qualified",
+    ):
+        if payload.get(key) is not False:
+            return False
+
+    raw_outcomes = payload.get("stage_outcomes")
+    if raw_outcomes is not None:
+        if not isinstance(raw_outcomes, (list, tuple)):
+            return False
+        normalized_outcomes: list[tuple[str, str]] = []
+        for item in raw_outcomes:
+            if (
+                not isinstance(item, (list, tuple))
+                or len(item) != 3
+                or not isinstance(item[0], str)
+                or item[1] not in {
+                    "SUCCESS",
+                    "PARTIAL",
+                    "FAILED",
+                    "SKIPPED",
+                }
+                or (
+                    item[2] is not None
+                    and not isinstance(item[2], str)
+                )
+            ):
+                return False
+            normalized_outcomes.append((item[0], item[1]))
+        if normalized_outcomes != normalized_statuses:
+            return False
+
+    for key in ("rpc_rate_limited", "rpc_circuit_open"):
+        if key in payload and not isinstance(payload[key], bool):
+            return False
+
+    return True
+
+
 def _read_recent_cycles_snapshot(
     database_path: Path,
     *,
@@ -569,7 +701,13 @@ def _read_recent_cycles_snapshot(
             payload = json.loads(str(evidence_json))
         except json.JSONDecodeError:
             payload = None
-        if not isinstance(payload, dict):
+        telemetry_valid = _progress_payload_valid(
+            payload,
+            pool_address=pool_address,
+            as_of=str(as_of),
+            status=str(status),
+        )
+        if not telemetry_valid:
             cycles.append(
                 TimerHealthCycle(
                     evidence_id=int(evidence_id),
@@ -579,10 +717,12 @@ def _read_recent_cycles_snapshot(
                     rpc_circuit_open=False,
                     stages_failed=0,
                     stages_skipped=0,
+                    telemetry_valid=False,
                 )
             )
             continue
 
+        assert isinstance(payload, dict)
         rpc_rate_limited = payload.get("rpc_rate_limited")
         rpc_circuit_open = payload.get("rpc_circuit_open")
         if not isinstance(rpc_rate_limited, bool):
@@ -613,8 +753,9 @@ def _read_recent_cycles_snapshot(
                 status=str(status),
                 rpc_rate_limited=rpc_rate_limited,
                 rpc_circuit_open=rpc_circuit_open,
-                stages_failed=int(payload.get("stages_failed", 0) or 0),
-                stages_skipped=int(payload.get("stages_skipped", 0) or 0),
+                stages_failed=int(payload["stages_failed"]),
+                stages_skipped=int(payload.get("stages_skipped", 0)),
+                telemetry_valid=True,
             )
         )
     _assert_database_path_stable(snapshot)
@@ -646,7 +787,7 @@ def _consecutive_rate_limits(
     count = 0
     previous_time: datetime | None = None
     for cycle in cycles:
-        if not cycle.rpc_rate_limited:
+        if not cycle.telemetry_valid or not cycle.rpc_rate_limited:
             break
         try:
             cycle_time = _parse_time(cycle.as_of)
@@ -796,6 +937,7 @@ def inspect_timer_health(
 
     latest_age: float | None = None
     latest_recent = False
+    latest_valid = bool(cycles and cycles[0].telemetry_valid)
     if cycles:
         try:
             latest_age = (
@@ -814,7 +956,11 @@ def inspect_timer_health(
         max_gap_seconds=max_cycle_age_seconds,
     )
     latest_failed = bool(
-        cycles and cycles[0].status == "COLLECTION_FAILED"
+        cycles
+        and (
+            not cycles[0].telemetry_valid
+            or cycles[0].status == "COLLECTION_FAILED"
+        )
     )
 
     topology_ready = bool(
@@ -840,6 +986,7 @@ def inspect_timer_health(
     healthy = bool(
         topology_ready
         and latest_recent
+        and latest_valid
         and not latest_failed
         and rate_limit_streak == 0
     )
@@ -907,6 +1054,7 @@ def inspect_timer_health(
         cycles=cycles,
         latest_cycle_age_seconds=latest_age,
         latest_cycle_recent=latest_recent,
+        latest_cycle_valid=latest_valid,
         latest_cycle_failed=latest_failed,
         consecutive_rpc_rate_limited=rate_limit_streak,
         rate_limit_streak_threshold=rate_limit_streak_threshold,
