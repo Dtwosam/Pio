@@ -248,3 +248,46 @@ def test_upgrade_tool_uses_no_follow_descriptor_reads():
     assert "O_NOFOLLOW" in source
     assert "os.fstat(" in source
     assert "os.open(" in source
+
+
+
+def test_upgrade_restores_current_unit_when_publish_verification_fails(
+    tmp_path,
+    monkeypatch,
+):
+    configure_contract(monkeypatch)
+    source = make_source(tmp_path)
+    destination = tmp_path / "systemd"
+    destination.mkdir()
+    for name, payload in OLD_BYTES.items():
+        path = destination / name
+        path.write_bytes(payload)
+        path.chmod(0o644)
+
+    first = next(iter(OLD_BYTES))
+    real_write = MODULE._write_target
+    injected = False
+
+    def replace_then_fail(**kwargs):
+        nonlocal injected
+        if kwargs["destination"].name == first and not injected:
+            injected = True
+            real_write(**kwargs)
+            raise ValueError("injected post-publish verification failure")
+        return real_write(**kwargs)
+
+    monkeypatch.setattr(MODULE, "_write_target", replace_then_fail)
+
+    with pytest.raises(
+        ValueError,
+        match="injected post-publish verification failure",
+    ):
+        MODULE.upgrade_units(
+            source_tree=source,
+            destination=destination,
+            backup_dir=tmp_path / "backups",
+            apply=True,
+        )
+
+    for name, payload in OLD_BYTES.items():
+        assert (destination / name).read_bytes() == payload
