@@ -171,6 +171,7 @@ class Phase2SavedMutationPostAudit:
     audit_deploy_surface_files: int
     execution_receipt_path: str
     execution_receipt_sha256: str
+    mutation_outcome_summary: dict[str, Any] | None
     prior_state: str
     current_state: str
     expected_post_states: tuple[str, ...]
@@ -359,6 +360,9 @@ def _audit_boundary_ok(audit: Any) -> bool:
         getattr(audit, "audit_integrity_valid", False)
         and getattr(audit, "receipt_terminal", False)
         and getattr(audit, "mutation_succeeded", False)
+        and getattr(audit, "receipt_failure_category", None) is None
+        and getattr(audit, "execution_failure_category", None) is None
+        and getattr(audit, "execution_failure_evidence", None) is None
         and getattr(audit, "post_state_expected", False)
         and getattr(audit, "post_mutation_verified", False)
         and getattr(audit, "read_only", False)
@@ -520,6 +524,14 @@ def save_verified_mutation_post_audit(
         audit_deploy_surface_files=audit_deploy_surface_files,
         execution_receipt_path=str(audit.execution_receipt_path),
         execution_receipt_sha256=str(audit.execution_receipt_sha256),
+        mutation_outcome_summary=(
+            dict(audit.mutation_outcome_summary)
+            if isinstance(
+                getattr(audit, "mutation_outcome_summary", None),
+                dict,
+            )
+            else None
+        ),
         prior_state=str(audit.prior_state),
         current_state=str(audit.current_state),
         expected_post_states=tuple(audit.expected_post_states),
