@@ -67,7 +67,13 @@ def efficiency(**overrides):
     return Report(**values)
 
 
-def install(monkeypatch, *, health_report=None, efficiency_report=None):
+def install(
+    monkeypatch,
+    *,
+    health_report=None,
+    efficiency_report=None,
+    autopause_failed=False,
+):
     monkeypatch.setattr(
         MODULE.HEALTH,
         "inspect_timer_health",
@@ -77,6 +83,11 @@ def install(monkeypatch, *, health_report=None, efficiency_report=None):
         MODULE.EFFICIENCY,
         "inspect_rpc_efficiency",
         lambda **kwargs: efficiency_report or efficiency(),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: autopause_failed,
     )
 
 
@@ -94,6 +105,8 @@ def test_operator_status_reports_healthy_without_provider_credit_guess(
     assert report.discovery_cache_reusable_now is True
     assert report.collector_attempts_are_not_provider_credits is True
     assert report.provider_credit_count_available is False
+    assert report.autopause_service_failed is False
+    assert report.autopause_failure_relevant is False
     assert report.rpc_called is False
 
 
@@ -204,3 +217,49 @@ def test_operator_status_rejects_boundary_crossing(monkeypatch, which):
 
     with pytest.raises(ValueError, match="read-only boundary"):
         MODULE.inspect_operator_status()
+
+
+
+def test_operator_status_surfaces_failed_autopause_hook_during_active_incident(
+    monkeypatch,
+):
+    install(
+        monkeypatch,
+        health_report=health(
+            collection_healthy=False,
+            pause_recommended=True,
+        ),
+        efficiency_report=efficiency(
+            repeated_provider_rejection=True,
+            latest_cycle_recent=True,
+            pause_recommended=True,
+            attention_required=True,
+        ),
+        autopause_failed=True,
+    )
+
+    report = MODULE.inspect_operator_status()
+
+    assert report.state == "RATE_LIMIT_PAUSE_REQUIRED"
+    assert report.provider_rate_limit_incident is True
+    assert report.autopause_service_failed is True
+    assert report.autopause_failure_relevant is True
+    assert report.future_timer_cycles_paused is False
+    assert report.attention_required is True
+
+
+def test_operator_status_does_not_treat_stale_autopause_failure_as_incident(
+    monkeypatch,
+):
+    install(
+        monkeypatch,
+        autopause_failed=True,
+    )
+
+    report = MODULE.inspect_operator_status()
+
+    assert report.state == "HEALTHY"
+    assert report.provider_rate_limit_incident is False
+    assert report.autopause_service_failed is True
+    assert report.autopause_failure_relevant is False
+    assert report.attention_required is False

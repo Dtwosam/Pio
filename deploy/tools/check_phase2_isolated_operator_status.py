@@ -15,6 +15,7 @@ from typing import Any, Callable
 TOOLS_DIR = Path(__file__).resolve().parent
 HEALTH_TOOL = TOOLS_DIR / "check_phase2_isolated_timer_health.py"
 EFFICIENCY_TOOL = TOOLS_DIR / "check_phase2_rpc_efficiency.py"
+AUTOPAUSE_UNIT = "pio-phase2-isolated-rate-limit-pause.service"
 
 
 def _load(path: Path, name: str) -> Any:
@@ -42,6 +43,8 @@ class Phase2OperatorStatusReport:
     collection_running: bool
     provider_rate_limit_incident: bool
     provider_rate_limit_paused: bool
+    autopause_service_failed: bool
+    autopause_failure_relevant: bool
     future_timer_cycles_paused: bool
     rate_limit_waste_guard_satisfied: bool
     discovery_cache_reusable_now: bool
@@ -64,6 +67,22 @@ def _boundary_ok(report: Any) -> bool:
         and not getattr(report, "rpc_called", True)
         and not getattr(report, "database_write_performed", True)
         and not getattr(report, "service_control_performed", True)
+    )
+
+
+def _unit_failed(
+    runner: SystemctlRunner,
+    unit: str,
+) -> bool:
+    completed = runner(
+        ["systemctl", "is-failed", unit],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return bool(
+        int(completed.returncode) == 0
+        and (completed.stdout or "").strip() == "failed"
     )
 
 
@@ -130,6 +149,15 @@ def inspect_operator_status(
         rate_limit_incident
         and efficiency.pause_recommended
     )
+    autopause_service_failed = _unit_failed(
+        runner,
+        AUTOPAUSE_UNIT,
+    )
+    autopause_failure_relevant = bool(
+        autopause_service_failed
+        and rate_limit_incident
+        and not efficiency.timer_paused
+    )
 
     if not topology_ready:
         state = "TOPOLOGY_NOT_READY"
@@ -158,6 +186,8 @@ def inspect_operator_status(
         collection_running=collection_running,
         provider_rate_limit_incident=rate_limit_incident,
         provider_rate_limit_paused=rate_limit_paused,
+        autopause_service_failed=autopause_service_failed,
+        autopause_failure_relevant=autopause_failure_relevant,
         future_timer_cycles_paused=future_timer_cycles_paused,
         rate_limit_waste_guard_satisfied=waste_guard_satisfied,
         discovery_cache_reusable_now=bool(
