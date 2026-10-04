@@ -427,3 +427,15 @@ def test_verifier_uses_single_byte_snapshot_for_artifact_and_receipt(
     assert report.execution_receipt_sha256_matches is True
     assert report.execution_receipt_valid is True
     assert report.static_audit_verified is True
+
+
+
+def test_saved_post_audit_contract_accepts_unit_upgrade_progression():
+    assert "SYSTEMD_UNIT_UPGRADE_READY" in (
+        MODULE._EXPECTED_POST_STATES_V1["RUNTIME_STAGING_READY"]
+    )
+    assert MODULE._EXPECTED_POST_STATES_V1["SYSTEMD_UNIT_UPGRADE_READY"] == (
+        "SYSTEMD_UNITS_NOT_READY",
+        "DETECTOR_ACTIVATION_READY",
+        "ACTIVE_TOPOLOGY_NOT_READY",
+    )
