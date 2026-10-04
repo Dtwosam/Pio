@@ -102,6 +102,7 @@ class Phase2MutationPostAuditVerification:
     preview_sha256_matches: bool
     preview_identity_matches: bool
     mutation_argv_sha256_matches: bool
+    receipt_failure_category: str | None
     execution_failure_evidence: dict[str, Any] | None
     mutation_outcome_summary: dict[str, Any] | None
     prior_state: str
@@ -429,6 +430,8 @@ def _receipt_record_consistent(
         and audit.get("mutation_succeeded") is receipt.get("mutation_succeeded")
         and audit.get("outcome_known") is receipt.get("outcome_known")
         and audit.get("exit_code") == receipt.get("exit_code")
+        and audit.get("receipt_failure_category")
+        == receipt.get("failure_category")
         and audit.get("execution_failure_category")
         == receipt.get("execution_failure_category")
         and audit.get("execution_failure_evidence")
@@ -592,6 +595,11 @@ def verify_saved_mutation_post_audit(
         preview_sha256_matches=preview_sha_matches,
         preview_identity_matches=preview_identity_matches,
         mutation_argv_sha256_matches=argv_matches,
+        receipt_failure_category=(
+            str(audit["receipt_failure_category"])
+            if audit.get("receipt_failure_category") is not None
+            else None
+        ),
         execution_failure_evidence=(
             dict(audit["execution_failure_evidence"])
             if isinstance(audit.get("execution_failure_evidence"), dict)

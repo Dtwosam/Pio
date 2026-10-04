@@ -279,6 +279,11 @@ It verifies:
   digest, and mutation-argv digest match between preview and receipt;
 - the current Phase-2 state through the existing zero-RPC lifecycle handoff.
 
+The audit also preserves the receipt-level `receipt_failure_category`
+separately from `execution_failure_category`. This keeps pre-launch guard
+failures and post-launch unknown outcomes distinguishable from failures returned
+by the mutation subprocess itself.
+
 The report separates three concepts:
 
 - `audit_integrity_valid`: the receipt/preview evidence chain is intact;

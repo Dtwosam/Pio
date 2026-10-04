@@ -26,6 +26,12 @@ _TERMINAL_STATUSES = frozenset(
         "OUTCOME_UNKNOWN_AFTER_LAUNCH",
     }
 )
+_COMPLETED_FAILURE_CATEGORIES = frozenset(
+    {
+        "INVALID_MUTATION_JSON",
+        "MUTATION_NONZERO_EXIT",
+    }
+)
 _EXECUTION_FAILURE_EVIDENCE_FIELDS = frozenset(
     {
         "applied",
@@ -143,6 +149,7 @@ class Phase2MutationReceiptAudit:
     mutation_succeeded: bool
     outcome_known: bool
     exit_code: int | None
+    receipt_failure_category: str | None
     execution_failure_category: str | None
     execution_failure_evidence: dict[str, Any] | None
     mutation_outcome_summary: dict[str, Any] | None
@@ -479,6 +486,8 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
     succeeded = payload["mutation_succeeded"]
     known = payload["outcome_known"]
     exit_code = payload.get("exit_code")
+    receipt_failure_category = payload.get("failure_category")
+    execution_failure_category = payload.get("execution_failure_category")
 
     if status == "PENDING":
         consistent = bool(
@@ -489,6 +498,8 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and exit_code is None
             and execution_sha is None
             and payload.get("completed_at") is None
+            and receipt_failure_category is None
+            and execution_failure_category is None
         )
     elif status == "COMPLETED":
         consistent = bool(
@@ -500,7 +511,17 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and execution_sha is not None
             and isinstance(payload.get("completed_at"), str)
         )
-        if succeeded and exit_code != 0:
+        if succeeded:
+            if (
+                exit_code != 0
+                or receipt_failure_category is not None
+                or execution_failure_category is not None
+            ):
+                consistent = False
+        elif (
+            receipt_failure_category not in _COMPLETED_FAILURE_CATEGORIES
+            or execution_failure_category != receipt_failure_category
+        ):
             consistent = False
     elif status == "ABORTED_BEFORE_LAUNCH":
         consistent = bool(
@@ -510,8 +531,9 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and known
             and exit_code is None
             and execution_sha is None
-            and payload.get("failure_category")
+            and receipt_failure_category
             == "EXECUTION_GUARD_FAILED_BEFORE_LAUNCH"
+            and execution_failure_category is None
         )
     else:
         consistent = bool(
@@ -521,8 +543,9 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
             and not known
             and exit_code is None
             and execution_sha is None
-            and payload.get("failure_category")
+            and receipt_failure_category
             == "MUTATION_RUNNER_FAILED_OUTCOME_UNKNOWN"
+            and execution_failure_category is None
         )
 
     if not consistent:
@@ -687,6 +710,9 @@ def audit_mutation_execution_receipt(
         and progress_observed
     )
 
+    receipt_failure_category = receipt.get("failure_category")
+    if receipt_failure_category is not None:
+        receipt_failure_category = str(receipt_failure_category)
     execution_failure_category = receipt.get("execution_failure_category")
     if execution_failure_category is not None:
         execution_failure_category = str(execution_failure_category)
@@ -726,6 +752,7 @@ def audit_mutation_execution_receipt(
         mutation_succeeded=mutation_succeeded,
         outcome_known=bool(receipt["outcome_known"]),
         exit_code=receipt.get("exit_code"),
+        receipt_failure_category=receipt_failure_category,
         execution_failure_category=execution_failure_category,
         execution_failure_evidence=execution_failure_evidence,
         mutation_outcome_summary=mutation_outcome_summary,

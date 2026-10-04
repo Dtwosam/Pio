@@ -86,6 +86,7 @@ def build_artifacts(
         "mutation_succeeded": True,
         "outcome_known": True,
         "exit_code": 0,
+        "failure_category": None,
         "execution_failure_category": None,
         "execution_failure_evidence": None,
         "mutation_outcome_summary": {
@@ -134,6 +135,7 @@ def build_artifacts(
         "mutation_succeeded": True,
         "outcome_known": True,
         "exit_code": 0,
+        "receipt_failure_category": None,
         "execution_failure_category": None,
         "execution_failure_evidence": None,
         "mutation_outcome_summary": {
@@ -216,6 +218,7 @@ def test_verifier_accepts_intact_saved_post_audit(
     assert report.preview_sha256_matches is True
     assert report.preview_identity_matches is True
     assert report.mutation_argv_sha256_matches is True
+    assert report.receipt_failure_category is None
     assert report.execution_failure_evidence is None
     assert report.mutation_outcome_summary == {
         "applied": True,
@@ -333,6 +336,29 @@ def test_verifier_detects_receipt_hash_tampering(
     )
 
     assert report.execution_receipt_sha256_matches is False
+    assert report.static_audit_verified is False
+
+
+def test_verifier_rejects_saved_audit_receipt_failure_category_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    install_static_receipt_validation(monkeypatch)
+    _preview, _receipt, artifact_path, artifact = build_artifacts(tmp_path)
+    artifact["audit"]["receipt_failure_category"] = "MUTATION_NONZERO_EXIT"
+    artifact["audit_payload_sha256"] = MODULE._canonical_sha256(
+        artifact["audit"]
+    )
+    write_private(artifact_path, artifact)
+
+    report = MODULE.verify_saved_mutation_post_audit(
+        artifact_path=artifact_path,
+        repository_root=ROOT,
+    )
+
+    assert report.audit_payload_sha256_matches is True
+    assert report.execution_receipt_sha256_matches is True
+    assert report.execution_receipt_valid is False
     assert report.static_audit_verified is False
 
 
