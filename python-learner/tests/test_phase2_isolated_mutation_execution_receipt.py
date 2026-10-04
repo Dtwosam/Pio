@@ -32,6 +32,7 @@ class Execution:
     result_secret_safe: bool = True
     exit_code: int | None = 0
     failure_category: str | None = None
+    result: object | None = None
 
     def to_record(self):
         return asdict(self)
@@ -197,6 +198,97 @@ def test_nonzero_mutation_is_still_finalized_as_known_outcome(
     payload = json.loads(receipt.read_text(encoding="utf-8"))
     assert payload["outcome_known"] is True
     assert payload["execution_failure_category"] == "MUTATION_NONZERO_EXIT"
+
+
+def test_failed_mutation_preserves_reviewed_structured_failure_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    execution = Execution(
+        exit_code=2,
+        failure_category="MUTATION_NONZERO_EXIT",
+        result={
+            "applied": False,
+            "failure_step": (
+                "UPDATE:pio-phase2-isolated-evidence-cycle.service"
+            ),
+            "rollback_performed": True,
+            "rollback_succeeded": False,
+            "files_updated": 1,
+            "ready": True,
+            "upgrade_needed": True,
+            "installer_needed": False,
+            "unreviewed_detail": "must not persist",
+        },
+    )
+    install_executor(monkeypatch, path, execution)
+    receipt = tmp_path / "receipt.json"
+
+    report = MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        runner=lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 2, stdout="{}", stderr="private failure"
+        ),
+        now=times(),
+    )
+
+    assert report.mutation_succeeded is False
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["execution_failure_evidence"] == {
+        "applied": False,
+        "failure_step": (
+            "UPDATE:pio-phase2-isolated-evidence-cycle.service"
+        ),
+        "rollback_performed": True,
+        "rollback_succeeded": False,
+        "files_updated": 1,
+        "ready": True,
+        "upgrade_needed": True,
+        "installer_needed": False,
+    }
+    assert "unreviewed_detail" not in json.dumps(
+        payload["execution_failure_evidence"]
+    )
+    assert "private failure" not in receipt.read_text(encoding="utf-8")
+
+
+def test_secret_unsafe_failure_result_is_not_persisted(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    secret = "https://rpc.invalid/?api-key=secret"
+    execution = Execution(
+        result_secret_safe=False,
+        exit_code=2,
+        failure_category="MUTATION_NONZERO_EXIT",
+        result={
+            "failure_step": secret,
+            "rollback_performed": True,
+            "rollback_succeeded": False,
+        },
+    )
+    install_executor(monkeypatch, path, execution)
+    receipt = tmp_path / "receipt.json"
+
+    MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        runner=lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 2, stdout="{}", stderr=""
+        ),
+        now=times(),
+    )
+
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["execution_failure_evidence"] is None
+    assert secret not in receipt.read_text(encoding="utf-8")
 
 
 def test_guard_failure_after_pending_finalizes_aborted_before_launch(
