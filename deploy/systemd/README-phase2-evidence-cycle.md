@@ -20,8 +20,9 @@ Operational dependencies:
 - Do not enable `pio-phase2-position-observer.timer` at the same time as this
   timer. The evidence cycle already performs that position-observation stage.
   The isolated evidence service/timer now declare systemd conflicts with the
-  legacy position-observer service/timer so duplicate 15-minute position scans
-  fail closed instead of consuming redundant Solana RPC capacity.
+  legacy position-observer service/timer and the legacy full evidence-cycle
+  service/timer, so duplicate 15-minute Solana collection fails closed instead
+  of consuming redundant RPC capacity.
 - The higher-frequency research quote timer may remain separate when additional
   prospective quote density is desired.
 
