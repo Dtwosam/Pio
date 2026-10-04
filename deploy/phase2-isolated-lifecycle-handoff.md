@@ -32,19 +32,23 @@ A normal deployment progresses through these states:
 3. `RUNTIME_STAGING_READY`
    - next action: `STAGE_REVIEWED_RUNTIME`
    - tool: `stage_phase2_isolated_runtime.py`
-4. `SYSTEMD_UNITS_NOT_READY`
+4. `SYSTEMD_UNIT_UPGRADE_READY` when an installed evidence service/timer
+   matches the exact reviewed predecessor bytes
+   - next action: `UPGRADE_REVIEWED_UNITS`
+   - tool: `upgrade_phase2_isolated_systemd_units.py`
+5. `SYSTEMD_UNITS_NOT_READY` when reviewed units are still missing
    - next action: `INSTALL_REVIEWED_UNITS`
    - tool: `install_phase2_isolated_systemd_units.py`
-5. `DETECTOR_ACTIVATION_READY`
+6. `DETECTOR_ACTIVATION_READY`
    - next action: `ACTIVATE_PRESTATE_STREAMS_AND_DETECTOR`
    - tool: `activate_phase2_isolated_detector.py`
-6. `SMOKE_REQUIRED`
+7. `SMOKE_REQUIRED`
    - next action: `RUN_ONE_SHOT_SMOKE`
    - tool: `run_phase2_isolated_smoke.py`
-7. `TIMER_ACTIVATION_READY`
+8. `TIMER_ACTIVATION_READY`
    - next action: `ACTIVATE_EVIDENCE_TIMER`
    - tool: `activate_phase2_isolated_timer.py`
-8. `RUNNING_HEALTHY`
+9. `RUNNING_HEALTHY`
    - next action: `MONITOR_ZERO_RPC_STATUS`
    - tool: `check_phase2_isolated_operator_status.py`
 
@@ -61,6 +65,28 @@ prepared reviewed runtime, the handoff returns
 
 If prerequisites are incomplete, the handoff returns a categorical blocker list
 rather than guessing a mutation.
+
+
+### Systemd predecessor upgrades
+
+The evidence service/timer units have a guarded predecessor-to-current upgrade
+path. If installed bytes match the exact reviewed predecessor blobs, the
+handoff returns `SYSTEMD_UNIT_UPGRADE_READY`. The upgrader changes only those
+eligible unit files, creates verified backups, performs no service control, and
+does not run `daemon-reload`.
+
+If one unit is an exact predecessor and its peer is missing, the lifecycle
+upgrades the predecessor first. A fresh lifecycle pass then returns
+`SYSTEMD_UNITS_NOT_READY` so the create-only installer can add the missing
+peer. This prevents one tool from mixing replacement and creation semantics.
+
+Unexpected modified, symlinked, or otherwise unreviewed installed unit bytes
+produce `SYSTEMD_UNIT_CONFLICT_REVIEW_REQUIRED`. That state has no mutation
+flag and must be reviewed rather than overwritten.
+
+The later detector activation mutation performs `systemctl daemon-reload`
+before it starts any isolated services, so updated on-disk unit definitions are
+loaded before activation.
 
 ## Rate-limit recovery
 
