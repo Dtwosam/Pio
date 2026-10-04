@@ -157,6 +157,8 @@ def test_audit_verifies_successful_mutation_and_observed_progress(
     assert report.mutation_argv_sha256_matches is True
     assert report.audit_integrity_valid is True
     assert report.mutation_succeeded is True
+    assert report.receipt_failure_category is None
+    assert report.execution_failure_category is None
     assert report.state_changed is True
     assert report.expected_post_states == ("SOURCE_PREPARATION_REQUIRED",)
     assert report.post_state_expected is True
@@ -273,8 +275,48 @@ def test_audit_keeps_known_failed_mutation_distinct_from_integrity(
     assert report.audit_integrity_valid is True
     assert report.mutation_completed is True
     assert report.mutation_succeeded is False
+    assert report.receipt_failure_category == "MUTATION_NONZERO_EXIT"
     assert report.execution_failure_category == "MUTATION_NONZERO_EXIT"
     assert report.post_mutation_verified is False
+
+
+def test_audit_rejects_completed_success_with_failure_category(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview)
+    payload["failure_category"] = "MUTATION_NONZERO_EXIT"
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(monkeypatch, lifecycle())
+
+    with pytest.raises(ValueError, match="outcome fields are inconsistent"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
+def test_audit_rejects_completed_failure_category_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview, succeeded=False, exit_code=2)
+    payload["failure_category"] = "INVALID_MUTATION_JSON"
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    with pytest.raises(ValueError, match="outcome fields are inconsistent"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
 
 
 def test_audit_surfaces_reviewed_structured_failure_evidence(
@@ -448,6 +490,8 @@ def test_audit_preserves_noncompleted_terminal_outcomes(
 
     assert report.receipt_terminal is True
     assert report.receipt_status == status
+    assert report.receipt_failure_category == category
+    assert report.execution_failure_category is None
     assert report.audit_integrity_valid is True
     assert report.post_mutation_verified is False
 
