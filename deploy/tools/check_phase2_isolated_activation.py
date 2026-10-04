@@ -480,6 +480,43 @@ def _unit_state(
     )
 
 
+def _all_unit_states(
+    *,
+    runner: SystemctlRunner,
+) -> tuple[ActivationUnitState, ...]:
+    return tuple(
+        _unit_state(unit, runner=runner)
+        for unit in (*LEGACY_UNITS, *NEW_INACTIVE_UNITS)
+    )
+
+
+def _capture_from_snapshot(
+    snapshot: _PathSnapshot,
+    *,
+    label: str,
+    max_bytes: int,
+) -> _CapturedFile | None:
+    if snapshot.kind != "REGULAR":
+        return None
+    captured = _capture_regular_file(
+        snapshot.path,
+        label=label,
+        max_bytes=max_bytes,
+    )
+    assert captured is not None
+    opened = snapshot.opened
+    assert opened is not None
+    if (
+        captured.opened.st_dev != opened.st_dev
+        or captured.opened.st_ino != opened.st_ino
+        or captured.opened.st_size != opened.st_size
+        or captured.opened.st_mtime_ns != opened.st_mtime_ns
+        or captured.opened.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} changed before capture")
+    return captured
+
+
 def inspect_activation(
     *,
     runtime_root: str | Path = "/opt/pio-phase2-runtime",
@@ -488,20 +525,71 @@ def inspect_activation(
     data_root: str | Path = "/opt/pio/data",
     runner: SystemctlRunner = subprocess.run,
 ) -> Phase2IsolatedActivationReport:
+    install_source_before = _install_source_identity()
+
+    env_path = Path(env_file).expanduser()
+    env_snapshot = _path_snapshot(env_path)
+    env_capture = _capture_from_snapshot(
+        env_snapshot,
+        label="Phase-2 environment file",
+        max_bytes=_MAX_CONFIG_BYTES,
+    )
+    env_regular = env_capture is not None
+    env_values = (
+        _read_env_bytes(env_capture.encoded)
+        if env_capture is not None
+        else {}
+    )
+
+    destination_path = Path(unit_destination).expanduser()
+    detector_unit = (
+        destination_path
+        / "pio-phase2-isolated-add-detector.service"
+    )
+    detector_unit_snapshot = _path_snapshot(detector_unit)
+    detector_unit_capture = _capture_from_snapshot(
+        detector_unit_snapshot,
+        label="installed Phase-2 detector unit",
+        max_bytes=_MAX_CONFIG_BYTES,
+    )
+
+    data_path = Path(data_root).expanduser()
+    data_snapshots = {
+        name: _path_snapshot(data_path / name)
+        for name in REQUIRED_DATA_FILES
+    }
+    detector_state_snapshot = data_snapshots[
+        "phase2-add-detector-state.json"
+    ]
+    detector_state_capture = _capture_from_snapshot(
+        detector_state_snapshot,
+        label="Phase-2 detector state",
+        max_bytes=_MAX_STATE_BYTES,
+    )
+
     runtime_current: str | None = None
     runtime_ready = False
     installed_units_exact = False
     installed_statuses: tuple[tuple[str, str], ...] = ()
+    current_path: Path | None = None
+    current_snapshot: _PathSnapshot | None = None
+    runtime_source: Path | None = None
 
     try:
         current = INSTALL._validate_runtime(runtime_root)
-        runtime_current = str(current)
-        runtime_source = current.resolve(strict=True)
+        current_path = Path(current)
+        current_snapshot = _path_snapshot(current_path)
+        runtime_current = str(current_path)
+        runtime_source = current_path.resolve(strict=True)
         install = INSTALL.inspect_install(
             source_tree=runtime_source,
             runtime_root=runtime_root,
             destination=unit_destination,
         )
+        if current_path.resolve(strict=True) != runtime_source:
+            raise ValueError(
+                "isolated runtime current target changed during activation inspection"
+            )
         runtime_ready = bool(install.runtime_ready)
         installed_statuses = tuple(
             (row.name, row.status)
@@ -515,11 +603,9 @@ def inspect_activation(
             )
         )
     except (OSError, RuntimeError, ValueError):
-        pass
+        runtime_ready = False
+        installed_units_exact = False
 
-    env_path = Path(env_file).expanduser()
-    env_regular = env_path.is_file() and not env_path.is_symlink()
-    env_values = _read_env(env_path) if env_regular else {}
     env_keys = tuple(
         ActivationEnvKey(
             name=name,
@@ -528,13 +614,12 @@ def inspect_activation(
         for name in REQUIRED_ENV_KEYS
     )
 
-    detector_unit = (
-        Path(unit_destination)
-        / "pio-phase2-isolated-add-detector.service"
-    )
     detector_pools = (
-        _detector_pools(detector_unit)
-        if installed_units_exact
+        _detector_pools_from_bytes(detector_unit_capture.encoded)
+        if (
+            installed_units_exact
+            and detector_unit_capture is not None
+        )
         else set()
     )
     position_pool = env_values.get(
@@ -547,29 +632,90 @@ def inspect_activation(
         and position_pool in detector_pools
     )
 
-    data_path = Path(data_root).expanduser()
     data_files = tuple(
         ActivationDataFile(
             name=name,
-            exists=(data_path / name).exists(),
-            regular_file=(data_path / name).is_file(),
-            symlink=(data_path / name).is_symlink(),
+            exists=snapshot.kind != "ABSENT",
+            regular_file=snapshot.kind == "REGULAR",
+            symlink=snapshot.kind == "SYMLINK",
         )
-        for name in REQUIRED_DATA_FILES
+        for name, snapshot in (
+            (name, data_snapshots[name])
+            for name in REQUIRED_DATA_FILES
+        )
     )
-    (
-        detector_state_valid,
-        detector_cursor_pools,
-        detector_cursors_complete,
-    ) = _detector_state_status(
-        data_path / "phase2-add-detector-state.json",
-        detector_pools=detector_pools,
-    )
+    if detector_state_capture is None:
+        detector_state_valid = False
+        detector_cursor_pools = 0
+        detector_cursors_complete = False
+    else:
+        (
+            detector_state_valid,
+            detector_cursor_pools,
+            detector_cursors_complete,
+        ) = _detector_state_status_from_bytes(
+            detector_state_capture.encoded,
+            detector_pools=detector_pools,
+        )
 
-    units = tuple(
-        _unit_state(unit, runner=runner)
-        for unit in (*LEGACY_UNITS, *NEW_INACTIVE_UNITS)
-    )
+    def assert_inputs_stable() -> None:
+        if _install_source_identity() != install_source_before:
+            raise ValueError(
+                "reviewed systemd installer changed during activation inspection"
+            )
+        _assert_path_snapshot_stable(
+            env_snapshot,
+            label="Phase-2 environment file",
+        )
+        if env_capture is not None:
+            _assert_regular_path_stable(
+                env_capture.path,
+                env_capture.opened,
+                label="Phase-2 environment file",
+            )
+        _assert_path_snapshot_stable(
+            detector_unit_snapshot,
+            label="installed Phase-2 detector unit",
+        )
+        if detector_unit_capture is not None:
+            _assert_regular_path_stable(
+                detector_unit_capture.path,
+                detector_unit_capture.opened,
+                label="installed Phase-2 detector unit",
+            )
+        for name, snapshot in data_snapshots.items():
+            _assert_path_snapshot_stable(
+                snapshot,
+                label=f"Phase-2 data file {name}",
+            )
+        if detector_state_capture is not None:
+            _assert_regular_path_stable(
+                detector_state_capture.path,
+                detector_state_capture.opened,
+                label="Phase-2 detector state",
+            )
+        if current_path is not None and current_snapshot is not None:
+            _assert_path_snapshot_stable(
+                current_snapshot,
+                label="isolated runtime current",
+            )
+            if (
+                runtime_source is not None
+                and current_path.resolve(strict=True) != runtime_source
+            ):
+                raise ValueError(
+                    "isolated runtime current target changed during activation inspection"
+                )
+
+    units_before = _all_unit_states(runner=runner)
+    assert_inputs_stable()
+    units_after = _all_unit_states(runner=runner)
+    assert_inputs_stable()
+    if units_after != units_before:
+        raise ValueError(
+            "systemd unit state changed during activation inspection"
+        )
+    units = units_after
 
     ready = bool(
         runtime_ready
