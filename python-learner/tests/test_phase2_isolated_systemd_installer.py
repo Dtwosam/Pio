@@ -33,6 +33,7 @@ def unit_source(tmp_path: Path) -> Path:
 def bypass_runtime(monkeypatch, tmp_path: Path):
     current = tmp_path / "runtime" / "current"
     current.parent.mkdir(parents=True)
+    (current.parent / "release").mkdir()
     current.symlink_to("release")
     monkeypatch.setattr(
         MODULE,
