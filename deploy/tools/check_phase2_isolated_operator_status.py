@@ -110,13 +110,33 @@ def _health_projection(report: Any) -> tuple[Any, ...]:
     )
 
 
+def _discovery_cache_projection(cache: Any) -> tuple[Any, ...]:
+    return (
+        getattr(cache, "path", None),
+        getattr(cache, "exists", None),
+        getattr(cache, "regular_file", None),
+        getattr(cache, "symlink", None),
+        getattr(cache, "format_valid", None),
+        getattr(cache, "pool_matches", None),
+        getattr(cache, "complete", None),
+        getattr(cache, "captured_at", None),
+        getattr(cache, "max_age_seconds", None),
+        getattr(cache, "reusable_now", None),
+        getattr(cache, "positions_found", None),
+        getattr(cache, "positions_returned", None),
+        getattr(cache, "positions_cached", None),
+    )
+
+
 def _efficiency_projection(report: Any) -> tuple[Any, ...]:
     return (
         getattr(report, "pool_address", None),
         getattr(report, "pool_configured", None),
         getattr(report, "database_ready", None),
         getattr(report, "database_path", None),
-        getattr(report, "discovery_cache", None),
+        _discovery_cache_projection(
+            getattr(report, "discovery_cache", None)
+        ),
         getattr(report, "position_attempts", None),
         getattr(report, "reinspection_attempts", None),
         getattr(report, "prestate_attempts", None),
