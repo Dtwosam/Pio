@@ -5,6 +5,8 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "deploy/tools/check_phase2_isolated_smoke_readiness.py"
@@ -165,3 +167,44 @@ def test_smoke_readiness_rejects_env_topology_mismatch(monkeypatch):
 
     assert report.smoke_ready is False
     assert report.env_ready is False
+
+
+
+def test_smoke_readiness_rejects_activation_checker_identity_drift(
+    monkeypatch,
+):
+    install_report(monkeypatch, base_report())
+    original = MODULE._preflight_source_identity
+    calls = 0
+
+    def drifting_identity():
+        nonlocal calls
+        calls += 1
+        commit, digest = original()
+        if calls == 1:
+            return commit, digest
+        return commit, "0" * len(digest)
+
+    monkeypatch.setattr(
+        MODULE,
+        "_preflight_source_identity",
+        drifting_identity,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="reviewed activation checker changed",
+    ):
+        MODULE.inspect_smoke_readiness()
+
+
+def test_smoke_readiness_does_not_path_reread_activation_source():
+    source = Path(MODULE.__file__).read_text(encoding="utf-8")
+    inspect_source = source[
+        source.index("def inspect_smoke_readiness("):
+        source.index("\ndef main() -> None:")
+    ]
+
+    assert "PREFLIGHT_TOOL.read_text" not in inspect_source
+    assert "PREFLIGHT_TOOL.read_bytes" not in inspect_source
+    assert "_preflight_source_identity()" in inspect_source
