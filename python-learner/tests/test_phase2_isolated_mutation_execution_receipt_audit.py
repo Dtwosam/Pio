@@ -531,6 +531,74 @@ def test_audit_surfaces_stranded_pending_receipt(tmp_path, monkeypatch):
     assert report.post_mutation_verified is False
 
 
+def test_audit_rejects_pending_receipt_with_failure_category(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    receipt = tmp_path / "execution.json"
+    base = completed_receipt(preview)
+    base.update(
+        {
+            "status": "PENDING",
+            "completed_at": None,
+            "mutation_launched": False,
+            "mutation_completed": False,
+            "mutation_succeeded": False,
+            "outcome_known": False,
+            "exit_code": None,
+            "failure_category": "MUTATION_NONZERO_EXIT",
+            "execution_report_sha256": None,
+            "execution_failure_category": None,
+        }
+    )
+    write_private(receipt, base)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    with pytest.raises(ValueError, match="outcome fields are inconsistent"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
+def test_audit_rejects_aborted_receipt_with_execution_failure_category(
+    tmp_path,
+    monkeypatch,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    receipt = tmp_path / "execution.json"
+    base = completed_receipt(preview)
+    base.update(
+        {
+            "status": "ABORTED_BEFORE_LAUNCH",
+            "completed_at": "2026-10-03T11:00:01+00:00",
+            "mutation_launched": False,
+            "mutation_completed": False,
+            "mutation_succeeded": False,
+            "outcome_known": True,
+            "exit_code": None,
+            "failure_category": "EXECUTION_GUARD_FAILED_BEFORE_LAUNCH",
+            "execution_report_sha256": None,
+            "execution_failure_category": "MUTATION_NONZERO_EXIT",
+        }
+    )
+    write_private(receipt, base)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    with pytest.raises(ValueError, match="outcome fields are inconsistent"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
 def test_audit_detects_preview_tampering_without_mutation(
     tmp_path,
     monkeypatch,
