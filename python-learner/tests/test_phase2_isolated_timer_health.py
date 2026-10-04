@@ -9,6 +9,8 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "deploy/tools/check_phase2_isolated_timer_health.py"
@@ -515,3 +517,140 @@ def test_health_rejects_overlapping_legacy_position_timer(
 
     assert report.legacy_collectors_quiescent is False
     assert report.collection_healthy is False
+
+
+
+def test_timer_health_does_not_reread_env_path_after_capture(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    env = env_file(tmp_path)
+    monkeypatch.setattr(
+        MODULE.ACTIVATION,
+        "_read_env",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("env path must not be reread")
+        ),
+    )
+
+    report = MODULE.inspect_timer_health(
+        env_file=env,
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.collection_healthy is True
+
+
+def test_timer_health_rejects_same_content_env_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    env = env_file(tmp_path)
+    original = MODULE.ACTIVATION.inspect_activation
+
+    def replacing_activation(**kwargs):
+        result = original(**kwargs)
+        encoded = env.read_bytes()
+        env.unlink()
+        env.write_bytes(encoded)
+        return result
+
+    monkeypatch.setattr(
+        MODULE.ACTIVATION,
+        "inspect_activation",
+        replacing_activation,
+    )
+
+    with pytest.raises(ValueError, match="environment file path changed"):
+        MODULE.inspect_timer_health(
+            env_file=env,
+            data_root=root,
+            now=lambda: datetime(
+                2026, 10, 2, 20, 30, tzinfo=timezone.utc
+            ),
+            runner=systemctl_runner,
+        )
+
+
+def test_timer_health_rejects_same_content_database_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    database = root / "pio.db"
+    env = env_file(tmp_path)
+    original = MODULE._read_recent_cycles_snapshot
+
+    def replacing_reader(database_path, **kwargs):
+        result = original(database_path, **kwargs)
+        encoded = database.read_bytes()
+        database.unlink()
+        database.write_bytes(encoded)
+        return result
+
+    monkeypatch.setattr(
+        MODULE,
+        "_read_recent_cycles_snapshot",
+        replacing_reader,
+    )
+
+    with pytest.raises(ValueError, match="database path changed"):
+        MODULE.inspect_timer_health(
+            env_file=env,
+            data_root=root,
+            now=lambda: datetime(
+                2026, 10, 2, 20, 30, tzinfo=timezone.utc
+            ),
+            runner=systemctl_runner,
+        )
+
+
+def test_timer_health_rejects_activation_source_identity_drift(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+    env = env_file(tmp_path)
+    identities = iter(
+        (
+            ("commit-a", "sha-a"),
+            ("commit-b", "sha-b"),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_activation_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(ValueError, match="activation checker changed"):
+        MODULE.inspect_timer_health(
+            env_file=env,
+            data_root=root,
+            now=lambda: datetime(
+                2026, 10, 2, 20, 30, tzinfo=timezone.utc
+            ),
+            runner=systemctl_runner,
+        )
