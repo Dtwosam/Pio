@@ -20,6 +20,9 @@ READINESS_TOOL = TOOLS_DIR / "check_phase2_isolated_smoke_readiness.py"
 READINESS_TOOL_RELATIVE = "deploy/tools/check_phase2_isolated_smoke_readiness.py"
 _MAX_TOOL_BYTES = 4 * 1024 * 1024
 _MAX_ENV_BYTES = 1024 * 1024
+_MAX_EXECUTOR_BYTES = 512 * 1024 * 1024
+_MAX_IDENTITY_BYTES = 64 * 1024
+_IDENTITY_FILENAME = ".pio-phase2-runtime-identity.json"
 
 
 def _assert_file_path_stable(
@@ -159,6 +162,9 @@ class Phase2IsolatedSmokeReport:
     failed_stages: int
     skipped_stages: int
     rpc_rate_limited: bool
+    runtime_executor_sha256: str | None
+    runtime_watch_executor_sha256: str | None
+    stage_identity_sha256: str | None
     progress_evidence_id: int | None
     receipt_path: str
     receipt_written: bool
@@ -252,6 +258,95 @@ def _parse_env_bytes(encoded: bytes) -> dict[str, str]:
         if key:
             values[key] = value
     return values
+
+
+def _sha256_regular_file(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[Path, os.stat_result, str]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    digest = hashlib.sha256()
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_EXECUTOR_BYTES:
+            raise ValueError(f"{label} size is invalid")
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            digest.update(chunk)
+            remaining -= len(chunk)
+        after = os.fstat(fd)
+        if (
+            remaining
+            or after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_mode != before.st_mode
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while hashing")
+    finally:
+        os.close(fd)
+
+    _assert_file_path_stable(resolved, before, label=label)
+    return resolved, before, digest.hexdigest()
+
+
+def _runtime_identity(
+    runtime: Path,
+) -> tuple[dict[str, Any], Path, os.stat_result, str]:
+    path, encoded, opened = _capture_regular_file(
+        runtime / _IDENTITY_FILENAME,
+        label="staged runtime identity manifest",
+        max_bytes=_MAX_IDENTITY_BYTES,
+    )
+    try:
+        payload = json.loads(encoded.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("staged runtime identity manifest is invalid") from exc
+    if not isinstance(payload, dict) or payload.get("format_version") != 1:
+        raise ValueError("staged runtime identity manifest is invalid")
+    if payload.get("release_path") != str(runtime):
+        raise ValueError("staged runtime identity release path does not match current runtime")
+    if payload.get("pinned_source_head") != runtime.name:
+        raise ValueError("staged runtime identity source head does not match release")
+    for key in (
+        "executor_sha256",
+        "watch_executor_sha256",
+        "reviewed_check_sha256",
+    ):
+        value = payload.get(key)
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(ch not in "0123456789abcdef" for ch in value.lower())
+        ):
+            raise ValueError("staged runtime identity manifest is invalid")
+    commit = payload.get("reviewed_check_commit")
+    if not isinstance(commit, str) or len(commit) not in {40, 64}:
+        raise ValueError("staged runtime identity manifest is invalid")
+    return payload, path, opened, hashlib.sha256(encoded).hexdigest()
 
 
 def _runtime_current(runtime_root: str | Path) -> Path:
@@ -348,6 +443,9 @@ def _write_receipt(
     path: Path,
     *,
     runtime_target: Path,
+    runtime_executor_sha256: str,
+    runtime_watch_executor_sha256: str,
+    stage_identity_sha256: str,
     progress_evidence_id: int,
     finished_at: str,
     stages: tuple[SmokeStage, ...],
@@ -358,6 +456,9 @@ def _write_receipt(
     payload = {
         "format_version": 1,
         "runtime_target": str(runtime_target),
+        "runtime_executor_sha256": runtime_executor_sha256,
+        "runtime_watch_executor_sha256": runtime_watch_executor_sha256,
+        "stage_identity_sha256": stage_identity_sha256,
         "progress_evidence_id": progress_evidence_id,
         "finished_at": finished_at,
         "stage_statuses": [
@@ -421,6 +522,9 @@ def run_smoke(
             failed_stages=0,
             skipped_stages=0,
             rpc_rate_limited=False,
+            runtime_executor_sha256=None,
+            runtime_watch_executor_sha256=None,
+            stage_identity_sha256=None,
             progress_evidence_id=None,
             receipt_path=str(receipt),
             receipt_written=False,
@@ -442,6 +546,9 @@ def run_smoke(
             failed_stages=0,
             skipped_stages=0,
             rpc_rate_limited=False,
+            runtime_executor_sha256=None,
+            runtime_watch_executor_sha256=None,
+            stage_identity_sha256=None,
             progress_evidence_id=None,
             receipt_path=str(receipt),
             receipt_written=False,
@@ -453,10 +560,35 @@ def run_smoke(
         )
 
     runtime = _runtime_current(runtime_root)
-    executor, executor_stat = _regular_file_identity(
+    (
+        identity_payload,
+        identity_path,
+        identity_stat,
+        stage_identity_sha256,
+    ) = _runtime_identity(runtime)
+    (
+        executor,
+        executor_stat,
+        runtime_executor_sha256,
+    ) = _sha256_regular_file(
         runtime / "rust-executor/target/release/meteora-executor",
         label="reviewed isolated executor",
     )
+    (
+        watch_executor,
+        watch_executor_stat,
+        runtime_watch_executor_sha256,
+    ) = _sha256_regular_file(
+        runtime / "rust-executor/target/release/pio-phase2-account-watch",
+        label="reviewed account-watch executor",
+    )
+    if identity_payload["executor_sha256"] != runtime_executor_sha256:
+        raise ValueError("staged runtime executor identity does not match live executor")
+    if identity_payload["watch_executor_sha256"] != runtime_watch_executor_sha256:
+        raise ValueError(
+            "staged runtime account-watch identity does not match live executor"
+        )
+
     python_path, python_stat = _regular_file_identity(
         Path(python_executable),
         label="Python executable",
@@ -494,9 +626,44 @@ def run_smoke(
     )
     _assert_runtime_target_stable(runtime_root, runtime)
     _assert_file_path_stable(
+        identity_path,
+        identity_stat,
+        label="staged runtime identity manifest",
+    )
+    _, executor_before_launch_stat, executor_before_launch_sha256 = (
+        _sha256_regular_file(
+            executor,
+            label="reviewed isolated executor",
+        )
+    )
+    if (
+        executor_before_launch_sha256 != runtime_executor_sha256
+        or executor_before_launch_sha256 != identity_payload["executor_sha256"]
+    ):
+        raise ValueError("reviewed isolated executor SHA-256 changed before smoke launch")
+    _, watch_before_launch_stat, watch_before_launch_sha256 = (
+        _sha256_regular_file(
+            watch_executor,
+            label="reviewed account-watch executor",
+        )
+    )
+    if (
+        watch_before_launch_sha256 != runtime_watch_executor_sha256
+        or watch_before_launch_sha256
+        != identity_payload["watch_executor_sha256"]
+    ):
+        raise ValueError(
+            "reviewed account-watch executor SHA-256 changed before smoke launch"
+        )
+    _assert_file_path_stable(
         executor,
-        executor_stat,
+        executor_before_launch_stat,
         label="reviewed isolated executor",
+    )
+    _assert_file_path_stable(
+        watch_executor,
+        watch_before_launch_stat,
+        label="reviewed account-watch executor",
     )
     _assert_file_path_stable(
         python_path,
@@ -540,6 +707,9 @@ def run_smoke(
         _write_receipt(
             receipt,
             runtime_target=runtime,
+            runtime_executor_sha256=runtime_executor_sha256,
+            runtime_watch_executor_sha256=runtime_watch_executor_sha256,
+            stage_identity_sha256=stage_identity_sha256,
             progress_evidence_id=evidence_id,
             finished_at=finished_at,
             stages=stages,
@@ -556,6 +726,9 @@ def run_smoke(
         failed_stages=failed,
         skipped_stages=skipped,
         rpc_rate_limited=rate_limited,
+        runtime_executor_sha256=runtime_executor_sha256,
+        runtime_watch_executor_sha256=runtime_watch_executor_sha256,
+        stage_identity_sha256=stage_identity_sha256,
         progress_evidence_id=evidence_id,
         receipt_path=str(receipt),
         receipt_written=receipt_written,

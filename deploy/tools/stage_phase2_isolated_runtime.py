@@ -20,6 +20,8 @@ REPO_ROOT = TOOLS_DIR.parents[1]
 CHECK_TOOL = TOOLS_DIR / "check_phase2_isolated_runtime.py"
 CHECK_TOOL_RELATIVE = "deploy/tools/check_phase2_isolated_runtime.py"
 _MAX_TOOL_BYTES = 4 * 1024 * 1024
+_IDENTITY_FILENAME = ".pio-phase2-runtime-identity.json"
+_MAX_IDENTITY_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -203,6 +205,8 @@ class IsolatedRuntimeStageReport:
     source_watch_executor_sha256: str
     release_executor_sha256: str | None
     release_watch_executor_sha256: str | None
+    identity_path: str
+    identity_sha256: str | None
     existing_release_reused: bool
     applied: bool
     current_target: str | None
@@ -268,6 +272,96 @@ def _binary_identity(report: Any) -> tuple[str, str]:
     return executor_sha, watcher_sha
 
 
+def _identity_path(release: Path) -> Path:
+    return release / _IDENTITY_FILENAME
+
+
+def _identity_bytes(
+    *,
+    release: Path,
+    binary_identity: tuple[str, str],
+    check_identity: tuple[str, str],
+) -> bytes:
+    payload = {
+        "format_version": 1,
+        "pinned_source_head": CHECK.PINNED_SOURCE_HEAD,
+        "release_path": str(release),
+        "reviewed_check_commit": check_identity[0],
+        "reviewed_check_sha256": check_identity[1],
+        "executor_sha256": binary_identity[0],
+        "watch_executor_sha256": binary_identity[1],
+    }
+    return (
+        json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+
+
+def _write_identity_manifest(
+    location: Path,
+    *,
+    release: Path,
+    binary_identity: tuple[str, str],
+    check_identity: tuple[str, str],
+) -> str:
+    path = _identity_path(location)
+    if path.exists() and path.is_symlink():
+        raise ValueError("runtime identity path must not be a symlink")
+    encoded = _identity_bytes(
+        release=release,
+        binary_identity=binary_identity,
+        check_identity=check_identity,
+    )
+    if len(encoded) > _MAX_IDENTITY_BYTES:
+        raise ValueError("runtime identity payload is too large")
+    temp = location / f".{_IDENTITY_FILENAME}.{os.getpid()}.tmp"
+    if temp.exists() or temp.is_symlink():
+        temp.unlink()
+    try:
+        with open(temp, "xb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+    finally:
+        if temp.exists() or temp.is_symlink():
+            temp.unlink()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _read_identity_manifest(
+    release: Path,
+    *,
+    binary_identity: tuple[str, str],
+    check_identity: tuple[str, str],
+    required: bool,
+) -> str | None:
+    path = _identity_path(release)
+    if not path.exists():
+        if required:
+            raise ValueError("runtime identity manifest is missing")
+        return None
+    captured = _capture_regular_file(
+        path,
+        label="runtime identity manifest",
+    )
+    if len(captured.encoded) > _MAX_IDENTITY_BYTES:
+        raise ValueError("runtime identity manifest is too large")
+    try:
+        payload = json.loads(captured.encoded.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("runtime identity manifest is invalid") from exc
+    expected = json.loads(
+        _identity_bytes(
+            release=release,
+            binary_identity=binary_identity,
+            check_identity=check_identity,
+        ).decode("utf-8")
+    )
+    if payload != expected:
+        raise ValueError("runtime identity manifest does not match staged runtime")
+    return hashlib.sha256(captured.encoded).hexdigest()
+
+
 def _validate_source(source: Path) -> Any:
     report = CHECK.inspect_runtime(source)
     if not report.runtime_ready:
@@ -331,6 +425,7 @@ def stage_runtime(
     current = destination / "current"
     existing_release = release.exists()
     release_binary_identity: tuple[str, str] | None = None
+    identity_sha256: str | None = None
 
     if existing_release:
         if release.is_symlink() or not release.is_dir():
@@ -343,6 +438,12 @@ def stage_runtime(
             raise ValueError(
                 "existing pinned release binary identity does not match prepared source"
             )
+        identity_sha256 = _read_identity_manifest(
+            release,
+            binary_identity=release_binary_identity,
+            check_identity=check_identity,
+            required=False,
+        )
 
     if not apply:
         if _check_source_identity() != check_identity:
@@ -370,6 +471,8 @@ def stage_runtime(
                 if release_binary_identity is not None
                 else None
             ),
+            identity_path=str(_identity_path(release)),
+            identity_sha256=identity_sha256,
             existing_release_reused=existing_release,
             applied=False,
             current_target=_current_target(current),
@@ -403,6 +506,12 @@ def stage_runtime(
             raise ValueError(
                 "existing pinned release binary identity does not match prepared source"
             )
+        identity_sha256 = _write_identity_manifest(
+            release,
+            release=release,
+            binary_identity=release_binary_identity,
+            check_identity=check_identity,
+        )
     else:
         staging = releases / (
             f".staging-{CHECK.PINNED_SOURCE_HEAD}.{os.getpid()}"
@@ -430,6 +539,12 @@ def stage_runtime(
                 raise ValueError(
                     "reviewed isolated-runtime validator changed before release publish"
                 )
+            identity_sha256 = _write_identity_manifest(
+                staging,
+                release=release,
+                binary_identity=staging_identity,
+                check_identity=check_identity,
+            )
             os.replace(staging, release)
             release_binary_identity = staging_identity
         finally:
@@ -442,6 +557,15 @@ def stage_runtime(
         raise ValueError(
             "release binary identity changed before current-link update"
         )
+    observed_identity_sha256 = _read_identity_manifest(
+        release,
+        binary_identity=release_binary_identity,
+        check_identity=check_identity,
+        required=True,
+    )
+    if identity_sha256 is not None and observed_identity_sha256 != identity_sha256:
+        raise ValueError("runtime identity manifest changed before current-link update")
+    identity_sha256 = observed_identity_sha256
     if _binary_identity(_validate_source(source)) != source_binary_identity:
         raise ValueError(
             "prepared source binary identity changed before current-link update"
@@ -456,6 +580,16 @@ def stage_runtime(
         if _binary_identity(_validate_existing_release(release)) != source_binary_identity:
             raise ValueError(
                 "release binary identity changed after current-link update"
+            )
+        final_identity_sha256 = _read_identity_manifest(
+            release,
+            binary_identity=source_binary_identity,
+            check_identity=check_identity,
+            required=True,
+        )
+        if final_identity_sha256 != identity_sha256:
+            raise ValueError(
+                "runtime identity manifest changed after current-link update"
             )
         if _check_source_identity() != check_identity:
             raise ValueError(
@@ -478,6 +612,8 @@ def stage_runtime(
         source_watch_executor_sha256=source_binary_identity[1],
         release_executor_sha256=release_binary_identity[0],
         release_watch_executor_sha256=release_binary_identity[1],
+        identity_path=str(_identity_path(release)),
+        identity_sha256=identity_sha256,
         existing_release_reused=reused,
         applied=True,
         current_target=_current_target(current),

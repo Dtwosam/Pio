@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -39,7 +40,28 @@ def runtime_tree(tmp_path: Path) -> tuple[Path, Path]:
     executor.parent.mkdir(parents=True)
     executor.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     executor.chmod(executor.stat().st_mode | stat.S_IXUSR)
+    watcher = (
+        release
+        / "rust-executor/target/release/pio-phase2-account-watch"
+    )
+    watcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    watcher.chmod(watcher.stat().st_mode | stat.S_IXUSR)
     (release / "python-learner/src").mkdir(parents=True)
+    identity = {
+        "format_version": 1,
+        "pinned_source_head": "pin",
+        "release_path": str(release),
+        "reviewed_check_commit": "a" * 40,
+        "reviewed_check_sha256": "b" * 64,
+        "executor_sha256": hashlib.sha256(executor.read_bytes()).hexdigest(),
+        "watch_executor_sha256": hashlib.sha256(
+            watcher.read_bytes()
+        ).hexdigest(),
+    }
+    (release / MODULE._IDENTITY_FILENAME).write_text(
+        json.dumps(identity, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     current = root / "current"
     current.symlink_to(Path("releases") / "pin")
     return root, release
@@ -183,6 +205,26 @@ def test_smoke_accepts_partial_evidence_and_writes_receipt(
     assert "api-key=secret" not in encoded
     saved = json.loads(receipt.read_text(encoding="utf-8"))
     assert saved["runtime_target"] == str(release)
+    executor = release / "rust-executor/target/release/meteora-executor"
+    watcher = (
+        release
+        / "rust-executor/target/release/pio-phase2-account-watch"
+    )
+    assert saved["runtime_executor_sha256"] == hashlib.sha256(
+        executor.read_bytes()
+    ).hexdigest()
+    assert saved["runtime_watch_executor_sha256"] == hashlib.sha256(
+        watcher.read_bytes()
+    ).hexdigest()
+    assert saved["stage_identity_sha256"] == hashlib.sha256(
+        (release / MODULE._IDENTITY_FILENAME).read_bytes()
+    ).hexdigest()
+    assert report.runtime_executor_sha256 == saved["runtime_executor_sha256"]
+    assert (
+        report.runtime_watch_executor_sha256
+        == saved["runtime_watch_executor_sha256"]
+    )
+    assert report.stage_identity_sha256 == saved["stage_identity_sha256"]
     assert saved["progress_evidence_id"] == 123
     assert saved["smoke_passed"] is True
 
@@ -467,6 +509,139 @@ def test_smoke_aborts_if_runtime_current_changes_before_launch(
     with pytest.raises(
         ValueError,
         match="runtime current target changed before smoke launch",
+    ):
+        MODULE.run_smoke(
+            runtime_root=runtime_root,
+            env_file=env,
+            data_root=data,
+            python_executable=python,
+            receipt_path=data / "receipt.json",
+            apply=True,
+            runner=runner,
+        )
+
+    assert calls == []
+
+
+
+def test_smoke_rejects_executor_drift_after_identity_capture(
+    tmp_path,
+    monkeypatch,
+):
+    install_readiness(monkeypatch, ready=True)
+    runtime_root, release = runtime_tree(tmp_path)
+    python = python_executable(tmp_path)
+    env = env_file(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "pio.db").write_text("db", encoding="utf-8")
+    executor = release / "rust-executor/target/release/meteora-executor"
+    real_parse = MODULE._parse_env_bytes
+    calls = []
+
+    def drift_after_parse(encoded):
+        parsed = real_parse(encoded)
+        executor.write_text("#!/bin/sh\necho drift\n", encoding="utf-8")
+        executor.chmod(executor.stat().st_mode | stat.S_IXUSR)
+        return parsed
+
+    monkeypatch.setattr(MODULE, "_parse_env_bytes", drift_after_parse)
+
+    def runner(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("runner must not execute")
+
+    with pytest.raises(
+        ValueError,
+        match="executor SHA-256 changed before smoke launch",
+    ):
+        MODULE.run_smoke(
+            runtime_root=runtime_root,
+            env_file=env,
+            data_root=data,
+            python_executable=python,
+            receipt_path=data / "receipt.json",
+            apply=True,
+            runner=runner,
+        )
+
+    assert calls == []
+
+
+def test_smoke_rejects_account_watch_drift_after_identity_capture(
+    tmp_path,
+    monkeypatch,
+):
+    install_readiness(monkeypatch, ready=True)
+    runtime_root, release = runtime_tree(tmp_path)
+    python = python_executable(tmp_path)
+    env = env_file(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "pio.db").write_text("db", encoding="utf-8")
+    watcher = (
+        release
+        / "rust-executor/target/release/pio-phase2-account-watch"
+    )
+    real_parse = MODULE._parse_env_bytes
+    calls = []
+
+    def drift_after_parse(encoded):
+        parsed = real_parse(encoded)
+        watcher.write_text("#!/bin/sh\necho drift\n", encoding="utf-8")
+        watcher.chmod(watcher.stat().st_mode | stat.S_IXUSR)
+        return parsed
+
+    monkeypatch.setattr(MODULE, "_parse_env_bytes", drift_after_parse)
+
+    def runner(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("runner must not execute")
+
+    with pytest.raises(
+        ValueError,
+        match="account-watch executor SHA-256 changed before smoke launch",
+    ):
+        MODULE.run_smoke(
+            runtime_root=runtime_root,
+            env_file=env,
+            data_root=data,
+            python_executable=python,
+            receipt_path=data / "receipt.json",
+            apply=True,
+            runner=runner,
+        )
+
+    assert calls == []
+
+
+def test_smoke_rejects_runtime_identity_manifest_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    install_readiness(monkeypatch, ready=True)
+    runtime_root, release = runtime_tree(tmp_path)
+    python = python_executable(tmp_path)
+    env = env_file(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "pio.db").write_text("db", encoding="utf-8")
+    identity_path = release / MODULE._IDENTITY_FILENAME
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    identity["executor_sha256"] = "0" * 64
+    identity_path.write_text(
+        json.dumps(identity, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def runner(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("runner must not execute")
+
+    with pytest.raises(
+        ValueError,
+        match="staged runtime executor identity does not match live executor",
     ):
         MODULE.run_smoke(
             runtime_root=runtime_root,
