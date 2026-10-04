@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from pathlib import Path
 import os
@@ -95,6 +96,14 @@ def test_stager_preflight_is_non_mutating(tmp_path, monkeypatch):
     )
 
     assert report.source_runtime_ready is True
+    assert report.source_executor_sha256 == hashlib.sha256(
+        (source / MODULE.CHECK.EXECUTOR_RELATIVE).read_bytes()
+    ).hexdigest()
+    assert report.source_watch_executor_sha256 == hashlib.sha256(
+        (source / MODULE.CHECK.WATCH_EXECUTOR_RELATIVE).read_bytes()
+    ).hexdigest()
+    assert report.release_executor_sha256 is None
+    assert report.release_watch_executor_sha256 is None
     assert report.applied is False
     assert destination.exists() is False
     assert report.production_tree_modified is False
@@ -122,6 +131,11 @@ def test_stager_installs_versioned_release_and_atomic_current_link(
     assert current.is_symlink()
     assert current.resolve() == release.resolve()
     assert report.current_target == os.path.relpath(release, destination)
+    assert report.release_executor_sha256 == report.source_executor_sha256
+    assert (
+        report.release_watch_executor_sha256
+        == report.source_watch_executor_sha256
+    )
     assert MODULE.CHECK.inspect_runtime(release).runtime_ready is True
 
 
@@ -287,3 +301,70 @@ def test_stager_validator_capture_rejects_symlink(tmp_path):
             link,
             label="reviewed test validator",
         )
+
+
+
+def test_stager_rejects_existing_release_with_different_binary_identity(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_ready_runtime(tmp_path, monkeypatch)
+    destination = tmp_path / "runtime-root"
+
+    first = MODULE.stage_runtime(
+        source_tree=source,
+        destination_root=destination,
+        apply=True,
+    )
+    release = Path(first.release_path)
+    executor = release / MODULE.CHECK.EXECUTOR_RELATIVE
+    executor.write_text("#!/bin/sh\necho drift\n", encoding="utf-8")
+    executor.chmod(executor.stat().st_mode | stat.S_IXUSR)
+
+    assert MODULE.CHECK.inspect_runtime(release).runtime_ready is True
+
+    with pytest.raises(
+        ValueError,
+        match="binary identity does not match prepared source",
+    ):
+        MODULE.stage_runtime(
+            source_tree=source,
+            destination_root=destination,
+            apply=True,
+        )
+
+
+def test_stager_rejects_source_binary_drift_during_copy(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_ready_runtime(tmp_path, monkeypatch)
+    destination = tmp_path / "runtime-root"
+    executor = source / MODULE.CHECK.EXECUTOR_RELATIVE
+    real_copytree = MODULE.shutil.copytree
+
+    def copy_then_drift(*args, **kwargs):
+        result = real_copytree(*args, **kwargs)
+        executor.write_text("#!/bin/sh\necho changed\n", encoding="utf-8")
+        executor.chmod(executor.stat().st_mode | stat.S_IXUSR)
+        return result
+
+    monkeypatch.setattr(MODULE.shutil, "copytree", copy_then_drift)
+
+    with pytest.raises(
+        ValueError,
+        match="prepared source binary identity changed during stage copy",
+    ):
+        MODULE.stage_runtime(
+            source_tree=source,
+            destination_root=destination,
+            apply=True,
+        )
+
+    release = (
+        destination
+        / "releases"
+        / MODULE.CHECK.PINNED_SOURCE_HEAD
+    )
+    assert release.exists() is False
+    assert (destination / "current").exists() is False

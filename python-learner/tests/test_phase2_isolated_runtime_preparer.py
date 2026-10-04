@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from pathlib import Path
 import stat
@@ -57,6 +58,8 @@ def test_preparer_preflight_is_non_mutating(tmp_path, monkeypatch):
     assert report.compat_applied is False
     assert report.build_requested is False
     assert report.runtime_ready is False
+    assert report.executor_sha256 is None
+    assert report.watch_executor_sha256 is None
     assert MODULE._tracked_dirty(source) == ()
 
 
@@ -82,6 +85,12 @@ def test_preparer_applies_compat_builds_and_validates(tmp_path, monkeypatch):
     assert report.build_requested is True
     assert report.build_succeeded is True
     assert report.runtime_ready is True
+    assert report.executor_sha256 == hashlib.sha256(
+        Path(report.executor_path).read_bytes()
+    ).hexdigest()
+    assert report.watch_executor_sha256 == hashlib.sha256(
+        Path(report.watch_executor_path).read_bytes()
+    ).hexdigest()
     assert report.production_tree_modified is False
     assert report.rpc_called is False
     assert report.service_control_performed is False
