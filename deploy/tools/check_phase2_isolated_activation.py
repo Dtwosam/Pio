@@ -517,6 +517,35 @@ def _capture_from_snapshot(
     return captured
 
 
+def _read_env(path: Path) -> dict[str, str]:
+    """
+    Compatibility helper for read-only consumers such as timer-health.
+
+    Read and parse one descriptor-bound env snapshot, then recheck the path
+    identity before returning. New activation logic uses the already-captured
+    bytes directly.
+    """
+    snapshot = _path_snapshot(Path(path).expanduser())
+    captured = _capture_from_snapshot(
+        snapshot,
+        label="Phase-2 environment file",
+        max_bytes=_MAX_CONFIG_BYTES,
+    )
+    if captured is None:
+        return {}
+    values = _read_env_bytes(captured.encoded)
+    _assert_path_snapshot_stable(
+        snapshot,
+        label="Phase-2 environment file",
+    )
+    _assert_regular_path_stable(
+        captured.path,
+        captured.opened,
+        label="Phase-2 environment file",
+    )
+    return values
+
+
 def inspect_activation(
     *,
     runtime_root: str | Path = "/opt/pio-phase2-runtime",
