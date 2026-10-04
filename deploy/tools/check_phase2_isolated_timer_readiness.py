@@ -23,6 +23,9 @@ SMOKE_RUNNER_TOOL_RELATIVE = "deploy/tools/run_phase2_isolated_smoke.py"
 
 _MAX_TOOL_BYTES = 4 * 1024 * 1024
 _MAX_RECEIPT_BYTES = 4 * 1024 * 1024
+_MAX_RUNTIME_IDENTITY_BYTES = 1024 * 1024
+_MAX_EXECUTOR_BYTES = 256 * 1024 * 1024
+_RUNTIME_IDENTITY_FILENAME = ".pio-phase2-runtime-identity.json"
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,13 @@ class _CapturedFile:
     path: Path
     encoded: bytes
     opened: os.stat_result
+
+
+@dataclass(frozen=True)
+class _DigestSnapshot:
+    path: Path
+    opened: os.stat_result
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -53,6 +63,9 @@ class Phase2TimerReadinessSnapshot:
     receipt: _CapturedFile | None
     database: _DatabasePathSnapshot | None
     runtime_current: _RuntimeCurrentSnapshot | None
+    runtime_identity: _CapturedFile | None
+    runtime_executor: _DigestSnapshot | None
+    runtime_watch_executor: _DigestSnapshot | None
 
 
 def _assert_regular_path_stable(
@@ -154,6 +167,80 @@ def _capture_regular_file(
     return _CapturedFile(path=resolved, encoded=encoded, opened=before)
 
 
+def _capture_digest_file(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int,
+) -> _DigestSnapshot:
+    raw = Path(path).expanduser()
+    try:
+        opened_path = os.lstat(raw)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be inspected safely") from exc
+    if stat.S_ISLNK(opened_path.st_mode) or not stat.S_ISREG(opened_path.st_mode):
+        raise ValueError(f"{label} must be a regular file")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    digest = hashlib.sha256()
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size < 0 or before.st_size > max_bytes:
+            raise ValueError(f"{label} size is invalid")
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            digest.update(chunk)
+            remaining -= len(chunk)
+        after = os.fstat(fd)
+        if (
+            remaining != 0
+            or after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_mode != before.st_mode
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    _assert_regular_path_stable(resolved, before, label=label)
+    return _DigestSnapshot(
+        path=resolved,
+        opened=before,
+        sha256=digest.hexdigest(),
+    )
+
+
+def _assert_digest_snapshot_stable(
+    snapshot: _DigestSnapshot,
+    *,
+    label: str,
+) -> None:
+    _assert_regular_path_stable(
+        snapshot.path,
+        snapshot.opened,
+        label=label,
+    )
+
+
 def _load_captured_smoke_runner(
     path: Path,
     name: str,
@@ -200,6 +287,9 @@ class Phase2TimerReadinessReport:
     receipt_regular: bool
     receipt_valid: bool
     receipt_runtime_matches: bool
+    receipt_stage_identity_matches: bool
+    receipt_executor_matches: bool
+    receipt_watch_executor_matches: bool
     receipt_age_seconds: float | None
     receipt_fresh: bool
     receipt_stage_statuses_valid: bool
@@ -489,6 +579,22 @@ def assert_timer_readiness_snapshot_stable(
         _assert_database_path_stable(snapshot.database)
     if snapshot.runtime_current is not None:
         _assert_runtime_current_stable(snapshot.runtime_current)
+    if snapshot.runtime_identity is not None:
+        _assert_regular_path_stable(
+            snapshot.runtime_identity.path,
+            snapshot.runtime_identity.opened,
+            label="staged runtime identity manifest",
+        )
+    if snapshot.runtime_executor is not None:
+        _assert_digest_snapshot_stable(
+            snapshot.runtime_executor,
+            label="staged runtime executor",
+        )
+    if snapshot.runtime_watch_executor is not None:
+        _assert_digest_snapshot_stable(
+            snapshot.runtime_watch_executor,
+            label="staged runtime account-watch executor",
+        )
 
 
 def capture_timer_readiness(
@@ -536,13 +642,25 @@ def capture_timer_readiness(
         and payload.get("smoke_passed") is True
         and payload.get("eligible_for_timer_enable_preflight") is True
         and isinstance(payload.get("runtime_target"), str)
+        and isinstance(payload.get("runtime_executor_sha256"), str)
+        and len(str(payload["runtime_executor_sha256"])) == 64
+        and isinstance(payload.get("runtime_watch_executor_sha256"), str)
+        and len(str(payload["runtime_watch_executor_sha256"])) == 64
+        and isinstance(payload.get("stage_identity_sha256"), str)
+        and len(str(payload["stage_identity_sha256"])) == 64
         and isinstance(payload.get("progress_evidence_id"), int)
         and int(payload["progress_evidence_id"]) > 0
         and isinstance(payload.get("finished_at"), str)
     )
 
     runtime_snapshot: _RuntimeCurrentSnapshot | None = None
+    runtime_identity_capture: _CapturedFile | None = None
+    runtime_executor_snapshot: _DigestSnapshot | None = None
+    runtime_watch_executor_snapshot: _DigestSnapshot | None = None
     runtime_matches = False
+    stage_identity_matches = False
+    executor_matches = False
+    watch_executor_matches = False
     age_seconds: float | None = None
     fresh = False
     stages_valid = False
@@ -555,9 +673,57 @@ def capture_timer_readiness(
                 str(runtime_snapshot.resolved_target)
                 == str(payload["runtime_target"])
             )
+            if runtime_matches:
+                runtime = runtime_snapshot.resolved_target
+                runtime_identity_capture = _capture_regular_file(
+                    runtime / _RUNTIME_IDENTITY_FILENAME,
+                    label="staged runtime identity manifest",
+                    max_bytes=_MAX_RUNTIME_IDENTITY_BYTES,
+                )
+                assert runtime_identity_capture is not None
+                identity_payload = _parse_receipt_bytes(
+                    runtime_identity_capture.encoded
+                )
+                runtime_executor_snapshot = _capture_digest_file(
+                    runtime / "rust-executor/target/release/meteora-executor",
+                    label="staged runtime executor",
+                    max_bytes=_MAX_EXECUTOR_BYTES,
+                )
+                runtime_watch_executor_snapshot = _capture_digest_file(
+                    runtime
+                    / "rust-executor/target/release/pio-phase2-account-watch",
+                    label="staged runtime account-watch executor",
+                    max_bytes=_MAX_EXECUTOR_BYTES,
+                )
+                stage_identity_matches = bool(
+                    hashlib.sha256(
+                        runtime_identity_capture.encoded
+                    ).hexdigest()
+                    == str(payload["stage_identity_sha256"])
+                )
+                executor_matches = bool(
+                    runtime_executor_snapshot.sha256
+                    == str(payload["runtime_executor_sha256"])
+                    and isinstance(identity_payload, dict)
+                    and identity_payload.get("executor_sha256")
+                    == runtime_executor_snapshot.sha256
+                )
+                watch_executor_matches = bool(
+                    runtime_watch_executor_snapshot.sha256
+                    == str(payload["runtime_watch_executor_sha256"])
+                    and isinstance(identity_payload, dict)
+                    and identity_payload.get("watch_executor_sha256")
+                    == runtime_watch_executor_snapshot.sha256
+                )
         except (OSError, RuntimeError, ValueError):
             runtime_snapshot = None
+            runtime_identity_capture = None
+            runtime_executor_snapshot = None
+            runtime_watch_executor_snapshot = None
             runtime_matches = False
+            stage_identity_matches = False
+            executor_matches = False
+            watch_executor_matches = False
 
         try:
             age_seconds = (
@@ -620,6 +786,9 @@ def capture_timer_readiness(
         and receipt_regular
         and receipt_valid
         and runtime_matches
+        and stage_identity_matches
+        and executor_matches
+        and watch_executor_matches
         and fresh
         and stages_valid
         and row_present
@@ -634,6 +803,9 @@ def capture_timer_readiness(
         receipt_regular=receipt_regular,
         receipt_valid=receipt_valid,
         receipt_runtime_matches=runtime_matches,
+        receipt_stage_identity_matches=stage_identity_matches,
+        receipt_executor_matches=executor_matches,
+        receipt_watch_executor_matches=watch_executor_matches,
         receipt_age_seconds=age_seconds,
         receipt_fresh=fresh,
         receipt_stage_statuses_valid=stages_valid,
@@ -656,6 +828,9 @@ def capture_timer_readiness(
         receipt=receipt_capture,
         database=database_snapshot,
         runtime_current=runtime_snapshot,
+        runtime_identity=runtime_identity_capture,
+        runtime_executor=runtime_executor_snapshot,
+        runtime_watch_executor=runtime_watch_executor_snapshot,
     )
     assert_timer_readiness_snapshot_stable(snapshot)
     return report, snapshot
