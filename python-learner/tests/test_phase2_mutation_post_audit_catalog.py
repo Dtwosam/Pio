@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from pathlib import Path
 import sys
@@ -215,3 +216,90 @@ def test_catalog_rejects_directory_change_during_verification(tmp_path, monkeypa
         MODULE.build_phase2_post_audit_catalog(
             artifact_directory=tmp_path,
         )
+
+def test_catalog_verifier_source_identity_matches_exact_executed_bytes():
+    commit, verifier_sha = MODULE._verifier_source_identity()
+
+    assert len(commit) >= 40
+    assert verifier_sha == MODULE._VERIFY_TOOL_SHA256_AT_LOAD
+    assert verifier_sha == hashlib.sha256(
+        MODULE._VERIFY_TOOL_BYTES_AT_LOAD
+    ).hexdigest()
+
+
+def test_catalog_never_rereads_loaded_verifier_tool_bytes(monkeypatch):
+    real_read_bytes = Path.read_bytes
+
+    def reject_verifier_reread(path):
+        if path.resolve() == MODULE._VERIFY_TOOL_PATH_AT_LOAD:
+            raise AssertionError(
+                "catalog verifier identity must use captured dependency bytes"
+            )
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_verifier_reread)
+
+    commit, verifier_sha = MODULE._verifier_source_identity()
+
+    assert len(commit) >= 40
+    assert verifier_sha == MODULE._VERIFY_TOOL_SHA256_AT_LOAD
+
+
+def test_catalog_verifier_is_descriptor_captured_and_executed():
+    source = TOOL.read_text(encoding="utf-8")
+
+    assert "def _capture_tool(" in source
+    assert "O_NOFOLLOW" in source
+    assert "os.fstat(" in source
+    assert "compile(encoded" in source
+    assert "exec(code, module.__dict__)" in source
+    assert "_VERIFY_TOOL_BYTES_AT_LOAD" in source
+    assert "VERIFY_TOOL.read_bytes()" not in source
+
+
+def test_catalog_rejects_symlinked_verifier_path(tmp_path, monkeypatch):
+    real_tool = tmp_path / "verify.py"
+    real_tool.write_text("# reviewed\n", encoding="utf-8")
+    link = tmp_path / "verify-link.py"
+    link.symlink_to(real_tool)
+    monkeypatch.setattr(MODULE, "VERIFY_TOOL", link)
+
+    with pytest.raises(ValueError, match="missing or symlinked"):
+        MODULE.build_phase2_post_audit_catalog(
+            artifact_directory=tmp_path,
+        )
+
+
+def test_catalog_rejects_verifier_source_change_during_scan(
+    tmp_path,
+    monkeypatch,
+):
+    artifact = private_file(tmp_path / "a.post-audit.json")
+    monkeypatch.setattr(
+        MODULE.VERIFY,
+        "verify_saved_mutation_post_audit",
+        lambda *, artifact_path, repository_root: verified_report(
+            Path(artifact_path),
+            artifact_sha="1" * 64,
+            receipt_sha="2" * 64,
+        ),
+    )
+    identities = iter(
+        (
+            ("a" * 40, "1" * 64),
+            ("b" * 40, "2" * 64),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_verifier_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(ValueError, match="source changed during catalog"):
+        MODULE.build_phase2_post_audit_catalog(
+            artifact_directory=tmp_path,
+        )
+
+    assert artifact.exists()
+
