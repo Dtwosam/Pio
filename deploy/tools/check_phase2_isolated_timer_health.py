@@ -69,9 +69,9 @@ def _capture_regular_file(
 ) -> _CapturedFile | None:
     raw = Path(path).expanduser()
     if raw.is_symlink():
-        return None if optional else (_ for _ in ()).throw(
-            ValueError(f"{label} must not be a symlink")
-        )
+        if optional:
+            return None
+        raise ValueError(f"{label} must not be a symlink")
     try:
         resolved = raw.resolve(strict=True)
     except OSError:
