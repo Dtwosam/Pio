@@ -160,30 +160,80 @@ def systemctl_runner(command, **kwargs):
 
 
 def cycle(*, at, status="COLLECTION_SUCCESS", limited=False):
+    overall = status.removeprefix("COLLECTION_")
+    if limited:
+        stage_outcomes = [
+            [
+                "POSITION_OBSERVATIONS",
+                "FAILED",
+                "RPC_RATE_LIMITED",
+            ],
+            [
+                "TRANSACTION_REINSPECTION",
+                "SKIPPED",
+                "RPC_CIRCUIT_OPEN",
+            ],
+            [
+                "PRESTATE_VERIFICATION",
+                "SKIPPED",
+                "RPC_CIRCUIT_OPEN",
+            ],
+        ]
+    elif overall == "FAILED":
+        stage_outcomes = [
+            ["POSITION_OBSERVATIONS", "FAILED", "POSITION_STAGE_FAILED"]
+        ]
+    elif overall == "PARTIAL":
+        stage_outcomes = [
+            ["CALIBRATION_EVIDENCE", "PARTIAL", None]
+        ]
+    else:
+        stage_outcomes = [
+            ["RECONCILIATION_CORPUS", "SUCCESS", None]
+        ]
+
+    stage_statuses = [
+        [name, stage_status]
+        for name, stage_status, _category in stage_outcomes
+    ]
+    stages_successful = sum(
+        stage_status == "SUCCESS"
+        for _name, stage_status in stage_statuses
+    )
+    stages_partial = sum(
+        stage_status == "PARTIAL"
+        for _name, stage_status in stage_statuses
+    )
+    stages_failed = sum(
+        stage_status == "FAILED"
+        for _name, stage_status in stage_statuses
+    )
+    stages_skipped = sum(
+        stage_status == "SKIPPED"
+        for _name, stage_status in stage_statuses
+    )
+
     return {
         "as_of": at,
         "status": status,
         "evidence": {
-            "stages_failed": 1 if status == "COLLECTION_FAILED" else 0,
-            "stages_skipped": 2 if limited else 0,
+            "pool_address": POOL,
+            "finished_at": at,
+            "overall_status": overall,
+            "stages_successful": stages_successful,
+            "stages_partial": stages_partial,
+            "stages_failed": stages_failed,
+            "stages_skipped": stages_skipped,
+            "stage_statuses": stage_statuses,
+            "stage_outcomes": stage_outcomes,
             "rpc_rate_limited": limited,
             "rpc_circuit_open": limited,
-            "stage_outcomes": (
-                [
-                    [
-                        "POSITION_OBSERVATIONS",
-                        "FAILED",
-                        "RPC_RATE_LIMITED",
-                    ],
-                    [
-                        "TRANSACTION_REINSPECTION",
-                        "SKIPPED",
-                        "RPC_CIRCUIT_OPEN",
-                    ],
-                ]
-                if limited
-                else []
-            ),
+            "read_only": True,
+            "actionable": False,
+            "live_authorized": False,
+            "promotion_gate_evaluated": False,
+            "phase_promotion_performed": False,
+            "qualified": False,
         },
     }
 
@@ -942,3 +992,106 @@ def test_timer_health_explicitly_allows_transient_evidence_service(
 
     assert report.collection_healthy is True
     assert flags == [True, True]
+
+
+
+def test_timer_health_rejects_structurally_invalid_success_telemetry(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    root = write_db(
+        tmp_path,
+        [
+            {
+                "as_of": "2026-10-02T20:20:00+00:00",
+                "status": "COLLECTION_SUCCESS",
+                "evidence": {},
+            }
+        ],
+    )
+
+    report = MODULE.inspect_timer_health(
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.latest_cycle_recent is True
+    assert report.latest_cycle_valid is False
+    assert report.latest_cycle_failed is True
+    assert report.collection_healthy is False
+    assert report.consecutive_rpc_rate_limited == 0
+    assert report.pause_recommended is False
+
+
+def test_timer_health_rejects_progress_status_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    item = cycle(at="2026-10-02T20:20:00+00:00")
+    item["evidence"]["overall_status"] = "FAILED"
+    root = write_db(tmp_path, [item])
+
+    report = MODULE.inspect_timer_health(
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.latest_cycle_valid is False
+    assert report.collection_healthy is False
+
+
+def test_timer_health_rejects_progress_stage_count_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    item = cycle(at="2026-10-02T20:20:00+00:00")
+    item["evidence"]["stages_successful"] = 99
+    root = write_db(tmp_path, [item])
+
+    report = MODULE.inspect_timer_health(
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.latest_cycle_valid is False
+    assert report.collection_healthy is False
+
+
+def test_timer_health_accepts_valid_legacy_progress_without_rpc_fields(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    item = cycle(at="2026-10-02T20:20:00+00:00")
+    item["evidence"].pop("stage_outcomes")
+    item["evidence"].pop("rpc_rate_limited")
+    item["evidence"].pop("rpc_circuit_open")
+    root = write_db(tmp_path, [item])
+
+    report = MODULE.inspect_timer_health(
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.latest_cycle_valid is True
+    assert report.collection_healthy is True
+    assert report.consecutive_rpc_rate_limited == 0
