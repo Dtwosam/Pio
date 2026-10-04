@@ -3,31 +3,190 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 from typing import Any
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 VERIFY_TOOL = TOOLS_DIR / "check_phase2_isolated_mutation_post_audit.py"
+VERIFY_TOOL_RELATIVE = "deploy/tools/check_phase2_isolated_mutation_post_audit.py"
 _DEFAULT_PATTERN = "*.post-audit.json"
 _MAX_ARTIFACTS = 1000
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+def _assert_tool_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after load") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after load")
+
+
+def _capture_tool(
+    path: Path,
+    *,
+    label: str,
+) -> tuple[Path, bytes, os.stat_result]:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f"{label} is missing") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size <= 0 or before.st_size > _MAX_TOOL_BYTES:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_tool_path_stable(resolved, before, label=label)
+    return resolved, encoded, before
+
+
+def _load_captured(
+    path: Path,
+    name: str,
+) -> tuple[Any, Path, bytes, os.stat_result]:
+    label = "reviewed mutation post-audit verifier"
+    resolved, encoded, opened = _capture_tool(path, label=label)
+    spec = importlib.util.spec_from_file_location(name, resolved)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed Phase-2 tool: {path}")
+        raise ValueError(f"cannot load reviewed Phase-2 tool: {resolved}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(encoded, str(resolved), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_tool_path_stable(resolved, opened, label=label)
+    return module, resolved, encoded, opened
 
 
-VERIFY = _load(VERIFY_TOOL, "phase2_post_audit_catalog_verify")
+(
+    VERIFY,
+    _VERIFY_TOOL_PATH_AT_LOAD,
+    _VERIFY_TOOL_BYTES_AT_LOAD,
+    _VERIFY_TOOL_STAT_AT_LOAD,
+) = _load_captured(
+    VERIFY_TOOL,
+    "phase2_post_audit_catalog_verify",
+)
+_VERIFY_TOOL_SHA256_AT_LOAD = hashlib.sha256(
+    _VERIFY_TOOL_BYTES_AT_LOAD
+).hexdigest()
+
+
+def _run_git(*args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+
+
+def _verifier_source_identity() -> tuple[str, str]:
+    raw = Path(VERIFY_TOOL).expanduser()
+    if raw.is_symlink():
+        raise ValueError("reviewed mutation post-audit verifier is missing or symlinked")
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(
+            "reviewed mutation post-audit verifier is missing or symlinked"
+        ) from exc
+    if resolved != _VERIFY_TOOL_PATH_AT_LOAD:
+        raise ValueError(
+            "mutation post-audit verifier path changed after module load"
+        )
+    _assert_tool_path_stable(
+        _VERIFY_TOOL_PATH_AT_LOAD,
+        _VERIFY_TOOL_STAT_AT_LOAD,
+        label="reviewed mutation post-audit verifier",
+    )
+
+    head = _run_git("rev-parse", "HEAD")
+    if head.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = head.stdout.decode("utf-8").strip()
+    if not commit:
+        raise ValueError("reviewed source commit is invalid")
+
+    historical = _run_git("show", f"{commit}:{VERIFY_TOOL_RELATIVE}")
+    if historical.returncode != 0:
+        raise ValueError(
+            "mutation post-audit verifier is not present at reviewed source commit"
+        )
+    if historical.stdout != _VERIFY_TOOL_BYTES_AT_LOAD:
+        raise ValueError(
+            "mutation post-audit verifier bytes do not match reviewed source commit"
+        )
+
+    _assert_tool_path_stable(
+        _VERIFY_TOOL_PATH_AT_LOAD,
+        _VERIFY_TOOL_STAT_AT_LOAD,
+        label="reviewed mutation post-audit verifier",
+    )
+    return commit, _VERIFY_TOOL_SHA256_AT_LOAD
 
 
 @dataclass(frozen=True)
@@ -110,6 +269,7 @@ def build_phase2_post_audit_catalog(
     pattern: str = _DEFAULT_PATTERN,
     repository_root: str | Path = VERIFY.REPO_ROOT,
 ) -> Phase2PostAuditCatalogReport:
+    source_before = _verifier_source_identity()
     directory = _artifact_directory(artifact_directory)
     candidates = _candidate_files(directory, pattern)
     identities_before = tuple(_candidate_identity(path) for path in candidates)
@@ -181,6 +341,12 @@ def build_phase2_post_audit_catalog(
     stable = identities_after == identities_before
     if not stable:
         raise ValueError("post-audit catalog changed during verification")
+
+    source_after = _verifier_source_identity()
+    if source_after != source_before:
+        raise ValueError(
+            "reviewed mutation post-audit verifier source changed during catalog"
+        )
 
     return Phase2PostAuditCatalogReport(
         artifact_directory=str(directory),
