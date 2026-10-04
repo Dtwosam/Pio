@@ -3,8 +3,8 @@ Description=Pio Phase 2 event-driven prestate stream for %i
 After=network-online.target
 Wants=network-online.target
 Conflicts=pio-phase2-prestate-watch.service
-ConditionPathIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
-ConditionPathIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/pio-phase2-account-watch
+ConditionFileIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/meteora-executor
+ConditionFileIsExecutable=/opt/pio-phase2-runtime/current/rust-executor/target/release/pio-phase2-account-watch
 
 [Service]
 Type=simple
