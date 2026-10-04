@@ -496,3 +496,143 @@ def test_activation_preflight_rejects_installer_identity_drift(
             **args,
             runner=systemctl_runner(),
         )
+
+
+
+def test_activation_preflight_is_strict_for_evidence_service_by_default(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    original = MODULE._all_unit_states
+    calls = 0
+
+    def transitioning(*, runner):
+        nonlocal calls
+        calls += 1
+        rows = original(runner=runner)
+        if calls == 1:
+            return rows
+        updated = []
+        for item in rows:
+            if item.name == MODULE.EVIDENCE_SERVICE_UNIT:
+                updated.append(
+                    MODULE.ActivationUnitState(
+                        name=item.name,
+                        active_state="active",
+                        enabled_state=item.enabled_state,
+                        active=True,
+                        enabled=item.enabled,
+                        must_be_disabled=item.must_be_disabled,
+                        ready=False,
+                    )
+                )
+            else:
+                updated.append(item)
+        return tuple(updated)
+
+    monkeypatch.setattr(MODULE, "_all_unit_states", transitioning)
+
+    with pytest.raises(
+        ValueError,
+        match="systemd unit state changed during activation inspection",
+    ):
+        MODULE.inspect_activation(
+            **args,
+            runner=systemctl_runner(),
+        )
+
+
+def test_activation_can_allow_only_transient_evidence_service(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    original = MODULE._all_unit_states
+    calls = 0
+
+    def transitioning(*, runner):
+        nonlocal calls
+        calls += 1
+        rows = original(runner=runner)
+        if calls == 1:
+            return rows
+        updated = []
+        for item in rows:
+            if item.name == MODULE.EVIDENCE_SERVICE_UNIT:
+                updated.append(
+                    MODULE.ActivationUnitState(
+                        name=item.name,
+                        active_state="active",
+                        enabled_state=item.enabled_state,
+                        active=True,
+                        enabled=item.enabled,
+                        must_be_disabled=item.must_be_disabled,
+                        ready=False,
+                    )
+                )
+            else:
+                updated.append(item)
+        return tuple(updated)
+
+    monkeypatch.setattr(MODULE, "_all_unit_states", transitioning)
+
+    report = MODULE.inspect_activation(
+        **args,
+        runner=systemctl_runner(),
+        allow_transient_evidence_service=True,
+    )
+
+    evidence = next(
+        item
+        for item in report.unit_states
+        if item.name == MODULE.EVIDENCE_SERVICE_UNIT
+    )
+    assert evidence.active is True
+    assert report.activation_ready is False
+
+
+def test_activation_transient_evidence_opt_in_still_rejects_timer_drift(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    original = MODULE._all_unit_states
+    calls = 0
+    timer = "pio-phase2-isolated-evidence-cycle.timer"
+
+    def transitioning(*, runner):
+        nonlocal calls
+        calls += 1
+        rows = original(runner=runner)
+        if calls == 1:
+            return rows
+        updated = []
+        for item in rows:
+            if item.name == timer:
+                updated.append(
+                    MODULE.ActivationUnitState(
+                        name=item.name,
+                        active_state="active",
+                        enabled_state=item.enabled_state,
+                        active=True,
+                        enabled=item.enabled,
+                        must_be_disabled=item.must_be_disabled,
+                        ready=False,
+                    )
+                )
+            else:
+                updated.append(item)
+        return tuple(updated)
+
+    monkeypatch.setattr(MODULE, "_all_unit_states", transitioning)
+
+    with pytest.raises(
+        ValueError,
+        match="systemd unit state changed during activation inspection",
+    ):
+        MODULE.inspect_activation(
+            **args,
+            runner=systemctl_runner(),
+            allow_transient_evidence_service=True,
+        )

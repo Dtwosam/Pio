@@ -904,3 +904,41 @@ def test_timer_health_allows_transient_evidence_service_state_change(
 
     assert report.collection_healthy is True
     assert report.evidence_service_active is True
+
+
+
+def test_timer_health_explicitly_allows_transient_evidence_service(
+    tmp_path,
+    monkeypatch,
+):
+    install_base(monkeypatch, tmp_path)
+    original = MODULE.ACTIVATION.inspect_activation
+    flags = []
+
+    def capturing_activation(**kwargs):
+        flags.append(
+            kwargs.get("allow_transient_evidence_service", False)
+        )
+        return original(**kwargs)
+
+    monkeypatch.setattr(
+        MODULE.ACTIVATION,
+        "inspect_activation",
+        capturing_activation,
+    )
+    root = write_db(
+        tmp_path,
+        [cycle(at="2026-10-02T20:20:00+00:00")],
+    )
+
+    report = MODULE.inspect_timer_health(
+        env_file=env_file(tmp_path),
+        data_root=root,
+        now=lambda: datetime(
+            2026, 10, 2, 20, 30, tzinfo=timezone.utc
+        ),
+        runner=systemctl_runner,
+    )
+
+    assert report.collection_healthy is True
+    assert flags == [True, True]
