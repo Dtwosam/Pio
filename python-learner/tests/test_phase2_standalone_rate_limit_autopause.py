@@ -469,6 +469,9 @@ def test_autopause_refuses_timer_state_drift_before_pause(tmp_path):
     assert report.pause_recommended is True
     assert report.applied is False
     assert report.failure_step == "TIMER_STATE_CHANGED_BEFORE_PAUSE"
+    assert report.timer_enabled_after is False
+    assert report.timer_active_after is True
+    assert report.future_timer_cycles_paused is True
     assert report.service_control_performed is False
 
 
