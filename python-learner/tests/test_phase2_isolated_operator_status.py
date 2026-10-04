@@ -406,3 +406,68 @@ def test_operator_status_allows_age_only_progress_between_snapshots(
 
     assert report.state == "HEALTHY"
     assert report.attention_required is False
+
+
+
+def test_operator_status_allows_discovery_cache_age_to_advance(
+    monkeypatch,
+):
+    stable_health = health()
+    first_cache = Report(
+        path="/opt/pio/data/phase2-position-discovery-cache.json",
+        exists=True,
+        regular_file=True,
+        symlink=False,
+        format_valid=True,
+        pool_matches=True,
+        complete=True,
+        captured_at="2026-10-04T10:00:00+00:00",
+        age_seconds=100.0,
+        max_age_seconds=3600,
+        reusable_now=True,
+        positions_found=10,
+        positions_returned=10,
+        positions_cached=10,
+    )
+    second_cache = Report(
+        path="/opt/pio/data/phase2-position-discovery-cache.json",
+        exists=True,
+        regular_file=True,
+        symlink=False,
+        format_valid=True,
+        pool_matches=True,
+        complete=True,
+        captured_at="2026-10-04T10:00:00+00:00",
+        age_seconds=100.4,
+        max_age_seconds=3600,
+        reusable_now=True,
+        positions_found=10,
+        positions_returned=10,
+        positions_cached=10,
+    )
+    efficiency_reports = iter(
+        (
+            efficiency(discovery_cache=first_cache),
+            efficiency(discovery_cache=second_cache),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE.HEALTH,
+        "inspect_timer_health",
+        lambda **kwargs: stable_health,
+    )
+    monkeypatch.setattr(
+        MODULE.EFFICIENCY,
+        "inspect_rpc_efficiency",
+        lambda **kwargs: next(efficiency_reports),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_unit_failed",
+        lambda *args, **kwargs: False,
+    )
+
+    report = MODULE.inspect_operator_status()
+
+    assert report.state == "HEALTHY"
+    assert report.discovery_cache_reusable_now is True
