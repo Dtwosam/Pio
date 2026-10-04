@@ -8,6 +8,8 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "deploy/tools/check_phase2_isolated_activation.py"
@@ -339,3 +341,158 @@ def test_activation_preflight_blocks_overlapping_legacy_rpc_collectors(
 def test_activation_does_not_disable_independent_research_quote_density():
     assert "pio-phase2-research-quotes.service" not in MODULE.LEGACY_UNITS
     assert "pio-phase2-research-quotes.timer" not in MODULE.LEGACY_UNITS
+
+
+
+def test_activation_preflight_rejects_same_content_env_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    env = Path(args["env_file"])
+    base_runner = systemctl_runner()
+    replaced = False
+
+    def runner(command, **kwargs):
+        nonlocal replaced
+        if not replaced:
+            replacement = env.with_name("pio.env.replacement")
+            replacement.write_bytes(env.read_bytes())
+            replacement.replace(env)
+            replaced = True
+        return base_runner(command, **kwargs)
+
+    with pytest.raises(
+        ValueError,
+        match="Phase-2 environment file path changed",
+    ):
+        MODULE.inspect_activation(**args, runner=runner)
+
+
+def test_activation_preflight_rejects_detector_state_replacement(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    state = (
+        Path(args["data_root"])
+        / "phase2-add-detector-state.json"
+    )
+    base_runner = systemctl_runner()
+    replaced = False
+
+    def runner(command, **kwargs):
+        nonlocal replaced
+        if not replaced:
+            replacement = state.with_name(f"{state.name}.replacement")
+            replacement.write_bytes(state.read_bytes())
+            replacement.replace(state)
+            replaced = True
+        return base_runner(command, **kwargs)
+
+    with pytest.raises(
+        ValueError,
+        match="Phase-2 data file phase2-add-detector-state.json "
+        "path changed",
+    ):
+        MODULE.inspect_activation(**args, runner=runner)
+
+
+def test_activation_preflight_rejects_runtime_current_retarget(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    current = Path(args["runtime_root"]) / "current"
+    alternate = (
+        Path(args["runtime_root"])
+        / "releases"
+        / "alternate"
+    )
+    alternate.mkdir(parents=True)
+    base_runner = systemctl_runner()
+    changed = False
+
+    def runner(command, **kwargs):
+        nonlocal changed
+        if not changed:
+            current.unlink()
+            current.symlink_to(Path("releases") / "alternate")
+            changed = True
+        return base_runner(command, **kwargs)
+
+    with pytest.raises(
+        ValueError,
+        match="isolated runtime current path changed",
+    ):
+        MODULE.inspect_activation(**args, runner=runner)
+
+
+def test_activation_preflight_requires_stable_systemctl_snapshot(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    original = MODULE._all_unit_states
+    calls = 0
+
+    def unstable(*, runner):
+        nonlocal calls
+        calls += 1
+        rows = original(runner=runner)
+        if calls == 1:
+            return rows
+        first, *rest = rows
+        changed = MODULE.ActivationUnitState(
+            name=first.name,
+            active_state="active",
+            enabled_state=first.enabled_state,
+            active=True,
+            enabled=first.enabled,
+            must_be_disabled=first.must_be_disabled,
+            ready=False,
+        )
+        return (changed, *rest)
+
+    monkeypatch.setattr(MODULE, "_all_unit_states", unstable)
+
+    with pytest.raises(
+        ValueError,
+        match="systemd unit state changed",
+    ):
+        MODULE.inspect_activation(
+            **args,
+            runner=systemctl_runner(),
+        )
+
+
+def test_activation_preflight_rejects_installer_identity_drift(
+    tmp_path,
+    monkeypatch,
+):
+    args = ready_inputs(tmp_path, monkeypatch)
+    original = MODULE._install_source_identity
+    calls = 0
+
+    def drifting_identity():
+        nonlocal calls
+        calls += 1
+        commit, digest = original()
+        if calls == 1:
+            return commit, digest
+        return commit, "0" * len(digest)
+
+    monkeypatch.setattr(
+        MODULE,
+        "_install_source_identity",
+        drifting_identity,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="reviewed systemd installer changed",
+    ):
+        MODULE.inspect_activation(
+            **args,
+            runner=systemctl_runner(),
+        )

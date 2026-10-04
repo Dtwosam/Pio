@@ -3,32 +3,253 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 from typing import Any, Callable
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = TOOLS_DIR.parents[1]
 INSTALL_TOOL = TOOLS_DIR / "install_phase2_isolated_systemd_units.py"
+INSTALL_TOOL_RELATIVE = "deploy/tools/install_phase2_isolated_systemd_units.py"
+_MAX_TOOL_BYTES = 4 * 1024 * 1024
+_MAX_CONFIG_BYTES = 4 * 1024 * 1024
+_MAX_STATE_BYTES = 64 * 1024 * 1024
 
 
-def _load(path: Path, name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(name, path)
+@dataclass(frozen=True)
+class _CapturedFile:
+    path: Path
+    encoded: bytes
+    opened: os.stat_result
+
+
+@dataclass(frozen=True)
+class _PathSnapshot:
+    path: Path
+    kind: str
+    opened: os.stat_result | None
+    symlink_target: str | None
+
+
+def _assert_regular_path_stable(
+    path: Path,
+    opened: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"{label} path changed after capture") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != opened.st_dev
+        or current.st_ino != opened.st_ino
+        or current.st_size != opened.st_size
+        or current.st_mtime_ns != opened.st_mtime_ns
+        or current.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} path changed after capture")
+
+
+def _capture_regular_file(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int,
+    allow_missing: bool = False,
+) -> _CapturedFile | None:
+    raw = Path(path).expanduser()
+    if raw.is_symlink():
+        if allow_missing:
+            return None
+        raise ValueError(f"{label} must not be a symlink")
+    try:
+        resolved = raw.resolve(strict=True)
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        raise ValueError(f"{label} is missing")
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be resolved") from exc
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(resolved, flags)
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        raise ValueError(f"{label} is missing")
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened safely") from exc
+
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            if allow_missing:
+                return None
+            raise ValueError(f"{label} must be a regular file")
+        if before.st_size < 0 or before.st_size > max_bytes:
+            raise ValueError(f"{label} size is invalid")
+
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        encoded = b"".join(chunks)
+
+        after = os.fstat(fd)
+        if (
+            after.st_dev != before.st_dev
+            or after.st_ino != before.st_ino
+            or after.st_size != before.st_size
+            or after.st_mtime_ns != before.st_mtime_ns
+            or after.st_ctime_ns != before.st_ctime_ns
+            or not stat.S_ISREG(after.st_mode)
+        ):
+            raise ValueError(f"{label} changed while reading")
+    finally:
+        os.close(fd)
+
+    if len(encoded) != before.st_size:
+        raise ValueError(f"{label} changed while reading")
+    _assert_regular_path_stable(resolved, before, label=label)
+    return _CapturedFile(path=resolved, encoded=encoded, opened=before)
+
+
+def _path_snapshot(path: Path) -> _PathSnapshot:
+    raw = Path(path).expanduser()
+    try:
+        opened = os.lstat(raw)
+    except FileNotFoundError:
+        return _PathSnapshot(raw, "ABSENT", None, None)
+    except OSError as exc:
+        raise ValueError(f"cannot inspect path: {raw}") from exc
+
+    if stat.S_ISLNK(opened.st_mode):
+        try:
+            target = os.readlink(raw)
+        except OSError as exc:
+            raise ValueError(f"cannot inspect symlink: {raw}") from exc
+        return _PathSnapshot(raw, "SYMLINK", opened, target)
+    if stat.S_ISREG(opened.st_mode):
+        return _PathSnapshot(raw, "REGULAR", opened, None)
+    return _PathSnapshot(raw, "OTHER", opened, None)
+
+
+def _assert_path_snapshot_stable(
+    snapshot: _PathSnapshot,
+    *,
+    label: str,
+) -> None:
+    current = _path_snapshot(snapshot.path)
+    if current.kind != snapshot.kind:
+        raise ValueError(f"{label} path changed during activation inspection")
+    if snapshot.kind == "ABSENT":
+        return
+    before = snapshot.opened
+    after = current.opened
+    assert before is not None and after is not None
+    if (
+        before.st_dev != after.st_dev
+        or before.st_ino != after.st_ino
+        or before.st_mode != after.st_mode
+        or before.st_size != after.st_size
+        or before.st_mtime_ns != after.st_mtime_ns
+        or before.st_ctime_ns != after.st_ctime_ns
+        or snapshot.symlink_target != current.symlink_target
+    ):
+        raise ValueError(f"{label} path changed during activation inspection")
+
+
+def _load_captured_tool(path: Path, name: str) -> tuple[Any, _CapturedFile]:
+    captured = _capture_regular_file(
+        path,
+        label="reviewed systemd installer",
+        max_bytes=_MAX_TOOL_BYTES,
+    )
+    assert captured is not None
+    spec = importlib.util.spec_from_file_location(name, captured.path)
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load reviewed deployment tool: {path}")
+        raise ValueError(f"cannot load reviewed deployment tool: {captured.path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    try:
+        code = compile(captured.encoded, str(captured.path), "exec")
+        exec(code, module.__dict__)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    _assert_regular_path_stable(
+        captured.path,
+        captured.opened,
+        label="reviewed systemd installer",
+    )
+    return module, captured
 
 
-INSTALL = _load(
+INSTALL, _INSTALL_CAPTURE = _load_captured_tool(
     INSTALL_TOOL,
     "phase2_isolated_activation_install_check",
 )
+_INSTALL_SHA256 = hashlib.sha256(_INSTALL_CAPTURE.encoded).hexdigest()
+
+
+def _repo_head() -> str:
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(REPO_ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ValueError("cannot resolve reviewed source commit")
+    commit = completed.stdout.strip()
+    if len(commit) not in {40, 64}:
+        raise ValueError("reviewed source commit is invalid")
+    return commit
+
+
+def _install_source_identity() -> tuple[str, str]:
+    _assert_regular_path_stable(
+        _INSTALL_CAPTURE.path,
+        _INSTALL_CAPTURE.opened,
+        label="reviewed systemd installer",
+    )
+    commit = _repo_head()
+    historical = subprocess.run(
+        ["git", "show", f"{commit}:{INSTALL_TOOL_RELATIVE}"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        check=False,
+    )
+    if historical.returncode != 0:
+        raise ValueError(
+            "reviewed systemd installer is not present at reviewed source commit"
+        )
+    if historical.stdout != _INSTALL_CAPTURE.encoded:
+        raise ValueError(
+            "reviewed systemd installer bytes do not match reviewed source commit"
+        )
+    _assert_regular_path_stable(
+        _INSTALL_CAPTURE.path,
+        _INSTALL_CAPTURE.opened,
+        label="reviewed systemd installer",
+    )
+    return commit, _INSTALL_SHA256
 
 SystemctlRunner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -122,11 +343,13 @@ class Phase2IsolatedActivationReport:
         return asdict(self)
 
 
-def _read_env(path: Path) -> dict[str, str]:
-    if path.is_symlink() or not path.is_file():
+def _read_env_bytes(encoded: bytes) -> dict[str, str]:
+    try:
+        text = encoded.decode("utf-8")
+    except UnicodeDecodeError:
         return {}
     values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -149,11 +372,13 @@ def _read_env(path: Path) -> dict[str, str]:
     return values
 
 
-def _detector_pools(unit_path: Path) -> set[str]:
-    if unit_path.is_symlink() or not unit_path.is_file():
+def _detector_pools_from_bytes(encoded: bytes) -> set[str]:
+    try:
+        text = encoded.decode("utf-8")
+    except UnicodeDecodeError:
         return set()
     prefix = "Environment=PIO_PHASE2_DETECTOR_POOLS="
-    for raw in unit_path.read_text(encoding="utf-8").splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if not line.startswith(prefix):
             continue
@@ -171,16 +396,14 @@ def _detector_pools(unit_path: Path) -> set[str]:
     return set()
 
 
-def _detector_state_status(
-    path: Path,
+def _detector_state_status_from_bytes(
+    encoded: bytes,
     *,
     detector_pools: set[str],
 ) -> tuple[bool, int, bool]:
-    if path.is_symlink() or not path.is_file():
-        return False, 0, False
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        payload = json.loads(encoded.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return False, 0, False
     if not isinstance(payload, dict):
         return False, 0, False
@@ -257,6 +480,72 @@ def _unit_state(
     )
 
 
+def _all_unit_states(
+    *,
+    runner: SystemctlRunner,
+) -> tuple[ActivationUnitState, ...]:
+    return tuple(
+        _unit_state(unit, runner=runner)
+        for unit in (*LEGACY_UNITS, *NEW_INACTIVE_UNITS)
+    )
+
+
+def _capture_from_snapshot(
+    snapshot: _PathSnapshot,
+    *,
+    label: str,
+    max_bytes: int,
+) -> _CapturedFile | None:
+    if snapshot.kind != "REGULAR":
+        return None
+    captured = _capture_regular_file(
+        snapshot.path,
+        label=label,
+        max_bytes=max_bytes,
+    )
+    assert captured is not None
+    opened = snapshot.opened
+    assert opened is not None
+    if (
+        captured.opened.st_dev != opened.st_dev
+        or captured.opened.st_ino != opened.st_ino
+        or captured.opened.st_size != opened.st_size
+        or captured.opened.st_mtime_ns != opened.st_mtime_ns
+        or captured.opened.st_ctime_ns != opened.st_ctime_ns
+    ):
+        raise ValueError(f"{label} changed before capture")
+    return captured
+
+
+def _read_env(path: Path) -> dict[str, str]:
+    """
+    Compatibility helper for read-only consumers such as timer-health.
+
+    Read and parse one descriptor-bound env snapshot, then recheck the path
+    identity before returning. New activation logic uses the already-captured
+    bytes directly.
+    """
+    snapshot = _path_snapshot(Path(path).expanduser())
+    captured = _capture_from_snapshot(
+        snapshot,
+        label="Phase-2 environment file",
+        max_bytes=_MAX_CONFIG_BYTES,
+    )
+    if captured is None:
+        return {}
+    values = _read_env_bytes(captured.encoded)
+    _assert_path_snapshot_stable(
+        snapshot,
+        label="Phase-2 environment file",
+    )
+    _assert_regular_path_stable(
+        captured.path,
+        captured.opened,
+        label="Phase-2 environment file",
+    )
+    return values
+
+
 def inspect_activation(
     *,
     runtime_root: str | Path = "/opt/pio-phase2-runtime",
@@ -265,20 +554,71 @@ def inspect_activation(
     data_root: str | Path = "/opt/pio/data",
     runner: SystemctlRunner = subprocess.run,
 ) -> Phase2IsolatedActivationReport:
+    install_source_before = _install_source_identity()
+
+    env_path = Path(env_file).expanduser()
+    env_snapshot = _path_snapshot(env_path)
+    env_capture = _capture_from_snapshot(
+        env_snapshot,
+        label="Phase-2 environment file",
+        max_bytes=_MAX_CONFIG_BYTES,
+    )
+    env_regular = env_capture is not None
+    env_values = (
+        _read_env_bytes(env_capture.encoded)
+        if env_capture is not None
+        else {}
+    )
+
+    destination_path = Path(unit_destination).expanduser()
+    detector_unit = (
+        destination_path
+        / "pio-phase2-isolated-add-detector.service"
+    )
+    detector_unit_snapshot = _path_snapshot(detector_unit)
+    detector_unit_capture = _capture_from_snapshot(
+        detector_unit_snapshot,
+        label="installed Phase-2 detector unit",
+        max_bytes=_MAX_CONFIG_BYTES,
+    )
+
+    data_path = Path(data_root).expanduser()
+    data_snapshots = {
+        name: _path_snapshot(data_path / name)
+        for name in REQUIRED_DATA_FILES
+    }
+    detector_state_snapshot = data_snapshots[
+        "phase2-add-detector-state.json"
+    ]
+    detector_state_capture = _capture_from_snapshot(
+        detector_state_snapshot,
+        label="Phase-2 detector state",
+        max_bytes=_MAX_STATE_BYTES,
+    )
+
     runtime_current: str | None = None
     runtime_ready = False
     installed_units_exact = False
     installed_statuses: tuple[tuple[str, str], ...] = ()
+    current_path: Path | None = None
+    current_snapshot: _PathSnapshot | None = None
+    runtime_source: Path | None = None
 
     try:
         current = INSTALL._validate_runtime(runtime_root)
-        runtime_current = str(current)
-        runtime_source = current.resolve(strict=True)
+        current_path = Path(current)
+        current_snapshot = _path_snapshot(current_path)
+        runtime_current = str(current_path)
+        runtime_source = current_path.resolve(strict=True)
         install = INSTALL.inspect_install(
             source_tree=runtime_source,
             runtime_root=runtime_root,
             destination=unit_destination,
         )
+        if current_path.resolve(strict=True) != runtime_source:
+            raise ValueError(
+                "isolated runtime current target changed during activation inspection"
+            )
         runtime_ready = bool(install.runtime_ready)
         installed_statuses = tuple(
             (row.name, row.status)
@@ -292,11 +632,9 @@ def inspect_activation(
             )
         )
     except (OSError, RuntimeError, ValueError):
-        pass
+        runtime_ready = False
+        installed_units_exact = False
 
-    env_path = Path(env_file).expanduser()
-    env_regular = env_path.is_file() and not env_path.is_symlink()
-    env_values = _read_env(env_path) if env_regular else {}
     env_keys = tuple(
         ActivationEnvKey(
             name=name,
@@ -305,13 +643,12 @@ def inspect_activation(
         for name in REQUIRED_ENV_KEYS
     )
 
-    detector_unit = (
-        Path(unit_destination)
-        / "pio-phase2-isolated-add-detector.service"
-    )
     detector_pools = (
-        _detector_pools(detector_unit)
-        if installed_units_exact
+        _detector_pools_from_bytes(detector_unit_capture.encoded)
+        if (
+            installed_units_exact
+            and detector_unit_capture is not None
+        )
         else set()
     )
     position_pool = env_values.get(
@@ -324,29 +661,90 @@ def inspect_activation(
         and position_pool in detector_pools
     )
 
-    data_path = Path(data_root).expanduser()
     data_files = tuple(
         ActivationDataFile(
             name=name,
-            exists=(data_path / name).exists(),
-            regular_file=(data_path / name).is_file(),
-            symlink=(data_path / name).is_symlink(),
+            exists=snapshot.kind != "ABSENT",
+            regular_file=snapshot.kind == "REGULAR",
+            symlink=snapshot.kind == "SYMLINK",
         )
-        for name in REQUIRED_DATA_FILES
+        for name, snapshot in (
+            (name, data_snapshots[name])
+            for name in REQUIRED_DATA_FILES
+        )
     )
-    (
-        detector_state_valid,
-        detector_cursor_pools,
-        detector_cursors_complete,
-    ) = _detector_state_status(
-        data_path / "phase2-add-detector-state.json",
-        detector_pools=detector_pools,
-    )
+    if detector_state_capture is None:
+        detector_state_valid = False
+        detector_cursor_pools = 0
+        detector_cursors_complete = False
+    else:
+        (
+            detector_state_valid,
+            detector_cursor_pools,
+            detector_cursors_complete,
+        ) = _detector_state_status_from_bytes(
+            detector_state_capture.encoded,
+            detector_pools=detector_pools,
+        )
 
-    units = tuple(
-        _unit_state(unit, runner=runner)
-        for unit in (*LEGACY_UNITS, *NEW_INACTIVE_UNITS)
-    )
+    def assert_inputs_stable() -> None:
+        if _install_source_identity() != install_source_before:
+            raise ValueError(
+                "reviewed systemd installer changed during activation inspection"
+            )
+        _assert_path_snapshot_stable(
+            env_snapshot,
+            label="Phase-2 environment file",
+        )
+        if env_capture is not None:
+            _assert_regular_path_stable(
+                env_capture.path,
+                env_capture.opened,
+                label="Phase-2 environment file",
+            )
+        _assert_path_snapshot_stable(
+            detector_unit_snapshot,
+            label="installed Phase-2 detector unit",
+        )
+        if detector_unit_capture is not None:
+            _assert_regular_path_stable(
+                detector_unit_capture.path,
+                detector_unit_capture.opened,
+                label="installed Phase-2 detector unit",
+            )
+        for name, snapshot in data_snapshots.items():
+            _assert_path_snapshot_stable(
+                snapshot,
+                label=f"Phase-2 data file {name}",
+            )
+        if detector_state_capture is not None:
+            _assert_regular_path_stable(
+                detector_state_capture.path,
+                detector_state_capture.opened,
+                label="Phase-2 detector state",
+            )
+        if current_path is not None and current_snapshot is not None:
+            _assert_path_snapshot_stable(
+                current_snapshot,
+                label="isolated runtime current",
+            )
+            if (
+                runtime_source is not None
+                and current_path.resolve(strict=True) != runtime_source
+            ):
+                raise ValueError(
+                    "isolated runtime current target changed during activation inspection"
+                )
+
+    units_before = _all_unit_states(runner=runner)
+    assert_inputs_stable()
+    units_after = _all_unit_states(runner=runner)
+    assert_inputs_stable()
+    if units_after != units_before:
+        raise ValueError(
+            "systemd unit state changed during activation inspection"
+        )
+    units = units_after
 
     ready = bool(
         runtime_ready
