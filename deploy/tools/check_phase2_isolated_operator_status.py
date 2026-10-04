@@ -86,6 +86,54 @@ def _unit_failed(
     )
 
 
+def _health_projection(report: Any) -> tuple[Any, ...]:
+    return (
+        getattr(report, "runtime_ready", None),
+        getattr(report, "installed_units_exact", None),
+        getattr(report, "env_ready", None),
+        getattr(report, "data_ready", None),
+        getattr(report, "detector_state_ready", None),
+        getattr(report, "detector_active_enabled", None),
+        getattr(report, "streams_active", None),
+        getattr(report, "timer_active", None),
+        getattr(report, "timer_enabled", None),
+        getattr(report, "timer_active_enabled", None),
+        getattr(report, "legacy_collectors_quiescent", None),
+        getattr(report, "evidence_service_active", None),
+        getattr(report, "cycles", ()),
+        getattr(report, "latest_cycle_recent", None),
+        getattr(report, "latest_cycle_failed", None),
+        getattr(report, "consecutive_rpc_rate_limited", None),
+        getattr(report, "rate_limit_streak_threshold", None),
+        getattr(report, "pause_recommended", None),
+        getattr(report, "collection_healthy", None),
+    )
+
+
+def _efficiency_projection(report: Any) -> tuple[Any, ...]:
+    return (
+        getattr(report, "pool_address", None),
+        getattr(report, "pool_configured", None),
+        getattr(report, "database_ready", None),
+        getattr(report, "database_path", None),
+        getattr(report, "discovery_cache", None),
+        getattr(report, "position_attempts", None),
+        getattr(report, "reinspection_attempts", None),
+        getattr(report, "prestate_attempts", None),
+        getattr(report, "recent_cycles", ()),
+        getattr(report, "consecutive_rpc_rate_limited_cycles", None),
+        getattr(report, "rate_limit_streak_threshold", None),
+        getattr(report, "repeated_provider_rejection", None),
+        getattr(report, "latest_cycle_recent", None),
+        getattr(report, "timer_active", None),
+        getattr(report, "timer_enabled", None),
+        getattr(report, "timer_paused", None),
+        getattr(report, "pause_recommended", None),
+        getattr(report, "protected_from_future_timer_cycles", None),
+        getattr(report, "attention_required", None),
+    )
+
+
 def inspect_operator_status(
     *,
     runtime_root: str | Path = "/opt/pio-phase2-runtime",
@@ -125,6 +173,13 @@ def inspect_operator_status(
     if not _boundary_ok(health) or not _boundary_ok(efficiency):
         raise ValueError("Phase-2 operator status crossed the read-only boundary")
 
+    health_projection = _health_projection(health)
+    efficiency_projection = _efficiency_projection(efficiency)
+    autopause_service_failed = _unit_failed(
+        runner,
+        AUTOPAUSE_UNIT,
+    )
+
     topology_ready = bool(
         health.runtime_ready
         and health.installed_units_exact
@@ -148,10 +203,6 @@ def inspect_operator_status(
     pause_required = bool(
         rate_limit_incident
         and efficiency.pause_recommended
-    )
-    autopause_service_failed = _unit_failed(
-        runner,
-        AUTOPAUSE_UNIT,
     )
     autopause_failure_relevant = bool(
         autopause_service_failed
@@ -178,6 +229,43 @@ def inspect_operator_status(
         not rate_limit_incident
         or future_timer_cycles_paused
     )
+
+    health_after = HEALTH.inspect_timer_health(
+        runtime_root=runtime_root,
+        unit_destination=unit_destination,
+        env_file=env_file,
+        data_root=data_root,
+        history_limit=history_limit,
+        max_cycle_age_seconds=max_cycle_age_seconds,
+        rate_limit_streak_threshold=rate_limit_streak_threshold,
+        now=now,
+        runner=runner,
+    )
+    efficiency_after = EFFICIENCY.inspect_rpc_efficiency(
+        data_root=data_root,
+        env_file=env_file,
+        lookback_hours=lookback_hours,
+        cycle_history_limit=history_limit,
+        rate_limit_streak_threshold=rate_limit_streak_threshold,
+        max_cycle_gap_seconds=max_cycle_age_seconds,
+        max_latest_age_seconds=max_cycle_age_seconds,
+        now=now,
+        runner=runner,
+    )
+    autopause_failed_after = _unit_failed(
+        runner,
+        AUTOPAUSE_UNIT,
+    )
+    if not _boundary_ok(health_after) or not _boundary_ok(efficiency_after):
+        raise ValueError("Phase-2 operator status crossed the read-only boundary")
+    if (
+        _health_projection(health_after) != health_projection
+        or _efficiency_projection(efficiency_after) != efficiency_projection
+        or autopause_failed_after != autopause_service_failed
+    ):
+        raise ValueError(
+            "Phase-2 operator inputs changed during status inspection"
+        )
 
     return Phase2OperatorStatusReport(
         state=state,
