@@ -336,6 +336,39 @@ def test_audit_rejects_failure_evidence_on_success(
         )
 
 
+@pytest.mark.parametrize(
+    "failure_step",
+    (
+        "UPDATE:/private/source",
+        "UPDATE:https://example.invalid/path",
+        "A" * 257,
+    ),
+)
+def test_audit_rejects_non_categorical_failure_step(
+    tmp_path,
+    monkeypatch,
+    failure_step,
+):
+    preview = tmp_path / "preview.json"
+    write_private(preview, preview_payload())
+    payload = completed_receipt(preview, succeeded=False, exit_code=2)
+    payload["execution_failure_evidence"] = {
+        "failure_step": failure_step,
+        "rollback_performed": True,
+    }
+    receipt = tmp_path / "execution.json"
+    write_private(receipt, payload)
+    install_lifecycle(
+        monkeypatch,
+        lifecycle(state="SOURCE_BOOTSTRAP_REQUIRED"),
+    )
+
+    with pytest.raises(ValueError, match="failure_step is invalid"):
+        MODULE.audit_mutation_execution_receipt(
+            execution_receipt_path=receipt,
+        )
+
+
 def test_audit_rejects_unreviewed_failure_evidence_field(
     tmp_path,
     monkeypatch,

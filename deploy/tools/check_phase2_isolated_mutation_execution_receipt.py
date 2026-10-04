@@ -53,6 +53,12 @@ _SUCCESS_OUTCOME_INT_FIELDS = frozenset({"files_updated"})
 _SUCCESS_OUTCOME_FIELDS = (
     _SUCCESS_OUTCOME_BOOL_FIELDS | _SUCCESS_OUTCOME_INT_FIELDS
 )
+_FAILURE_STEP_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789._:-@"
+)
+_MAX_FAILURE_STEP_LENGTH = 256
 
 _EXPECTED_POST_STATES: dict[str, tuple[str, ...]] = {
     "SOURCE_BOOTSTRAP_REQUIRED": (
@@ -323,7 +329,10 @@ def _validate_execution_failure_evidence(
     for key, value in raw.items():
         if key == "failure_step":
             if value is not None and (
-                not isinstance(value, str) or not value
+                not isinstance(value, str)
+                or not value
+                or len(value) > _MAX_FAILURE_STEP_LENGTH
+                or any(char not in _FAILURE_STEP_CHARS for char in value)
             ):
                 raise ValueError(
                     "execution receipt failure evidence failure_step is invalid"

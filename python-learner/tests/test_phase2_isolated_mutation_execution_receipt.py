@@ -346,6 +346,81 @@ def test_failed_mutation_preserves_reviewed_structured_failure_evidence(
     assert "private failure" not in receipt.read_text(encoding="utf-8")
 
 
+def test_failed_mutation_drops_non_categorical_failure_step(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    execution = Execution(
+        exit_code=2,
+        failure_category="MUTATION_NONZERO_EXIT",
+        result={
+            "applied": False,
+            "failure_step": "UPDATE:/private/source?diagnostic=oops",
+            "rollback_performed": True,
+            "rollback_succeeded": True,
+            "files_updated": 0,
+        },
+    )
+    install_executor(monkeypatch, path, execution)
+    receipt = tmp_path / "receipt.json"
+
+    MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        runner=lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 2, stdout="{}", stderr=""
+        ),
+        now=times(),
+    )
+
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    evidence = payload["execution_failure_evidence"]
+    assert evidence == {
+        "applied": False,
+        "rollback_performed": True,
+        "rollback_succeeded": True,
+        "files_updated": 0,
+    }
+    assert "/private/source" not in receipt.read_text(encoding="utf-8")
+    assert "diagnostic=oops" not in receipt.read_text(encoding="utf-8")
+
+
+def test_failed_mutation_drops_overlong_failure_step(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    execution = Execution(
+        exit_code=2,
+        failure_category="MUTATION_NONZERO_EXIT",
+        result={
+            "failure_step": "A" * 257,
+            "rollback_performed": True,
+        },
+    )
+    install_executor(monkeypatch, path, execution)
+    receipt = tmp_path / "receipt.json"
+
+    MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        runner=lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 2, stdout="{}", stderr=""
+        ),
+        now=times(),
+    )
+
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["execution_failure_evidence"] == {
+        "rollback_performed": True,
+    }
+
+
 def test_secret_unsafe_failure_result_is_not_persisted(
     tmp_path,
     monkeypatch,

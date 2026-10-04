@@ -395,6 +395,27 @@ def _identity_from_ready(ready: Any) -> dict[str, Any]:
     }
 
 
+_FAILURE_STEP_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789._:-@"
+)
+_MAX_FAILURE_STEP_LENGTH = 256
+
+
+def _safe_failure_step(value: Any) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > _MAX_FAILURE_STEP_LENGTH
+        or any(char not in _FAILURE_STEP_CHARS for char in value)
+    ):
+        return None
+    return value
+
+
 def _execution_failure_evidence(execution: Any) -> dict[str, Any] | None:
     category = getattr(execution, "failure_category", None)
     exit_code = getattr(execution, "exit_code", None)
@@ -428,10 +449,14 @@ def _execution_failure_evidence(execution: Any) -> dict[str, Any] | None:
             continue
         value = result[key]
         if key == "failure_step":
-            if value is not None and (
-                not isinstance(value, str) or not value
-            ):
+            if value is None:
+                evidence[key] = None
                 continue
+            safe_step = _safe_failure_step(value)
+            if safe_step is None:
+                continue
+            evidence[key] = safe_step
+            continue
         elif key == "files_updated":
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 continue
