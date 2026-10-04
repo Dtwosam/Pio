@@ -472,6 +472,10 @@ def _runtime_release_path(
     return str(current.resolve(strict=False))
 
 
+def _deployment_source_path() -> str:
+    return str(REPO_ROOT.resolve(strict=False))
+
+
 def _operator_parameters(
     *,
     runtime_root: str | Path,
@@ -540,28 +544,19 @@ def _next_step_contract(
 
     if state == "SYSTEMD_UNIT_UPGRADE_READY":
         return {
-            "source_tree": _runtime_release_path(
-                activation,
-                runtime_root=runtime_root,
-            ),
+            "source_tree": _deployment_source_path(),
             "destination": str(Path(unit_destination).expanduser()),
         }, "--apply"
 
     if state == "SYSTEMD_UNIT_CONFLICT_REVIEW_REQUIRED":
         return {
-            "source_tree": _runtime_release_path(
-                activation,
-                runtime_root=runtime_root,
-            ),
+            "source_tree": _deployment_source_path(),
             "destination": str(Path(unit_destination).expanduser()),
         }, None
 
     if state == "SYSTEMD_UNITS_NOT_READY":
         return {
-            "source_tree": _runtime_release_path(
-                activation,
-                runtime_root=runtime_root,
-            ),
+            "source_tree": _deployment_source_path(),
             "runtime_root": str(Path(runtime_root).expanduser()),
             "destination": str(Path(unit_destination).expanduser()),
         }, "--apply"
@@ -701,10 +696,7 @@ def inspect_lifecycle_handoff(
                 blockers = (str(source_bootstrap.status),)
     elif not bool(activation.installed_units_exact):
         unit_upgrade = UNIT_UPGRADE.inspect_upgrade(
-            source_tree=_runtime_release_path(
-                activation,
-                runtime_root=runtime_root,
-            ),
+            source_tree=_deployment_source_path(),
             destination=unit_destination,
         )
         if not _unit_upgrade_boundary_ok(unit_upgrade):
