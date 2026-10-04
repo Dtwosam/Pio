@@ -73,11 +73,42 @@ class Systemctl:
         raise AssertionError(f"unexpected action: {action}")
 
 
-def install_readiness(monkeypatch, *, ready=True):
+def install_readiness(monkeypatch, *, ready=True, revalidated=None):
+    states = [ready]
+    if revalidated is not None:
+        states.append(revalidated)
+
+    def capture(**kwargs):
+        value = states.pop(0) if len(states) > 1 else states[0]
+        return (
+            SimpleNamespace(timer_ready=value),
+            SimpleNamespace(token="snapshot"),
+        )
+
     monkeypatch.setattr(
         MODULE.READINESS,
-        "inspect_timer_readiness",
-        lambda **kwargs: SimpleNamespace(timer_ready=ready),
+        "capture_timer_readiness",
+        capture,
+    )
+    monkeypatch.setattr(
+        MODULE.READINESS,
+        "assert_timer_readiness_snapshot_stable",
+        lambda snapshot: None,
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_readiness_source_identity",
+        lambda: ("commit", "sha256"),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_capture_activation_inputs",
+        lambda **kwargs: SimpleNamespace(token="inputs"),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_assert_activation_inputs_stable",
+        lambda inputs: None,
     )
 
 
@@ -129,6 +160,8 @@ def test_timer_activation_enables_only_evidence_timer(monkeypatch):
     assert report.direct_rpc_called is False
     assert report.timer_may_trigger_rpc_cycles is True
     assert systemctl.calls == [
+        f"is-enabled:{MODULE.TIMER_UNIT}",
+        f"is-active:{MODULE.TIMER_UNIT}",
         "daemon-reload",
         f"enable:--now:{MODULE.TIMER_UNIT}",
         f"is-enabled:{MODULE.TIMER_UNIT}",
@@ -187,4 +220,106 @@ def test_timer_activation_stops_before_mutation_if_daemon_reload_fails(
     assert report.failure_step == "DAEMON_RELOAD"
     assert report.service_control_performed is False
     assert report.rollback_performed is False
-    assert systemctl.calls == ["daemon-reload"]
+    assert systemctl.calls == [
+        f"is-enabled:{MODULE.TIMER_UNIT}",
+        f"is-active:{MODULE.TIMER_UNIT}",
+        "daemon-reload",
+    ]
+
+
+
+def test_timer_activation_revalidates_readiness_before_systemd_mutation(
+    monkeypatch,
+):
+    install_readiness(monkeypatch, ready=True, revalidated=False)
+    systemctl = Systemctl()
+
+    report = MODULE.activate_timer(
+        apply=True,
+        runner=systemctl,
+    )
+
+    assert report.applied is False
+    assert report.failure_step == "PREFLIGHT_CHANGED_BEFORE_APPLY"
+    assert report.service_control_performed is False
+    assert systemctl.calls == []
+
+
+def test_timer_activation_rejects_concurrently_enabled_timer(monkeypatch):
+    install_readiness(monkeypatch)
+    systemctl = Systemctl()
+    systemctl.enabled = True
+
+    report = MODULE.activate_timer(
+        apply=True,
+        runner=systemctl,
+    )
+
+    assert report.applied is False
+    assert report.failure_step == "TIMER_STATE_CHANGED_BEFORE_APPLY"
+    assert report.service_control_performed is False
+    assert systemctl.calls == [
+        f"is-enabled:{MODULE.TIMER_UNIT}",
+        f"is-active:{MODULE.TIMER_UNIT}",
+    ]
+
+
+def test_timer_activation_aborts_on_input_drift_before_daemon_reload(
+    monkeypatch,
+):
+    install_readiness(monkeypatch)
+    systemctl = Systemctl()
+    checks = {"count": 0}
+
+    def guard(_inputs):
+        checks["count"] += 1
+        if checks["count"] >= 2:
+            raise ValueError("installed unit changed after capture")
+
+    monkeypatch.setattr(
+        MODULE,
+        "_assert_activation_inputs_stable",
+        guard,
+    )
+
+    import pytest
+
+    with pytest.raises(ValueError, match="installed unit changed"):
+        MODULE.activate_timer(
+            apply=True,
+            runner=systemctl,
+        )
+
+    assert systemctl.calls == []
+
+
+def test_timer_activation_rechecks_readiness_snapshot_before_enable(
+    monkeypatch,
+):
+    install_readiness(monkeypatch)
+    systemctl = Systemctl()
+    checks = {"count": 0}
+
+    def readiness_guard(_snapshot):
+        checks["count"] += 1
+        # Checks 1-3 occur before daemon-reload; check 4 is immediately
+        # after daemon-reload and before enable --now.
+        if checks["count"] >= 4:
+            raise ValueError("smoke receipt path changed after capture")
+
+    monkeypatch.setattr(
+        MODULE.READINESS,
+        "assert_timer_readiness_snapshot_stable",
+        readiness_guard,
+    )
+
+    import pytest
+
+    with pytest.raises(ValueError, match="smoke receipt path changed"):
+        MODULE.activate_timer(
+            apply=True,
+            runner=systemctl,
+        )
+
+    assert "daemon-reload" in systemctl.calls
+    assert f"enable:--now:{MODULE.TIMER_UNIT}" not in systemctl.calls
