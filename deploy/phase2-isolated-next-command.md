@@ -245,8 +245,11 @@ hashes the mutation argv instead of persisting the raw argv, never persists
 child stderr, and never stores the arbitrary structured mutation result itself.
 
 For a known failed mutation, the receipt may preserve the reviewed
-`execution_failure_evidence` fields needed to assess rollback. For a successful
-mutation, it may instead preserve a small `mutation_outcome_summary` containing
+`execution_failure_evidence` fields needed to assess rollback. Any persisted
+`failure_step` is a bounded categorical token using only reviewed identifier
+characters; paths, URLs, whitespace, query material, and free-form diagnostics
+are not accepted as a failure step. For a successful mutation, the receipt may
+instead preserve a small `mutation_outcome_summary` containing
 only allowlisted scalar safety facts such as `applied`, `files_updated`,
 readiness booleans, and the reported daemon-reload/service-control/RPC boundary
 booleans. Failure-only rollback fields, paths, diagnostics, unit lists, URLs,
