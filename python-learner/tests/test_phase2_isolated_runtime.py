@@ -124,9 +124,9 @@ def test_runtime_contract_pins_operational_autopause_surface():
         "deploy/systemd/pio-phase2-isolated-add-detector.service":
             "fdb5334cca2174421e084813b42052f5399c435b",
         "deploy/systemd/pio-phase2-isolated-evidence-cycle.service":
-            "5ecbe4db4717f8df2facb8e5ab4ed8f1300178f8",
+            "46fb8d90bbc008702711e14c1de643aecb41c57c",
         "deploy/systemd/pio-phase2-isolated-evidence-cycle.timer":
-            "fe7f964fc546f9f1fc24225132c883854fdca686",
+            "9b0e757ba3857c2b33d2cecfe94be98f0913a72f",
         "deploy/systemd/pio-phase2-isolated-rate-limit-pause.service":
             "07e8d4a58243537bea74226da4ab6548bf212496",
     }
