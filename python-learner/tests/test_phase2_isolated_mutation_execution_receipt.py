@@ -32,6 +32,7 @@ class Execution:
     result_secret_safe: bool = True
     exit_code: int | None = 0
     failure_category: str | None = None
+    result: dict | list | None = None
 
     def to_record(self):
         return asdict(self)
@@ -197,6 +198,117 @@ def test_nonzero_mutation_is_still_finalized_as_known_outcome(
     payload = json.loads(receipt.read_text(encoding="utf-8"))
     assert payload["outcome_known"] is True
     assert payload["execution_failure_category"] == "MUTATION_NONZERO_EXIT"
+
+
+
+
+def test_receipt_persists_only_allowlisted_mutation_outcome_fields(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    secret = "https://rpc.invalid/?api-key=super-secret"
+    execution = Execution(
+        exit_code=2,
+        failure_category="MUTATION_NONZERO_EXIT",
+        result={
+            "applied": False,
+            "failure_step": (
+                "UPDATE:pio-phase2-isolated-evidence-cycle.service"
+            ),
+            "rollback_performed": True,
+            "rollback_succeeded": True,
+            "files_updated": 0,
+            "upgrade_needed": True,
+            "installer_needed": False,
+            "ready": True,
+            "daemon_reload_performed": False,
+            "service_control_performed": False,
+            "rpc_called": False,
+            "source_tree": "/private/source",
+            "backup_root": "/private/backup",
+            "diagnostic": secret,
+            "units": [{"name": "private-unit"}],
+        },
+    )
+    install_executor(monkeypatch, path, execution)
+    receipt = tmp_path / "receipt.json"
+
+    report = MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        runner=lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 2, stdout="{}", stderr=secret
+        ),
+        now=times(),
+    )
+
+    expected = {
+        "applied": False,
+        "failure_step": (
+            "UPDATE:pio-phase2-isolated-evidence-cycle.service"
+        ),
+        "rollback_performed": True,
+        "rollback_succeeded": True,
+        "files_updated": 0,
+        "upgrade_needed": True,
+        "installer_needed": False,
+        "ready": True,
+        "daemon_reload_performed": False,
+        "service_control_performed": False,
+        "rpc_called": False,
+    }
+    assert report.mutation_outcome_summary == expected
+
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["mutation_outcome_summary"] == expected
+    encoded = json.dumps(payload)
+    assert "source_tree" not in encoded
+    assert "backup_root" not in encoded
+    assert "private-unit" not in encoded
+    assert "super-secret" not in encoded
+
+
+def test_receipt_drops_unsafe_or_wrong_typed_outcome_values(
+    tmp_path,
+    monkeypatch,
+):
+    path = preview(tmp_path)
+    execution = Execution(
+        result={
+            "applied": "yes",
+            "failure_step": "UPDATE:https://rpc.invalid/?api-key=secret",
+            "rollback_performed": 1,
+            "rollback_succeeded": False,
+            "files_updated": True,
+            "ready": False,
+        },
+    )
+    install_executor(monkeypatch, path, execution)
+    receipt = tmp_path / "receipt.json"
+
+    report = MODULE.run_mutation_with_receipt(
+        preview_path=path,
+        expected_preview_sha256="1" * 64,
+        execution_receipt_path=receipt,
+        execute=True,
+        runner=lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, stdout="{}", stderr=""
+        ),
+        now=times(),
+    )
+
+    assert report.mutation_outcome_summary == {
+        "rollback_succeeded": False,
+        "ready": False,
+    }
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    assert payload["mutation_outcome_summary"] == {
+        "rollback_succeeded": False,
+        "ready": False,
+    }
 
 
 def test_guard_failure_after_pending_finalizes_aborted_before_launch(
