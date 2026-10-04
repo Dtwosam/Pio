@@ -475,3 +475,62 @@ def test_runner_never_launches_preflight_path_directly():
     assert "pass_fds=(preflight_tool_fd,)" in source
     assert "_EXACT_PREFLIGHT_BOOTSTRAP" in source
     assert "runner(\n        list(argv)," not in source
+
+
+
+def test_preflight_runner_allows_unit_upgrade_tool(monkeypatch):
+    preview = Result(
+        state="SYSTEMD_UNIT_UPGRADE_READY",
+        next_action="UPGRADE_REVIEWED_UNITS",
+        next_tool="upgrade_phase2_isolated_systemd_units.py",
+        preflight_argv=(
+            sys.executable,
+            str(
+                ROOT
+                / "deploy/tools/upgrade_phase2_isolated_systemd_units.py"
+            ),
+            "--source-tree",
+            "/opt/pio-phase2-runtime/current",
+            "--destination",
+            "/etc/systemd/system",
+        ),
+        mutation_flag="--apply",
+        mutation_flag_appended=False,
+        lifecycle={},
+        read_only=True,
+        rpc_called=False,
+        database_write_performed=False,
+        service_control_performed=False,
+    )
+    monkeypatch.setattr(
+        MODULE.RENDER,
+        "render_lifecycle_command",
+        lambda **kwargs: preview,
+    )
+
+    def runner(command, **kwargs):
+        payload = {
+            "ready": True,
+            "upgrade_needed": True,
+            "installer_needed": False,
+            "applied": False,
+            "files_updated": 0,
+            "backup_root": None,
+            "daemon_reload_performed": False,
+            "service_control_performed": False,
+            "rpc_called": False,
+            "units": [],
+        }
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps(payload), ""
+        )
+
+    report = MODULE.run_next_read_only_preflight(runner=runner)
+
+    assert report.command_executed is True
+    assert report.result_json_valid is True
+    assert report.exit_code == 0
+    assert report.failure_category is None
+    assert report.next_tool == "upgrade_phase2_isolated_systemd_units.py"
+    assert report.mutation_flag == "--apply"
+    assert report.mutation_flag_appended is False
