@@ -752,12 +752,13 @@ def test_handoff_unit_upgrade_uses_reviewed_checkout_not_runtime_release(
             statuses=("READY_UPDATE", "READY_UPDATE"),
         )
 
+    activation_report = activation(installed_units_exact=False)
+    activation_report.runtime_current = (
+        "/opt/pio-phase2-runtime/releases/pinned-runtime"
+    )
     install(
         monkeypatch,
-        activation_report=activation(
-            installed_units_exact=False,
-            runtime_current="/opt/pio-phase2-runtime/releases/pinned-runtime",
-        ),
+        activation_report=activation_report,
     )
     monkeypatch.setattr(MODULE.UNIT_UPGRADE, "inspect_upgrade", inspect_upgrade)
 
