@@ -343,11 +343,13 @@ class Phase2IsolatedActivationReport:
         return asdict(self)
 
 
-def _read_env(path: Path) -> dict[str, str]:
-    if path.is_symlink() or not path.is_file():
+def _read_env_bytes(encoded: bytes) -> dict[str, str]:
+    try:
+        text = encoded.decode("utf-8")
+    except UnicodeDecodeError:
         return {}
     values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -370,11 +372,13 @@ def _read_env(path: Path) -> dict[str, str]:
     return values
 
 
-def _detector_pools(unit_path: Path) -> set[str]:
-    if unit_path.is_symlink() or not unit_path.is_file():
+def _detector_pools_from_bytes(encoded: bytes) -> set[str]:
+    try:
+        text = encoded.decode("utf-8")
+    except UnicodeDecodeError:
         return set()
     prefix = "Environment=PIO_PHASE2_DETECTOR_POOLS="
-    for raw in unit_path.read_text(encoding="utf-8").splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if not line.startswith(prefix):
             continue
@@ -392,16 +396,14 @@ def _detector_pools(unit_path: Path) -> set[str]:
     return set()
 
 
-def _detector_state_status(
-    path: Path,
+def _detector_state_status_from_bytes(
+    encoded: bytes,
     *,
     detector_pools: set[str],
 ) -> tuple[bool, int, bool]:
-    if path.is_symlink() or not path.is_file():
-        return False, 0, False
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        payload = json.loads(encoded.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return False, 0, False
     if not isinstance(payload, dict):
         return False, 0, False
