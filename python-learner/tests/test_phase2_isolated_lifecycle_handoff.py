@@ -141,6 +141,34 @@ def source_runtime(*, ready=False, production_modified=False):
     )
 
 
+def unit_upgrade(
+    *,
+    ready=True,
+    upgrade_needed=False,
+    installer_needed=True,
+    statuses=("NOT_INSTALLED", "NOT_INSTALLED"),
+):
+    names = (
+        "pio-phase2-isolated-evidence-cycle.service",
+        "pio-phase2-isolated-evidence-cycle.timer",
+    )
+    return Result(
+        ready=ready,
+        upgrade_needed=upgrade_needed,
+        installer_needed=installer_needed,
+        applied=False,
+        files_updated=0,
+        backup_root=None,
+        daemon_reload_performed=False,
+        service_control_performed=False,
+        rpc_called=False,
+        units=tuple(
+            Result(name=name, status=status)
+            for name, status in zip(names, statuses)
+        ),
+    )
+
+
 def install(
     monkeypatch,
     *,
@@ -150,6 +178,7 @@ def install(
     timer_report=None,
     source_bootstrap_report=None,
     source_runtime_report=None,
+    unit_upgrade_report=None,
 ):
     monkeypatch.setattr(
         MODULE.ACTIVATION,
@@ -186,6 +215,15 @@ def install(
             "inspect_runtime",
             lambda *args, **kwargs: source_runtime_report,
         )
+    monkeypatch.setattr(
+        MODULE.UNIT_UPGRADE,
+        "inspect_upgrade",
+        lambda **kwargs: (
+            unit_upgrade_report
+            if unit_upgrade_report is not None
+            else unit_upgrade()
+        ),
+    )
 
 
 def test_handoff_bootstraps_missing_pinned_source_before_runtime_staging(
@@ -305,6 +343,95 @@ def test_handoff_installs_units_after_runtime_is_ready(monkeypatch):
         "destination": "/etc/systemd/system",
     }
     assert report.next_mutation_flag == "--apply"
+    assert report.blockers == ("SYSTEMD_UNITS_MISSING",)
+    assert report.systemd_unit_upgrade["installer_needed"] is True
+
+
+def test_handoff_routes_exact_predecessor_units_to_upgrader(monkeypatch):
+    install(
+        monkeypatch,
+        activation_report=activation(installed_units_exact=False),
+        unit_upgrade_report=unit_upgrade(
+            upgrade_needed=True,
+            installer_needed=False,
+            statuses=("READY_UPDATE", "READY_UPDATE"),
+        ),
+    )
+
+    report = MODULE.inspect_lifecycle_handoff()
+
+    assert report.state == "SYSTEMD_UNIT_UPGRADE_READY"
+    assert report.next_action == "UPGRADE_REVIEWED_UNITS"
+    assert report.next_tool == "upgrade_phase2_isolated_systemd_units.py"
+    assert report.next_parameters == {
+        "source_tree": "/opt/pio-phase2-runtime/current",
+        "destination": "/etc/systemd/system",
+    }
+    assert report.next_mutation_flag == "--apply"
+    assert report.blockers == ()
+    assert report.systemd_unit_upgrade["upgrade_needed"] is True
+
+
+def test_handoff_upgrades_predecessor_before_installing_missing_peer(
+    monkeypatch,
+):
+    install(
+        monkeypatch,
+        activation_report=activation(installed_units_exact=False),
+        unit_upgrade_report=unit_upgrade(
+            upgrade_needed=True,
+            installer_needed=True,
+            statuses=("READY_UPDATE", "NOT_INSTALLED"),
+        ),
+    )
+
+    report = MODULE.inspect_lifecycle_handoff()
+
+    assert report.state == "SYSTEMD_UNIT_UPGRADE_READY"
+    assert report.next_tool == "upgrade_phase2_isolated_systemd_units.py"
+    assert report.next_mutation_flag == "--apply"
+
+
+def test_handoff_surfaces_modified_unit_conflict_without_mutation(
+    monkeypatch,
+):
+    install(
+        monkeypatch,
+        activation_report=activation(installed_units_exact=False),
+        unit_upgrade_report=unit_upgrade(
+            ready=False,
+            upgrade_needed=False,
+            installer_needed=False,
+            statuses=("CONFLICT_MODIFIED", "ALREADY_TARGET"),
+        ),
+    )
+
+    report = MODULE.inspect_lifecycle_handoff()
+
+    assert report.state == "SYSTEMD_UNIT_CONFLICT_REVIEW_REQUIRED"
+    assert report.next_action == "REVIEW_SYSTEMD_UNIT_CONFLICT"
+    assert report.next_tool == "upgrade_phase2_isolated_systemd_units.py"
+    assert report.next_mutation_flag is None
+    assert report.blockers == (
+        "pio-phase2-isolated-evidence-cycle.service:CONFLICT_MODIFIED",
+    )
+
+
+def test_handoff_rejects_mutating_unit_upgrade_inspection(monkeypatch):
+    bad = unit_upgrade(
+        upgrade_needed=True,
+        installer_needed=False,
+        statuses=("READY_UPDATE", "READY_UPDATE"),
+    )
+    bad.applied = True
+    install(
+        monkeypatch,
+        activation_report=activation(installed_units_exact=False),
+        unit_upgrade_report=bad,
+    )
+
+    with pytest.raises(ValueError, match="read-only boundary"):
+        MODULE.inspect_lifecycle_handoff()
 
 
 def test_handoff_activates_detector_topology_when_preflight_is_ready(
@@ -515,7 +642,7 @@ def test_handoff_dependency_identity_is_one_reviewed_snapshot():
 
     assert len(commit) >= 40
     assert len(dependency_sha) == 64
-    assert len(MODULE._DEPENDENCY_SNAPSHOTS) == 6
+    assert len(MODULE._DEPENDENCY_SNAPSHOTS) == 7
 
     for (
         _current,
