@@ -39,8 +39,11 @@ def make_source(tmp_path: Path, monkeypatch) -> Path:
 
 
 def test_preparer_refuses_live_production_tree():
-    with pytest.raises(ValueError, match="must not be /opt/pio"):
+    with pytest.raises(ValueError, match="must not be inside /opt/pio"):
         MODULE.prepare_runtime(source_tree="/opt/pio")
+
+    with pytest.raises(ValueError, match="must not be inside /opt/pio"):
+        MODULE._source("/opt/pio/phase2-side-runtime")
 
 
 def test_preparer_preflight_is_non_mutating(tmp_path, monkeypatch):
@@ -94,3 +97,114 @@ def test_preparer_rejects_dirty_source_before_mutation(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="unexpected tracked changes"):
         MODULE.prepare_runtime(source_tree=source, prepare=True)
+
+
+
+def test_preparer_rejects_symlinked_source(tmp_path, monkeypatch):
+    source = make_source(tmp_path, monkeypatch)
+    link = tmp_path / "runtime-link"
+    link.symlink_to(source, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        MODULE.prepare_runtime(source_tree=link)
+
+
+def test_preparer_rejects_dependency_drift_before_preflight_return(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_source(tmp_path, monkeypatch)
+    identities = iter(
+        (
+            ("commit-a", "compat-sha", "check-sha"),
+            ("commit-b", "compat-sha", "check-sha"),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_dependency_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="dependencies changed during preflight",
+    ):
+        MODULE.prepare_runtime(source_tree=source)
+
+    assert MODULE._tracked_dirty(source) == ()
+
+
+def test_preparer_rejects_dependency_drift_before_compat_mutation(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_source(tmp_path, monkeypatch)
+    identities = iter(
+        (
+            ("commit-a", "compat-sha", "check-sha"),
+            ("commit-b", "compat-sha", "check-sha"),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_dependency_source_identity",
+        lambda: next(identities),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="dependencies changed before compatibility apply",
+    ):
+        MODULE.prepare_runtime(source_tree=source, prepare=True)
+
+    assert MODULE._tracked_dirty(source) == ()
+
+
+def test_preparer_stops_before_build_if_dependencies_change_after_patch(
+    tmp_path,
+    monkeypatch,
+):
+    source = make_source(tmp_path, monkeypatch)
+    stable = ("commit-a", "compat-sha", "check-sha")
+    identities = iter(
+        (
+            stable,
+            stable,
+            ("commit-b", "compat-sha", "check-sha"),
+        )
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "_dependency_source_identity",
+        lambda: next(identities),
+    )
+    build_called = False
+
+    def fake_build(_source):
+        nonlocal build_called
+        build_called = True
+
+    monkeypatch.setattr(MODULE, "_build_executor", fake_build)
+
+    with pytest.raises(
+        ValueError,
+        match="dependencies changed after compatibility apply",
+    ):
+        MODULE.prepare_runtime(source_tree=source, prepare=True)
+
+    assert build_called is False
+    assert MODULE._tracked_dirty(source)
+
+
+def test_preparer_dependency_capture_rejects_symlink(tmp_path):
+    target = tmp_path / "tool.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    link = tmp_path / "tool-link.py"
+    link.symlink_to(target)
+
+    with pytest.raises(ValueError, match="must not be a symlink"):
+        MODULE._capture_regular_file(
+            link,
+            label="reviewed test tool",
+        )
