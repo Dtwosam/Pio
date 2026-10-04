@@ -775,8 +775,9 @@ def test_timer_health_allows_wal_growth_but_rejects_wal_replacement(
     MODULE._assert_database_path_stable(snapshot)
 
     original = wal.read_bytes()
-    wal.unlink()
-    wal.write_bytes(original)
+    replacement = root / "replacement-wal"
+    replacement.write_bytes(original)
+    replacement.replace(wal)
 
     with pytest.raises(
         ValueError,
