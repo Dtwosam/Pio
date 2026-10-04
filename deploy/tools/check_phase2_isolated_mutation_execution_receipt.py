@@ -38,6 +38,21 @@ _EXECUTION_FAILURE_EVIDENCE_FIELDS = frozenset(
         "installer_needed",
     }
 )
+_SUCCESS_OUTCOME_BOOL_FIELDS = frozenset(
+    {
+        "applied",
+        "ready",
+        "upgrade_needed",
+        "installer_needed",
+        "daemon_reload_performed",
+        "service_control_performed",
+        "rpc_called",
+    }
+)
+_SUCCESS_OUTCOME_INT_FIELDS = frozenset({"files_updated"})
+_SUCCESS_OUTCOME_FIELDS = (
+    _SUCCESS_OUTCOME_BOOL_FIELDS | _SUCCESS_OUTCOME_INT_FIELDS
+)
 
 _EXPECTED_POST_STATES: dict[str, tuple[str, ...]] = {
     "SOURCE_BOOTSTRAP_REQUIRED": (
@@ -124,6 +139,7 @@ class Phase2MutationReceiptAudit:
     exit_code: int | None
     execution_failure_category: str | None
     execution_failure_evidence: dict[str, Any] | None
+    mutation_outcome_summary: dict[str, Any] | None
     audit_integrity_valid: bool
     post_mutation_progress_observed: bool
     post_mutation_verified: bool
@@ -348,6 +364,59 @@ def _validate_execution_failure_evidence(
     return dict(raw)
 
 
+def _validate_success_outcome_summary(
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    raw = payload.get("mutation_outcome_summary")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("execution receipt mutation outcome summary is invalid")
+
+    unknown = set(raw) - _SUCCESS_OUTCOME_FIELDS
+    if unknown:
+        raise ValueError(
+            "execution receipt mutation outcome summary has unreviewed fields"
+        )
+
+    for key in _SUCCESS_OUTCOME_BOOL_FIELDS & set(raw):
+        if not isinstance(raw[key], bool):
+            raise ValueError(
+                f"execution receipt mutation outcome {key} is invalid"
+            )
+
+    for key in _SUCCESS_OUTCOME_INT_FIELDS & set(raw):
+        value = raw[key]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+        ):
+            raise ValueError(
+                f"execution receipt mutation outcome {key} is invalid"
+            )
+
+    exit_code = payload.get("exit_code")
+    if not (
+        payload.get("status") == "COMPLETED"
+        and payload.get("mutation_completed") is True
+        and payload.get("mutation_succeeded") is True
+        and payload.get("outcome_known") is True
+        and isinstance(exit_code, int)
+        and not isinstance(exit_code, bool)
+        and exit_code == 0
+        and payload.get("result_json_valid") is True
+        and payload.get("result_secret_safe") is True
+        and payload.get("execution_failure_category") is None
+        and payload.get("execution_failure_evidence") is None
+    ):
+        raise ValueError(
+            "execution receipt mutation outcome summary is inconsistent with outcome"
+        )
+
+    return dict(raw)
+
+
 def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
     _assert_credential_minimal(payload)
     if payload.get("format_version") != 1:
@@ -450,6 +519,7 @@ def _validate_receipt(payload: dict[str, Any]) -> tuple[str, bool]:
     if not consistent:
         raise ValueError("execution receipt outcome fields are inconsistent")
     _validate_execution_failure_evidence(payload)
+    _validate_success_outcome_summary(payload)
     return str(status), status in _TERMINAL_STATUSES
 
 
@@ -612,6 +682,7 @@ def audit_mutation_execution_receipt(
     if execution_failure_category is not None:
         execution_failure_category = str(execution_failure_category)
     execution_failure_evidence = _validate_execution_failure_evidence(receipt)
+    mutation_outcome_summary = _validate_success_outcome_summary(receipt)
 
     return Phase2MutationReceiptAudit(
         execution_receipt_path=str(receipt_file),
@@ -648,6 +719,7 @@ def audit_mutation_execution_receipt(
         exit_code=receipt.get("exit_code"),
         execution_failure_category=execution_failure_category,
         execution_failure_evidence=execution_failure_evidence,
+        mutation_outcome_summary=mutation_outcome_summary,
         audit_integrity_valid=audit_integrity_valid,
         post_mutation_progress_observed=progress_observed,
         post_mutation_verified=verified,
