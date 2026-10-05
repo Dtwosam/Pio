@@ -636,3 +636,52 @@ def test_activation_transient_evidence_opt_in_still_rejects_timer_drift(
             runner=systemctl_runner(),
             allow_transient_evidence_service=True,
         )
+
+
+def test_activation_validates_units_from_reviewed_checkout_not_runtime_release(
+    tmp_path,
+    monkeypatch,
+):
+    destination = install_unit_tree(tmp_path)
+    release = tmp_path / "runtime" / "releases" / "pin"
+    release.mkdir(parents=True)
+    current = release.parent.parent / "current"
+    current.symlink_to(Path("releases") / "pin")
+
+    monkeypatch.setattr(
+        MODULE.INSTALL,
+        "_validate_runtime",
+        lambda _root: current,
+    )
+
+    captured = {}
+
+    def inspect_install(**kwargs):
+        captured.update(kwargs)
+        rows = tuple(
+            SimpleNamespace(name=name, status="ALREADY_TARGET")
+            for name in MODULE.INSTALL.UNIT_CONTRACT
+        )
+        return SimpleNamespace(
+            runtime_ready=True,
+            units=rows,
+        )
+
+    monkeypatch.setattr(
+        MODULE.INSTALL,
+        "inspect_install",
+        inspect_install,
+    )
+
+    report = MODULE.inspect_activation(
+        runtime_root=tmp_path / "runtime",
+        unit_destination=destination,
+        env_file=env_file(tmp_path),
+        data_root=data_tree(tmp_path),
+        runner=systemctl_runner(),
+    )
+
+    assert report.runtime_ready is True
+    assert report.installed_units_exact is True
+    assert Path(captured["source_tree"]) == ROOT
+    assert Path(captured["source_tree"]) != current.resolve(strict=True)
