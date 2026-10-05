@@ -614,7 +614,7 @@ def inspect_activation(
         runtime_current = str(current_path)
         runtime_source = current_path.resolve(strict=True)
         install = INSTALL.inspect_install(
-            source_tree=runtime_source,
+            source_tree=REPO_ROOT,
             runtime_root=runtime_root,
             destination=unit_destination,
         )
